@@ -16,6 +16,8 @@ import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_remote_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_terminal_screen.dart';
 import 'package:flutter_hbb/desktop/widgets/refresh_wrapper.dart';
+import 'package:flutter_hbb/desktop/widgets/sense_cm_geometry.dart'; // Sense Remote
+import 'package:flutter_hbb/desktop/widgets/sense_cm_window.dart'; // Sense Remote
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -289,7 +291,10 @@ void runConnectionManagerScreen() async {
     const DesktopServerPage(),
     MyTheme.currentThemeMode(),
   );
-  final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
+  // Sense Remote: the Host-side icon is never hidden during a connection,
+  // so RustDesk's "hide connection window" setting does not apply to it.
+  final hide = !SenseCm.enabled &&
+      await bind.cmGetConfig(name: "hide_cm") == 'true';
   gFFI.serverModel.hideCm = hide;
   if (hide) {
     await hideCmWindow(isStartup: true);
@@ -304,6 +309,32 @@ void runConnectionManagerScreen() async {
 bool _isCmReadyToShow = false;
 
 showCmWindow({bool isStartup = false}) async {
+  // Sense Remote: icon mode shows the small icon at its remembered place
+  // (bottom right first), always on top and off the task bar.
+  if (SenseCm.enabled) {
+    if (isStartup) {
+      WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
+          size: kSenseCmIconSize, alwaysOnTop: true);
+      await windowManager.waitUntilReadyToShow(windowOptions, null);
+      bind.mainHideDock();
+      await windowManager.setSkipTaskbar(true);
+      await SenseCm.showIcon();
+      await Future.wait([windowManager.show(), windowManager.setOpacity(1)]);
+      _isCmReadyToShow = true;
+    } else if (_isCmReadyToShow) {
+      if (await windowManager.getOpacity() != 1 ||
+          !await windowManager.isVisible()) {
+        await SenseCm.showIcon();
+        await windowManager.setOpacity(1);
+        await windowManager.show();
+        await windowManager.setAlwaysOnTop(true);
+      } else if (await windowManager.isMinimized()) {
+        // "Show desktop" and similar must not take the icon away.
+        await windowManager.restore();
+      }
+    }
+    return;
+  }
   if (isStartup) {
     WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
         size: kConnectionManagerWindowSizeClosedChat, alwaysOnTop: true);
