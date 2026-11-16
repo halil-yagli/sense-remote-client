@@ -2,6 +2,8 @@
 # RustDesk'in flutter-build.yml dosyasindaki Windows ve macOS adimlarindan sadelestirildi:
 # imzalama, surum yayini, MSI, Linux/Android/iOS ve Windows arm64 yok.
 # Ciktilar imzasizdir ve yalniz ekip cihazlarinda deneme icindir.
+# Her platform iki rolle derlenir (SENSE_ROLE): incoming = musteri bilgisayari
+# (yalniz baglanti kabul eder, ayarlar kilitli), outgoing = ekip (yalniz baglanir).
 name: Sense Remote build
 
 on:
@@ -39,9 +41,15 @@ jobs:
     uses: ./.github/workflows/bridge.yml
 
   windows:
-    name: windows-x86_64
+    name: windows-x86_64-${{ matrix.role }}
     needs: [generate-bridge]
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [incoming, outgoing]
+    env:
+      SENSE_ROLE: ${{ matrix.role }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -122,6 +130,7 @@ jobs:
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
 
       - name: Run the Rust tests
+        if: ${{ matrix.role == 'incoming' }}
         shell: bash
         run: |
           FEATURES=$(python3 ./build.py --portable --flutter --skip-portable-pack --hwcodec --vram --print-features)
@@ -136,23 +145,26 @@ jobs:
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
           popd
           mkdir -p ./out
-          mv ./target/release/rustdesk-portable-packer.exe ./out/sense-remote-${{ env.VERSION }}-x86_64-unsigned.exe
+          mv ./target/release/rustdesk-portable-packer.exe ./out/sense-remote-${{ matrix.role }}-${{ env.VERSION }}-x86_64-unsigned.exe
 
       - name: Upload Windows build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sense-remote-windows-x86_64
+          name: sense-remote-${{ matrix.role }}-windows-x86_64
           path: ./out/
           if-no-files-found: error
           retention-days: 14
 
   macos:
-    name: macos-${{ matrix.job.arch }}
+    name: macos-${{ matrix.job.arch }}-${{ matrix.role }}
     needs: [generate-bridge]
     runs-on: ${{ matrix.job.os }}
+    env:
+      SENSE_ROLE: ${{ matrix.role }}
     strategy:
       fail-fast: false
       matrix:
+        role: [incoming, outgoing]
         job:
           - { target: x86_64-apple-darwin, os: macos-26-intel, arch: x86_64, extra-build-args: "" }
           - { target: aarch64-apple-darwin, os: macos-26, arch: aarch64, extra-build-args: "--screencapturekit" }
@@ -229,7 +241,7 @@ jobs:
           path: ./
 
       - name: Run the Dart tests
-        if: ${{ matrix.job.arch == 'aarch64' }}
+        if: ${{ matrix.job.arch == 'aarch64' && matrix.role == 'incoming' }}
         working-directory: flutter
         run: flutter test --timeout 60s
 
@@ -265,12 +277,12 @@ jobs:
           CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
           sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
           mkdir -p out
-          create-dmg --icon "$APP_NAME" 200 190 --hide-extension "$APP_NAME" --window-size 800 400 --app-drop-link 600 185 "out/sense-remote-${{ env.VERSION }}-${{ matrix.job.arch }}-unsigned.dmg" "$APP"
+          create-dmg --icon "$APP_NAME" 200 190 --hide-extension "$APP_NAME" --window-size 800 400 --app-drop-link 600 185 "out/sense-remote-${{ matrix.role }}-${{ env.VERSION }}-${{ matrix.job.arch }}-unsigned.dmg" "$APP"
 
       - name: Upload macOS build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sense-remote-macos-${{ matrix.job.arch }}
+          name: sense-remote-${{ matrix.role }}-macos-${{ matrix.job.arch }}
           path: out/*.dmg
           if-no-files-found: error
           retention-days: 14

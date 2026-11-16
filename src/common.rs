@@ -1234,6 +1234,84 @@ pub const SENSE_APP_NAME: &str = "SenseRemote";
 /// Sense Remote: the name people see in translated UI text.
 pub const SENSE_APP_DISPLAY_NAME: &str = "Sense Remote";
 
+/// Sense Remote role, fixed at build time with the `SENSE_ROLE` environment variable:
+/// - `incoming`: customer computers. Only accepts connections; settings and address book
+///   are hidden. The team sets the permanent password from an elevated command line
+///   (`SenseRemote.exe --password ...`), which stays allowed.
+/// - `outgoing`: team computers. Only connects out; never accepts connections.
+/// - unset: full RustDesk UI (developer builds only, never shipped).
+pub const SENSE_ROLE: Option<&str> = option_env!("SENSE_ROLE");
+
+/// Settings for a role: (hard settings, builtin settings). Hard settings are what RustDesk
+/// reads for custom clients (`config::is_incoming_only`, `is_outgoing_only`,
+/// `is_disable_settings`, ...).
+pub fn sense_role_settings(
+    role: Option<&str>,
+) -> (Vec<(&'static str, &'static str)>, Vec<(&'static str, &'static str)>) {
+    match role {
+        Some("incoming") => (
+            vec![
+                ("conn-type", "incoming"),
+                ("disable-settings", "Y"),
+                ("disable-ab", "Y"),
+            ],
+            vec![(
+                keys::OPTION_ALLOW_COMMAND_LINE_SETTINGS_WHEN_SETTINGS_DISABLED,
+                "Y",
+            )],
+        ),
+        Some("outgoing") => (vec![("conn-type", "outgoing")], vec![]),
+        _ => (vec![], vec![]),
+    }
+}
+
+pub fn apply_sense_role(role: Option<&str>) {
+    let (hard, builtin) = sense_role_settings(role);
+    let mut h = config::HARD_SETTINGS.write().unwrap();
+    for (k, v) in hard {
+        h.insert(k.to_owned(), v.to_owned());
+    }
+    drop(h);
+    let mut b = config::BUILTIN_SETTINGS.write().unwrap();
+    for (k, v) in builtin {
+        b.insert(k.to_owned(), v.to_owned());
+    }
+}
+
+#[cfg(test)]
+mod sense_role_tests {
+    use super::*;
+
+    #[test]
+    fn incoming_locks_settings_and_keeps_cli_password() {
+        let (hard, builtin) = sense_role_settings(Some("incoming"));
+        assert!(hard.contains(&("conn-type", "incoming")));
+        assert!(hard.contains(&("disable-settings", "Y")));
+        assert!(hard.contains(&("disable-ab", "Y")));
+        assert!(builtin.contains(&(
+            keys::OPTION_ALLOW_COMMAND_LINE_SETTINGS_WHEN_SETTINGS_DISABLED,
+            "Y"
+        )));
+        assert!(config::option2bool(
+            keys::OPTION_ALLOW_COMMAND_LINE_SETTINGS_WHEN_SETTINGS_DISABLED,
+            "Y"
+        ));
+    }
+
+    #[test]
+    fn outgoing_only_sets_conn_type() {
+        let (hard, builtin) = sense_role_settings(Some("outgoing"));
+        assert_eq!(hard, vec![("conn-type", "outgoing")]);
+        assert!(builtin.is_empty());
+    }
+
+    #[test]
+    fn no_role_changes_nothing() {
+        assert_eq!(sense_role_settings(None), (vec![], vec![]));
+        assert_eq!(sense_role_settings(Some("other")), (vec![], vec![]));
+    }
+}
+
 /// Name shown to people: "Sense Remote" for our build, the app name otherwise.
 #[inline]
 pub fn get_app_display_name() -> String {
@@ -2529,6 +2607,7 @@ pub fn load_custom_client() {
     // before anything reads APP_NAME (core_main, flutter_ffi and service call it first).
     // A custom.txt signed by RustDesk's key could still override it below; we ship none.
     *config::APP_NAME.write().unwrap() = SENSE_APP_NAME.to_owned();
+    apply_sense_role(SENSE_ROLE);
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());

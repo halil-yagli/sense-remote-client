@@ -107,4 +107,6 @@ fn main() {
         build_android_ifaddrs();
     }
     println!("cargo:rerun-if-changed=build.rs");
+    // Sense Remote: the role (incoming / outgoing) is compiled in; rebuild when it changes.
+    println!("cargo:rerun-if-env-changed=SENSE_ROLE");
 }
