@@ -1284,8 +1284,18 @@ pub fn get_custom_rendezvous_server(custom: String) -> String {
     "".to_owned()
 }
 
+/// Sense Remote: the panel API address is fixed at build time (`sense::API_SERVER`). The
+/// user setting, the custom ID server, the exe-name license and a panel strategy can not
+/// change it, and it never falls back to admin.rustdesk.com. The upstream resolution is kept
+/// below (unused) to ease upstream merges.
 #[inline]
 pub fn get_api_server(api: String, custom: String) -> String {
+    let _ = (api, custom);
+    crate::sense::api_server()
+}
+
+#[allow(dead_code)]
+fn get_api_server_upstream(api: String, custom: String) -> String {
     if Config::no_register_device() {
         return "".to_owned();
     }
@@ -1302,6 +1312,7 @@ pub fn get_api_server(api: String, custom: String) -> String {
     res
 }
 
+#[allow(dead_code)] // Sense Remote: only reached from `get_api_server_upstream`.
 fn get_api_server_(api: String, custom: String) -> String {
     #[cfg(windows)]
     if let Ok(lic) = crate::platform::windows::get_license_from_exe_name() {
@@ -1401,15 +1412,20 @@ pub fn get_audit_server(api: String, custom: String, typ: String) -> String {
 /// and the target URL belongs to the configured non-public API host.
 #[inline]
 fn should_use_raw_tcp_for_api(url: &str) -> bool {
-    get_builtin_option(keys::OPTION_USE_RAW_TCP_FOR_API) == "Y"
-        && !use_ws()
-        && is_tcp_proxy_api_target(url)
+    // Sense Remote: never send API requests through the public ID server's TCP proxy.
+    crate::sense::api_tcp_proxy_allowed(
+        get_builtin_option(keys::OPTION_USE_RAW_TCP_FOR_API) == "Y"
+            && !use_ws()
+            && is_tcp_proxy_api_target(url),
+    )
 }
 
 /// Check if we can attempt raw TCP proxy fallback for this target URL.
 #[inline]
 fn can_fallback_to_raw_tcp(url: &str) -> bool {
-    !use_ws() && is_tcp_proxy_api_target(url)
+    // Sense Remote: a failed / 5xx API request is returned as is, not retried through the
+    // public ID server (its answer would be handled as if it came from the panel).
+    crate::sense::api_tcp_proxy_allowed(!use_ws() && is_tcp_proxy_api_target(url))
 }
 
 #[inline]
@@ -2532,6 +2548,13 @@ pub fn load_custom_client() {
     // Sense Remote: apply the role the installer wrote (Host / Controller / both) before
     // anything reads conn-type or the settings locks.
     crate::sense::apply_installed_role();
+    load_custom_client_file();
+    // Sense Remote: pin the API address and TLS certificate checking last, so that no
+    // custom.txt can loosen them.
+    crate::sense::apply_security_settings();
+}
+
+fn load_custom_client_file() {
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
@@ -3333,6 +3356,39 @@ mod tests {
             "not a url",
             "https://admin.example.com"
         ));
+    }
+
+    // Sense Remote: a failed or 5xx request to the panel is returned as is; the TCP proxy
+    // path (the public ID server) is never tried, even though upstream would.
+    #[tokio::test]
+    async fn test_sense_api_request_does_not_fall_back_to_tcp_proxy() {
+        let url = format!("{}/api/heartbeat", crate::sense::API_SERVER);
+        assert!(should_use_tcp_proxy_for_api_url(&url, crate::sense::API_SERVER));
+        assert!(!should_use_raw_tcp_for_api(&url));
+        assert!(!can_fallback_to_raw_tcp(&url));
+
+        let proxied = Arc::new(Mutex::new(0));
+        let tcp = |proxied: Arc<Mutex<i32>>| async move {
+            *proxied.lock().unwrap() += 1;
+            Ok::<_, hbb_common::anyhow::Error>("from the TCP proxy".to_owned())
+        };
+        let res = with_tcp_proxy_fallback(
+            &url,
+            "POST",
+            async { Err::<(u16, String), _>(anyhow!("connection refused")) },
+            tcp(proxied.clone()),
+        )
+        .await;
+        assert!(res.is_err());
+        let res = with_tcp_proxy_fallback(
+            &url,
+            "POST",
+            async { Ok::<_, hbb_common::anyhow::Error>((503u16, "panel busy".to_owned())) },
+            tcp(proxied.clone()),
+        )
+        .await;
+        assert_eq!(res.unwrap(), "panel busy");
+        assert_eq!(*proxied.lock().unwrap(), 0);
     }
 
     #[test]
