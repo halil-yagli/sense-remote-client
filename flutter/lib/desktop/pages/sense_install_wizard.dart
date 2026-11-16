@@ -373,16 +373,22 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
                                 width: 24, height: 24),
                       ),
                       const SizedBox(width: 10),
-                      const Text.rich(
-                        TextSpan(children: [
-                          TextSpan(
-                              text: 'Sense',
-                              style: TextStyle(fontWeight: FontWeight.w700)),
-                          TextSpan(
-                              text: ' Remote',
-                              style: TextStyle(fontWeight: FontWeight.w200)),
-                        ]),
-                        style: TextStyle(fontSize: 16),
+                      // Sense Remote: dar kenar çubuğunda (185 px) taşmasın.
+                      const Flexible(
+                        child: Text.rich(
+                          TextSpan(children: [
+                            TextSpan(
+                                text: 'Sense',
+                                style: TextStyle(fontWeight: FontWeight.w700)),
+                            TextSpan(
+                                text: ' Remote',
+                                style: TextStyle(fontWeight: FontWeight.w200)),
+                          ]),
+                          style: TextStyle(fontSize: 16),
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
