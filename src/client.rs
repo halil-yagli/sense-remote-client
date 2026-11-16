@@ -954,7 +954,8 @@ impl Client {
         };
         msg_out.set_punch_hole_request(PunchHoleRequest {
             id: peer.to_owned(),
-            token: token.to_owned(),
+            // Sense Remote: never send the panel access token to the ID server.
+            token: crate::sense::token_for_rendezvous(&token),
             nat_type: nat_type.into(),
             licence_key: key.to_owned(),
             conn_type: conn_type.into(),
@@ -1824,7 +1825,8 @@ impl Client {
             );
             msg_out.set_request_relay(RequestRelay {
                 id: peer.to_owned(),
-                token: token.to_owned(),
+                // Sense Remote: never send the panel access token to the ID server.
+                token: crate::sense::token_for_rendezvous(token),
                 uuid: uuid.clone(),
                 relay_server: relay_server.clone(),
                 secure,
@@ -5294,7 +5296,8 @@ async fn hc_connection_(
     crate::secure_tcp(&mut conn, &key).await?;
     let mut msg_out = RendezvousMessage::new();
     msg_out.set_hc(HealthCheck {
-        token,
+        // Sense Remote: never send the panel access token to the ID server.
+        token: crate::sense::token_for_rendezvous(&token),
         ..Default::default()
     });
     conn.send(&msg_out).await?;

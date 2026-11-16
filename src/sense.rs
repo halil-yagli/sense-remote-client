@@ -317,11 +317,231 @@ pub fn finish_install(open_app: bool) {
     std::process::exit(0);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Sense Remote: panel API security (wave 2).
+//
+// The panel at `API_SERVER` is the only server that may see the panel access token or answer
+// API requests. The ID / relay server stays RustDesk's free public one, so:
+// 1. the API address is fixed at build time; no user setting, custom ID server, exe-name
+//    license or panel strategy can move it (and it never falls back to admin.rustdesk.com);
+// 2. API requests are never retried through the ID server's TCP proxy: a failure is returned;
+// 3. the access token is never put in messages to the ID / relay server;
+// 4. certificate checking for TLS can not be switched off.
+// ---------------------------------------------------------------------------------------------
+
+/// Panel API address, fixed at build time (`SENSE_API_SERVER`, no trailing slash).
+pub const API_SERVER: &str = match option_env!("SENSE_API_SERVER") {
+    Some(url) => url,
+    None => "https://remote.snsdpt.com",
+};
+
+const fn starts_with(value: &str, prefix: &str) -> bool {
+    let (value, prefix) = (value.as_bytes(), prefix.as_bytes());
+    if value.len() < prefix.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < prefix.len() {
+        if value[i] != prefix[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// `https://<host>` (no path, no trailing slash). Plain `http://` only for a panel on this
+/// computer (`localhost` / `127.0.0.1`), so a development build can talk to a local panel;
+/// it never leaves the machine.
+pub const fn is_valid_api_server(url: &str) -> bool {
+    let bytes = url.as_bytes();
+    let rest_from = if starts_with(url, "https://") {
+        8
+    } else if starts_with(url, "http://localhost:") || starts_with(url, "http://127.0.0.1:") {
+        7
+    } else {
+        return false;
+    };
+    if bytes.len() <= rest_from {
+        return false;
+    }
+    let mut i = rest_from;
+    while i < bytes.len() {
+        let c = bytes[i];
+        // No path, query, user info or whitespace: only the origin.
+        if c == b'/' || c == b'?' || c == b'#' || c == b'@' || c == b'\\' || c <= b' ' {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+// A wrong `SENSE_API_SERVER` stops the build instead of producing an insecure client.
+const _: () = assert!(
+    is_valid_api_server(API_SERVER),
+    "SENSE_API_SERVER must be https://<host>[:port] (http only for localhost)"
+);
+
+/// The API address every caller gets (`common::get_api_server`). Its inputs (the
+/// `api-server` and `custom-rendezvous-server` settings) are deliberately not used.
+pub fn api_server() -> String {
+    API_SERVER.to_owned()
+}
+
+/// API requests may go through the ID server's TCP proxy (`use-raw-tcp-for-api` or the
+/// fallback after a connection error / 5xx). Never in our build: the public ID server is not
+/// ours, and its answer would be handled as if it came from the panel.
+pub const API_TCP_PROXY_ALLOWED: bool = false;
+
+/// Pure form of the upstream fallback decision with the Sense rule applied:
+/// `upstream_eligible` is what RustDesk would decide (WebSocket off, target is the API host).
+pub fn api_tcp_proxy_allowed(upstream_eligible: bool) -> bool {
+    API_TCP_PROXY_ALLOWED && upstream_eligible
+}
+
+/// Token to put in messages to the ID / relay server (`PunchHoleRequest`, `RequestRelay`,
+/// `HealthCheck`). Always empty: the panel access token belongs to the panel only, and the
+/// ID server is RustDesk's public one. Without a token the client connects like any
+/// signed-out RustDesk client.
+pub fn token_for_rendezvous(_access_token: &str) -> String {
+    String::new()
+}
+
+/// Settings pinned in `OVERWRITE_SETTINGS`: neither the user, a custom.txt nor a panel
+/// strategy can change them. `api-server` is pinned too so the settings page shows the real
+/// (fixed) address.
+pub fn security_overwrite_settings() -> [(&'static str, &'static str); 2] {
+    [
+        (keys::OPTION_API_SERVER, API_SERVER),
+        (keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK, "N"),
+    ]
+}
+
+fn apply_security_to(overwrite: &mut HashMap<String, String>) {
+    for (k, v) in security_overwrite_settings() {
+        overwrite.insert(k.to_owned(), v.to_owned());
+    }
+}
+
+/// Called at the end of `load_custom_client` in every process.
+pub fn apply_security_settings() {
+    apply_security_to(&mut config::OVERWRITE_SETTINGS.write().unwrap());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const CLI: &str = keys::OPTION_ALLOW_COMMAND_LINE_SETTINGS_WHEN_SETTINGS_DISABLED;
+
+    #[test]
+    fn api_server_is_https_panel_origin() {
+        assert!(is_valid_api_server(API_SERVER));
+        assert!(API_SERVER.starts_with("https://"));
+        assert!(!API_SERVER.ends_with('/'));
+        assert_eq!(api_server(), API_SERVER);
+        assert!(!crate::common::is_public(API_SERVER));
+        if option_env!("SENSE_API_SERVER").is_none() {
+            assert_eq!(API_SERVER, "https://remote.snsdpt.com");
+        }
+    }
+
+    #[test]
+    fn api_server_validation() {
+        for ok in [
+            "https://remote.snsdpt.com",
+            "https://remote.snsdpt.com:8443",
+            "http://localhost:3000",
+            "http://127.0.0.1:8787",
+        ] {
+            assert!(is_valid_api_server(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "https://",
+            "http://remote.snsdpt.com",
+            "http://localhost",
+            "http://localhost.evil.test",
+            "ws://remote.snsdpt.com",
+            "remote.snsdpt.com",
+            "https://remote.snsdpt.com/",
+            "https://remote.snsdpt.com/api",
+            "https://remote.snsdpt.com?x=1",
+            "https://user@evil.test",
+            "https://remote.snsdpt.com evil",
+            "HTTPS://remote.snsdpt.com",
+        ] {
+            assert!(!is_valid_api_server(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn get_api_server_ignores_every_input() {
+        for (api, custom) in [
+            ("", ""),
+            ("https://admin.rustdesk.com", ""),
+            ("https://evil.test", "evil.test"),
+            ("", "rs-ny.rustdesk.com"),
+            ("", "10.0.0.1:21116"),
+            ("http://remote.snsdpt.com:21114", "remote.snsdpt.com"),
+        ] {
+            assert_eq!(
+                crate::common::get_api_server(api.to_owned(), custom.to_owned()),
+                API_SERVER,
+                "api={api:?} custom={custom:?}"
+            );
+        }
+        // Heartbeat, audit and strategy stay on (they are off for a "public" address).
+        assert_eq!(
+            crate::common::get_audit_server("x".to_owned(), "y".to_owned(), "conn".to_owned()),
+            format!("{API_SERVER}/api/audit/conn")
+        );
+    }
+
+    #[test]
+    fn api_requests_never_use_the_tcp_proxy() {
+        assert!(!API_TCP_PROXY_ALLOWED);
+        assert!(!api_tcp_proxy_allowed(true));
+        assert!(!api_tcp_proxy_allowed(false));
+    }
+
+    #[test]
+    fn access_token_never_goes_to_the_id_server() {
+        assert_eq!(token_for_rendezvous("panel-issued-test-value"), "");
+        assert_eq!(token_for_rendezvous(""), "");
+    }
+
+    #[test]
+    fn security_settings_are_pinned_over_user_and_custom_values() {
+        let mut overwrite = HashMap::from([
+            (keys::OPTION_API_SERVER.to_owned(), "https://evil.test".to_owned()),
+            (keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK.to_owned(), "Y".to_owned()),
+            ("other".to_owned(), "kept".to_owned()),
+        ]);
+        apply_security_to(&mut overwrite);
+        assert_eq!(overwrite[keys::OPTION_API_SERVER], API_SERVER);
+        assert_eq!(overwrite[keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK], "N");
+        assert_eq!(overwrite["other"], "kept");
+    }
+
+    #[test]
+    fn tls_certificate_check_cannot_be_skipped() {
+        apply_security_settings();
+        // Whatever the user saved, the pinned value wins...
+        assert!(!config::Config::get_bool_option(
+            keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK
+        ));
+        assert!(!config::allow_insecure_tls_fallback());
+        // ...so every HTTPS / WSS client is built with certificate checking on.
+        for url in [API_SERVER, "https://remote.snsdpt.com/api/heartbeat"] {
+            assert_eq!(
+                hbb_common::tls::get_cached_tls_accept_invalid_cert(url),
+                Some(false)
+            );
+        }
+        assert_eq!(config::Config::get_option(keys::OPTION_API_SERVER), API_SERVER);
+    }
 
     #[test]
     fn role_parse_round_trip() {
