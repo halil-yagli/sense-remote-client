@@ -391,6 +391,8 @@ void runInstallPage() async {
   WindowOptions windowOptions =
       getHiddenTitleBarWindowOptions(size: Size(800, 600), center: true);
   windowManager.waitUntilReadyToShow(windowOptions, () async {
+    // Sense Remote: taskbar title of the setup window.
+    windowManager.setTitle('Sense Remote Kurulum');
     windowManager.show();
     windowManager.focus();
     windowManager.setOpacity(1);

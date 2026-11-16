@@ -2479,6 +2479,18 @@ pub fn install_install_options() -> SyncReturn<String> {
     SyncReturn(install_options())
 }
 
+// Sense Remote: install from the Sense setup screen with the chosen role
+// ("host" / "controller" / "both") and computer info (JSON). Runs on a worker thread and
+// returns "" on success, "cancelled" if the administrator prompt was declined, or an error.
+pub fn install_sense_install(options: String, path: String, role: String, info: String) -> String {
+    crate::sense::install(&options, path, &role, &info)
+}
+
+// Sense Remote: leave the setup screen after "Kuruldu", optionally opening the installed app.
+pub fn install_sense_finish(open_app: bool) {
+    crate::sense::finish_install(open_app)
+}
+
 pub fn main_account_auth(op: String, remember_me: bool) {
     let id = get_id();
     let uuid = get_uuid();

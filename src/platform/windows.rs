@@ -1500,7 +1500,8 @@ fn get_install_info_with_subkey(subkey: String) -> (String, String, String, Stri
     path = path.trim_end_matches('\\').to_owned();
     let start_menu = format!(
         "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\{}",
-        crate::get_app_name()
+        // Sense Remote: the start menu folder carries the display name ("Sense Remote").
+        crate::sense::shortcut_name()
     );
     let exe = format!("{}\\{}.exe", path, crate::get_app_name());
     (subkey, path, start_menu, exe)
@@ -1676,13 +1677,16 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     // The elevated runner expands this to `%~f0.dir`, beside its protected copy.
     // Do not stage privileged shortcut artifacts in the user-writable `%TEMP%`.
     let tmp_path = "%RUSTDESK_OUTPUT_DIR%".to_owned();
+    // Sense Remote: shortcuts people see are "Sense Remote" and "Sense Remote'u kaldır".
+    let shortcut_name = crate::sense::shortcut_name();
+    let uninstall_shortcut_name = crate::sense::uninstall_shortcut_name();
     let (mk_shortcut_commands, mk_shortcut_file) = staged_shortcut_commands(
         shortcut_bytes(&exe, None, shortcut_icon_location.as_deref())?,
-        &format!("{app_name}.lnk"),
+        &format!("{shortcut_name}.lnk"),
     )?;
     let (uninstall_shortcut_commands, uninstall_shortcut_file) = staged_shortcut_commands(
         shortcut_bytes(&exe, Some("--uninstall"), Some("msiexec.exe"))?,
-        &format!("Uninstall {app_name}.lnk"),
+        &format!("{uninstall_shortcut_name}.lnk"),
     )?;
     let (tray_shortcut_commands, tray_shortcut_file) =
         staged_tray_shortcut_commands(&app_name, &exe, shortcut_icon_location.as_deref())?;
@@ -1693,8 +1697,7 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     if options.contains("desktopicon") {
         shortcuts = format!(
             "copy /Y \"{}\\{}.lnk\" \"%PUBLIC%\\Desktop\\\"",
-            tmp_path,
-            crate::get_app_name()
+            tmp_path, shortcut_name
         );
         reg_value_desktop_shortcuts = "1".to_owned();
     }
@@ -1702,8 +1705,8 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
         shortcuts = format!(
             "{shortcuts}
 md \"{start_menu}\"
-copy /Y \"{tmp_path}\\{app_name}.lnk\" \"{start_menu}\\\"
-copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{start_menu}\\\"
+copy /Y \"{tmp_path}\\{shortcut_name}.lnk\" \"{start_menu}\\\"
+copy /Y \"{tmp_path}\\{uninstall_shortcut_name}.lnk\" \"{start_menu}\\\"
      "
         );
         reg_value_start_menu_shortcuts = "1".to_owned();
@@ -1726,8 +1729,8 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{start_menu}\\\"
     // Note: without if exist, the bat may exit in advance on some Windows7 https://github.com/rustdesk/rustdesk/issues/895
     let dels = format!(
         "
-if exist \"{tmp_path}\\{app_name}.lnk\" del /f /q \"{tmp_path}\\{app_name}.lnk\"
-if exist \"{tmp_path}\\Uninstall {app_name}.lnk\" del /f /q \"{tmp_path}\\Uninstall {app_name}.lnk\"
+if exist \"{tmp_path}\\{shortcut_name}.lnk\" del /f /q \"{tmp_path}\\{shortcut_name}.lnk\"
+if exist \"{tmp_path}\\{uninstall_shortcut_name}.lnk\" del /f /q \"{tmp_path}\\{uninstall_shortcut_name}.lnk\"
 if exist \"{tmp_path}\\{app_name} Tray.lnk\" del /f /q \"{tmp_path}\\{app_name} Tray.lnk\"
         "
     );
@@ -1781,12 +1784,12 @@ md \"{path}\"
 {copy_exe}
 reg add {subkey} /f
 reg add {subkey} /f /v DisplayIcon /t REG_SZ /d \"{display_icon}\"
-reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{app_name}\"
+reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{display_name}\"
 reg add {subkey} /f /v DisplayVersion /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v Version /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v BuildDate /t REG_SZ /d \"{build_date}\"
 reg add {subkey} /f /v InstallLocation /t REG_SZ /d \"{path}\"
-reg add {subkey} /f /v Publisher /t REG_SZ /d \"{app_name}\"
+reg add {subkey} /f /v Publisher /t REG_SZ /d \"{publisher}\"
 reg add {subkey} /f /v VersionMajor /t REG_DWORD /d {version_major}
 reg add {subkey} /f /v VersionMinor /t REG_DWORD /d {version_minor}
 reg add {subkey} /f /v VersionBuild /t REG_DWORD /d {version_build}
@@ -1797,13 +1800,19 @@ reg add {subkey} /f /v WindowsInstaller /t REG_DWORD /d 0
 {uninstall_shortcut_commands}
 {tray_shortcuts}
 {shortcuts}
-copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
+copy /Y \"{tmp_path}\\{uninstall_shortcut_name}.lnk\" \"{path}\\\"
+{sense_setup}
 {dels}
 {import_config}
 {after_install}
 {sleep}
     ",
         display_icon = shortcut_icon_location.as_deref().unwrap_or(exe.as_str()),
+        // Sense Remote: name and publisher in "Installed apps"; role + setup info (HKLM),
+        // written before the service is created so the service starts with the role.
+        display_name = crate::common::get_app_display_name(),
+        publisher = crate::sense::PUBLISHER,
+        sense_setup = crate::sense::pending_install_commands(),
         nested_exe = escape_nested_cmd_ampersands(&exe),
         version = crate::VERSION.replace("-", "."),
         build_date = crate::BUILD_DATE,
@@ -1902,12 +1911,13 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
     {uninstall_amyuni_idd}
     if exist \"{path}\" rd /s /q \"{path}\"
     if exist \"{start_menu}\" rd /s /q \"{start_menu}\"
-    if exist \"%PUBLIC%\\Desktop\\{app_name}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{app_name}.lnk\"
+    if exist \"%PUBLIC%\\Desktop\\{shortcut_name}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{shortcut_name}.lnk\"
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
     ",
         before_uninstall=get_before_uninstall(kill_self)?,
         uninstall_amyuni_idd=get_uninstall_amyuni_idd(),
         app_name = crate::get_app_name(),
+        shortcut_name = crate::sense::shortcut_name(),
     ))
 }
 
@@ -1930,7 +1940,17 @@ pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
             }
         }
     }
-    run_cmds(get_uninstall(kill_self, true)?, true, "uninstall")
+    // Sense Remote: a real uninstall also removes the installed role and setup info. The
+    // cleanup `install_me` runs first (`get_uninstall`) keeps them for reinstalls.
+    run_cmds(
+        format!(
+            "{}\r\n{}",
+            get_uninstall(kill_self, true)?,
+            crate::sense::uninstall_commands()
+        ),
+        true,
+        "uninstall",
+    )
 }
 
 fn write_vbs(cmds: String, tip: &str) -> ResultType<PathBuf> {

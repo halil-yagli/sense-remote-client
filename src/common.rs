@@ -2529,6 +2529,9 @@ pub fn load_custom_client() {
     // before anything reads APP_NAME (core_main, flutter_ffi and service call it first).
     // A custom.txt signed by RustDesk's key could still override it below; we ship none.
     *config::APP_NAME.write().unwrap() = SENSE_APP_NAME.to_owned();
+    // Sense Remote: apply the role the installer wrote (Host / Controller / both) before
+    // anything reads conn-type or the settings locks.
+    crate::sense::apply_installed_role();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());

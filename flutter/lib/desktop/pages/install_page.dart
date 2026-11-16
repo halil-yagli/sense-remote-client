@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/desktop/pages/sense_install_page.dart';
 import 'package:flutter_hbb/desktop/widgets/install_directory_confirmation.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -11,6 +12,9 @@ import 'package:get/get.dart';
 import 'package:path/path.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:window_manager/window_manager.dart';
+
+// Sense Remote: the Sense setup wizard replaces RustDesk's install page.
+const bool kSenseInstallPage = true;
 
 class InstallPage extends StatefulWidget {
   const InstallPage({Key? key}) : super(key: key);
@@ -42,6 +46,7 @@ class _InstallPageState extends State<InstallPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (kSenseInstallPage) return const SenseInstallPage();
     return DragToResizeArea(
       resizeEdgeSize: stateGlobal.resizeEdgeSize.value,
       enableResizeEdges: windowManagerEnableResizeEdges,
