@@ -18,6 +18,9 @@ class GroupModel {
   final RxBool isSelectedDeviceGroup = false.obs;
   final RxString selectedAccessibleItemName = ''.obs;
   final RxString searchAccessibleItemNameText = ''.obs;
+  // Sense Remote: panel order and multi-project membership; null when the
+  // server sends no `sense` extension (or the list came from the cache).
+  SensePanelOrder? senseOrder;
   WeakReference<FFI> parent;
   var initialized = false;
   var _cacheLoadOnceFlag = false;
@@ -67,15 +70,21 @@ class GroupModel {
       // old hbbs doesn't support this api
       // return;
     }
-    tmpDeviceGroups.sort((a, b) => a.name.compareTo(b.name));
+    // Sense Remote: the panel sends projects already in panel order; keep it.
+    if (!SensePanelOrder.groupsHaveSense(tmpDeviceGroups)) {
+      tmpDeviceGroups.sort((a, b) => a.name.compareTo(b.name));
+    }
     List<UserPayload> tmpUsers = List.empty(growable: true);
     if (!await _getUsers(tmpUsers)) {
       return;
     }
     List<Peer> tmpPeers = List.empty(growable: true);
-    if (!await _getPeers(tmpPeers)) {
+    List<PeerPayload> tmpPeerPayloads = List.empty(growable: true);
+    if (!await _getPeers(tmpPeers, tmpPeerPayloads)) {
       return;
     }
+    // Sense Remote: set before `peers` changes so the list sorts with it.
+    senseOrder = SensePanelOrder.build(tmpDeviceGroups, tmpPeerPayloads);
     deviceGroups.value = tmpDeviceGroups;
     // me first
     var index = tmpUsers
@@ -221,7 +230,8 @@ class GroupModel {
     return false;
   }
 
-  Future<bool> _getPeers(List<Peer> tmpPeers) async {
+  Future<bool> _getPeers(
+      List<Peer> tmpPeers, List<PeerPayload> tmpPeerPayloads) async {
     try {
       final api = "${await bind.mainGetApiServer()}/api/peers";
       var uri0 = Uri.parse(api);
@@ -264,8 +274,10 @@ class GroupModel {
                 int index = tmpPeers.indexWhere((e) => e.id == peer.id);
                 if (index < 0) {
                   tmpPeers.add(peer);
+                  tmpPeerPayloads.add(peerPayload); // Sense Remote: panel order
                 } else {
                   tmpPeers[index] = peer;
+                  tmpPeerPayloads[index] = peerPayload;
                 }
               }
             }
@@ -344,6 +356,7 @@ class GroupModel {
 
   reset() async {
     initialized = false;
+    senseOrder = null; // Sense Remote
     groupLoadError.value = '';
     deviceGroups.clear();
     users.clear();
