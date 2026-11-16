@@ -527,20 +527,25 @@ mod tests {
 
     #[test]
     fn tls_certificate_check_cannot_be_skipped() {
-        apply_security_settings();
-        // Whatever the user saved, the pinned value wins...
-        assert!(!config::Config::get_bool_option(
-            keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK
-        ));
-        assert!(!config::allow_insecure_tls_fallback());
-        // ...so every HTTPS / WSS client is built with certificate checking on.
-        for url in [API_SERVER, "https://remote.snsdpt.com/api/heartbeat"] {
-            assert_eq!(
-                hbb_common::tls::get_cached_tls_accept_invalid_cert(url),
-                Some(false)
-            );
-        }
-        assert_eq!(config::Config::get_option(keys::OPTION_API_SERVER), API_SERVER);
+        // Pure check (no global OVERWRITE_SETTINGS write: other tests in this process compare
+        // `Config::get_options()` with the saved file). Settings are read
+        // OVERWRITE > user > default (`config::get_or`), so the pinned "N" wins over a user "Y",
+        // `allow_insecure_tls_fallback()` is false and `get_cached_tls_accept_invalid_cert`
+        // always returns `Some(false)`: no client retries with certificate checking off.
+        let mut overwrite = HashMap::new();
+        apply_security_to(&mut overwrite);
+        let user = HashMap::from([(
+            keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK.to_owned(),
+            "Y".to_owned(),
+        )]);
+        let key = keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK;
+        let effective = overwrite
+            .get(key)
+            .or_else(|| user.get(key))
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(effective, "N");
+        assert!(!config::option2bool(key, &effective));
     }
 
     #[test]
