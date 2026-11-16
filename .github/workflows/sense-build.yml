@@ -2,6 +2,7 @@
 # RustDesk'in flutter-build.yml dosyasindaki Windows ve macOS adimlarindan sadelestirildi:
 # imzalama, surum yayini, MSI, Linux/Android/iOS ve Windows arm64 yok.
 # Ciktilar imzasizdir ve yalniz ekip cihazlarinda deneme icindir.
+# PR'larda yalniz Windows; macOS master'da ve elle calisir (Windows oncelikli).
 name: Sense Remote build
 
 on:
@@ -149,6 +150,9 @@ jobs:
   macos:
     name: macos-${{ matrix.job.arch }}
     needs: [generate-bridge]
+    # Windows oncelikli (karar 2026-11-16): Mac PR'larda calismaz, yalniz master'a
+    # gonderimde ve elle (workflow_dispatch) calisir; Mac kirilmasi boylece yine gorulur.
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
