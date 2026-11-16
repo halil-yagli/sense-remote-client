@@ -1,5 +1,5 @@
 {
-  "source": "sense-remote-panel packages/shared/src/client-api/client-api.test.ts (main 6ef012c); heartbeat sample without applied_seq (added by the envelope task)",
+  "source": "sense-remote-panel packages/shared/src/client-api/client-api.test.ts (main 6ef012c); heartbeat sample without applied_seq (added by the envelope task); network per coordinator 2026-11-17 (P0 ortak/sozlesme-v2)",
   "sysinfo": {
     "v": 1,
     "role": "host",
@@ -9,7 +9,12 @@
       { "index": 0, "x": 0, "y": 0, "width": 1920, "height": 1080, "primary": true, "connection": "hdmi" },
       { "index": 1, "x": 1920, "y": 0, "width": 3840, "height": 2160, "scale": 1.5, "refresh_hz": 60 }
     ],
-    "displays_hash": "0000000000000000000000000000000000000000000000000000000000000001"
+    "displays_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+    "network": [
+      { "name": "Ethernet", "kind": "ethernet", "ipv4": ["192.168.1.10"], "ipv6": ["2001:db8::10"], "up": true },
+      { "name": "Ethernet 2", "kind": "ethernet", "ipv4": ["10.0.0.7", "10.0.0.8"], "up": true },
+      { "name": "Wi-Fi", "kind": "wifi", "ipv4": ["192.168.1.20"], "up": false }
+    ]
   },
   "heartbeat": {
     "v": 1,

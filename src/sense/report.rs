@@ -12,7 +12,10 @@
 //! - `heartbeat_base()`: value for `heartbeat["sense"]` (v, role, app_version, displays_hash,
 //!   health at most once per `HEALTH_INTERVAL`). I4 adds `applied_seq`, `envelope_error`,
 //!   `clock_skew_s` to this object.
-//! - `health()` and `displays()` for direct use.
+//! - `health()`, `displays()` and `network()` for direct use.
+//!
+//! `network` (adapter IP addresses, `network.rs`) goes into sysinfo and, with `health`, into the
+//! heartbeat at most once per `HEALTH_INTERVAL`, so a changed DHCP address shows within a minute.
 //! Both builders return `None` when there is no installed role (portable / not installed),
 //! no `SENSE_VERSION` at build time, or an unsupported platform: then no `sense` is sent.
 //!
@@ -26,7 +29,7 @@
 // Sense Remote: the sync loop starts using these in task I4.
 #![allow(dead_code)]
 
-use super::SenseRole;
+use super::{network::SenseNetwork, SenseRole};
 use hbb_common::{
     log,
     sysinfo::{Components, Disks, System, MINIMUM_CPU_UPDATE_INTERVAL},
@@ -135,6 +138,8 @@ pub struct SysinfoExt {
     pub displays: Option<Vec<SenseDisplay>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub displays_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<Vec<SenseNetwork>>,
 }
 
 /// The part of `SenseHeartbeatExt` this module fills (I4 adds the envelope fields).
@@ -148,6 +153,8 @@ pub struct HeartbeatBase {
     pub displays_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<SenseHealth>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<Vec<SenseNetwork>>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -168,6 +175,7 @@ pub fn sysinfo_ext() -> Option<Value> {
         platform: platform.to_owned(),
         displays: (!displays.is_empty()).then_some(displays),
         displays_hash: hash,
+        network: network_list(),
     };
     to_json(&ext)
 }
@@ -176,13 +184,14 @@ pub fn sysinfo_ext() -> Option<Value> {
 /// put in at least `HEALTH_INTERVAL` ago.
 pub fn heartbeat_base() -> Option<Value> {
     let (role, app_version, _) = identity()?;
-    let health = take_health_slot(Instant::now()).then(measure_health);
+    let due = take_health_slot(Instant::now());
     let base = HeartbeatBase {
         v: EXT_VERSION,
         role: role_name(role).to_owned(),
         app_version,
         displays_hash: cached_displays_hash(),
-        health,
+        health: due.then(measure_health),
+        network: if due { network_list() } else { None },
     };
     to_json(&base)
 }
@@ -201,6 +210,16 @@ pub fn displays() -> (Vec<Value>, Option<String>) {
     let hash = displays_hash(&displays);
     let values = displays.iter().filter_map(to_json).collect();
     (values, hash)
+}
+
+/// `sense.network`: Ethernet / Wi-Fi adapters with their IP addresses (no MAC).
+pub fn network() -> Vec<Value> {
+    super::network::collect().iter().filter_map(to_json).collect()
+}
+
+fn network_list() -> Option<Vec<SenseNetwork>> {
+    let list = super::network::collect();
+    (!list.is_empty()).then_some(list)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -645,13 +664,16 @@ mod tests {
         "disks", "uptime_s",
     ];
     const SCHEMA_DISK_KEYS: [&str; 3] = ["mount", "used_pct", "total_gb"];
-    const SCHEMA_SYSINFO_KEYS: [&str; 6] =
-        ["v", "role", "app_version", "platform", "displays", "displays_hash"];
-    // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4).
-    const SCHEMA_HEARTBEAT_KEYS: [&str; 9] = [
+    const SCHEMA_SYSINFO_KEYS: [&str; 7] =
+        ["v", "role", "app_version", "platform", "displays", "displays_hash", "network"];
+    // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4, + network).
+    const SCHEMA_HEARTBEAT_KEYS: [&str; 10] = [
         "v", "role", "app_version", "displays_hash", "health", "applied_seq",
-        "maintenance_curtain", "envelope_error", "clock_skew_s",
+        "maintenance_curtain", "envelope_error", "clock_skew_s", "network",
     ];
+    // Network entry (contract from the coordinator, 2026-11-17; P0 branch ortak/sozlesme-v2).
+    const SCHEMA_NETWORK_KEYS: [&str; 5] = ["name", "kind", "ipv4", "ipv6", "up"];
+    const SCHEMA_NETWORK_KINDS: [&str; 3] = ["ethernet", "wifi", "other"];
     const SCHEMA_ROLES: [&str; 3] = ["host", "controller", "host_controller"];
     const SCHEMA_PLATFORMS: [&str; 2] = ["windows-x64", "macos-arm64"];
     const SCHEMA_CONNECTIONS: [&str; 8] = [
@@ -689,6 +711,16 @@ mod tests {
         }
     }
 
+    fn full_network() -> Vec<SenseNetwork> {
+        vec![SenseNetwork {
+            name: "Ethernet".into(),
+            kind: "ethernet".into(),
+            ipv4: vec!["192.168.1.10".into()],
+            ipv6: Some(vec!["2001:db8::10".into()]),
+            up: Some(true),
+        }]
+    }
+
     fn full_health() -> SenseHealth {
         SenseHealth {
             at: 1_800_000_000,
@@ -722,15 +754,19 @@ mod tests {
             platform: "windows-x64".into(),
             displays: Some(vec![full_display()]),
             displays_hash: Some("0".repeat(64)),
+            network: Some(full_network()),
         })
         .unwrap();
         assert_eq!(keys(&sysinfo), set(&SCHEMA_SYSINFO_KEYS));
+        assert_eq!(keys(&sysinfo["network"][0]), set(&SCHEMA_NETWORK_KEYS));
+        assert!(SCHEMA_NETWORK_KINDS.contains(&sysinfo["network"][0]["kind"].as_str().unwrap()));
         let heartbeat = serde_json::to_value(HeartbeatBase {
             v: EXT_VERSION,
             role: "host".into(),
             app_version: 1,
             displays_hash: Some("0".repeat(64)),
             health: Some(full_health()),
+            network: Some(full_network()),
         })
         .unwrap();
         assert!(keys(&heartbeat).is_subset(&set(&SCHEMA_HEARTBEAT_KEYS)));
@@ -764,6 +800,10 @@ mod tests {
         let mut bad = samples["sysinfo"]["displays"][0].clone();
         bad["serial"] = Value::from("X");
         assert!(serde_json::from_value::<SenseDisplay>(bad).is_err());
+        // The MAC address is not part of the contract.
+        let mut bad = samples["sysinfo"]["network"][0].clone();
+        bad["mac"] = Value::from("00:11:22:33:44:55");
+        assert!(serde_json::from_value::<SenseNetwork>(bad).is_err());
     }
 
     #[test]
@@ -1021,6 +1061,10 @@ mod tests {
         }
         if cfg!(not(windows)) {
             assert!(displays.is_empty()); // MAC-SONRA
+        }
+        for n in network() {
+            assert!(keys(&n).is_subset(&set(&SCHEMA_NETWORK_KEYS)));
+            assert!(SCHEMA_NETWORK_KINDS.contains(&n["kind"].as_str().unwrap()));
         }
     }
 }
