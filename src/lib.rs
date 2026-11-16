@@ -50,6 +50,8 @@ mod clipboard;
 pub mod core_main;
 mod custom_server;
 mod lang;
+// Sense Remote: role chosen at installation + Sense setup screen.
+mod sense;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod port_forward;
 mod port_forward_mux;

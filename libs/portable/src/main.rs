@@ -271,6 +271,17 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
     }
 }
 
+// Sense Remote: our setup file is `SenseRemote-Kurulum-<n>.exe` (browsers may add " (1)");
+// it opens the setup screen like RustDesk's `*install.exe`. Only the file name counts.
+fn is_click_setup(arg_exe: &str) -> bool {
+    let name = Path::new(&arg_exe.replace('\\', "/"))
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    name.ends_with("install.exe") || (name.ends_with(".exe") && name.contains("-kurulum"))
+}
+
 fn main() -> Result<(), String> {
     let mut args = Vec::new();
     let mut arg_exe = Default::default();
@@ -283,7 +294,7 @@ fn main() -> Result<(), String> {
         }
         i += 1;
     }
-    let click_setup = args.is_empty() && arg_exe.to_lowercase().ends_with("install.exe");
+    let click_setup = args.is_empty() && is_click_setup(&arg_exe);
     #[cfg(windows)]
     let quick_support = args.is_empty() && win::is_quick_support_exe(&arg_exe);
     #[cfg(not(windows))]
@@ -382,6 +393,17 @@ mod win {
 #[cfg(test)]
 mod meta_tests {
     use super::*;
+
+    #[test]
+    fn sense_setup_file_names_open_the_setup_screen() {
+        assert!(is_click_setup("SenseRemote-Kurulum-1.exe"));
+        assert!(is_click_setup(r"C:\Users\a\Downloads\SenseRemote-Kurulum-12 (1).exe"));
+        assert!(is_click_setup("senseremote-kurulum-1.EXE"));
+        assert!(is_click_setup("rustdesk-install.exe"));
+        assert!(!is_click_setup("SenseRemote.exe"));
+        assert!(!is_click_setup(r"C:\x-kurulum\SenseRemote.exe"));
+        assert!(!is_click_setup("SenseRemote-Kurulum-1.exe.txt"));
+    }
 
     #[test]
     fn resolve_within_rejects_paths_that_escape() {

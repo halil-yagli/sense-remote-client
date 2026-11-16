@@ -33,6 +33,8 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   VERSION: "1.5.3"
+  # Sense Remote surum numarasi (duz sayi); kurulum dosyasi SenseRemote-Kurulum-<n>.exe.
+  SENSE_VERSION: "1"
 
 jobs:
   generate-bridge:
@@ -88,6 +90,11 @@ jobs:
           cd $(dirname $(dirname $(which flutter)))
           git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
 
+      # Sense Remote: Dart testleri (kurulum ekrani dahil) Windows PR'larinda da calissin.
+      - name: Run the Dart tests
+        working-directory: flutter
+        run: flutter test --timeout 60s
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
@@ -131,12 +138,19 @@ jobs:
         shell: bash
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
+          # Sense Remote: kurulan program SenseRemote.exe (install_me <APP_NAME>.exe bekler).
+          mv ./rustdesk/rustdesk.exe ./rustdesk/SenseRemote.exe
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/SenseRemote.exe
           popd
           mkdir -p ./out
-          mv ./target/release/rustdesk-portable-packer.exe ./out/sense-remote-${{ env.VERSION }}-x86_64-unsigned.exe
+          # Sense Remote: kurulum dosyasi adi; "-Kurulum" adi kurulum ekranini acar.
+          mv ./target/release/rustdesk-portable-packer.exe ./out/SenseRemote-Kurulum-${{ env.SENSE_VERSION }}.exe
+
+      - name: Run the setup file tests
+        shell: bash
+        run: cargo test --locked --release -p rustdesk-portable-packer
 
       - name: Upload Windows build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
