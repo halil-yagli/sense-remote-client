@@ -14,8 +14,10 @@
 //!   `clock_skew_s` to this object.
 //! - `health()`, `displays()` and `network()` for direct use.
 //!
-//! `network` (adapter IP addresses, `network.rs`) goes into sysinfo and, with `health`, into the
-//! heartbeat at most once per `HEALTH_INTERVAL`, so a changed DHCP address shows within a minute.
+//! `network` (adapter IP addresses, `network.rs`) goes into sysinfo only (contract: "değişince
+//! sysinfo yeniden gelir"). The sync loop asks `network_changed_since_sysinfo()` (checks at most
+//! once per `HEALTH_INTERVAL`) and uploads sysinfo again when it returns true, so a changed DHCP
+//! address shows within about a minute.
 //! Both builders return `None` when there is no installed role (portable / not installed),
 //! no `SENSE_VERSION` at build time, or an unsupported platform: then no `sense` is sent.
 //!
@@ -153,8 +155,6 @@ pub struct HeartbeatBase {
     pub displays_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<SenseHealth>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub network: Option<Vec<SenseNetwork>>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -175,7 +175,12 @@ pub fn sysinfo_ext() -> Option<Value> {
         platform: platform.to_owned(),
         displays: (!displays.is_empty()).then_some(displays),
         displays_hash: hash,
-        network: network_list(),
+        network: {
+            let network = network_list();
+            *SENT_NETWORK_HASH.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(network_hash(network.as_deref()));
+            network
+        },
     };
     to_json(&ext)
 }
@@ -184,14 +189,13 @@ pub fn sysinfo_ext() -> Option<Value> {
 /// put in at least `HEALTH_INTERVAL` ago.
 pub fn heartbeat_base() -> Option<Value> {
     let (role, app_version, _) = identity()?;
-    let due = take_health_slot(Instant::now());
+    let health = take_health_slot(Instant::now()).then(measure_health);
     let base = HeartbeatBase {
         v: EXT_VERSION,
         role: role_name(role).to_owned(),
         app_version,
         displays_hash: cached_displays_hash(),
-        health: due.then(measure_health),
-        network: if due { network_list() } else { None },
+        health,
     };
     to_json(&base)
 }
@@ -220,6 +224,35 @@ pub fn network() -> Vec<Value> {
 fn network_list() -> Option<Vec<SenseNetwork>> {
     let list = super::network::collect();
     (!list.is_empty()).then_some(list)
+}
+
+// Hash of the network list in the last sysinfo (`None` = no sysinfo built yet) and the time of
+// the last comparison.
+static SENT_NETWORK_HASH: Mutex<Option<String>> = Mutex::new(None);
+static LAST_NETWORK_CHECK: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// True when the adapters / addresses differ from those in the last `sysinfo_ext()`: the sync
+/// loop then uploads sysinfo again. Reads the adapters at most once per `HEALTH_INTERVAL`
+/// (otherwise false); false before the first sysinfo (that upload carries the list anyway).
+pub fn network_changed_since_sysinfo() -> bool {
+    let now = Instant::now();
+    {
+        let mut last = LAST_NETWORK_CHECK.lock().unwrap_or_else(|e| e.into_inner());
+        if !health_due(*last, now) {
+            return false;
+        }
+        *last = Some(now);
+    }
+    let Some(sent) = SENT_NETWORK_HASH.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+        return false;
+    };
+    network_hash(network_list().as_deref()) != sent
+}
+
+fn network_hash(list: Option<&[SenseNetwork]>) -> String {
+    let value = serde_json::to_value(list.unwrap_or_default()).unwrap_or(Value::Null);
+    let digest = Sha256::digest(canonical_json(&value).as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -666,12 +699,12 @@ mod tests {
     const SCHEMA_DISK_KEYS: [&str; 3] = ["mount", "used_pct", "total_gb"];
     const SCHEMA_SYSINFO_KEYS: [&str; 7] =
         ["v", "role", "app_version", "platform", "displays", "displays_hash", "network"];
-    // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4, + network).
-    const SCHEMA_HEARTBEAT_KEYS: [&str; 10] = [
+    // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4).
+    const SCHEMA_HEARTBEAT_KEYS: [&str; 9] = [
         "v", "role", "app_version", "displays_hash", "health", "applied_seq",
-        "maintenance_curtain", "envelope_error", "clock_skew_s", "network",
+        "maintenance_curtain", "envelope_error", "clock_skew_s",
     ];
-    // Network entry (contract from the coordinator, 2026-11-17; P0 branch ortak/sozlesme-v2).
+    // SenseNetworkInterface (P0 branch ortak/sozlesme-v2, 40d007a).
     const SCHEMA_NETWORK_KEYS: [&str; 5] = ["name", "kind", "ipv4", "ipv6", "up"];
     const SCHEMA_NETWORK_KINDS: [&str; 3] = ["ethernet", "wifi", "other"];
     const SCHEMA_ROLES: [&str; 3] = ["host", "controller", "host_controller"];
@@ -766,7 +799,6 @@ mod tests {
             app_version: 1,
             displays_hash: Some("0".repeat(64)),
             health: Some(full_health()),
-            network: Some(full_network()),
         })
         .unwrap();
         assert!(keys(&heartbeat).is_subset(&set(&SCHEMA_HEARTBEAT_KEYS)));
@@ -1013,6 +1045,24 @@ mod tests {
         assert_eq!(pick_cpu_temp(readings.into_iter()), Some(61.3));
         assert_eq!(pick_cpu_temp([("GPU", 80.0f32)].into_iter()), None);
         assert_eq!(pick_cpu_temp([("cpu", f32::NAN), ("core 0", 400.0)].into_iter()), None);
+    }
+
+    #[test]
+    fn network_hash_is_stable_and_order_sensitive() {
+        let mut two = full_network();
+        two.push(SenseNetwork {
+            name: "Wi-Fi".into(),
+            kind: "wifi".into(),
+            ipv4: vec!["192.168.1.20".into()],
+            ipv6: None,
+            up: Some(true),
+        });
+        assert_eq!(network_hash(Some(&two[..])), network_hash(Some(&two.clone()[..])));
+        assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&two[..1])));
+        assert_eq!(network_hash(None), network_hash(Some(&[][..])));
+        let mut moved = two.clone();
+        moved[1].ipv4 = vec!["192.168.1.21".into()];
+        assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&moved[..])));
     }
 
     #[test]
