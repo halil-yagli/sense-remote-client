@@ -429,6 +429,13 @@ pub fn apply_security_settings() {
     apply_security_to(&mut config::OVERWRITE_SETTINGS.write().unwrap());
 }
 
+// Sense Remote: the `sense` extension of heartbeat / sysinfo (health, display info, network
+// addresses), wave 2 I3.
+pub mod report;
+#[cfg(windows)]
+mod displays_win;
+mod network;
+
 #[cfg(test)]
 mod tests {
     use super::*;
