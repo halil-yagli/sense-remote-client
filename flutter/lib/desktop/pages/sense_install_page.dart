@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/desktop/pages/sense_install_wizard.dart';
 import 'package:flutter_hbb/desktop/widgets/install_directory_confirmation.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 class SenseInstallPage extends StatefulWidget {
@@ -39,7 +39,7 @@ class _SenseInstallPageState extends State<SenseInstallPage> {
     final dir =
         await FilePicker.platform.getDirectoryPath(initialDirectory: current);
     if (dir == null) return null;
-    return join(dir, await bind.mainGetAppName());
+    return p.join(dir, await bind.mainGetAppName());
   }
 
   @override
