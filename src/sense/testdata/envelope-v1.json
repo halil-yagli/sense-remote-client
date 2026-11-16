@@ -1,0 +1,817 @@
+{
+  "v": 1,
+  "description": "Sense Remote imzali zarf ortak test vektoru (panel packages/shared ve istemci src/sense/testdata). Imzalanan veri = prefix (ASCII) || base64url_decode(p). Ed25519 ayrik imza, s = 64 bayt. p ve s dolgusuz, kanonik base64url (RFC 4648 §5); k = hex(SHA-256(ham 32 bayt acik anahtar)[0..8]). Dogrulama sirasi: zarf bicimi (yalniz k/p/s; k ^[0-9a-f]{16}$; s 86 karakter) -> k listede -> p/s cozumu (s 64 bayt) -> imza -> JSON + sema (bilinmeyen alan yok, her duzeyde) -> iss -> did ve duuid -> nbf - clock_skew_s <= now_s <= exp + clock_skew_s -> seq > last_seq. result_panel bu adimlarin sonucudur. result_client ek olarak: typ != strategy -> unsupported_type; config_options allowed_options'a uymuyor -> not_allowed. allowed_options: anahtar -> kural; enum: deger listede; int_or_empty: bos ya da onde sifirsiz ondalik (1-4 rakam), min <= n <= max. Her vakada tek kusur vardir. Anahtarlar uretimde bellekte uretildi; gizli anahtar hicbir yerde yok.",
+  "prefix": "sense-remote/envelope/v1\n",
+  "clock_skew_s": 300,
+  "keys": [
+    {
+      "k": "dd9f71c38f66dc5c",
+      "public_key": "84hSx-sClpkKRM9g3MySGfNQtOjFACpxp-phb52StgY"
+    },
+    {
+      "k": "a6baacd6d0289669",
+      "public_key": "y6E8WSxU1gk6iyGs8HdE76x6L4v3r12-u4jNYETIa70"
+    }
+  ],
+  "allowed_options": {
+    "access-mode": {
+      "kind": "enum",
+      "values": [""]
+    },
+    "enable-keyboard": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-clipboard": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-file-transfer": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-audio": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-remote-restart": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-record-session": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-block-input": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-privacy-mode": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-terminal": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-tunnel": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-camera": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "enable-remote-printer": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "allow-remove-wallpaper": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "allow-auto-disconnect": {
+      "kind": "enum",
+      "values": ["Y", "N"]
+    },
+    "auto-disconnect-timeout": {
+      "kind": "int_or_empty",
+      "min": 5,
+      "max": 1440
+    }
+  },
+  "cases": [
+    {
+      "name": "ok_full_set",
+      "description": "Gecerli tam set (Sense varsayilani, access-mode bos)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 5,
+      "config_options": {
+        "access-mode": "",
+        "enable-keyboard": "Y",
+        "enable-clipboard": "Y",
+        "enable-file-transfer": "Y",
+        "enable-audio": "Y",
+        "enable-remote-restart": "Y",
+        "enable-record-session": "Y",
+        "enable-block-input": "Y",
+        "enable-privacy-mode": "Y",
+        "enable-terminal": "N",
+        "enable-tunnel": "N",
+        "enable-camera": "N",
+        "enable-remote-printer": "N",
+        "allow-remove-wallpaper": "N",
+        "allow-auto-disconnect": "N",
+        "auto-disconnect-timeout": ""
+      }
+    },
+    {
+      "name": "ok_with_sense_role",
+      "description": "Gecerli + sense_role host_controller + otomatik kesme 30 dk",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIzMCIsImVuYWJsZS1hdWRpbyI6IlkiLCJlbmFibGUtYmxvY2staW5wdXQiOiJZIiwiZW5hYmxlLWNhbWVyYSI6Ik4iLCJlbmFibGUtY2xpcGJvYXJkIjoiWSIsImVuYWJsZS1maWxlLXRyYW5zZmVyIjoiWSIsImVuYWJsZS1rZXlib2FyZCI6IlkiLCJlbmFibGUtcHJpdmFjeS1tb2RlIjoiWSIsImVuYWJsZS1yZWNvcmQtc2Vzc2lvbiI6IlkiLCJlbmFibGUtcmVtb3RlLXByaW50ZXIiOiJOIiwiZW5hYmxlLXJlbW90ZS1yZXN0YXJ0IjoiWSIsImVuYWJsZS10ZXJtaW5hbCI6Ik4iLCJlbmFibGUtdHVubmVsIjoiTiJ9LCJyZXZpc2lvbiI6Mywic2Vuc2Vfcm9sZSI6Imhvc3RfY29udHJvbGxlciJ9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6Ikt6RktrY2RUZmVSTG8xOFd0MVZxQXciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "RFDpU3mfEfx8Ssfka0UggckvCWemG-uBeLypr07BlDfkV4kPGjvT5yI5CUtwZwg9eWO84LhZaOzBOradLffbAQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 5,
+      "config_options": {
+        "access-mode": "",
+        "enable-keyboard": "Y",
+        "enable-clipboard": "Y",
+        "enable-file-transfer": "Y",
+        "enable-audio": "Y",
+        "enable-remote-restart": "Y",
+        "enable-record-session": "Y",
+        "enable-block-input": "Y",
+        "enable-privacy-mode": "Y",
+        "enable-terminal": "N",
+        "enable-tunnel": "N",
+        "enable-camera": "N",
+        "enable-remote-printer": "N",
+        "allow-remove-wallpaper": "N",
+        "allow-auto-disconnect": "Y",
+        "auto-disconnect-timeout": "30"
+      },
+      "sense_role": "host_controller"
+    },
+    {
+      "name": "ok_second_key",
+      "description": "Listedeki ikinci anahtarla imzali (anahtar dondurme)",
+      "envelope": {
+        "k": "a6baacd6d0289669",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IlphNzBjcEN1NGVtZjdqVFZYM1JGVFEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "R89wk8g1cyFlS7EChzGlfGJVqm0gsaE5Bf90b_MIVtshdU_pCdr1NgcEuyvvNyTGGhm5_oa-3_gCHdeuO7OsCg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 5,
+      "config_options": {
+        "access-mode": "",
+        "enable-keyboard": "Y",
+        "enable-clipboard": "Y",
+        "enable-file-transfer": "Y",
+        "enable-audio": "Y",
+        "enable-remote-restart": "Y",
+        "enable-record-session": "Y",
+        "enable-block-input": "Y",
+        "enable-privacy-mode": "Y",
+        "enable-terminal": "N",
+        "enable-tunnel": "N",
+        "enable-camera": "N",
+        "enable-remote-printer": "N",
+        "allow-remove-wallpaper": "N",
+        "allow-auto-disconnect": "N",
+        "auto-disconnect-timeout": ""
+      }
+    },
+    {
+      "name": "ok_first_envelope",
+      "description": "Hic uygulanmamis cihaz: last_seq 0, seq 1",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6ImxkZVlIaUlMOGhtbDF3dmpiUS04TXciLCJzZXEiOjEsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "aFKonbb7oSzZbUMOfCCCTHkevS68t36GTvEhm0s5sXhHFoWaKUrc1MYgq_zlFJye_Hh3ouauVFZVpNUWTiQeCg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 0
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 1,
+      "config_options": {
+        "access-mode": "",
+        "enable-keyboard": "Y",
+        "enable-clipboard": "Y",
+        "enable-file-transfer": "Y",
+        "enable-audio": "Y",
+        "enable-remote-restart": "Y",
+        "enable-record-session": "Y",
+        "enable-block-input": "Y",
+        "enable-privacy-mode": "Y",
+        "enable-terminal": "N",
+        "enable-tunnel": "N",
+        "enable-camera": "N",
+        "enable-remote-printer": "N",
+        "allow-remove-wallpaper": "N",
+        "allow-auto-disconnect": "N",
+        "auto-disconnect-timeout": ""
+      }
+    },
+    {
+      "name": "ok_partial_set",
+      "description": "Kismi set de kabul (her anahtar tek basina denetlenir)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImVuYWJsZS10ZXJtaW5hbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IlpsTmR1eUs0STNpNkM2SUNHcTZ5R3ciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "taeTDxF_DGieg2cXHumeCt0s7dLJ_-fI4bwWY3r_61_InbUcHaiNQlYVCA1E8iHO-gmXqBy8sndkPBK5ILsQBw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 5,
+      "config_options": {
+        "enable-terminal": "N"
+      }
+    },
+    {
+      "name": "ok_nbf_boundary",
+      "description": "now_s = nbf - clock_skew_s (sinir dahil)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1799999700,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 5,
+      "config_options": {
+        "access-mode": "",
+        "enable-keyboard": "Y",
+        "enable-clipboard": "Y",
+        "enable-file-transfer": "Y",
+        "enable-audio": "Y",
+        "enable-remote-restart": "Y",
+        "enable-record-session": "Y",
+        "enable-block-input": "Y",
+        "enable-privacy-mode": "Y",
+        "enable-terminal": "N",
+        "enable-tunnel": "N",
+        "enable-camera": "N",
+        "enable-remote-printer": "N",
+        "allow-remove-wallpaper": "N",
+        "allow-auto-disconnect": "N",
+        "auto-disconnect-timeout": ""
+      }
+    },
+    {
+      "name": "ok_exp_boundary",
+      "description": "now_s = exp + clock_skew_s (sinir dahil)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800605100,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 5,
+      "config_options": {
+        "access-mode": "",
+        "enable-keyboard": "Y",
+        "enable-clipboard": "Y",
+        "enable-file-transfer": "Y",
+        "enable-audio": "Y",
+        "enable-remote-restart": "Y",
+        "enable-record-session": "Y",
+        "enable-block-input": "Y",
+        "enable-privacy-mode": "Y",
+        "enable-terminal": "N",
+        "enable-tunnel": "N",
+        "enable-camera": "N",
+        "enable-remote-printer": "N",
+        "allow-remove-wallpaper": "N",
+        "allow-auto-disconnect": "N",
+        "auto-disconnect-timeout": ""
+      }
+    },
+    {
+      "name": "malformed_padded_s",
+      "description": "s dolgulu base64url (== ekli)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw=="
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "malformed",
+      "result_client": "malformed"
+    },
+    {
+      "name": "malformed_noncanonical_s",
+      "description": "s'nin son karakterinde kullanilmayan bitler 1 (kanonik olmayan base64url)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48C_"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "malformed",
+      "result_client": "malformed"
+    },
+    {
+      "name": "malformed_extra_field",
+      "description": "Zarfta k/p/s disinda alan",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw",
+        "x": "1"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "malformed",
+      "result_client": "malformed"
+    },
+    {
+      "name": "malformed_uppercase_k",
+      "description": "k buyuk harf hex (bicim disi)",
+      "envelope": {
+        "k": "AD9F71C38F66DC5C",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "malformed",
+      "result_client": "malformed"
+    },
+    {
+      "name": "malformed_short_s",
+      "description": "s 85 karakter",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48C"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "malformed",
+      "result_client": "malformed"
+    },
+    {
+      "name": "unknown_key",
+      "description": "Listede olmayan anahtarla imzali",
+      "envelope": {
+        "k": "588247e623be4932",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6InplenQ5RWc4WWxocDM4Y2hoMVhzS2ciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "JIfNyEQa4zt6K2gu33rhbF-dQ0Z1oAp78knRbDH2xGApSfcKsbwe_6dYJKtdffvn9eHTO1avvDYkJrSWiX-PAQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "unknown_key",
+      "result_client": "unknown_key"
+    },
+    {
+      "name": "bad_signature_payload_bit",
+      "description": "p'nin ilk baytinda bir bit degisti",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eiJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "bad_signature",
+      "result_client": "bad_signature"
+    },
+    {
+      "name": "bad_signature_signature_bit",
+      "description": "s'nin ilk baytinda bir bit degisti",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8vbX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "bad_signature",
+      "result_client": "bad_signature"
+    },
+    {
+      "name": "bad_payload_version",
+      "description": "Imzali ama v: 2",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjhpMTBVTGhLU0Y3eW5jS1RleGNQc0EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6Mn0",
+        "s": "RwDDIxN94UVQ2ROf_Mwh07IYZpEaFEYgmmufW7sJohAPW0fOqdaKnGb9tuB2SO5X2NK5J1TYd32CkDBa0WWPDA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "bad_payload",
+      "result_client": "bad_payload"
+    },
+    {
+      "name": "bad_payload_unknown_field",
+      "description": "Imzali ama yukte bilinmeyen ust duzey alan",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiZXh0cmEiOnRydWUsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJjR2xBaF9lcE9uWHlDN241czZ4T0NRIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "OAzPdXT61nvFNSpy0FIMBKA0-p6j5HD7rcSYxRtrs4Vtsw2ARVU6UYlzjTRt5BpSql4myt5YJWGXlgHdd4_gCQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "bad_payload",
+      "result_client": "bad_payload"
+    },
+    {
+      "name": "bad_payload_unknown_body_field",
+      "description": "Imzali ama body'de bilinmeyen alan",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwiZXh0cmEiOiJ4IiwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjREeGNtdXR1Vk1SeG13enA1dFJReFEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "aOaxDPZ9VkAxmpduvmatjrMwwA82zmcUprDyQsrg_hVW54sMucU1W3ho6hUUh0fepT4YOq8UQEc3Tgho8-VlDg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "bad_payload",
+      "result_client": "bad_payload"
+    },
+    {
+      "name": "bad_payload_controller_role",
+      "description": "Imzali ama sense_role controller (panelden gonderilemez)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjMsInNlbnNlX3JvbGUiOiJjb250cm9sbGVyIn0sImRpZCI6IjEyMzQ1Njc4OSIsImR1dWlkIjoiZEdWemRDMTFkV2xrIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoiWW9WcnVsbVJLWlVISHRYYlE3R2txUSIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
+        "s": "flI2IA69JQrYYr84v2GiAb_DvCTtclaxX0mwNtUc601gQfJvpk8M-SPlyHnBQ4096bGSpLue0Nf2d-7KSRpiAw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "bad_payload",
+      "result_client": "bad_payload"
+    },
+    {
+      "name": "bad_payload_not_json",
+      "description": "Imzali ama yuk JSON degil",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "bm90IGpzb24",
+        "s": "_gOyLgG8jmNYSPjv1jxD46JoG9yUU7mR66PzI6bGzr-IMJCA_-HkeJC4kSZkbC1LRsJ8zjNTNcxPjryXQ6JdBw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "bad_payload",
+      "result_client": "bad_payload"
+    },
+    {
+      "name": "wrong_issuer",
+      "description": "iss baska alan adi",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJldmlsLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJGb2F0UTNwR1htS3Rxbmx6dUp3d093Iiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "EQLGVE7C7FRQYnWaJ7tglA340F3Imb0jDNnmXUsBLPTsIf-qIY41k7Cu0I8zwA09dKmdFW7aVgBwvmq4NDBjCQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "wrong_issuer",
+      "result_client": "wrong_issuer"
+    },
+    {
+      "name": "wrong_device_did",
+      "description": "did baska cihaz",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiI5ODc2NTQzMjEiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6InVocy1fR2FSNXUzdFVKUmtUQ3BfeFEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "FjENks4Fd6C4nm3rO23uWQQeo8JLOfUYSaapfyM-Zv8ek1-LKipAJ7rTQHp70-Y2sh-3Nlg4ADy9AwLzLoZ5BA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "wrong_device",
+      "result_client": "wrong_device"
+    },
+    {
+      "name": "wrong_device_duuid",
+      "description": "did dogru, duuid baska",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6IlltRnphMkV0ZFhWcFpBIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoidFV2UHItaTdkNktyNnlXek8xbF9QUSIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
+        "s": "o4MZ2HxsNmm_V4DBAWJByh4vZIqwL-npq08iHHnIrLpNB08AoyYUYwA5h67-DOj1yMQQk3Ndds8e12ZaQNtXBw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "wrong_device",
+      "result_client": "wrong_device"
+    },
+    {
+      "name": "not_yet_valid",
+      "description": "now_s = nbf - clock_skew_s - 1",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1799999699,
+        "last_seq": 4
+      },
+      "result_panel": "not_yet_valid",
+      "result_client": "not_yet_valid"
+    },
+    {
+      "name": "expired",
+      "description": "now_s = exp + clock_skew_s + 1",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800605101,
+        "last_seq": 4
+      },
+      "result_panel": "expired",
+      "result_client": "expired"
+    },
+    {
+      "name": "replayed_equal_seq",
+      "description": "seq = last_seq (ayni zarf ikinci kez)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 5
+      },
+      "result_panel": "replayed",
+      "result_client": "replayed"
+    },
+    {
+      "name": "replayed_older_seq",
+      "description": "seq < last_seq (eski zarf)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 15
+      },
+      "result_panel": "replayed",
+      "result_client": "replayed"
+    },
+    {
+      "name": "not_allowed_key",
+      "description": "Izin listesi disi anahtar (api-server)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXBpLXNlcnZlciI6Imh0dHBzOi8veC50ZXN0IiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6ImVPWFlMNzM1b1dkVEFPcGJwQnNHdnciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "bYaOcyO57OL14cWru2dsbGRJleyKP6flmTDZmqW-nJykeS7NJJLeAewD1Af5v-bBiW3AEfbBUQzUvR8P27v6Ag"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "not_allowed"
+    },
+    {
+      "name": "not_allowed_value_yes",
+      "description": "enable-keyboard: yes (yalniz Y/N)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJ5ZXMiLCJlbmFibGUtcHJpdmFjeS1tb2RlIjoiWSIsImVuYWJsZS1yZWNvcmQtc2Vzc2lvbiI6IlkiLCJlbmFibGUtcmVtb3RlLXByaW50ZXIiOiJOIiwiZW5hYmxlLXJlbW90ZS1yZXN0YXJ0IjoiWSIsImVuYWJsZS10ZXJtaW5hbCI6Ik4iLCJlbmFibGUtdHVubmVsIjoiTiJ9LCJyZXZpc2lvbiI6M30sImRpZCI6IjEyMzQ1Njc4OSIsImR1dWlkIjoiZEdWemRDMTFkV2xrIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoiOGhENGVVbTVUMTZrZHdtTEFtT1NTQSIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
+        "s": "zx1RInsh_5DqhRJg0TkPwTNc5UhMdaufXURMpOn5jhjqCSoz3TpjhZb1fAZ93iDkiHX-oGc9icCaXXzPRpgtCQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "not_allowed"
+    },
+    {
+      "name": "not_allowed_access_mode_full",
+      "description": "access-mode: full (yalniz bos)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiZnVsbCIsImFsbG93LWF1dG8tZGlzY29ubmVjdCI6Ik4iLCJhbGxvdy1yZW1vdmUtd2FsbHBhcGVyIjoiTiIsImF1dG8tZGlzY29ubmVjdC10aW1lb3V0IjoiIiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJZb3RKZk91eTBYNjM1SEdFV3lyZFFRIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "ImYKbrztLKkKZZvGz5q-wqzcnqVPGJtRz2OFB_u_AQIafoafjZkzdvV1eoGVk0xcldBozij8tFmboSBzGmq1BQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "not_allowed"
+    },
+    {
+      "name": "not_allowed_timeout_below_min",
+      "description": "auto-disconnect-timeout: 4 (min 5)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiI0IiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJvWko3d0s4NlZxbDNUOVhORmRnYU5RIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "A3X_vzIehLLNxBptZ7Ie-lIkGME9BGMoHa89ZikYOMOEAjnXUkj_nPhrk4Z2qCNjz53xNQ7MPvzKeEQrpAB_AA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "not_allowed"
+    },
+    {
+      "name": "not_allowed_timeout_above_max",
+      "description": "auto-disconnect-timeout: 1441 (max 1440)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIxNDQxIiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJIeDFwQ2I4T0UxclRINmEwSzA1VTFBIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "kPy8XAswgr4PhnV54gZtuRzuJr0P2M_Se45ToxzT0Ue8xn_g53RppQSfxM-nrfWUvKrg3WdLKWXMUZM0ClMDAA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "not_allowed"
+    },
+    {
+      "name": "not_allowed_timeout_leading_zero",
+      "description": "auto-disconnect-timeout: 030 (onde sifir)",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIwMzAiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6Il9FS1JHWG9UTVpfcjkyVDV6a3JsVGciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "dGoQRFV4f1rQLp_d5r6PY0bqlDdbhSa-Rg0Ni0UKrZle2rkD2lJaLhsIcDBbRiXbP14NKNKxtSD7fdDlOcqcDw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "not_allowed"
+    },
+    {
+      "name": "unsupported_type_update",
+      "description": "Gecerli imzali update zarfi; Dalga 2 istemcisi yalniz strategy uygular",
+      "envelope": {
+        "k": "dd9f71c38f66dc5c",
+        "p": "eyJib2R5Ijp7ImFwcF92ZXJzaW9uIjoyLCJpbnN0YWxsX3dpbmRvdyI6ImlkbGUiLCJwbGF0Zm9ybSI6IndpbmRvd3MteDY0Iiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInNpemUiOjEwMjQsInVybCI6Imh0dHBzOi8vcmVtb3RlLmV4YW1wbGUudGVzdC9pbmRpci9zZW5zZS1yZW1vdGUtMi5leGUifSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDI1OTIwMDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJnXzB4OEdsY1BEN1BrMkFUcDZtbDlBIiwic2VxIjo1LCJ0eXAiOiJ1cGRhdGUiLCJ2IjoxfQ",
+        "s": "ytz4YpInK_jT6p5Sr_3JrxAvGj1vFFD-1pybt8qdpsgEp-WaiCOfLGoU9foLyXANpE7MAYnaSE8plONtaje5CQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "unsupported_type"
+    }
+  ]
+}

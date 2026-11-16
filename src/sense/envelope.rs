@@ -437,9 +437,12 @@ pub enum OptionRule {
     Empty,
     /// `Y` or `N`.
     YesNo,
-    /// `""` or 5–1440 written with 1–4 digits.
+    /// `""` or a decimal without leading zero (1–4 ASCII digits), `MIN_MINUTES..=MAX_MINUTES`.
     Minutes,
 }
+
+pub const MIN_MINUTES: u16 = 5;
+pub const MAX_MINUTES: u16 = 1440;
 
 /// Only settings the panel can always undo (plan K-İZİN): nothing that could stop the
 /// heartbeat, change servers / identity, hide the connection window or lock out remote access.
@@ -468,10 +471,15 @@ impl OptionRule {
             OptionRule::Empty => value.is_empty(),
             OptionRule::YesNo => value == "Y" || value == "N",
             OptionRule::Minutes => {
+                // Same as the panel's `int_or_empty` (`^[1-9][0-9]{0,3}$`): one spelling per
+                // value, so "030" is not accepted as 30.
                 value.is_empty()
                     || (value.len() <= 4
+                        && !value.starts_with('0')
                         && value.bytes().all(|b| b.is_ascii_digit())
-                        && value.parse::<u16>().is_ok_and(|m| (5..=1440).contains(&m)))
+                        && value
+                            .parse::<u16>()
+                            .is_ok_and(|m| (MIN_MINUTES..=MAX_MINUTES).contains(&m)))
             }
         }
     }
@@ -510,3 +518,6 @@ pub fn expected_issuer() -> String {
 
 #[cfg(test)]
 mod tests;
+// Sense Remote: the shared test vector made by the panel (`envelope-v1.json`, copied verbatim).
+#[cfg(test)]
+mod vector;

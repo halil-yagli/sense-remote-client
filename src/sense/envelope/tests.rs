@@ -362,6 +362,9 @@ fn options_outside_the_allow_list_reject_the_whole_envelope() {
         ("auto-disconnect-timeout", "10000"),
         ("auto-disconnect-timeout", " 10"),
         ("auto-disconnect-timeout", "+10"),
+        ("auto-disconnect-timeout", "030"),
+        ("auto-disconnect-timeout", "0005"),
+        ("auto-disconnect-timeout", "0"),
     ] {
         let mut payload = strategy(5);
         payload["body"]["config_options"][key] = json!(value);
