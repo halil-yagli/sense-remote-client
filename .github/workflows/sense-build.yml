@@ -1,4 +1,4 @@
-# Sense Remote: Windows (x64) + macOS (Intel ve Apple Silicon) derlemesi.
+# Sense Remote: Windows (x64) + macOS (yalniz Apple Silicon) derlemesi.
 # RustDesk'in flutter-build.yml dosyasindaki Windows ve macOS adimlarindan sadelestirildi:
 # imzalama, surum yayini, MSI, Linux/Android/iOS ve Windows arm64 yok.
 # Ciktilar imzasizdir ve yalniz ekip cihazlarinda deneme icindir.
@@ -154,7 +154,6 @@ jobs:
       fail-fast: false
       matrix:
         job:
-          - { target: x86_64-apple-darwin, os: macos-26-intel, arch: x86_64, extra-build-args: "" }
           - { target: aarch64-apple-darwin, os: macos-26, arch: aarch64, extra-build-args: "--screencapturekit" }
     steps:
       - name: Export GitHub Actions cache environment variables
@@ -190,12 +189,6 @@ jobs:
       - name: Keep CocoaPods for Flutter 3.44 (arm64)
         if: ${{ matrix.job.arch == 'aarch64' }}
         run: flutter config --no-enable-swift-package-manager
-
-      - name: Patch flutter
-        if: ${{ matrix.job.arch == 'x86_64' }}
-        run: |
-          cd $(dirname $(dirname $(which flutter)))
-          git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
 
       - name: Workaround for flutter issue
         shell: bash
