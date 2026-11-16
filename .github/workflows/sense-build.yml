@@ -36,6 +36,9 @@ env:
   VERSION: "1.5.3"
   # Sense Remote surum numarasi (duz sayi); kurulum dosyasi SenseRemote-Kurulum-<n>.exe.
   SENSE_VERSION: "1"
+  # Panelin imza acik anahtar(lar)i: k1=<base64url>,k2=... (acik anahtar, sir degil). Repo
+  # degiskeni (Settings > Variables) yoksa bos gelir: istemci her zarfi reddeder (unknown_key).
+  SENSE_ENVELOPE_KEYS: ${{ vars.SENSE_ENVELOPE_KEYS }}
 
 jobs:
   generate-bridge:
@@ -122,6 +125,16 @@ jobs:
           if ! $VCPKG_ROOT/vcpkg install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"; then
             find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do echo "$_1:"; cat "$_1"; done
             exit 1
+          fi
+
+      # Sense Remote: anahtarsiz derleme surer ama panelden gelen hicbir yetki uygulanmaz.
+      - name: Check panel envelope keys
+        shell: bash
+        run: |
+          if [ -z "$SENSE_ENVELOPE_KEYS" ]; then
+            echo "::warning title=SENSE_ENVELOPE_KEYS bos::Bu derleme panel zarflarini dogrulayacak anahtar icermiyor; istemci her zarfi reddeder (unknown_key). Yayin oncesi repo degiskenine panelin acik anahtarini yazin."
+          else
+            echo "SENSE_ENVELOPE_KEYS: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | wc -l) anahtar"
           fi
 
       - name: Build
