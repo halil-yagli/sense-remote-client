@@ -21,6 +21,8 @@ import '../../common/widgets/chat_page.dart';
 import '../../models/file_model.dart';
 import '../../models/platform_model.dart';
 import '../../models/server_model.dart';
+import '../widgets/sense_cm_window.dart'; // Sense Remote: Host-side icon
+import 'sense_cm_page.dart'; // Sense Remote: Host-side icon
 
 /// Set only by this window's own close control, and only once the user has confirmed. Any other
 /// way the window can go - a session logout closing every window, the window manager, a native
@@ -93,6 +95,9 @@ class _DesktopServerPageState extends State<DesktopServerPage>
       ],
       child: Consumer<ServerModel>(
         builder: (context, serverModel, child) {
+          // Sense Remote: on the controlled computer only a small Sense icon
+          // (card on click) instead of this window; see sense_cm_page.dart.
+          if (SenseCm.enabled) return const SenseCmRoot();
           final body = Scaffold(
             backgroundColor: Theme.of(context).colorScheme.background,
             body: ConnectionManager(),

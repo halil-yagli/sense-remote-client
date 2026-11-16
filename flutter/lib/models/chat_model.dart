@@ -6,6 +6,7 @@ import 'package:draggable_float_widget/draggable_float_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
+import 'package:flutter_hbb/desktop/widgets/sense_cm_window.dart'; // Sense Remote
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/desktop/widgets/windows_cm_window_position.dart';
 import 'package:flutter_hbb/mobile/pages/home_page.dart';
@@ -282,6 +283,9 @@ class ChatModel with ChangeNotifier {
   showChatPage(MessageKey key) async {
     if (isDesktop) {
       if (isConnManager) {
+        // Sense Remote: the icon's card has its own chat; a message shows an
+        // unread badge instead of resizing the window.
+        if (SenseCm.enabled) return;
         if (!_isShowCMSidePage) {
           await toggleCMChatPage(key);
         }
@@ -439,7 +443,12 @@ class ChatModel with ChangeNotifier {
         debugPrint("Failed to receive msg, client is null");
         return;
       }
-      if (isDesktop) {
+      if (isDesktop && isConnManager && SenseCm.enabled) {
+        // Sense Remote: no focus stealing; count it unless it is on screen.
+        if (!SenseCm.isShowingChat(id)) {
+          client.unreadChatMessageCount.value += 1;
+        }
+      } else if (isDesktop) {
         windowOnTop(null);
         // disable auto jumpTo other tab when hasFocus, and mark unread message
         final currentSelectedTab =
