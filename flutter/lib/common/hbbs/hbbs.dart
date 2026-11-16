@@ -82,6 +82,9 @@ class PeerPayload {
   String user_name = '';
   String? device_group_name;
   String note = '';
+  // Sense Remote: all project tags of the peer from the panel's `sense`
+  // extension; null when the server does not send it (stock behaviour).
+  List<SenseProjectRef>? senseProjects;
 
   PeerPayload.fromJson(Map<String, dynamic> json)
       : id = json['id'] ?? '',
@@ -90,7 +93,8 @@ class PeerPayload {
         user = json['user'] ?? '',
         user_name = json['user_name'] ?? '',
         device_group_name = json['device_group_name'] ?? '',
-        note = json['note'] ?? '';
+        note = json['note'] ?? '',
+        senseProjects = SenseProjectRef.listFromSense(json['sense']);
 
   static Peer toPeer(PeerPayload p) {
     return Peer.fromJson({
@@ -287,16 +291,118 @@ class AbTag {
 
 class DeviceGroupPayload {
   String name;
+  // Sense Remote: project id and panel sort key from the `sense` extension;
+  // null on stock servers. Not written to the group cache.
+  SenseProjectRef? sense;
 
-  DeviceGroupPayload(this.name);
+  DeviceGroupPayload(this.name, {this.sense});
 
   DeviceGroupPayload.fromJson(Map<String, dynamic> json)
-      : name = json['name'] ?? '';
+      : name = json['name'] ?? '',
+        sense = SenseProjectRef.fromJsonOrNull(json['sense']);
 
   Map<String, dynamic> toGroupCacheJson() {
     final Map<String, dynamic> map = {
       'name': name,
     };
     return map;
+  }
+}
+
+// Sense Remote: the Sense panel adds a `sense` object to the device group and
+// peer list items (panel contract `client-api/peers.ts`, plan §2.1.6). The
+// classes below read it and give the Controller list the panel order and
+// multi-project membership. Without `sense` nothing here is used.
+class SenseProjectRef {
+  final String projectId;
+  final String sortKey;
+
+  const SenseProjectRef(this.projectId, this.sortKey);
+
+  static SenseProjectRef? fromJsonOrNull(dynamic json) {
+    if (json is! Map) return null;
+    final projectId = json['project_id'];
+    final sortKey = json['sort_key'];
+    if (projectId is! String || projectId.isEmpty) return null;
+    return SenseProjectRef(projectId, sortKey is String ? sortKey : '');
+  }
+
+  /// Reads `sense.projects` of a peer; null when `sense` is missing.
+  static List<SenseProjectRef>? listFromSense(dynamic sense) {
+    if (sense is! Map) return null;
+    final projects = sense['projects'];
+    if (projects is! List) return <SenseProjectRef>[];
+    return projects
+        .map(fromJsonOrNull)
+        .whereType<SenseProjectRef>()
+        .toList();
+  }
+}
+
+/// Sense Remote: panel order of the Controller list (pure, no global state).
+class SensePanelOrder {
+  // peer id -> position in the panel response (project order, then in-project order)
+  final Map<String, int> _peerIndex;
+  // peer id -> {project (group) name -> in-project sort key}
+  final Map<String, Map<String, String>> _peerKeys;
+
+  SensePanelOrder._(this._peerIndex, this._peerKeys);
+
+  /// True when any device group came with the `sense` extension.
+  static bool groupsHaveSense(List<DeviceGroupPayload> groups) =>
+      groups.any((g) => g.sense != null);
+
+  /// Null when the server sent no `sense` data (stock behaviour stays).
+  /// [peers] must be in response order.
+  static SensePanelOrder? build(
+      List<DeviceGroupPayload> groups, List<PeerPayload> peers) {
+    if (!groupsHaveSense(groups) &&
+        !peers.any((p) => p.senseProjects != null)) {
+      return null;
+    }
+    final groupNameById = <String, String>{};
+    for (final g in groups) {
+      final sense = g.sense;
+      if (sense != null) groupNameById[sense.projectId] = g.name;
+    }
+    final peerIndex = <String, int>{};
+    final peerKeys = <String, Map<String, String>>{};
+    for (final p in peers) {
+      peerIndex.putIfAbsent(p.id, () => peerIndex.length);
+      final keys = <String, String>{};
+      for (final ref in p.senseProjects ?? const <SenseProjectRef>[]) {
+        final name = groupNameById[ref.projectId];
+        if (name != null) keys.putIfAbsent(name, () => ref.sortKey);
+      }
+      // A peer without `sense` keeps its single legacy group.
+      if (p.senseProjects == null &&
+          (p.device_group_name ?? '').isNotEmpty) {
+        keys[p.device_group_name!] = '';
+      }
+      peerKeys[p.id] = keys;
+    }
+    return SensePanelOrder._(peerIndex, peerKeys);
+  }
+
+  bool knowsPeer(String peerId) => _peerKeys.containsKey(peerId);
+
+  /// Project (group) names the peer belongs to.
+  Iterable<String> groupNamesOf(String peerId) =>
+      _peerKeys[peerId]?.keys ?? const <String>[];
+
+  /// Panel order. With [groupName] (selected project) the in-project sort key
+  /// decides; otherwise the response position. Unknown peers go last, by id.
+  int compare(String a, String b, {String? groupName}) {
+    if (groupName != null && groupName.isNotEmpty) {
+      final ka = _peerKeys[a]?[groupName];
+      final kb = _peerKeys[b]?[groupName];
+      if (ka != null && kb != null && ka != kb) return ka.compareTo(kb);
+    }
+    final ia = _peerIndex[a];
+    final ib = _peerIndex[b];
+    if (ia != null && ib != null) return ia.compareTo(ib);
+    if (ia != null) return -1;
+    if (ib != null) return 1;
+    return a.compareTo(b);
   }
 }

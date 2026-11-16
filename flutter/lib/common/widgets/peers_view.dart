@@ -26,8 +26,12 @@ class PeerSortType {
   static const String remoteHost = 'Remote Host';
   static const String username = 'Username';
   static const String status = 'Status';
+  // Sense Remote: order set in the Sense panel; default. Falls back to
+  // Remote ID when the list has no panel order (other tabs, stock server).
+  static const String panelOrder = 'Panel order';
 
   static List<String> values = [
+    PeerSortType.panelOrder,
     PeerSortType.remoteId,
     PeerSortType.remoteHost,
     PeerSortType.username,
@@ -57,9 +61,15 @@ final peerSearchText = "".obs;
 /// for peer sort, global obs value
 RxString? _peerSort;
 RxString get peerSort {
-  _peerSort ??= bind.getLocalFlutterOption(k: kOptionPeerSorting).obs;
+  _peerSort ??= peerSortOrDefault(
+          bind.getLocalFlutterOption(k: kOptionPeerSorting))
+      .obs;
   return _peerSort!;
 }
+
+// Sense Remote: an unset sort option means panel order.
+String peerSortOrDefault(String stored) =>
+    stored.isEmpty ? PeerSortType.panelOrder : stored;
 
 // list for listener
 RxList<RxString> get obslist => [peerSearchText, peerSort].obs;
@@ -364,9 +374,9 @@ class _PeersViewState extends State<_PeersView>
       peers = peers.where((peer) => widget.peerFilter!(peer)).toList();
     }
 
-    // fallback to id sorting
+    // fallback to panel order (Sense Remote; was id sorting)
     if (!PeerSortType.values.contains(sortedBy)) {
-      sortedBy = PeerSortType.remoteId;
+      sortedBy = PeerSortType.panelOrder;
       bind.setLocalFlutterOption(
         k: kOptionPeerSorting,
         v: sortedBy,
@@ -374,6 +384,21 @@ class _PeersViewState extends State<_PeersView>
     }
 
     if (widget.peers.loadEvent != LoadEvent.recent) {
+      // Sense Remote: panel order only exists for the group (Controller) list.
+      final senseOrder = widget.peers.loadEvent == LoadEvent.group
+          ? gFFI.groupModel.senseOrder
+          : null;
+      if (sortedBy == PeerSortType.panelOrder) {
+        if (senseOrder != null) {
+          final selected = gFFI.groupModel.isSelectedDeviceGroup.value
+              ? gFFI.groupModel.selectedAccessibleItemName.value
+              : null;
+          peers.sort((p1, p2) =>
+              senseOrder.compare(p1.id, p2.id, groupName: selected));
+        } else {
+          peers.sort((p1, p2) => p1.getId().compareTo(p2.getId()));
+        }
+      }
       switch (sortedBy) {
         case PeerSortType.remoteId:
           peers.sort((p1, p2) => p1.getId().compareTo(p2.getId()));
@@ -575,16 +600,18 @@ class MyGroupPeerView extends BasePeersView {
           user.name == peer.loginName &&
           (user.name.toLowerCase().contains(text) ||
               user.displayNameOrName.toLowerCase().contains(text)));
-      final searchPeersOfDeviceGroup =
-          peer.device_group_name.toLowerCase().contains(text) &&
-              model.deviceGroups.any((g) => g.name == peer.device_group_name);
+      final searchPeersOfDeviceGroup = _senseGroupNames(peer).any((name) =>
+          name.toLowerCase().contains(text) &&
+          model.deviceGroups.any((g) => g.name == name));
       if (!searchPeersOfUser && !searchPeersOfDeviceGroup) {
         return false;
       }
     }
     if (model.selectedAccessibleItemName.isNotEmpty) {
       if (model.isSelectedDeviceGroup.value) {
-        if (model.selectedAccessibleItemName.value != peer.device_group_name) {
+        // Sense Remote: a multi-project peer shows in each of its projects.
+        if (!_senseGroupNames(peer)
+            .contains(model.selectedAccessibleItemName.value)) {
           return false;
         }
       } else {
@@ -594,5 +621,15 @@ class MyGroupPeerView extends BasePeersView {
       }
     }
     return true;
+  }
+
+  // Sense Remote: project names of the peer (all panel projects when known,
+  // otherwise the single stock `device_group_name`).
+  static Iterable<String> _senseGroupNames(Peer peer) {
+    final order = gFFI.groupModel.senseOrder;
+    if (order != null && order.knowsPeer(peer.id)) {
+      return order.groupNamesOf(peer.id);
+    }
+    return [peer.device_group_name];
   }
 }
