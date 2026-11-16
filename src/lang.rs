@@ -278,7 +278,8 @@ pub fn translate_locale(name: String, locale: &str) -> String {
             {
                 let app_name = crate::get_app_name();
                 if !app_name.contains("RustDesk") {
-                    s = s.replace("RustDesk", &app_name);
+                    // Sense Remote: show "Sense Remote" (with space) in text, not "SenseRemote".
+                    s = s.replace("RustDesk", &crate::common::get_app_display_name());
                 } else {
                     // https://github.com/rustdesk/rustdesk-server-pro/issues/845
                     // If app_name contains "RustDesk" (e.g., "RustDesk-Admin"), we need to avoid
