@@ -1227,6 +1227,24 @@ pub fn get_app_name() -> String {
     hbb_common::config::APP_NAME.read().unwrap().clone()
 }
 
+/// Sense Remote: internal app name. RustDesk only accepts letters, numbers, `-` and `_`
+/// (see `validate_install_app_name`) and uses it unquoted in `sc` / `taskkill` commands
+/// and in the macOS bundle path (`/Applications/<name>.app`), so it has no space.
+pub const SENSE_APP_NAME: &str = "SenseRemote";
+/// Sense Remote: the name people see in translated UI text.
+pub const SENSE_APP_DISPLAY_NAME: &str = "Sense Remote";
+
+/// Name shown to people: "Sense Remote" for our build, the app name otherwise.
+#[inline]
+pub fn get_app_display_name() -> String {
+    let app_name = get_app_name();
+    if app_name == SENSE_APP_NAME {
+        SENSE_APP_DISPLAY_NAME.to_owned()
+    } else {
+        app_name
+    }
+}
+
 #[inline]
 pub fn is_rustdesk() -> bool {
     hbb_common::config::APP_NAME.read().unwrap().eq("RustDesk")
@@ -2507,6 +2525,10 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    // Sense Remote: our build always runs as a custom client named SenseRemote. This runs
+    // before anything reads APP_NAME (core_main, flutter_ffi and service call it first).
+    // A custom.txt signed by RustDesk's key could still override it below; we ship none.
+    *config::APP_NAME.write().unwrap() = SENSE_APP_NAME.to_owned();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
