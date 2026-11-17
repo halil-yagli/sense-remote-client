@@ -27,6 +27,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
+import 'sense_home_about.dart'; // Sense Remote
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -2572,6 +2573,14 @@ class _About extends StatefulWidget {
 class _AboutState extends State<_About> {
   @override
   Widget build(BuildContext context) {
+    // Sense Remote: Sense About page (version, role, panel status, small
+    // "Açık kaynak lisansları" link). The stock page is kept below unused so
+    // upstream merges stay small.
+    return const SenseAboutPage();
+  }
+
+  // ignore: unused_element
+  Widget _buildStockAbout(BuildContext context) {
     return futureBuilder(future: () async {
       final license = await bind.mainGetLicense();
       final version = await bind.mainGetVersion();
