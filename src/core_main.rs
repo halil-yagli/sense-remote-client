@@ -735,12 +735,20 @@ fn import_config(path: &str) {
         log::info!("Empty source config, skipped");
         return;
     }
-    if get_modified_time(&path) > get_modified_time(&Config::file())
-        && get_modified_time(&path) < get_exe_time()
-    {
-        if store_path(Config::file(), config).is_err() {
-            log::info!("config written");
+    // Sense Remote (K3-2): same rule as upstream, in `sense::identity` (tested); the reason is
+    // logged because a skipped import leaves the service with another ID and device key.
+    match crate::sense::identity::import_runs(
+        false,
+        get_modified_time(&path),
+        get_modified_time(&Config::file()),
+        get_exe_time(),
+    ) {
+        Ok(()) => {
+            if store_path(Config::file(), config).is_err() {
+                log::info!("config written");
+            }
         }
+        Err(reason) => log::warn!("Sense Remote: config import skipped: {reason}"),
     }
     let config2: Config2 = load_path(path2.into());
     if get_modified_time(&path2) > get_modified_time(&Config2::file()) {

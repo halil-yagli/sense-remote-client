@@ -36,6 +36,8 @@ pub mod envelope_seq;
 // Only the Flutter UI has the setup wizard and the panel sign-in (`hbbs_http::account`).
 #[cfg(feature = "flutter")]
 pub mod enroll;
+// Sense Remote (K3-2): the service imports the ID + key pair the panel registers.
+pub mod identity;
 
 /// Registry key (under HKLM) that holds the installed role and setup info.
 pub const REG_SUBKEY: &str = "SOFTWARE\\SenseRemote";
@@ -340,9 +342,13 @@ pub fn install(options: &str, path: String, role: &str, info_json: &str) -> Stri
     if let Err(err) = prepare_install(role, info_json) {
         return err.to_owned();
     }
-    // Sense Remote (K-R2-3): create the device key pair before `install_me`, so the service
-    // imports the same pair (`--import-config`) whose public key the registration sends.
-    let _ = config::Config::get_key_pair();
+    // Sense Remote (K-R2-3, K3-2): create the RustDesk ID and device key pair and make sure
+    // both are in the config file before `install_me`, so the service imports this pair
+    // (`--import-config` skips a file without ID or key; `get_key_pair` writes the key from a
+    // background thread). Registration then reads the pair back from the service.
+    if let Err(err) = store_identity_for_import() {
+        return err.to_owned();
+    }
     // silent = true: the setup screen shows "Kuruldu" and opens the app on request.
     match crate::platform::windows::install_me(options, path, true, false) {
         Ok(()) => {
@@ -366,6 +372,38 @@ pub fn install(options: &str, path: String, role: &str, info_json: &str) -> Stri
             }
         }
     }
+}
+
+/// Sense Remote (K3-2): ID and key pair in the setup process's config file, written before the
+/// service imports it. Waits briefly for `get_key_pair`'s background write.
+#[cfg(windows)]
+fn store_identity_for_import() -> Result<(), &'static str> {
+    let _ = config::Config::get_id();
+    let _ = config::Config::get_key_pair();
+    let path = config::Config::file();
+    let mut ready = Err("identity-store");
+    for _ in 0..30 {
+        let file: config::Config = config::load_path(path.clone());
+        ready = identity::stored_for_import(file.is_empty());
+        if ready.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if ready.is_err() {
+        log::error!("Sense Remote: RustDesk ID or device key not stored before installation");
+        return ready;
+    }
+    // Reinstall: the service's config is usually newer than this file, and the import only
+    // copies a newer file. Marking it as written now (content unchanged) keeps the import.
+    let touched = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .and_then(|file| file.set_modified(std::time::SystemTime::now()));
+    if let Err(err) = touched {
+        log::warn!("Sense Remote: could not mark the config for import: {err}");
+    }
+    ready
 }
 
 #[cfg(not(windows))]
@@ -926,5 +964,34 @@ mod tests {
         assert_eq!(prepare_install("host", "not json"), Err("invalid-info"));
         assert_eq!(prepare_install("host", "{\"name\":\"\"}"), Err("invalid-name"));
         assert_eq!(pending_install_commands(), "");
+    }
+
+    // Sense Remote (T3): Windows file details (Properties > Details) of the setup file and the
+    // installed program name Sense Department; the AGPL notice and the source link stay.
+    #[test]
+    fn windows_file_details_name_sense_and_keep_the_agpl_notice() {
+        let sources = [
+            ("Cargo.toml", include_str!("../Cargo.toml")),
+            ("libs/portable/Cargo.toml", include_str!("../libs/portable/Cargo.toml")),
+            ("Runner.rc", include_str!("../flutter/windows/runner/Runner.rc")),
+        ];
+        for (name, text) in sources {
+            let copyright = text
+                .lines()
+                .find(|line| line.contains("LegalCopyright"))
+                .unwrap_or_else(|| panic!("{name}: no LegalCopyright"));
+            assert!(copyright.contains("Sense Department"), "{name}");
+            assert!(copyright.contains("AGPL-3.0"), "{name}");
+            assert!(
+                copyright.contains("https://github.com/halil-yagli/sense-remote-client"),
+                "{name}"
+            );
+            assert!(!copyright.contains("Purslane"), "{name}");
+            let original = text
+                .lines()
+                .find(|line| line.contains("OriginalFilename"))
+                .unwrap_or_else(|| panic!("{name}: no OriginalFilename"));
+            assert!(!original.to_lowercase().contains("rustdesk"), "{name}");
+        }
     }
 }

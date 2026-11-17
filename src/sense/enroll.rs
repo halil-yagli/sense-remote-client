@@ -364,7 +364,9 @@ async fn post_json(url: String, body: String, header: String) -> ResultType<(u16
 /// Registers this computer. JSON for the wizard: `{"ok": true, "projects": [{name, created}]}`
 /// or `{"ok": false, "error": "<code>"}`.
 pub fn enroll(input_json: &str) -> String {
-    let error = |code: &str| json!({ "ok": false, "error": code }).to_string();
+    // Sense Remote (K3-5): `action` tells the wizard whether "Yeniden dene" can help.
+    let error =
+        |code: &str| json!({ "ok": false, "error": code, "action": error_action(code) }).to_string();
     let Some(role) = installed_role() else {
         return error("not-installed");
     };
@@ -377,13 +379,22 @@ pub fn enroll(input_json: &str) -> String {
     let (Some(platform), Some(app_version)) = (report::platform(), report::app_version()) else {
         return error("build");
     };
+    // Sense Remote (K3-2): ID and public key from one source, this process's config file,
+    // which `sense::install` stored and the service imported (`--import-config`). The
+    // service's IPC is not used: it accepts only its own executable, so `ipc::get_id` here
+    // fell back to this file anyway, and when it did answer the ID and key could disagree.
+    let (_, public_key) = Config::get_key_pair();
     let me = Identity {
-        id: crate::ui_interface::get_id(),
+        id: Config::get_id(),
         uuid: crate::ui_interface::get_uuid(),
         platform,
         app_version,
-        public_key: Config::get_key_pair().1,
+        public_key,
     };
+    log::info!(
+        "Sense Remote: registering device key {}",
+        super::identity::public_key_label(&me.public_key)
+    );
     let body = match enroll_body(&input, role, &me) {
         Ok(body) => body,
         Err(key) => return error(key),
@@ -411,6 +422,19 @@ pub fn enroll(input_json: &str) -> String {
             log::warn!("Sense Remote: registration refused: {code} (HTTP {status})");
             error(code)
         }
+    }
+}
+
+/// Sense Remote (K3-5): what the wizard offers for an error code. Codes made on this computer
+/// that a retry cannot fix get `none` (contact the team) or `edit` (fix the form); unknown and
+/// panel codes keep the wizard's own mapping (`default`).
+pub fn error_action(code: &str) -> &'static str {
+    match code {
+        "build" | "identity" | "identity-store" | "not-installed" => "none",
+        "validation" | "invalid-name" | "invalid-location" | "invalid-note"
+        | "invalid-project" => "edit",
+        "network" | "retry" | "rate_limited" => "retry",
+        _ => "default",
     }
 }
 
@@ -480,6 +504,24 @@ mod tests {
                 "IŞIK".to_owned(),
                 "ışık".to_owned(),
             ],
+        }
+    }
+
+    #[test]
+    fn local_errors_say_whether_a_retry_helps() {
+        // K3-5: a broken build or a missing identity does not get better with "Yeniden dene".
+        for code in ["build", "identity", "identity-store", "not-installed"] {
+            assert_eq!(error_action(code), "none", "{code}");
+        }
+        for code in ["validation", "invalid-name", "invalid-location", "invalid-note", "invalid-project"] {
+            assert_eq!(error_action(code), "edit", "{code}");
+        }
+        for code in ["network", "retry", "rate_limited"] {
+            assert_eq!(error_action(code), "retry", "{code}");
+        }
+        // Panel codes the wizard already maps keep its mapping.
+        for code in ["token_invalid", "install_scope", "device_mismatch", "uuid_mismatch", "x"] {
+            assert_eq!(error_action(code), "default", "{code}");
         }
     }
 
