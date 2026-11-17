@@ -501,6 +501,8 @@ pub fn license_from_exe_name(
 // Sense Remote: the `sense` extension of heartbeat / sysinfo (health, display info, network
 // addresses), wave 2 I3.
 pub mod report;
+// Sense Remote: signed heartbeat report (wave 3 I7, K-R2-3 / G2-1).
+pub mod report_sig;
 #[cfg(windows)]
 mod displays_win;
 mod network;

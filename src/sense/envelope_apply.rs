@@ -185,8 +185,9 @@ pub fn apply_steps<S: ApplySteps>(
     Ok(())
 }
 
-/// Role to store, `None` when it stays the same. The panel may only switch between Host and
-/// Host + Controller (plan K-ROL): a Controller-only or uninstalled computer is refused.
+/// Role to store, `None` when it stays the same. Sense Remote (wave 3, K-ROL-2): every switch
+/// between Host, Controller and Host + Controller is allowed (the service runs in every role, so
+/// the way back reaches a Controller too). A computer without an installed role is refused.
 pub fn role_change(
     installed: Option<SenseRole>,
     wanted: Option<PanelRole>,
@@ -194,13 +195,27 @@ pub fn role_change(
     let Some(wanted) = wanted else {
         return Ok(None);
     };
-    match installed {
-        Some(current @ (SenseRole::Host | SenseRole::Both)) => {
-            let next = wanted.sense_role();
-            Ok((next != current).then_some(next))
-        }
-        Some(SenseRole::Controller) | None => Err(Reason::NotAllowed),
-    }
+    let Some(current) = installed else {
+        return Err(Reason::NotAllowed);
+    };
+    let next = wanted.sense_role();
+    Ok((next != current).then_some(next))
+}
+
+/// Sense Remote (K-ROL-2): the `--server` process decides once at start whether it listens
+/// (Controller: sync loop only, `rendezvous_mediator.rs`). A change into or out of Controller
+/// therefore restarts it; the Windows service starts it again with the stored role. Host <->
+/// Host + Controller keeps listening and is applied in-process.
+pub fn restart_needed(old: Option<SenseRole>, new: SenseRole) -> bool {
+    old.map_or(true, |old| (old == SenseRole::Controller) != (new == SenseRole::Controller))
+}
+
+/// Sense Remote (wave 3, K-CTRL): an outgoing-only (Controller) computer still installs the
+/// service, imports the config and runs the panel sync loop, as long as it is a Sense install
+/// (role in HKLM, or the setup screen is installing one now). Otherwise upstream's
+/// outgoing-only behaviour (no service, no sync) stays.
+pub fn service_when_outgoing_only(installed: Option<SenseRole>, installing: bool) -> bool {
+    installed.is_some() || installing
 }
 
 /// Sense Remote (K2-1): local − panel clock (contract `clock_skew_s`: positive = this computer is
@@ -450,7 +465,11 @@ mod tests {
         let item = s.sign(&strategy(7, json!({ "sense_role": "host_controller" })));
         let verified = check(&item, &keys, &expect(0), true).unwrap();
         assert_eq!(verified.body.sense_role, Some(PanelRole::HostController));
+        // Sense Remote (K-ROL-2): Controller is accepted from wave 3 on.
         let item = s.sign(&strategy(7, json!({ "sense_role": "controller" })));
+        let verified = check(&item, &keys, &expect(0), true).unwrap();
+        assert_eq!(verified.body.sense_role, Some(PanelRole::Controller));
+        let item = s.sign(&strategy(7, json!({ "sense_role": "both" })));
         assert_eq!(
             check(&item, &keys, &expect(0), true).unwrap_err().reason,
             Reason::BadPayload
@@ -458,17 +477,83 @@ mod tests {
     }
 
     #[test]
-    fn role_change_only_between_host_and_both() {
-        let (host, both, controller) = (SenseRole::Host, SenseRole::Both, SenseRole::Controller);
-        let (p_host, p_both) = (PanelRole::Host, PanelRole::HostController);
-        assert_eq!(role_change(Some(host), None), Ok(None));
+    fn role_change_between_all_three_roles() {
+        // K-ROL-2: every switch is allowed, the same role changes nothing.
+        let roles = [
+            (SenseRole::Host, PanelRole::Host),
+            (SenseRole::Controller, PanelRole::Controller),
+            (SenseRole::Both, PanelRole::HostController),
+        ];
+        for (installed, _) in roles {
+            assert_eq!(role_change(Some(installed), None), Ok(None));
+            for (target, wanted) in roles {
+                let expected = (target != installed).then_some(target);
+                assert_eq!(
+                    role_change(Some(installed), Some(wanted)),
+                    Ok(expected),
+                    "{installed:?} -> {wanted:?}"
+                );
+            }
+        }
         assert_eq!(role_change(None, None), Ok(None));
-        assert_eq!(role_change(Some(host), Some(p_host)), Ok(None));
-        assert_eq!(role_change(Some(host), Some(p_both)), Ok(Some(both)));
-        assert_eq!(role_change(Some(both), Some(p_host)), Ok(Some(host)));
-        assert_eq!(role_change(Some(both), Some(p_both)), Ok(None));
-        assert_eq!(role_change(Some(controller), Some(p_both)), Err(Reason::NotAllowed));
-        assert_eq!(role_change(None, Some(p_host)), Err(Reason::NotAllowed));
+        assert_eq!(role_change(None, Some(PanelRole::Host)), Err(Reason::NotAllowed));
+        assert_eq!(role_change(None, Some(PanelRole::Controller)), Err(Reason::NotAllowed));
+    }
+
+    #[test]
+    fn controller_gets_service_and_sync_only_as_sense_install() {
+        // K-CTRL: every installed Sense role, and the setup screen's install, get the service.
+        for role in [SenseRole::Host, SenseRole::Controller, SenseRole::Both] {
+            assert!(service_when_outgoing_only(Some(role), false));
+        }
+        assert!(service_when_outgoing_only(None, true));
+        // Portable / not installed: upstream behaviour (no service, no sync loop).
+        assert!(!service_when_outgoing_only(None, false));
+    }
+
+    #[test]
+    fn controller_server_branch_runs_sync_only() {
+        // K-CTRL code path: in `start_all`, the outgoing-only branch starts the sync loop and
+        // then only sleeps; ID server registration, direct server and LAN listening come after
+        // it and are never reached by a Controller.
+        let source = include_str!("../rendezvous_mediator.rs");
+        let start = source.find("pub async fn start_all()").unwrap();
+        let branch_start = start + source[start..].find("if config::is_outgoing_only() {").unwrap();
+        let branch_end = branch_start + source[branch_start..].find("loop {").unwrap();
+        let branch = &source[branch_start..branch_end];
+        assert!(branch.contains("service_when_outgoing_only("), "{branch}");
+        assert!(branch.contains("crate::hbbs_http::sync::start();"), "{branch}");
+        for listening in ["direct_server", "start_listening", "Self::start(", "new_server()"] {
+            assert!(!branch.contains(listening), "{listening} in the Controller branch");
+        }
+        let after = &source[branch_end..];
+        let sleep_loop = &after[..after.find('}').unwrap()];
+        assert!(sleep_loop.contains("sleep(1.).await;"), "{sleep_loop}");
+    }
+
+    #[test]
+    fn server_restarts_only_when_listening_changes() {
+        let (host, both, controller) = (SenseRole::Host, SenseRole::Both, SenseRole::Controller);
+        assert!(restart_needed(Some(host), controller));
+        assert!(restart_needed(Some(both), controller));
+        assert!(restart_needed(Some(controller), host));
+        assert!(restart_needed(Some(controller), both));
+        assert!(!restart_needed(Some(host), both));
+        assert!(!restart_needed(Some(both), host));
+        assert!(restart_needed(None, host));
+    }
+
+    #[test]
+    fn controller_apply_writes_the_role_like_any_other() {
+        // A Controller-only computer now takes a role envelope (K-CTRL: it runs the sync loop).
+        let (controller, host) = (Some(SenseRole::Controller), Some(SenseRole::Host));
+        let mut steps = FakeSteps::new(None);
+        steps.role = controller;
+        let new_role = role_change(controller, Some(PanelRole::Host)).unwrap();
+        assert_eq!(new_role, host);
+        assert_eq!(apply_steps(&mut steps, controller, new_role), Ok(()));
+        assert_eq!(steps.log, ["check", "options", "role", "seq"]);
+        assert_eq!(steps.role, host);
     }
 
     #[test]

@@ -47,6 +47,9 @@ use std::{
 
 /// `v` of the extension (`SENSE_EXT_VERSION` in the contract).
 pub const EXT_VERSION: u32 = 1;
+/// Sense Remote (wave 3, K-ROL-2): capabilities in every heartbeat (`sense.caps`). `role_all`:
+/// this build takes all three roles from the panel. The curtain task (I10) adds `curtain` here.
+pub const CAPS: [&str; 1] = ["role_all"];
 /// Health goes into the heartbeat at most this often (contract: "en çok 60 sn'de bir").
 pub const HEALTH_INTERVAL: Duration = Duration::from_secs(60);
 /// The heartbeat's `displays_hash` is recomputed at most this often (the heartbeat runs every
@@ -155,6 +158,9 @@ pub struct HeartbeatBase {
     pub displays_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<SenseHealth>,
+    /// Sense Remote (K-ROL-2): `CAPS`; covered by the signed report (`report_sig.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caps: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -196,6 +202,7 @@ pub fn heartbeat_base() -> Option<Value> {
         app_version,
         displays_hash: cached_displays_hash(),
         health,
+        caps: Some(CAPS.iter().map(|cap| (*cap).to_owned()).collect()),
     };
     to_json(&base)
 }
@@ -670,8 +677,8 @@ fn displays_hash(displays: &[SenseDisplay]) -> Option<String> {
 /// JCS for the values this module produces: keys sorted (all ASCII, so byte order equals the
 /// UTF-16 order JCS asks for), whole floats written as integers like ECMAScript does, other
 /// numbers and strings as `serde_json` writes them (same shortest form / escapes as JSON.stringify
-/// for these ranges).
-fn canonical_json(value: &Value) -> String {
+/// for these ranges). Sense Remote (wave 3): also the signed heartbeat report (`report_sig.rs`).
+pub(super) fn canonical_json(value: &Value) -> String {
     match value {
         Value::Array(items) => {
             let parts: Vec<String> = items.iter().map(canonical_json).collect();
@@ -718,11 +725,15 @@ mod tests {
     const SCHEMA_DISK_KEYS: [&str; 3] = ["mount", "used_pct", "total_gb"];
     const SCHEMA_SYSINFO_KEYS: [&str; 7] =
         ["v", "role", "app_version", "platform", "displays", "displays_hash", "network"];
-    // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4).
-    const SCHEMA_HEARTBEAT_KEYS: [&str; 9] = [
+    // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4, + wave 3 `caps` and the signed
+    // `report`, contract v3).
+    const SCHEMA_HEARTBEAT_KEYS: [&str; 11] = [
         "v", "role", "app_version", "displays_hash", "health", "applied_seq",
-        "maintenance_curtain", "envelope_error", "clock_skew_s",
+        "maintenance_curtain", "envelope_error", "clock_skew_s", "caps", "report",
     ];
+    // Contract v3: `caps` is at most 16 strings of at most 32 characters.
+    const SCHEMA_CAPS_MAX: usize = 16;
+    const SCHEMA_CAP_MAX_CHARS: usize = 32;
     // SenseNetworkInterface (P0 branch ortak/sozlesme-v2, 40d007a).
     const SCHEMA_NETWORK_KEYS: [&str; 5] = ["name", "kind", "ipv4", "ipv6", "up"];
     const SCHEMA_NETWORK_KINDS: [&str; 3] = ["ethernet", "wifi", "other"];
@@ -818,9 +829,14 @@ mod tests {
             app_version: 1,
             displays_hash: Some("0".repeat(64)),
             health: Some(full_health()),
+            caps: Some(vec!["role_all".into()]),
         })
         .unwrap();
         assert!(keys(&heartbeat).is_subset(&set(&SCHEMA_HEARTBEAT_KEYS)));
+        // K-ROL-2: the capabilities fit the contract and say `role_all`.
+        assert!(CAPS.len() <= SCHEMA_CAPS_MAX);
+        assert!(CAPS.iter().all(|cap| !cap.is_empty() && cap.len() <= SCHEMA_CAP_MAX_CHARS));
+        assert!(CAPS.contains(&"role_all"));
         // Nothing unread is sent: an empty display has only the required fields.
         let minimal = serde_json::to_value(SenseDisplay {
             width: 1,

@@ -5,12 +5,12 @@
   "clock_skew_s": 300,
   "keys": [
     {
-      "k": "dd9f71c38f66dc5c",
-      "public_key": "84hSx-sClpkKRM9g3MySGfNQtOjFACpxp-phb52StgY"
+      "k": "79136d67316fda3a",
+      "public_key": "O6jAmKT5jkIcCcGoDAuxUDPejVT0vL1gdiFh5PVYqRA"
     },
     {
-      "k": "a6baacd6d0289669",
-      "public_key": "y6E8WSxU1gk6iyGs8HdE76x6L4v3r12-u4jNYETIa70"
+      "k": "091a87b8ae454513",
+      "public_key": "n1Rq6N49SfAN-Ffc1cYtPCSyhb6IyYbqjdoJwJCqIyk"
     }
   ],
   "allowed_options": {
@@ -85,9 +85,9 @@
       "name": "ok_full_set",
       "description": "Gecerli tam set (Sense varsayilani, access-mode bos)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -122,9 +122,9 @@
       "name": "ok_with_sense_role",
       "description": "Gecerli + sense_role host_controller + otomatik kesme 30 dk",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIzMCIsImVuYWJsZS1hdWRpbyI6IlkiLCJlbmFibGUtYmxvY2staW5wdXQiOiJZIiwiZW5hYmxlLWNhbWVyYSI6Ik4iLCJlbmFibGUtY2xpcGJvYXJkIjoiWSIsImVuYWJsZS1maWxlLXRyYW5zZmVyIjoiWSIsImVuYWJsZS1rZXlib2FyZCI6IlkiLCJlbmFibGUtcHJpdmFjeS1tb2RlIjoiWSIsImVuYWJsZS1yZWNvcmQtc2Vzc2lvbiI6IlkiLCJlbmFibGUtcmVtb3RlLXByaW50ZXIiOiJOIiwiZW5hYmxlLXJlbW90ZS1yZXN0YXJ0IjoiWSIsImVuYWJsZS10ZXJtaW5hbCI6Ik4iLCJlbmFibGUtdHVubmVsIjoiTiJ9LCJyZXZpc2lvbiI6Mywic2Vuc2Vfcm9sZSI6Imhvc3RfY29udHJvbGxlciJ9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6Ikt6RktrY2RUZmVSTG8xOFd0MVZxQXciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "RFDpU3mfEfx8Ssfka0UggckvCWemG-uBeLypr07BlDfkV4kPGjvT5yI5CUtwZwg9eWO84LhZaOzBOradLffbAQ"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIzMCIsImVuYWJsZS1hdWRpbyI6IlkiLCJlbmFibGUtYmxvY2staW5wdXQiOiJZIiwiZW5hYmxlLWNhbWVyYSI6Ik4iLCJlbmFibGUtY2xpcGJvYXJkIjoiWSIsImVuYWJsZS1maWxlLXRyYW5zZmVyIjoiWSIsImVuYWJsZS1rZXlib2FyZCI6IlkiLCJlbmFibGUtcHJpdmFjeS1tb2RlIjoiWSIsImVuYWJsZS1yZWNvcmQtc2Vzc2lvbiI6IlkiLCJlbmFibGUtcmVtb3RlLXByaW50ZXIiOiJOIiwiZW5hYmxlLXJlbW90ZS1yZXN0YXJ0IjoiWSIsImVuYWJsZS10ZXJtaW5hbCI6Ik4iLCJlbmFibGUtdHVubmVsIjoiTiJ9LCJyZXZpc2lvbiI6Mywic2Vuc2Vfcm9sZSI6Imhvc3RfY29udHJvbGxlciJ9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6InVIVjhlMlRZZkQtdnNoTXJScldERnciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "MEf5aNFCAmHE3belo6_Lyn8jwmySWb_bxxAdR9kzPCSiEJXg-vFqj0KdxzxQRLz6sOnhgZR4_8WPwFIoaLjRCw"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -157,12 +157,88 @@
       "sense_role": "host_controller"
     },
     {
+      "name": "ok_controller_role",
+      "description": "Gecerli + sense_role controller (Dalga 3, K-ROL-2: panel yalniz caps role_all bildiren cihaza gonderir)",
+      "envelope": {
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjMsInNlbnNlX3JvbGUiOiJjb250cm9sbGVyIn0sImRpZCI6IjEyMzQ1Njc4OSIsImR1dWlkIjoiZEdWemRDMTFkV2xrIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoiLU5jTEY1bVdmM1o0Y1JYUEx0bDVaQSIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
+        "s": "Vxfod1ky9vbHECOhspikkosnyj-ZHgGY_Qx8lEHPGmPJzW-8R_qLzQ9fz0S1N4sja1fwu24pMZGpKIWYDvfuCQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 5,
+      "config_options": {
+        "access-mode": "",
+        "enable-keyboard": "Y",
+        "enable-clipboard": "Y",
+        "enable-file-transfer": "Y",
+        "enable-audio": "Y",
+        "enable-remote-restart": "Y",
+        "enable-record-session": "Y",
+        "enable-block-input": "Y",
+        "enable-privacy-mode": "Y",
+        "enable-terminal": "N",
+        "enable-tunnel": "N",
+        "enable-camera": "N",
+        "enable-remote-printer": "N",
+        "allow-remove-wallpaper": "N",
+        "allow-auto-disconnect": "N",
+        "auto-disconnect-timeout": ""
+      },
+      "sense_role": "controller"
+    },
+    {
+      "name": "ok_host_role",
+      "description": "Gecerli + sense_role host (Controller'dan ya da Host + Controller'dan donus)",
+      "envelope": {
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjMsInNlbnNlX3JvbGUiOiJob3N0In0sImRpZCI6IjEyMzQ1Njc4OSIsImR1dWlkIjoiZEdWemRDMTFkV2xrIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoiVjkzQWdaWVoxSWJBRHRKeDlxX210dyIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
+        "s": "ri9AlYmYXCT22UESQit1ebrUHVfGACrP7a2KdxWeX1NqnVga8fQVc2QfB8NTHCN1-EiC-2lpRf0I4YY4BQ5VBg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000060,
+        "last_seq": 4
+      },
+      "result_panel": "ok",
+      "result_client": "ok",
+      "seq": 5,
+      "config_options": {
+        "access-mode": "",
+        "enable-keyboard": "Y",
+        "enable-clipboard": "Y",
+        "enable-file-transfer": "Y",
+        "enable-audio": "Y",
+        "enable-remote-restart": "Y",
+        "enable-record-session": "Y",
+        "enable-block-input": "Y",
+        "enable-privacy-mode": "Y",
+        "enable-terminal": "N",
+        "enable-tunnel": "N",
+        "enable-camera": "N",
+        "enable-remote-printer": "N",
+        "allow-remove-wallpaper": "N",
+        "allow-auto-disconnect": "N",
+        "auto-disconnect-timeout": ""
+      },
+      "sense_role": "host"
+    },
+    {
       "name": "ok_second_key",
       "description": "Listedeki ikinci anahtarla imzali (anahtar dondurme)",
       "envelope": {
-        "k": "a6baacd6d0289669",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IlphNzBjcEN1NGVtZjdqVFZYM1JGVFEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "R89wk8g1cyFlS7EChzGlfGJVqm0gsaE5Bf90b_MIVtshdU_pCdr1NgcEuyvvNyTGGhm5_oa-3_gCHdeuO7OsCg"
+        "k": "091a87b8ae454513",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IlhqenA0UUhCMENXZUhxTldmU014OFEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "pIAG2Rhyv0zAWRKHTjVlBbXyOUwDQN8ejtYfg8-gSXvGQvm1Ace6YF6sPRiKuIRbO3dX58rY2azr5zd77T4_BA"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -197,9 +273,9 @@
       "name": "ok_first_envelope",
       "description": "Hic uygulanmamis cihaz: last_seq 0, seq 1",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6ImxkZVlIaUlMOGhtbDF3dmpiUS04TXciLCJzZXEiOjEsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "aFKonbb7oSzZbUMOfCCCTHkevS68t36GTvEhm0s5sXhHFoWaKUrc1MYgq_zlFJye_Hh3ouauVFZVpNUWTiQeCg"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IlpZbXpubk80S2RhYVhVLXhxMTBnTUEiLCJzZXEiOjEsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "siKVe0T9CXiH4cGFUZwhuv-oubDlhZ-l7-l1M_D3lLfgcz_Vrpq8YkzEKG1SBcuWcCatKCVeRWPJhNo9PYlXBw"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -234,9 +310,9 @@
       "name": "ok_partial_set",
       "description": "Kismi set de kabul (her anahtar tek basina denetlenir)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImVuYWJsZS10ZXJtaW5hbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IlpsTmR1eUs0STNpNkM2SUNHcTZ5R3ciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "taeTDxF_DGieg2cXHumeCt0s7dLJ_-fI4bwWY3r_61_InbUcHaiNQlYVCA1E8iHO-gmXqBy8sndkPBK5ILsQBw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImVuYWJsZS10ZXJtaW5hbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6Ii1fRzJCSEpxWUdxUXB0cngzXzRJVlEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "Yv61D_l_fVTpoO5HimnOJj9F-TPqoZc43FpAWypyDTUgWmWGlHDrBxyPVpxwuV5S59ZIu_FNAV6YdcG5eTRMAQ"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -256,9 +332,9 @@
       "name": "ok_nbf_boundary",
       "description": "now_s = nbf - clock_skew_s (sinir dahil)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -293,9 +369,9 @@
       "name": "ok_exp_boundary",
       "description": "now_s = exp + clock_skew_s (sinir dahil)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -330,9 +406,9 @@
       "name": "malformed_padded_s",
       "description": "s dolgulu base64url (== ekli)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw=="
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg=="
       },
       "expect": {
         "iss": "remote.example.test",
@@ -348,9 +424,9 @@
       "name": "malformed_noncanonical_s",
       "description": "s'nin son karakterinde kullanilmayan bitler 1 (kanonik olmayan base64url)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48C_"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBv"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -366,9 +442,9 @@
       "name": "malformed_extra_field",
       "description": "Zarfta k/p/s disinda alan",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw",
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg",
         "x": "1"
       },
       "expect": {
@@ -385,9 +461,9 @@
       "name": "malformed_uppercase_k",
       "description": "k buyuk harf hex (bicim disi)",
       "envelope": {
-        "k": "AD9F71C38F66DC5C",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "A9136D67316FDA3A",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -403,9 +479,9 @@
       "name": "malformed_short_s",
       "description": "s 85 karakter",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48C"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQB"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -421,9 +497,9 @@
       "name": "unknown_key",
       "description": "Listede olmayan anahtarla imzali",
       "envelope": {
-        "k": "588247e623be4932",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6InplenQ5RWc4WWxocDM4Y2hoMVhzS2ciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "JIfNyEQa4zt6K2gu33rhbF-dQ0Z1oAp78knRbDH2xGApSfcKsbwe_6dYJKtdffvn9eHTO1avvDYkJrSWiX-PAQ"
+        "k": "b9c7d280753aef84",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IlZVejNKRzcyTE5MckEzbHJVUGJfeEEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "_3iK72mVIyUGOgPla23bkY1DZeytTlqBj0fRTVEo0gRnmvZyXQImSTVBq-oT_cZhQQHvCrv5ZlnaE9VNOqNGAA"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -439,9 +515,9 @@
       "name": "bad_signature_payload_bit",
       "description": "p'nin ilk baytinda bir bit degisti",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eiJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eiJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -457,9 +533,9 @@
       "name": "bad_signature_signature_bit",
       "description": "s'nin ilk baytinda bir bit degisti",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8vbX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "k5JiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -475,9 +551,9 @@
       "name": "bad_payload_version",
       "description": "Imzali ama v: 2",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjhpMTBVTGhLU0Y3eW5jS1RleGNQc0EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6Mn0",
-        "s": "RwDDIxN94UVQ2ROf_Mwh07IYZpEaFEYgmmufW7sJohAPW0fOqdaKnGb9tuB2SO5X2NK5J1TYd32CkDBa0WWPDA"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjVhNmRQdkQ3TXhZLThlRVZzRXFrRmciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6Mn0",
+        "s": "BdGcn8WcFBFOsp8i2HpRXyw9areoi8LL37WyLRw5jKvLo1LJiAENuk4hOYXrAQL1cS_9ovFB-EMC9vVhW0SMBQ"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -493,9 +569,9 @@
       "name": "bad_payload_unknown_field",
       "description": "Imzali ama yukte bilinmeyen ust duzey alan",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiZXh0cmEiOnRydWUsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJjR2xBaF9lcE9uWHlDN241czZ4T0NRIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
-        "s": "OAzPdXT61nvFNSpy0FIMBKA0-p6j5HD7rcSYxRtrs4Vtsw2ARVU6UYlzjTRt5BpSql4myt5YJWGXlgHdd4_gCQ"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiZXh0cmEiOnRydWUsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiI5eHJOa0M4WnJLWEhFYWZjZmJpS0ZRIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "9nqdSJrISAs9BRFF75E2wWfzAyPpRUoyRaF0697vwcUHngMtGGNdbRc3aMiVzPgdLbEX_b5Dm8TtaCMN0AuhAg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -511,9 +587,9 @@
       "name": "bad_payload_unknown_body_field",
       "description": "Imzali ama body'de bilinmeyen alan",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwiZXh0cmEiOiJ4IiwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjREeGNtdXR1Vk1SeG13enA1dFJReFEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "aOaxDPZ9VkAxmpduvmatjrMwwA82zmcUprDyQsrg_hVW54sMucU1W3ho6hUUh0fepT4YOq8UQEc3Tgho8-VlDg"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwiZXh0cmEiOiJ4IiwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6ImdUWHBZdF80QzNtcW5QOXAxTmJpU3ciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "mWoxg-Jx_gwZQ5PC91dcw9adBPMaCpkWOUOUivCdoFuWF2SYzNw2VsQM5rbERg0_DGH0f1PpLiQIaG5rOEsHDA"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -526,12 +602,12 @@
       "result_client": "bad_payload"
     },
     {
-      "name": "bad_payload_controller_role",
-      "description": "Imzali ama sense_role controller (panelden gonderilemez)",
+      "name": "bad_payload_unknown_role",
+      "description": "Imzali ama sense_role bilinmeyen deger (admin)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjMsInNlbnNlX3JvbGUiOiJjb250cm9sbGVyIn0sImRpZCI6IjEyMzQ1Njc4OSIsImR1dWlkIjoiZEdWemRDMTFkV2xrIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoiWW9WcnVsbVJLWlVISHRYYlE3R2txUSIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
-        "s": "flI2IA69JQrYYr84v2GiAb_DvCTtclaxX0mwNtUc601gQfJvpk8M-SPlyHnBQ4096bGSpLue0Nf2d-7KSRpiAw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjMsInNlbnNlX3JvbGUiOiJhZG1pbiJ9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6ImIxWk9CdDhtRnVSX1I1VXl1Z25tMnciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "8RuZr6wgBYxCGXoJP2tPQRtGg2L_7VwlhyDUyG-NZRkgY9Qexz6rppuNCM1CnLuw1VHcL9lOx3ayP63z-kjoBQ"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -547,9 +623,9 @@
       "name": "bad_payload_not_json",
       "description": "Imzali ama yuk JSON degil",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
+        "k": "79136d67316fda3a",
         "p": "bm90IGpzb24",
-        "s": "_gOyLgG8jmNYSPjv1jxD46JoG9yUU7mR66PzI6bGzr-IMJCA_-HkeJC4kSZkbC1LRsJ8zjNTNcxPjryXQ6JdBw"
+        "s": "1VUHShmj48fBf0-MAy06iamO_xOiISDejItcu7pLjQnaPL2ufHtGtwpO2Vs9JgrTTaj1YADo7VvUOYCRdNMyBw"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -565,9 +641,9 @@
       "name": "wrong_issuer",
       "description": "iss baska alan adi",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJldmlsLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJGb2F0UTNwR1htS3Rxbmx6dUp3d093Iiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
-        "s": "EQLGVE7C7FRQYnWaJ7tglA340F3Imb0jDNnmXUsBLPTsIf-qIY41k7Cu0I8zwA09dKmdFW7aVgBwvmq4NDBjCQ"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJldmlsLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJpTHFnb2FwZnk5b2J2aXd5RjJCWml3Iiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "74MXLh5DfThsH92khxIbu1PR8gX7Bb0PdHox10J5KwwBf6D1bww85AdSYxKApn01RUy84aC57rpJNesIJLamAw"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -583,9 +659,9 @@
       "name": "wrong_device_did",
       "description": "did baska cihaz",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiI5ODc2NTQzMjEiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6InVocy1fR2FSNXUzdFVKUmtUQ3BfeFEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "FjENks4Fd6C4nm3rO23uWQQeo8JLOfUYSaapfyM-Zv8ek1-LKipAJ7rTQHp70-Y2sh-3Nlg4ADy9AwLzLoZ5BA"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiI5ODc2NTQzMjEiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6Im1mSHFLVjJpUWljWl9hNXc0ZGRnVUEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "bUog7GuDiWp8Ry2oJ4YIvBB_TBT85NPDESN7kEmkqPcM07Rmf7zSuk68KXP9c4w4uAlWWp-3Z4bpCqF11a-EAA"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -601,9 +677,9 @@
       "name": "wrong_device_duuid",
       "description": "did dogru, duuid baska",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6IlltRnphMkV0ZFhWcFpBIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoidFV2UHItaTdkNktyNnlXek8xbF9QUSIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
-        "s": "o4MZ2HxsNmm_V4DBAWJByh4vZIqwL-npq08iHHnIrLpNB08AoyYUYwA5h67-DOj1yMQQk3Ndds8e12ZaQNtXBw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6IlltRnphMkV0ZFhWcFpBIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoiMUFTVXFad1ExUXM1LXZxa0ZIc0JHQSIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
+        "s": "nj_uGNf_TAVWDJX6lkjrRW4OE5xWVTlIbpaXsA5JKPEHUTbeJfxgxbpgV1g3Id3pOd4iSQ7sTXes2KhUZtSADQ"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -619,9 +695,9 @@
       "name": "not_yet_valid",
       "description": "now_s = nbf - clock_skew_s - 1",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -637,9 +713,9 @@
       "name": "expired",
       "description": "now_s = exp + clock_skew_s + 1",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -655,9 +731,9 @@
       "name": "replayed_equal_seq",
       "description": "seq = last_seq (ayni zarf ikinci kez)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -673,9 +749,9 @@
       "name": "replayed_older_seq",
       "description": "seq < last_seq (eski zarf)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjZNRUoxME8tUlBsTXB6cmttYzBXWVEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "8_bX6hj40JziSYPhb8AClJUoJI5HQFsN2-01zuPhPJK0N14Aag-rfRQRAQZW5Y-uitIFX5mCTNo-5lWrIl48Cw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkYtdHpVSmtwYldmdG9DdTNlVENPT1EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "kpJiYaEgQdEAfPHdvlXjMLlUHeeDEWEyowCH4T5MBVnurKaRx39ZeW9nZiwZDqyjDgCnvLMWImEWcljTIEcQBg"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -691,9 +767,9 @@
       "name": "not_allowed_key",
       "description": "Izin listesi disi anahtar (api-server)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXBpLXNlcnZlciI6Imh0dHBzOi8veC50ZXN0IiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6ImVPWFlMNzM1b1dkVEFPcGJwQnNHdnciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "bYaOcyO57OL14cWru2dsbGRJleyKP6flmTDZmqW-nJykeS7NJJLeAewD1Af5v-bBiW3AEfbBUQzUvR8P27v6Ag"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXBpLXNlcnZlciI6Imh0dHBzOi8veC50ZXN0IiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6ImtJM0J6OUJjZzl0MGpvM0hzZi15a0EiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "gvmDD_s1ypqKR0bWPqKlj91OjXXEtQEDXVXUSDU2zbos1juWb2c-8YdFvxOXUTuBlDj5Oo38hkgKt9MPY9kVCA"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -709,9 +785,9 @@
       "name": "not_allowed_value_yes",
       "description": "enable-keyboard: yes (yalniz Y/N)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJ5ZXMiLCJlbmFibGUtcHJpdmFjeS1tb2RlIjoiWSIsImVuYWJsZS1yZWNvcmQtc2Vzc2lvbiI6IlkiLCJlbmFibGUtcmVtb3RlLXByaW50ZXIiOiJOIiwiZW5hYmxlLXJlbW90ZS1yZXN0YXJ0IjoiWSIsImVuYWJsZS10ZXJtaW5hbCI6Ik4iLCJlbmFibGUtdHVubmVsIjoiTiJ9LCJyZXZpc2lvbiI6M30sImRpZCI6IjEyMzQ1Njc4OSIsImR1dWlkIjoiZEdWemRDMTFkV2xrIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoiOGhENGVVbTVUMTZrZHdtTEFtT1NTQSIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
-        "s": "zx1RInsh_5DqhRJg0TkPwTNc5UhMdaufXURMpOn5jhjqCSoz3TpjhZb1fAZ93iDkiHX-oGc9icCaXXzPRpgtCQ"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiTiIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJ5ZXMiLCJlbmFibGUtcHJpdmFjeS1tb2RlIjoiWSIsImVuYWJsZS1yZWNvcmQtc2Vzc2lvbiI6IlkiLCJlbmFibGUtcmVtb3RlLXByaW50ZXIiOiJOIiwiZW5hYmxlLXJlbW90ZS1yZXN0YXJ0IjoiWSIsImVuYWJsZS10ZXJtaW5hbCI6Ik4iLCJlbmFibGUtdHVubmVsIjoiTiJ9LCJyZXZpc2lvbiI6M30sImRpZCI6IjEyMzQ1Njc4OSIsImR1dWlkIjoiZEdWemRDMTFkV2xrIiwiZXhwIjoxODAwNjA0ODAwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJuYmYiOjE4MDAwMDAwMDAsIm5vbmNlIjoiRE1wVGlCY2lRMWRvSTU4N1pIbEN0ZyIsInNlcSI6NSwidHlwIjoic3RyYXRlZ3kiLCJ2IjoxfQ",
+        "s": "tyZlTykDkl5e4abySmEZrJzxF_XItwygKZr4bGYsv58aF0d3zx_h3CGLDwA1NJVK6lKwAEwtZVW1w2w1CfSjBw"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -727,9 +803,9 @@
       "name": "not_allowed_access_mode_full",
       "description": "access-mode: full (yalniz bos)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiZnVsbCIsImFsbG93LWF1dG8tZGlzY29ubmVjdCI6Ik4iLCJhbGxvdy1yZW1vdmUtd2FsbHBhcGVyIjoiTiIsImF1dG8tZGlzY29ubmVjdC10aW1lb3V0IjoiIiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJZb3RKZk91eTBYNjM1SEdFV3lyZFFRIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
-        "s": "ImYKbrztLKkKZZvGz5q-wqzcnqVPGJtRz2OFB_u_AQIafoafjZkzdvV1eoGVk0xcldBozij8tFmboSBzGmq1BQ"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiZnVsbCIsImFsbG93LWF1dG8tZGlzY29ubmVjdCI6Ik4iLCJhbGxvdy1yZW1vdmUtd2FsbHBhcGVyIjoiTiIsImF1dG8tZGlzY29ubmVjdC10aW1lb3V0IjoiIiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJFS21pc08wN2Y5NjZOU0IzdEtxbkR3Iiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "NpKlijQmRajtdoZWv_2x5L8dyMGgAlBx9Ot_6tCs-9dLYcAPG7xMLRsUyLTJTkCS3OZYv1raq_PBhzjxssW5AQ"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -745,9 +821,9 @@
       "name": "not_allowed_timeout_below_min",
       "description": "auto-disconnect-timeout: 4 (min 5)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiI0IiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJvWko3d0s4NlZxbDNUOVhORmRnYU5RIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
-        "s": "A3X_vzIehLLNxBptZ7Ie-lIkGME9BGMoHa89ZikYOMOEAjnXUkj_nPhrk4Z2qCNjz53xNQ7MPvzKeEQrpAB_AA"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiI0IiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJ4d0Q5STJkUXcxTGdSZEg3UUR5RFhBIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "HQ6pNa0Nz-AXaChXGYgs_iPP7mqxKAU3Q6DT08M6MCIWVJYTOAlpYIwCC1YG6zjVBmyeHsyUZswLccU0_KdtAA"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -763,9 +839,9 @@
       "name": "not_allowed_timeout_above_max",
       "description": "auto-disconnect-timeout: 1441 (max 1440)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIxNDQxIiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJIeDFwQ2I4T0UxclRINmEwSzA1VTFBIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
-        "s": "kPy8XAswgr4PhnV54gZtuRzuJr0P2M_Se45ToxzT0Ue8xn_g53RppQSfxM-nrfWUvKrg3WdLKWXMUZM0ClMDAA"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIxNDQxIiwiZW5hYmxlLWF1ZGlvIjoiWSIsImVuYWJsZS1ibG9jay1pbnB1dCI6IlkiLCJlbmFibGUtY2FtZXJhIjoiTiIsImVuYWJsZS1jbGlwYm9hcmQiOiJZIiwiZW5hYmxlLWZpbGUtdHJhbnNmZXIiOiJZIiwiZW5hYmxlLWtleWJvYXJkIjoiWSIsImVuYWJsZS1wcml2YWN5LW1vZGUiOiJZIiwiZW5hYmxlLXJlY29yZC1zZXNzaW9uIjoiWSIsImVuYWJsZS1yZW1vdGUtcHJpbnRlciI6Ik4iLCJlbmFibGUtcmVtb3RlLXJlc3RhcnQiOiJZIiwiZW5hYmxlLXRlcm1pbmFsIjoiTiIsImVuYWJsZS10dW5uZWwiOiJOIn0sInJldmlzaW9uIjozfSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDA2MDQ4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJmREhZMDI0bERLSWpleFVvWWM2elJnIiwic2VxIjo1LCJ0eXAiOiJzdHJhdGVneSIsInYiOjF9",
+        "s": "RWklamqtiVxdVh11k3IkBSTb3cRnkRL8es_12-cRxEIjglAaAb38ho9XCGExvOPqabXmcf6Y17ewPekU5UATDw"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -781,9 +857,9 @@
       "name": "not_allowed_timeout_leading_zero",
       "description": "auto-disconnect-timeout: 030 (onde sifir)",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIwMzAiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6Il9FS1JHWG9UTVpfcjkyVDV6a3JsVGciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
-        "s": "dGoQRFV4f1rQLp_d5r6PY0bqlDdbhSa-Rg0Ni0UKrZle2rkD2lJaLhsIcDBbRiXbP14NKNKxtSD7fdDlOcqcDw"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7ImFjY2Vzcy1tb2RlIjoiIiwiYWxsb3ctYXV0by1kaXNjb25uZWN0IjoiWSIsImFsbG93LXJlbW92ZS13YWxscGFwZXIiOiJOIiwiYXV0by1kaXNjb25uZWN0LXRpbWVvdXQiOiIwMzAiLCJlbmFibGUtYXVkaW8iOiJZIiwiZW5hYmxlLWJsb2NrLWlucHV0IjoiWSIsImVuYWJsZS1jYW1lcmEiOiJOIiwiZW5hYmxlLWNsaXBib2FyZCI6IlkiLCJlbmFibGUtZmlsZS10cmFuc2ZlciI6IlkiLCJlbmFibGUta2V5Ym9hcmQiOiJZIiwiZW5hYmxlLXByaXZhY3ktbW9kZSI6IlkiLCJlbmFibGUtcmVjb3JkLXNlc3Npb24iOiJZIiwiZW5hYmxlLXJlbW90ZS1wcmludGVyIjoiTiIsImVuYWJsZS1yZW1vdGUtcmVzdGFydCI6IlkiLCJlbmFibGUtdGVybWluYWwiOiJOIiwiZW5hYmxlLXR1bm5lbCI6Ik4ifSwicmV2aXNpb24iOjN9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDYwNDgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IjVKRkNlWjhVMGpNWWRoVUlGSjExMXciLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "AT4kPl51NFEYBqdna8WcUVbd8J9UgYtbPRp5FT_beTEaox6BB59HKWDhDmK7Eh6yZgrFdsMXZ4YoeQYP75sWDw"
       },
       "expect": {
         "iss": "remote.example.test",
@@ -799,9 +875,9 @@
       "name": "unsupported_type_update",
       "description": "Gecerli imzali update zarfi; Dalga 2 istemcisi yalniz strategy uygular",
       "envelope": {
-        "k": "dd9f71c38f66dc5c",
-        "p": "eyJib2R5Ijp7ImFwcF92ZXJzaW9uIjoyLCJpbnN0YWxsX3dpbmRvdyI6ImlkbGUiLCJwbGF0Zm9ybSI6IndpbmRvd3MteDY0Iiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInNpemUiOjEwMjQsInVybCI6Imh0dHBzOi8vcmVtb3RlLmV4YW1wbGUudGVzdC9pbmRpci9zZW5zZS1yZW1vdGUtMi5leGUifSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDI1OTIwMDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJnXzB4OEdsY1BEN1BrMkFUcDZtbDlBIiwic2VxIjo1LCJ0eXAiOiJ1cGRhdGUiLCJ2IjoxfQ",
-        "s": "ytz4YpInK_jT6p5Sr_3JrxAvGj1vFFD-1pybt8qdpsgEp-WaiCOfLGoU9foLyXANpE7MAYnaSE8plONtaje5CQ"
+        "k": "79136d67316fda3a",
+        "p": "eyJib2R5Ijp7ImFwcF92ZXJzaW9uIjoyLCJpbnN0YWxsX3dpbmRvdyI6ImlkbGUiLCJwbGF0Zm9ybSI6IndpbmRvd3MteDY0Iiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInNpemUiOjEwMjQsInVybCI6Imh0dHBzOi8vcmVtb3RlLmV4YW1wbGUudGVzdC9pbmRpci9zZW5zZS1yZW1vdGUtMi5leGUifSwiZGlkIjoiMTIzNDU2Nzg5IiwiZHV1aWQiOiJkR1Z6ZEMxMWRXbGsiLCJleHAiOjE4MDI1OTIwMDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsIm5iZiI6MTgwMDAwMDAwMCwibm9uY2UiOiJmclo1WjJxcUs1VmdidHRsVXA2NlFBIiwic2VxIjo1LCJ0eXAiOiJ1cGRhdGUiLCJ2IjoxfQ",
+        "s": "mBsz44pqpxlamrTY-O4HNfs6rrGqAW-4ygPXgCZ2xcXiNgrFcU3KTpgfcdC58LS7-Umt2JZOgu7BIf43KyNqBA"
       },
       "expect": {
         "iss": "remote.example.test",
