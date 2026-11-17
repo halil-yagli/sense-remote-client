@@ -49,6 +49,30 @@ pub fn next_ts(last: Option<i64>, now_s: i64) -> i64 {
     }
 }
 
+/// Sense Remote (panel A7): `ts` must also increase across restarts. The sync loop persists a
+/// reservation (an upper bound of every `ts` it has sent) and starts a new process above it.
+/// Persisting `RESERVE_S` ahead keeps the writes to about one a minute; after a restart `ts` is
+/// at most `RESERVE_S + 1` s ahead of the clock, inside the panel's 300 s future limit.
+pub const RESERVE_S: i64 = 60;
+
+/// `ts` of the next report and, when it passes the stored reservation, the new reservation to
+/// store **before** the report is sent. `last`: last `ts` of this process; `reserved`: the stored
+/// reservation (read at start, then the last value stored).
+pub fn next_ts_reserved(last: Option<i64>, reserved: Option<i64>, now_s: i64) -> (i64, Option<i64>) {
+    // In a running process `last` is the floor; the reservation only matters for the first
+    // report after a start (it is above every `ts` sent before).
+    let ts = next_ts(last.or(reserved), now_s);
+    let new_reservation = reserved
+        .map_or(true, |reserved| ts > reserved)
+        .then(|| ts.saturating_add(RESERVE_S));
+    (ts, new_reservation)
+}
+
+/// Stored reservation as written by the sync loop; anything else counts as none.
+pub fn parse_reservation(value: &str) -> Option<i64> {
+    value.trim().parse::<i64>().ok().filter(|ts| *ts > 0)
+}
+
 /// The bytes the device signs. `None` when `sense` is not an object or has no `applied_seq`.
 pub fn signed_bytes(id: &str, uuid: &str, ts: i64, sense: &Value) -> Option<Vec<u8>> {
     let sense = sense.as_object()?;
@@ -312,6 +336,46 @@ mod tests {
         assert!(!sign_into(&mut sense, "1", "u", 1, &sk.0[..32]));
         assert!(sense.get("report").is_none());
         assert_eq!(signed_bytes("1", "u", 1, &json!([])), None);
+    }
+
+    #[test]
+    fn ts_increases_across_restarts() {
+        // First report ever: reserve ahead.
+        assert_eq!(next_ts_reserved(None, None, 1_000), (1_000, Some(1_060)));
+        // Same process, inside the reservation: no write.
+        assert_eq!(next_ts_reserved(Some(1_000), Some(1_060), 1_000), (1_001, None));
+        assert_eq!(next_ts_reserved(Some(1_001), Some(1_060), 1_015), (1_015, None));
+        // Passing the reservation: write a new one first.
+        assert_eq!(next_ts_reserved(Some(1_059), Some(1_060), 1_061), (1_061, Some(1_121)));
+        // Restart within the same second (last is gone): above every ts sent before.
+        let (ts, reservation) = next_ts_reserved(None, Some(1_060), 1_001);
+        assert_eq!((ts, reservation), (1_061, Some(1_121)));
+        // Restart with the clock set back an hour: still increasing.
+        let (ts, _) = next_ts_reserved(None, Some(1_121), 1_121 - 3_600);
+        assert_eq!(ts, 1_122);
+        // Normal restart later on: the clock wins, at most RESERVE_S + 1 ahead otherwise.
+        assert_eq!(next_ts_reserved(None, Some(1_121), 5_000), (5_000, Some(5_060)));
+        // Simulated run: every ts strictly above the previous one, whatever the restarts.
+        let mut stored: Option<i64> = None;
+        let mut last: Option<i64> = None;
+        let mut previous = i64::MIN;
+        for (step, now) in [10, 10, 10, 11, 75, 75, 12, 12, 200, 199].into_iter().enumerate() {
+            if step == 3 || step == 6 || step == 9 {
+                last = None; // process restart
+            }
+            let (ts, reservation) = next_ts_reserved(last, stored, now);
+            if let Some(r) = reservation {
+                stored = Some(r);
+            }
+            assert!(ts > previous, "step {step}: {ts} <= {previous}");
+            assert!(stored.unwrap() >= ts);
+            previous = ts;
+            last = Some(ts);
+        }
+        assert_eq!(parse_reservation("1121"), Some(1_121));
+        assert_eq!(parse_reservation(""), None);
+        assert_eq!(parse_reservation("-5"), None);
+        assert_eq!(parse_reservation("x"), None);
     }
 
     #[test]
