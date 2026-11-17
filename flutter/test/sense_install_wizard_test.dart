@@ -516,6 +516,18 @@ void main() {
       'network': SenseEnrollAction.retry,
       'other': SenseEnrollAction.retry,
       'something_new': SenseEnrollAction.retry,
+      // Sense Remote (review K3-5): local codes of src/sense/enroll.rs.
+      'invalid-name': SenseEnrollAction.edit,
+      'invalid-location': SenseEnrollAction.edit,
+      'invalid-note': SenseEnrollAction.edit,
+      'invalid-project': SenseEnrollAction.edit,
+      'not-installed': SenseEnrollAction.none,
+      'build': SenseEnrollAction.none,
+      'identity': SenseEnrollAction.none,
+      'identity-store': SenseEnrollAction.none,
+      // Panel #31.
+      'device_closed': SenseEnrollAction.none,
+      'reinstall_not_allowed': SenseEnrollAction.retry,
     };
     actions.forEach((code, action) {
       expect(senseEnrollAction(code), action, reason: code);
@@ -535,6 +547,68 @@ void main() {
     final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
     expect(done, contains(t('done-panel-none')));
     expect(done, contains(t('done-lead-locked')));
+  });
+
+  // Sense Remote (design review T3-2): a Host has no large window to open.
+  testWidgets('Host only: the done page only closes', (tester) async {
+    final backend = FakeBackend();
+    await pumpWizard(tester, backend);
+    await goToSummary(tester, backend);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
+    expect(done, contains(t('done-host-background')));
+    expect(find.byKey(const Key('sense-finish-open')), findsNothing);
+    await tapAndSettle(tester, find.byKey(const Key('sense-finish-close')));
+    expect(backend.finishes, [false]);
+  });
+
+  // Sense Remote (design review T3-11): the version comes from the build.
+  testWidgets('the sidebar shows the build version, none without it',
+      (tester) async {
+    tester.view.physicalSize = const Size(860, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    Widget wizard(String version) => MaterialApp(
+          home: SenseInstallWizard(
+            initialPath: r'C:\Program Files\SenseRemote',
+            icon: const SizedBox(),
+            backend: FakeBackend(),
+            version: version,
+          ),
+        );
+    await tester.pumpWidget(wizard('7'));
+    await tester.pumpAndSettle();
+    expect(find.text('${t('version')} 7'), findsOneWidget);
+    await tester.pumpWidget(wizard(''));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('sense-version')), findsNothing);
+  });
+
+  // Sense Remote (panel #31): closed computer -> only skip; already active -> retry or skip.
+  testWidgets('closed or already registered computer', (tester) async {
+    final backend = FakeBackend()
+      ..enrollResult = const SenseEnrollResult.error('device_closed');
+    await pumpWizard(tester, backend);
+    await goToSummary(tester, backend, host: false, controller: true);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    expect(find.text(t('enroll-device_closed')), findsOneWidget);
+    expect(find.byKey(const Key('sense-retry-register')), findsNothing);
+    expect(find.byKey(const Key('sense-skip-register')), findsOneWidget);
+  });
+
+  testWidgets('already registered computer can retry after the panel allows it',
+      (tester) async {
+    final backend = FakeBackend()
+      ..enrollResult = const SenseEnrollResult.error('reinstall_not_allowed');
+    await pumpWizard(tester, backend);
+    await goToSummary(tester, backend, host: false, controller: true);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    expect(find.text(t('enroll-reinstall_not_allowed')), findsOneWidget);
+    expect(find.byKey(const Key('sense-skip-register')), findsOneWidget);
+    backend.enrollResult = const SenseEnrollResult.ok(['Örnek Müze']);
+    await tapAndSettle(tester, find.byKey(const Key('sense-retry-register')));
+    expect(backend.enrolls, hasLength(2));
+    expect(find.byKey(const Key('sense-done')), findsOneWidget);
   });
 
   testWidgets('declined administrator prompt stays on the summary',

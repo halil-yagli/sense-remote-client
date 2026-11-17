@@ -5,6 +5,8 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/desktop/pages/sense_home_about.dart' show kSenseVersionOption; // Sense Remote
+import 'package:flutter_hbb/desktop/pages/sense_home_strings.dart' show senseVersionFrom, kSenseVersionDefine; // Sense Remote
 import 'package:flutter_hbb/desktop/pages/sense_install_wizard.dart';
 import 'package:flutter_hbb/desktop/widgets/install_directory_confirmation.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -97,7 +99,18 @@ class _SenseInstallPageState extends State<SenseInstallPage> {
         onPickPath: _pickPath,
         onClose: () => windowManager.close(),
         onDragStart: () => windowManager.startDragging(),
+        // Sense Remote: version number of this setup file (#19 built-in option, T3-11).
+        version: _senseVersion(),
       ),
     );
   }
+}
+
+/// Sense Remote: the Sense version of this build (`sense-version` built-in option, then the
+/// `SENSE_VERSION` define); empty when the build has none.
+String _senseVersion() {
+  final n = senseVersionFrom(
+          bind.mainGetBuildinOption(key: kSenseVersionOption)) ??
+      senseVersionFrom(kSenseVersionDefine);
+  return n == null ? '' : '$n';
 }

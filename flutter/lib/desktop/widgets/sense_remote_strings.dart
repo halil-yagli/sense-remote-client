@@ -23,7 +23,7 @@ const Map<String, String> kSenseRemoteText = {
   'ghost': 'Hayalet mod',
   'ghost_on_tooltip': 'Hayalet modu kapat',
   'ghost_bar':
-      'Hayalet mod açık — sahadaki ekranlar ne yaptığınızı göstermiyor, siz gerçek görüntüyü görüyorsunuz',
+      'Hayalet mod açık — sahadaki ekranlarda bakım perdesi var, siz gerçek görüntüyü görüyorsunuz',
   'ghost_unavailable': 'Hayalet mod bu bağlantıda kullanılamıyor',
   'not_reported': 'Bildirilmedi',
   'no_panel_info': 'Panel bilgisi yok',

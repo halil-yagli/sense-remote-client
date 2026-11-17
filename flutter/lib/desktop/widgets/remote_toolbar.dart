@@ -328,13 +328,20 @@ class ToolbarState {
 }
 
 class _ToolbarTheme {
-  static const Color blueColor = MyTheme.button;
-  static const Color hoverBlueColor = MyTheme.accent;
+  // Sense Remote: one black strip like the Sense buttons (prototype
+  // uygulama.html screen 4): dark gray buttons with white icons instead of
+  // RustDesk's blue, Sense red for "end" (design review T3-7).
+  static const Color blueColor =
+      kSenseRemoteWindow ? Color(0xFF1D1D25) : MyTheme.button;
+  static const Color hoverBlueColor =
+      kSenseRemoteWindow ? Color(0xFF33333D) : MyTheme.accent;
   static Color inactiveColor = Colors.grey[800]!;
   static Color hoverInactiveColor = Colors.grey[850]!;
 
-  static const Color redColor = Colors.redAccent;
-  static const Color hoverRedColor = Colors.red;
+  static const Color redColor =
+      kSenseRemoteWindow ? Color(0xFFD81E30) : Colors.redAccent;
+  static const Color hoverRedColor =
+      kSenseRemoteWindow ? Color(0xFFB3172A) : Colors.red;
   // kMinInteractiveDimension
   static const double height = 20.0;
   static const double dividerHeight = 12.0;
@@ -882,11 +889,14 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       elevation: _ToolbarTheme.elevation,
       shadowColor: MyTheme.color(context).shadow,
       borderRadius: toolbarBorderRadius,
-      color: Theme.of(context)
-          .menuBarTheme
-          .style
-          ?.backgroundColor
-          ?.resolve(MaterialState.values.toSet()),
+      // Sense Remote: black strip in both themes (design review T3-7).
+      color: kSenseRemoteWindow
+          ? Colors.black
+          : Theme.of(context)
+              .menuBarTheme
+              .style
+              ?.backgroundColor
+              ?.resolve(MaterialState.values.toSet()),
       child: SingleChildScrollView(
         scrollDirection: innerAxis,
         child: Theme(

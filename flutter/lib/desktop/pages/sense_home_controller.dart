@@ -182,6 +182,9 @@ class _SenseControllerHomeState extends State<SenseControllerHome> {
           projectNames: names,
           peers: peers,
           order: group.senseOrder,
+          // Sense Remote: screen count from the panel list (K3-3); missing
+          // counts are simply not shown.
+          displayCounts: group.senseOrder?.displayCounts ?? const {},
           loading: loading,
           error: error,
           onConnect: (id) => connect(context, id),
