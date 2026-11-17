@@ -45,7 +45,7 @@ env:
   # varlik kimligi 210168939, 2024-12-01). Ozet sabit: dosya degisirse derleme duser.
   # Motor guncellemesi ayri PR'da: yeni ozet + kimlik buraya, gerekce PR'a.
   ENGINE_WINDOWS_URL: "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
-  ENGINE_WINDOWS_SHA256: "0000000000000000000000000000000000000000000000000000000000000000"
+  ENGINE_WINDOWS_SHA256: "ec8cabf36ee4ff24c8d98de25b00e70781eb03876265aee84d0fe554a110036e"
 
 jobs:
   # Etiket surumu: bicim ve on kosullar derlemeden once denetlenir (etiket disinda atlanir).

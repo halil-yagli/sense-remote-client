@@ -42,6 +42,8 @@ pub fn import_runs(
 }
 
 /// Install may start only when the setup process's config file has an ID and a key pair.
+// MAC-SONRA: the pkg installer will use it too; until then only Windows calls it.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn stored_for_import(file_is_empty: bool) -> Result<(), &'static str> {
     if file_is_empty {
         Err("identity-store")
