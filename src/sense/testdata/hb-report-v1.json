@@ -1,0 +1,763 @@
+{
+  "v": 1,
+  "description": "Sense Remote imzali cihaz raporu ortak test vektoru (panel packages/shared ve istemci src/sense/testdata). Imzalanan veri = prefix (ASCII) || JCS(nesne) (RFC 8785). nesne = { id, uuid (heartbeat ust duzeyi), ts (sense.report.ts), applied_seq (zorunlu) } + signed_fields'in sense ekinde OLANLARI (olmayan alan nesneye girmez; null yazilmaz). Baska hicbir alan imzalanmaz (health, role, displays_hash ...). sense.report = { ts: Unix sn, sig: Ed25519 ayrik imza 64 bayt, dolgusuz kanonik base64url }. device_pk = ham 32 bayt acik anahtar, base64url. Panel dogrulama sirasi: device_pk yok -> no_key; report yok -> unsigned; report bicimi / sig cozumu / applied_seq yok / imza -> bad_signature; ts > now_s + future_skew_s -> future; last_report_ts != null ve ts <= last_report_ts -> replayed; yoksa ok. signed_text yalniz imzasi gecerli vakalarda vardir: istemci ayni alanlardan bayt bayt ayni metni uretmeli. Anahtarlar uretimde bellekte uretildi; gizli anahtar hicbir yerde yok.",
+  "prefix": "sense-remote/hb-report/v1\n",
+  "future_skew_s": 300,
+  "signed_fields": ["applied_seq", "envelope_error", "clock_skew_s", "caps", "maintenance_curtain"],
+  "cases": [
+    {
+      "name": "ok_minimal",
+      "description": "Yalniz applied_seq 0; ilk rapor (last_report_ts null)",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 1,
+          "applied_seq": 0,
+          "report": {
+            "ts": 1799999970,
+            "sig": "1eQjxg5BqWiztUnRx7jt6ungMKQYqQj_Cmfx1Gbr1NSefQBHYAG7LIVDXNo3Rpm0Z_d2KQ92wJH9uiL63EcdCQ"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": null,
+      "now_s": 1800000000,
+      "result": "ok",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":0,\"id\":\"123456789\",\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "ok_full",
+      "description": "Butun imzali alanlar (envelope_error ic ice, caps, curtain, negatif skew) + imzasiz health/role/displays_hash",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "ok",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\"],\"clock_skew_s\":-420,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"id\":\"123456789\",\"maintenance_curtain\":true,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "ok_after_last",
+      "description": "ts = last_report_ts + 1",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999969,
+      "now_s": 1800000000,
+      "result": "ok",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\"],\"clock_skew_s\":-420,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"id\":\"123456789\",\"maintenance_curtain\":true,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "ok_future_boundary",
+      "description": "ts = now_s + future_skew_s (sinir dahil)",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1799999670,
+      "result": "ok",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\"],\"clock_skew_s\":-420,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"id\":\"123456789\",\"maintenance_curtain\":true,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "ok_old_clock",
+      "description": "Cihaz saati cok geride: alt sinir yok",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 1,
+          "applied_seq": 0,
+          "report": {
+            "ts": 1000,
+            "sig": "DvJmn40oqYNlYHiiftqmYQryP2mW4K2yFSu9hZ4hUTXC90h2qVTTJzWA57PX0YaBSWos8-CYJHrcRzwTfyCWDQ"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 999,
+      "now_s": 1800000000,
+      "result": "ok",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":0,\"id\":\"123456789\",\"ts\":1000,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "no_key",
+      "description": "Gecerli imza ama panelde cihaz anahtari yok",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": null,
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "no_key",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\"],\"clock_skew_s\":-420,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"id\":\"123456789\",\"maintenance_curtain\":true,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "unsigned",
+      "description": "Anahtar var, heartbeat'te report yok",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "unsigned"
+    },
+    {
+      "name": "bad_signature_sig_bit",
+      "description": "sig'in ilk baytinda bir bit degisti",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sI5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_field_added",
+      "description": "envelope_error'suz imzalandi, heartbeat'e envelope_error eklendi",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "EZscZYRUY9zVeKvyWHA8piX5L-PjWrm42IMXzHfvU6OjTkj6K487lqbudN0LUCN8EeVamQd128tmDnhiiG7OBg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_field_removed",
+      "description": "caps ile imzalandi, heartbeat'te caps yok",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_applied_seq_changed",
+      "description": "Imzadan sonra applied_seq degisti (sahte 'Uygulandi')",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 9,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_ts_changed",
+      "description": "Imzadan sonra report.ts degisti",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999971,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_other_device",
+      "description": "Baska cihaz id'si icin imzalanmis rapor bu cihazin heartbeat'inde",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "ILdjv1PRlzOCBB-mvUkD6mi-ufdsnPAXPWxUj5IIpKRo_lhQBK9s5Q22a8GC8GKMt8nH4EYG4yo82MX6S4MGDg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_wrong_key",
+      "description": "Baska bir anahtarla imzali",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "uLY44l8BQiRqBTMSazT3saTm7_ZsvrvCOadQHzgrZ6baWR_y_JoQ-EaZ9DOir6UfYxGgYrbVy5R8bo0DNwW8CQ"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_short_sig",
+      "description": "sig 85 karakter (bicim disi)",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5B"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_noncanonical_sig",
+      "description": "sig'in son karakterinde kullanilmayan bitler 1 (kanonik olmayan base64url)",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bv"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_extra_report_field",
+      "description": "report'ta ts/sig disinda alan",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg",
+            "x": 1
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_no_applied_seq",
+      "description": "report var ama applied_seq yok",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 1,
+          "report": {
+            "ts": 1799999970,
+            "sig": "1eQjxg5BqWiztUnRx7jt6ungMKQYqQj_Cmfx1Gbr1NSefQBHYAG7LIVDXNo3Rpm0Z_d2KQ92wJH9uiL63EcdCQ"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "replayed_equal_ts",
+      "description": "ts = last_report_ts (ayni rapor ikinci kez)",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999970,
+      "now_s": 1800000000,
+      "result": "replayed",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\"],\"clock_skew_s\":-420,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"id\":\"123456789\",\"maintenance_curtain\":true,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "replayed_older_ts",
+      "description": "ts < last_report_ts (eski rapor)",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1800000070,
+      "now_s": 1800000000,
+      "result": "replayed",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\"],\"clock_skew_s\":-420,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"id\":\"123456789\",\"maintenance_curtain\":true,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "future",
+      "description": "ts = now_s + future_skew_s + 1",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 1,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": ["role_all", "curtain"],
+          "maintenance_curtain": true,
+          "report": {
+            "ts": 1799999970,
+            "sig": "sY5aCzICHFeSlFxWev0nEOWGK7fKt9NHrQsc2kBQVZhgDjXuycXq034XEagOsmGBXCWb56UPQz9dIsFQVIr5Bg"
+          }
+        }
+      },
+      "device_pk": "mUyVVFFmui5m-P09Bo9rCwBdBp2Yp7dRVlZkE_pXeBY",
+      "last_report_ts": 1799999910,
+      "now_s": 1799999669,
+      "result": "future",
+      "signed_text": "sense-remote/hb-report/v1\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\"],\"clock_skew_s\":-420,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"id\":\"123456789\",\"maintenance_curtain\":true,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    }
+  ]
+}

@@ -109,6 +109,7 @@ fn vector_cases_match_result_client() {
         }
         let role = verified.body.sense_role.map(|role| match role {
             PanelRole::Host => "host",
+            PanelRole::Controller => "controller",
             PanelRole::HostController => "host_controller",
         });
         assert_eq!(role, case.get("sense_role").and_then(Value::as_str), "{name}");

@@ -4085,11 +4085,22 @@ fn service_control_command(operation: &str, exe: &str, installed_now: bool) -> R
     ))
 }
 
+// Sense Remote (wave 3, K-CTRL): a Sense Controller (outgoing only) also gets the service and the
+// config import, so the panel sync loop runs and a role envelope reaches it.
+fn sense_skip_service() -> bool {
+    config::is_outgoing_only()
+        && !crate::sense::envelope_apply::service_when_outgoing_only(
+            crate::sense::installed_role(),
+            !crate::sense::pending_install_commands().is_empty(),
+        )
+}
+
 fn get_import_config(exe: &str) -> String {
     // --import-config does not register a service dispatcher, so SCM can report
     // a start failure even when import runs. Preserve this legacy contract for
     // older installed executables.
-    if config::is_outgoing_only() {
+    // Sense Remote: not skipped for a Sense Controller (K-CTRL).
+    if sense_skip_service() {
         return "".to_string();
     }
     let exe = escape_nested_cmd_ampersands(exe);
@@ -4108,7 +4119,8 @@ sc delete {app_name}
 }
 
 fn get_create_service(exe: &str) -> String {
-    if config::is_outgoing_only() {
+    // Sense Remote: not skipped for a Sense Controller (K-CTRL).
+    if sense_skip_service() {
         return "".to_string();
     }
     let stop = Config::get_option("stop-service") == "Y";

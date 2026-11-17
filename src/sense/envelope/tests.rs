@@ -123,13 +123,18 @@ fn valid_full_set_is_accepted() {
 #[test]
 fn valid_role_maps_to_sense_role() {
     let s = signer();
-    for (role, expected) in [("host", SenseRole::Host), ("host_controller", SenseRole::Both)] {
+    // Sense Remote (K-ROL-2): Controller is a valid panel role from wave 3 on.
+    for (role, expected) in [
+        ("host", SenseRole::Host),
+        ("controller", SenseRole::Controller),
+        ("host_controller", SenseRole::Both),
+    ] {
         let mut payload = strategy(5);
         payload["body"]["sense_role"] = json!(role);
         let verified = check(&s, &payload).unwrap();
         assert_eq!(verified.body.sense_role.map(PanelRole::sense_role), Some(expected));
     }
-    for role in ["controller", "both", "", "Host"] {
+    for role in ["both", "", "Host", "Controller"] {
         let mut payload = strategy(5);
         payload["body"]["sense_role"] = json!(role);
         assert_eq!(reason(check(&s, &payload)), Reason::BadPayload, "{role}");

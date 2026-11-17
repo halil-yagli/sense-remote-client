@@ -18,6 +18,8 @@ use serde_json::{json, Value};
 const TIME_HEARTBEAT: Duration = Duration::from_secs(15);
 const UPLOAD_SYSINFO_TIMEOUT: Duration = Duration::from_secs(120);
 const TIME_CONN: Duration = Duration::from_secs(3);
+// Sense Remote (wave 3, panel A7): local option holding the signed report's `ts` reservation.
+const SENSE_REPORT_TS: &str = "sense-report-ts";
 
 #[cfg(not(any(target_os = "ios")))]
 lazy_static::lazy_static! {
@@ -94,6 +96,11 @@ async fn start_hbbs_sync_async() {
     let mut sysinfo_ver = "".to_owned();
     // Sense Remote: envelope state reported in every heartbeat (`sense.envelope_error`, ...).
     let mut sense_report = crate::sense::envelope_apply::Report::default();
+    // Sense Remote (wave 3, K-R2-3): `ts` of the last signed report, kept strictly increasing.
+    let mut sense_report_ts: Option<i64> = None;
+    // Panel A7: stored upper bound of every `ts` sent, so `ts` also increases across restarts.
+    let mut sense_report_reserved =
+        crate::sense::report_sig::parse_reservation(&LocalConfig::get_option(SENSE_REPORT_TS));
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -271,6 +278,13 @@ async fn start_hbbs_sync_async() {
                 .await
                 {
                     sense_report.extend(&mut sense, applied_seq);
+                    // Sense Remote (wave 3, K-R2-3 / G2-1): signed with the device key, last.
+                    sense_sign_report(
+                        &mut sense,
+                        &id,
+                        &mut sense_report_ts,
+                        &mut sense_report_reserved,
+                    );
                     v["sense"] = sense;
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
@@ -301,6 +315,37 @@ async fn start_hbbs_sync_async() {
                 }
             }
         }
+    }
+}
+
+// Sense Remote (wave 3, K-R2-3 / G2-1): signs `sense`'s state fields with RustDesk's own device
+// key (the panel has its public key from the enrolment). No key or no `applied_seq` -> no report;
+// the panel then ignores the state fields. The secret key is never logged.
+// `ts` increases strictly, also across restarts: the reservation is stored before a report with
+// a higher `ts` is sent (panel A7: replayed / future reports are ignored).
+#[cfg(not(any(target_os = "ios")))]
+fn sense_sign_report(
+    sense: &mut Value,
+    id: &str,
+    last_ts: &mut Option<i64>,
+    reserved: &mut Option<i64>,
+) {
+    let (ts, reservation) =
+        crate::sense::report_sig::next_ts_reserved(*last_ts, *reserved, now_s());
+    if let Some(reservation) = reservation {
+        LocalConfig::set_option(SENSE_REPORT_TS.to_owned(), reservation.to_string());
+        *reserved = Some(reservation);
+    }
+    let uuid = crate::encode64(hbb_common::get_uuid());
+    let (secret_key, _) = Config::get_key_pair();
+    if crate::sense::report_sig::sign_into(sense, id, &uuid, ts, &secret_key) {
+        *last_ts = Some(ts);
+    } else {
+        hbb_common::throttled_log!(
+            API_LOG_INTERVAL,
+            warn,
+            "Sense Remote: heartbeat report not signed (no device key or no applied_seq)"
+        );
     }
 }
 
@@ -459,8 +504,25 @@ fn sense_apply(
         // (K2-6, deferred: see the PR).
         crate::sense::apply_role(Some(role));
         log::info!("Sense Remote: role changed to {}", role.as_str());
+        // Sense Remote (wave 3, K-ROL-2): into or out of Controller, listening has to start or
+        // stop; `--server` decides that only at start, so it exits and the Windows service
+        // starts it again with the stored role (role and seq are already in HKLM).
+        if envelope_apply::restart_needed(installed, role) && crate::is_server() {
+            sense_restart_server();
+        }
     }
     Ok(())
+}
+
+// Sense Remote (K-ROL-2): ends the `--server` process shortly after a role change, so the
+// service (`run_service`: relaunch when the process has exited) starts it with the new role.
+#[cfg(not(any(target_os = "ios")))]
+fn sense_restart_server() {
+    log::info!("Sense Remote: role change needs a server restart");
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        std::process::exit(0);
+    });
 }
 
 fn heartbeat_url() -> String {
