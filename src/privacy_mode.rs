@@ -42,6 +42,17 @@ pub const PRIVACY_MODE_IMPL_WIN_EXCLUDE_FROM_CAPTURE: &str =
     "privacy_mode_impl_exclude_from_capture";
 pub const PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY: &str = "privacy_mode_impl_virtual_display";
 
+// Sense Remote: ghost mode (hayalet mod) = privacy mode with the Sense maintenance curtain
+// ("Bakım yapılıyor") on the physical screens, excluded from capture, so the Controller sees the
+// real screen and the Sense icon stays above the curtain (wave 3 I10). Windows offers only that
+// mode; RustDesk's other modes (magnifier with an external DLL, virtual display = physical
+// screens off) are not offered.
+#[cfg(windows)]
+const SENSE_CURTAIN_ONLY: bool = true;
+// Sense Remote (MAC-SONRA-15): macOS has no curtain yet, so it offers no privacy mode.
+#[cfg(target_os = "macos")]
+const SENSE_MACOS_CURTAIN: bool = false;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "t", content = "c")]
 pub enum PrivacyModeState {
@@ -99,6 +110,9 @@ lazy_static::lazy_static! {
         {
             if win_exclude_from_capture::is_supported() {
                 PRIVACY_MODE_IMPL_WIN_EXCLUDE_FROM_CAPTURE
+            } else if SENSE_CURTAIN_ONLY {
+                // Sense Remote: no Sense curtain before Windows 10 2004, so no ghost mode.
+                ""
             } else {
                 if display_service::is_privacy_mode_mag_supported() {
                     PRIVACY_MODE_IMPL_WIN_MAG
@@ -115,7 +129,13 @@ lazy_static::lazy_static! {
         {
             #[cfg(target_os = "macos")]
             {
-                macos::PRIVACY_MODE_IMPL.to_owned()
+                // Sense Remote (MAC-SONRA-15): no maintenance curtain on macOS yet; RustDesk's
+                // macOS privacy mode is a black screen, which needs a team decision.
+                if SENSE_MACOS_CURTAIN {
+                    macos::PRIVACY_MODE_IMPL.to_owned()
+                } else {
+                    "".to_owned()
+                }
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -157,15 +177,19 @@ lazy_static::lazy_static! {
                 map.insert(win_exclude_from_capture::PRIVACY_MODE_IMPL, |impl_key: &str| {
                     Box::new(win_exclude_from_capture::PrivacyModeImpl::new(impl_key))
                 });
-            } else {
+            } else if !SENSE_CURTAIN_ONLY {
                 map.insert(win_mag::PRIVACY_MODE_IMPL, |impl_key: &str| {
                     Box::new(win_mag::PrivacyModeImpl::new(impl_key))
                 });
             }
 
-            map.insert(win_virtual_display::PRIVACY_MODE_IMPL, |impl_key: &str| {
+            // Sense Remote: the virtual display mode turns the physical screens off (a black
+            // screen), which needs a team decision; it is not offered (I10).
+            if !SENSE_CURTAIN_ONLY {
+                map.insert(win_virtual_display::PRIVACY_MODE_IMPL, |impl_key: &str| {
                     Box::new(win_virtual_display::PrivacyModeImpl::new(impl_key))
                 });
+            }
         }
         Arc::new(Mutex::new(map))
     };
@@ -362,13 +386,17 @@ pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
                 PRIVACY_MODE_IMPL_WIN_EXCLUDE_FROM_CAPTURE,
                 "privacy_mode_impl_mag_tip",
             ));
-        } else {
+        } else if !SENSE_CURTAIN_ONLY {
             if display_service::is_privacy_mode_mag_supported() {
                 vec_impls.push((PRIVACY_MODE_IMPL_WIN_MAG, "privacy_mode_impl_mag_tip"));
             }
         }
 
-        if is_installed() && crate::platform::windows::is_self_service_running() {
+        // Sense Remote: only the Sense maintenance curtain is offered (I10).
+        if !SENSE_CURTAIN_ONLY
+            && is_installed()
+            && crate::platform::windows::is_self_service_running()
+        {
             vec_impls.push((
                 PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY,
                 "privacy_mode_impl_virtual_display_tip",
@@ -382,7 +410,12 @@ pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
         // No translation is intended for privacy_mode_impl_macos_tip as it is a 
         // placeholder for macOS specific privacy mode implementation which currently
         // doesn't provide multiple modes like Windows does.
-        vec![(macos::PRIVACY_MODE_IMPL, "privacy_mode_impl_macos_tip")]
+        // Sense Remote (MAC-SONRA-15): nothing offered, so the ghost button stays off.
+        if SENSE_MACOS_CURTAIN {
+            vec![(macos::PRIVACY_MODE_IMPL, "privacy_mode_impl_macos_tip")]
+        } else {
+            Vec::new()
+        }
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
