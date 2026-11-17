@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
-import '../../common.dart';
+import '../../common.dart' show gFFI;
 import '../../models/platform_model.dart';
 import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
