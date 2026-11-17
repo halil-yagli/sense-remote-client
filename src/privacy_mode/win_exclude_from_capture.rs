@@ -1,5 +1,3 @@
-use base::platform::windows::is_windows_version_or_greater;
-
 // Sense Remote: this mode no longer uses RustDesk's injected topmost window
 // (`win_topmost_window`, an external WindowInjection.dll that the Sense build does not ship).
 // The Sense maintenance curtain (`crate::sense::curtain`) covers every physical screen with its
@@ -9,9 +7,8 @@ pub use self::sense::PrivacyModeImpl;
 pub(super) const PRIVACY_MODE_IMPL: &str = super::PRIVACY_MODE_IMPL_WIN_EXCLUDE_FROM_CAPTURE;
 
 pub(super) fn is_supported() -> bool {
-    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity
-    // https://en.wikipedia.org/wiki/Windows_10_version_history
-    is_windows_version_or_greater(10, 0, 19041, 0, 0)
+    // Sense Remote: one check for the curtain (Windows 10 2004+), shared with the heartbeat `caps`.
+    crate::sense::curtain::is_supported()
 }
 
 mod sense {

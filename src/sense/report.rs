@@ -10,7 +10,8 @@
 //! Interface for the sync loop (`src/hbbs_http/sync.rs`, task I4):
 //! - `sysinfo_ext()`: value for `sysinfo["sense"]`, with the display list.
 //! - `heartbeat_base()`: value for `heartbeat["sense"]` (v, role, app_version, displays_hash,
-//!   health at most once per `HEALTH_INTERVAL`). I4 adds `applied_seq`, `envelope_error`,
+//!   health at most once per `HEALTH_INTERVAL`, `caps`, `maintenance_curtain` where the curtain
+//!   is supported). I4 adds `applied_seq`, `envelope_error`,
 //!   `clock_skew_s` to this object.
 //! - `health()`, `displays()` and `network()` for direct use.
 //!
@@ -47,9 +48,12 @@ use std::{
 
 /// `v` of the extension (`SENSE_EXT_VERSION` in the contract).
 pub const EXT_VERSION: u32 = 1;
-/// Sense Remote (wave 3, K-ROL-2): capabilities in every heartbeat (`sense.caps`). `role_all`:
-/// this build takes all three roles from the panel. The curtain task (I10) adds `curtain` here.
+/// Sense Remote (wave 3, K-ROL-2): capabilities of every build in every heartbeat (`sense.caps`).
+/// `role_all`: this build takes all three roles from the panel.
 pub const CAPS: [&str; 1] = ["role_all"];
+/// Sense Remote (wave 3, I10): added to `caps` only where the maintenance curtain can be shown
+/// (`curtain::is_supported`: Windows 10 2004+; not on macOS or older Windows).
+pub const CAP_CURTAIN: &str = "curtain";
 /// Health goes into the heartbeat at most this often (contract: "en çok 60 sn'de bir").
 pub const HEALTH_INTERVAL: Duration = Duration::from_secs(60);
 /// The heartbeat's `displays_hash` is recomputed at most this often (the heartbeat runs every
@@ -161,6 +165,10 @@ pub struct HeartbeatBase {
     /// Sense Remote (K-ROL-2): `CAPS`; covered by the signed report (`report_sig.rs`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caps: Option<Vec<String>>,
+    /// Sense Remote (I10): curtain on now; only where `caps` has `curtain` (left out elsewhere,
+    /// e.g. on macOS). Signed like `caps`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maintenance_curtain: Option<bool>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -196,15 +204,31 @@ pub fn sysinfo_ext() -> Option<Value> {
 pub fn heartbeat_base() -> Option<Value> {
     let (role, app_version, _) = identity()?;
     let health = take_health_slot(Instant::now()).then(measure_health);
+    let curtain_supported = crate::sense::curtain::is_supported();
     let base = HeartbeatBase {
         v: EXT_VERSION,
         role: role_name(role).to_owned(),
         app_version,
         displays_hash: cached_displays_hash(),
         health,
-        caps: Some(CAPS.iter().map(|cap| (*cap).to_owned()).collect()),
+        caps: Some(caps(curtain_supported)),
+        maintenance_curtain: curtain_state(curtain_supported, crate::sense::curtain::is_shown()),
     };
     to_json(&base)
+}
+
+/// Sense Remote: `caps` of this computer: `CAPS`, plus `curtain` where it can be shown.
+fn caps(curtain_supported: bool) -> Vec<String> {
+    let mut caps: Vec<String> = CAPS.iter().map(|cap| (*cap).to_owned()).collect();
+    if curtain_supported {
+        caps.push(CAP_CURTAIN.to_owned());
+    }
+    caps
+}
+
+/// Sense Remote: `maintenance_curtain`, sent only next to the `curtain` capability.
+fn curtain_state(curtain_supported: bool, shown: bool) -> Option<bool> {
+    curtain_supported.then_some(shown)
 }
 
 /// `SenseHealth` measured now.
@@ -829,14 +853,18 @@ mod tests {
             app_version: 1,
             displays_hash: Some("0".repeat(64)),
             health: Some(full_health()),
-            caps: Some(vec!["role_all".into()]),
+            caps: Some(caps(true)),
+            maintenance_curtain: Some(false),
         })
         .unwrap();
         assert!(keys(&heartbeat).is_subset(&set(&SCHEMA_HEARTBEAT_KEYS)));
+        assert!(keys(&heartbeat).contains("maintenance_curtain"));
         // K-ROL-2: the capabilities fit the contract and say `role_all`.
         assert!(CAPS.len() <= SCHEMA_CAPS_MAX);
         assert!(CAPS.iter().all(|cap| !cap.is_empty() && cap.len() <= SCHEMA_CAP_MAX_CHARS));
         assert!(CAPS.contains(&"role_all"));
+        assert!(caps(true).len() <= SCHEMA_CAPS_MAX);
+        assert!(CAP_CURTAIN.len() <= SCHEMA_CAP_MAX_CHARS);
         // Nothing unread is sent: an empty display has only the required fields.
         let minimal = serde_json::to_value(SenseDisplay {
             width: 1,
@@ -1118,6 +1146,50 @@ mod tests {
         let mut moved = two.clone();
         moved[1].ipv4 = vec!["192.168.1.21".into()];
         assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&moved[..])));
+    }
+
+    /// I10: `curtain` and `maintenance_curtain` only where the curtain can be shown; the order
+    /// matches the shared vector (`hb-report-v1.json`, case `ok_full`), so the signed text is
+    /// byte for byte the panel's.
+    #[test]
+    fn caps_and_curtain_state() {
+        assert_eq!(caps(false), vec!["role_all".to_owned()]);
+        assert_eq!(caps(true), vec!["role_all".to_owned(), "curtain".to_owned()]);
+        assert_eq!(curtain_state(false, true), None);
+        assert_eq!(curtain_state(true, false), Some(false));
+        assert_eq!(curtain_state(true, true), Some(true));
+
+        let vector: Value =
+            serde_json::from_str(include_str!("testdata/hb-report-v1.json")).unwrap();
+        let ok_full = vector["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == "ok_full")
+            .unwrap();
+        let sense = &ok_full["heartbeat"]["sense"];
+        assert_eq!(sense["caps"], serde_json::json!(caps(true)));
+        assert_eq!(sense["maintenance_curtain"], serde_json::json!(true));
+
+        // Unsupported (macOS, Windows before 2004): neither field leaves the computer.
+        let base = |supported: bool| {
+            serde_json::to_value(HeartbeatBase {
+                v: EXT_VERSION,
+                role: "host".into(),
+                app_version: 1,
+                displays_hash: None,
+                health: None,
+                caps: Some(caps(supported)),
+                maintenance_curtain: curtain_state(supported, false),
+            })
+            .unwrap()
+        };
+        assert!(base(false).get("maintenance_curtain").is_none());
+        assert_eq!(base(false)["caps"], serde_json::json!(["role_all"]));
+        assert_eq!(base(true)["maintenance_curtain"], serde_json::json!(false));
+        // Outside Windows there is no curtain, so no `curtain` capability (MAC-SONRA-15).
+        #[cfg(not(windows))]
+        assert!(!crate::sense::curtain::is_supported());
     }
 
     #[test]

@@ -19,10 +19,28 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static SHOWN: AtomicBool = AtomicBool::new(false);
 
-/// True while the curtain is on (for the heartbeat `maintenance_curtain`, I7 owner).
-#[allow(dead_code)]
+/// True while the curtain is on (heartbeat `maintenance_curtain`, `report::heartbeat_base`).
 pub fn is_shown() -> bool {
     SHOWN.load(Ordering::SeqCst)
+}
+
+/// Sense Remote: true where this computer can show the curtain: Windows 10 2004 (build 19041)
+/// or later, the first with `WDA_EXCLUDEFROMCAPTURE`. Privacy mode and the heartbeat `caps`
+/// (`curtain`) both ask here, so the two never disagree. Read once; the OS build does not
+/// change while the program runs.
+#[cfg(windows)]
+pub fn is_supported() -> bool {
+    static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity
+        base::platform::windows::is_windows_version_or_greater(10, 0, 19041, 0, 0)
+    })
+}
+
+/// Sense Remote: no curtain outside Windows yet (MAC-SONRA-15).
+#[cfg(not(windows))]
+pub fn is_supported() -> bool {
+    false
 }
 
 // Curtain texts (Turkish UI first; the curtain is for visitors on site).
@@ -265,7 +283,7 @@ mod win {
             winuser::{
                 BeginPaint, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow,
                 DispatchMessageW, DrawIconEx, EndPaint, EnumDisplayMonitors, EnumWindows,
-                FindWindowExW, GetClientRect, GetMessageW, GetMonitorInfoA, GetTopWindow,
+                GetClientRect, GetMessageW, GetMonitorInfoA, GetTopWindow,
                 GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
                 IsWindowVisible, KillTimer, LoadImageW, PeekMessageW, PostThreadMessageW,
                 RegisterClassExW, SetLayeredWindowAttributes, SetTimer, SetWindowPos, ShowWindow,
@@ -443,7 +461,8 @@ mod win {
                 bail!("no screen found");
             }
             let windows = create_windows(hinst, &rects)?;
-            let mut curtain = Self {
+            // Sense Remote: `restack` takes `&self`, so no `mut` (compiler warning).
+            let curtain = Self {
                 hinst,
                 windows,
                 rects,
@@ -925,6 +944,8 @@ mod win {
 
     #[cfg(test)]
     pub(super) unsafe fn count_windows() -> usize {
+        // Sense Remote: imported here; only this test helper uses it (unused-import warning).
+        use winapi::um::winuser::FindWindowExW;
         let class = wide(CLASS_NAME);
         let mut n = 0;
         let mut after: HWND = null_mut();

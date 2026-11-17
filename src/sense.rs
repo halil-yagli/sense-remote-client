@@ -152,11 +152,27 @@ pub fn apply_installed_role() {
     for (k, v) in setup_builtin_settings(&info) {
         builtin.insert(k.to_owned(), v);
     }
+    // Sense Remote (wave 3 I9): "Sürüm n" on the About page reads the build's Sense version as a
+    // built-in option, so users can not change it either.
+    let (k, v) = version_builtin_setting(report::app_version());
+    builtin.insert(k.to_owned(), v);
 }
 
 /// Built-in option names for the setup info (read by the Host home screen).
 pub const OPTION_SENSE_NAME: &str = "sense-name";
 pub const OPTION_SENSE_LOCATION: &str = "sense-location";
+
+/// Sense Remote: built-in option with the Sense version number (`SENSE_VERSION` at build time).
+pub const OPTION_SENSE_VERSION: &str = "sense-version";
+
+/// Pure part: the version as a plain number (`"3"`); empty without `SENSE_VERSION` (local
+/// builds), so the About page falls back to its own value instead of showing a wrong one.
+fn version_builtin_setting(version: Option<u32>) -> (&'static str, String) {
+    (
+        OPTION_SENSE_VERSION,
+        version.map(|v| v.to_string()).unwrap_or_default(),
+    )
+}
 
 fn setup_builtin_settings(info: &SetupInfo) -> [(&'static str, String); 2] {
     [
@@ -885,6 +901,12 @@ mod tests {
             setup_builtin_settings(&SetupInfo::default()),
             [("sense-name", String::new()), ("sense-location", String::new())]
         );
+    }
+
+    #[test]
+    fn sense_version_becomes_builtin_option() {
+        assert_eq!(version_builtin_setting(Some(3)), ("sense-version", "3".to_owned()));
+        assert_eq!(version_builtin_setting(None), ("sense-version", String::new()));
     }
 
     #[test]
