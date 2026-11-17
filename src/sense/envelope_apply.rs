@@ -13,13 +13,19 @@
 //!
 //! The server time is never used to verify: it is only compared with the local clock and the
 //! difference reported (plan R8).
+//!
+//! Sense Remote (wave 2 review): `clock_skew_s` is local − panel as the contract says (K2-1); an
+//! envelope must carry the whole allow-listed set (G2-7); `apply_steps` fixes the order of the
+//! registry / settings writes and undoes them when a later one fails (K2-2, G2-6).
 
+use hbb_common::log;
 use super::{
     envelope::{self, Expect, PanelRole, Reason, Rejection, Verified},
     envelope_keys::TrustedKey,
     SenseRole,
 };
 use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
 
 /// Same limit as the panel's `HeartbeatResponse.sense_envelopes`.
 pub const MAX_ENVELOPES: usize = 8;
@@ -68,7 +74,18 @@ pub fn parse_answer(body: &str) -> Option<HeartbeatAnswer> {
     Some(answer)
 }
 
-/// Verification plus the platform gate. `Ok` = apply it now.
+/// Sense Remote (G2-7): the envelope sets every allow-listed key. A partial set would leave the
+/// other permissions as they happen to be on this computer (e.g. an old `access-mode=full`
+/// overriding them all), so it is refused here, before anything is applied. `verify` alone still
+/// accepts it, to stay identical to the panel's `verifyEnvelope` and the shared test vector.
+pub fn is_full_set(config_options: &BTreeMap<String, String>) -> bool {
+    config_options.len() == envelope::ALLOWED_OPTIONS.len()
+        && envelope::ALLOWED_OPTIONS
+            .iter()
+            .all(|(key, _)| config_options.contains_key(*key))
+}
+
+/// Verification, the full-set rule and the platform gate. `Ok` = apply it now.
 pub fn check(
     item: &Value,
     keys: &[TrustedKey],
@@ -76,6 +93,13 @@ pub fn check(
     applies: bool,
 ) -> Result<Verified, Rejection> {
     let verified = envelope::verify(item, keys, expect)?;
+    if !is_full_set(&verified.body.config_options) {
+        return Err(Rejection {
+            reason: Reason::NotAllowed,
+            k: Some(verified.k),
+            seq: Some(verified.seq),
+        });
+    }
     if !applies {
         return Err(Rejection {
             reason: Reason::UnsupportedPlatform,
@@ -84,6 +108,81 @@ pub fn check(
         });
     }
     Ok(verified)
+}
+
+/// Sense Remote (G2-5): `check` with the stored seq as read from the registry. When it could not
+/// be read, `expect.last_seq` is only a placeholder: a verified envelope is then refused
+/// (`apply_failed`, with its seq) instead of being checked against a counter of 0.
+pub fn check_stored(
+    item: &Value,
+    keys: &[TrustedKey],
+    expect: &Expect,
+    applies: bool,
+    seq_readable: bool,
+) -> Result<Verified, Rejection> {
+    let verified = check(item, keys, expect, applies)?;
+    if !seq_readable {
+        return Err(Rejection {
+            reason: Reason::ApplyFailed,
+            k: Some(verified.k),
+            seq: Some(verified.seq),
+        });
+    }
+    Ok(verified)
+}
+
+/// Sense Remote (K2-2, G2-6): the writes of one apply, injected so that their order and the undo
+/// are tested without the registry. The sync loop implements them with HKLM and `Config`.
+pub trait ApplySteps {
+    /// Settings as they are now, to put back when a later step fails.
+    type Snapshot;
+    /// Fails when the seq could not be stored at the end (nothing has changed yet).
+    fn check_writable(&mut self) -> Result<(), String>;
+    fn snapshot(&mut self) -> Self::Snapshot;
+    fn set_options(&mut self) -> Result<(), String>;
+    fn restore_options(&mut self, snapshot: Self::Snapshot);
+    fn store_role(&mut self, role: SenseRole) -> Result<(), String>;
+    fn store_seq(&mut self) -> Result<(), String>;
+}
+
+/// Applies settings -> role -> seq. Either all three are written or, as far as the platform lets
+/// us, none: a failed role write puts the settings back, a failed seq write puts the old role and
+/// the settings back. So the panel's "rejected" (`apply_failed`) never sits next to a computer
+/// that changed anyway. `old_role` is the installed role (`role_change` only returns a new role
+/// when there is one).
+pub fn apply_steps<S: ApplySteps>(
+    steps: &mut S,
+    old_role: Option<SenseRole>,
+    new_role: Option<SenseRole>,
+) -> Result<(), Reason> {
+    let failed = |step: &str, err: String| {
+        log::error!("Sense Remote: envelope apply failed at {step}: {err}");
+        Reason::ApplyFailed
+    };
+    steps
+        .check_writable()
+        .map_err(|err| failed("write check", err))?;
+    let snapshot = steps.snapshot();
+    if let Err(err) = steps.set_options() {
+        steps.restore_options(snapshot);
+        return Err(failed("settings", err));
+    }
+    if let Some(role) = new_role {
+        if let Err(err) = steps.store_role(role) {
+            steps.restore_options(snapshot);
+            return Err(failed("role", err));
+        }
+    }
+    if let Err(err) = steps.store_seq() {
+        if let (Some(_), Some(old)) = (new_role, old_role) {
+            if let Err(undo) = steps.store_role(old) {
+                log::error!("Sense Remote: restoring role {} failed: {undo}", old.as_str());
+            }
+        }
+        steps.restore_options(snapshot);
+        return Err(failed("seq", err));
+    }
+    Ok(())
 }
 
 /// Role to store, `None` when it stays the same. The panel may only switch between Host and
@@ -104,9 +203,10 @@ pub fn role_change(
     }
 }
 
-/// Difference panel − local clock when it is larger than `SKEW_REPORT_S`.
+/// Sense Remote (K2-1): local − panel clock (contract `clock_skew_s`: positive = this computer is
+/// ahead) when it is larger than `SKEW_REPORT_S`.
 pub fn clock_skew(server_s: i64, local_s: i64) -> Option<i64> {
-    let diff = server_s.saturating_sub(local_s);
+    let diff = local_s.saturating_sub(server_s);
     (diff.abs() > SKEW_REPORT_S).then_some(diff)
 }
 
@@ -156,13 +256,16 @@ impl Report {
         }
     }
 
-    /// Adds `applied_seq` (always, 0 included), `envelope_error` and `clock_skew_s` to the
-    /// heartbeat's `sense` object.
-    pub fn extend(&self, sense: &mut Value, applied_seq: u64) {
+    /// Adds `applied_seq` (0 included), `envelope_error` and `clock_skew_s` to the heartbeat's
+    /// `sense` object. Sense Remote (G2-5): `applied_seq` is `None` when the stored seq could
+    /// not be read; it is then left out (the field is optional) rather than reported as 0.
+    pub fn extend(&self, sense: &mut Value, applied_seq: Option<u64>) {
         let Some(object) = sense.as_object_mut() else {
             return;
         };
-        object.insert("applied_seq".to_owned(), json!(applied_seq));
+        if let Some(applied_seq) = applied_seq {
+            object.insert("applied_seq".to_owned(), json!(applied_seq));
+        }
         if let Some(error) = &self.error {
             let mut value = json!({ "reason": error.reason.as_str(), "at": error.at });
             if let Some(seq) = error.seq {
@@ -373,13 +476,15 @@ mod tests {
         assert_eq!(clock_skew(NOW, NOW), None);
         assert_eq!(clock_skew(NOW + 300, NOW), None);
         assert_eq!(clock_skew(NOW - 300, NOW), None);
-        assert_eq!(clock_skew(NOW + 301, NOW), Some(301));
-        assert_eq!(clock_skew(NOW - 3_600, NOW), Some(-3_600));
+        // K2-1, contract: local − panel. Panel 301 s ahead = this computer behind -> negative.
+        assert_eq!(clock_skew(NOW + 301, NOW), Some(-301));
+        // Panel an hour behind = this computer ahead -> positive.
+        assert_eq!(clock_skew(NOW - 3_600, NOW), Some(3_600));
         let mut report = Report::default();
         report.server_time(Some(NOW + 900), NOW);
-        assert_eq!(report.clock_skew_s, Some(900));
+        assert_eq!(report.clock_skew_s, Some(-900));
         report.server_time(None, NOW);
-        assert_eq!(report.clock_skew_s, Some(900));
+        assert_eq!(report.clock_skew_s, Some(-900));
         report.server_time(Some(NOW), NOW);
         assert_eq!(report.clock_skew_s, None);
     }
@@ -421,8 +526,12 @@ mod tests {
         let error_keys: BTreeSet<&str> = ["seq", "k", "reason", "at"].into();
 
         let mut sense = json!({ "v": 1, "role": "host", "app_version": 1 });
-        Report::default().extend(&mut sense, 0);
+        Report::default().extend(&mut sense, Some(0));
         assert_eq!(sense["applied_seq"], json!(0));
+        // G2-5: an unreadable seq is not reported as 0.
+        let mut unread = json!({ "v": 1, "role": "host", "app_version": 1 });
+        Report::default().extend(&mut unread, None);
+        assert!(unread.get("applied_seq").is_none());
         assert!(sense.get("envelope_error").is_none());
         assert!(sense.get("clock_skew_s").is_none());
 
@@ -436,15 +545,16 @@ mod tests {
             3,
             NOW,
         );
+        // The panel's clock is 10 min behind: this computer is ahead -> +600 (K2-1).
         report.server_time(Some(NOW - 600), NOW);
         let mut sense = json!({ "v": 1, "role": "host_controller", "app_version": 1 });
-        report.extend(&mut sense, 3);
+        report.extend(&mut sense, Some(3));
         assert_eq!(
             sense,
             json!({
                 "v": 1, "role": "host_controller", "app_version": 1, "applied_seq": 3,
                 "envelope_error": { "seq": 9, "k": "0123456789abcdef", "reason": "expired", "at": NOW },
-                "clock_skew_s": -600,
+                "clock_skew_s": 600,
             })
         );
         for key in sense.as_object().unwrap().keys() {
@@ -457,5 +567,163 @@ mod tests {
         for reason in Reason::ALL {
             assert_eq!(Reason::parse(reason.as_str()), Some(reason));
         }
+    }
+
+    #[test]
+    fn partial_set_is_refused_before_apply() {
+        // G2-7: signed and verified, but only one key -> nothing is applied.
+        let s = signer();
+        let keys = vec![s.trusted.clone()];
+        let mut partial = strategy(5, json!({}));
+        partial["body"]["config_options"] = json!({ "enable-terminal": "Y" });
+        let item = s.sign(&partial);
+        assert!(envelope::verify(&item, &keys, &expect(4)).is_ok());
+        assert_eq!(
+            check(&item, &keys, &expect(4), true),
+            Err(Rejection {
+                reason: Reason::NotAllowed,
+                k: Some(s.trusted.k.clone()),
+                seq: Some(5),
+            })
+        );
+        // One key missing out of the sixteen.
+        let mut fifteen = strategy(5, json!({}));
+        fifteen["body"]["config_options"]
+            .as_object_mut()
+            .unwrap()
+            .remove("enable-tunnel");
+        assert_eq!(
+            check(&s.sign(&fifteen), &keys, &expect(4), true)
+                .unwrap_err()
+                .reason,
+            Reason::NotAllowed
+        );
+        let full: BTreeMap<String, String> = serde_json::from_value(full_set()).unwrap();
+        assert!(is_full_set(&full));
+    }
+
+    #[test]
+    fn unreadable_seq_refuses_a_verified_envelope() {
+        // G2-5: the stored seq could not be read -> not applied, reported with its seq.
+        let s = signer();
+        let keys = vec![s.trusted.clone()];
+        let item = s.sign(&strategy(5, json!({})));
+        assert!(check_stored(&item, &keys, &expect(0), true, true).is_ok());
+        assert_eq!(
+            check_stored(&item, &keys, &expect(0), true, false),
+            Err(Rejection {
+                reason: Reason::ApplyFailed,
+                k: Some(s.trusted.k.clone()),
+                seq: Some(5),
+            })
+        );
+        // Verification errors still come first.
+        assert_eq!(
+            check_stored(&item, &[], &expect(0), true, false)
+                .unwrap_err()
+                .reason,
+            Reason::UnknownKey
+        );
+    }
+
+    /// Records every write; `fail_at` makes one step fail (the first time it runs).
+    #[derive(Default)]
+    struct FakeSteps {
+        fail_at: Option<&'static str>,
+        options: &'static str,
+        role: Option<SenseRole>,
+        seq: u64,
+        log: Vec<String>,
+    }
+
+    impl FakeSteps {
+        fn new(fail_at: Option<&'static str>) -> Self {
+            Self {
+                fail_at,
+                options: "old",
+                role: Some(SenseRole::Host),
+                ..Default::default()
+            }
+        }
+
+        fn step(&mut self, name: &'static str) -> Result<(), String> {
+            self.log.push(name.to_owned());
+            if self.fail_at == Some(name) {
+                self.fail_at = None;
+                return Err(format!("{name} failed"));
+            }
+            Ok(())
+        }
+    }
+
+    impl ApplySteps for FakeSteps {
+        type Snapshot = &'static str;
+        fn check_writable(&mut self) -> Result<(), String> {
+            self.step("check")
+        }
+        fn snapshot(&mut self) -> &'static str {
+            self.options
+        }
+        fn set_options(&mut self) -> Result<(), String> {
+            self.step("options")?;
+            self.options = "new";
+            Ok(())
+        }
+        fn restore_options(&mut self, snapshot: &'static str) {
+            self.log.push("restore options".to_owned());
+            self.options = snapshot;
+        }
+        fn store_role(&mut self, role: SenseRole) -> Result<(), String> {
+            self.step("role")?;
+            self.role = Some(role);
+            Ok(())
+        }
+        fn store_seq(&mut self) -> Result<(), String> {
+            self.step("seq")?;
+            self.seq = 7;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn apply_writes_settings_then_role_then_seq() {
+        let (host, both) = (Some(SenseRole::Host), Some(SenseRole::Both));
+        let mut steps = FakeSteps::new(None);
+        assert_eq!(apply_steps(&mut steps, host, both), Ok(()));
+        assert_eq!(steps.log, ["check", "options", "role", "seq"]);
+        assert_eq!((steps.options, steps.role, steps.seq), ("new", both, 7));
+        // No role change: the role is not written.
+        let mut steps = FakeSteps::new(None);
+        assert_eq!(apply_steps(&mut steps, host, None), Ok(()));
+        assert_eq!(steps.log, ["check", "options", "seq"]);
+        assert_eq!((steps.options, steps.role, steps.seq), ("new", host, 7));
+    }
+
+    #[test]
+    fn failed_apply_leaves_the_computer_as_it_was() {
+        let (host, both) = (Some(SenseRole::Host), Some(SenseRole::Both));
+        // G2-6: the registry is not writable -> nothing is touched.
+        let mut steps = FakeSteps::new(Some("check"));
+        assert_eq!(apply_steps(&mut steps, host, both), Err(Reason::ApplyFailed));
+        assert_eq!(steps.log, ["check"]);
+        assert_eq!((steps.options, steps.role, steps.seq), ("old", host, 0));
+        // K2-2: role write fails -> settings restored, seq not stored.
+        let mut steps = FakeSteps::new(Some("role"));
+        assert_eq!(apply_steps(&mut steps, host, both), Err(Reason::ApplyFailed));
+        assert_eq!(steps.log, ["check", "options", "role", "restore options"]);
+        assert_eq!((steps.options, steps.role, steps.seq), ("old", host, 0));
+        // K2-2: seq write fails -> old role and settings restored.
+        let mut steps = FakeSteps::new(Some("seq"));
+        assert_eq!(apply_steps(&mut steps, host, both), Err(Reason::ApplyFailed));
+        assert_eq!(
+            steps.log,
+            ["check", "options", "role", "seq", "role", "restore options"]
+        );
+        assert_eq!((steps.options, steps.role, steps.seq), ("old", host, 0));
+        // Settings fail -> restored, role never written.
+        let mut steps = FakeSteps::new(Some("options"));
+        assert_eq!(apply_steps(&mut steps, host, both), Err(Reason::ApplyFailed));
+        assert_eq!(steps.log, ["check", "options", "restore options"]);
+        assert_eq!((steps.options, steps.role, steps.seq), ("old", host, 0));
     }
 }

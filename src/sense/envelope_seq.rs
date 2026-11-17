@@ -7,6 +7,9 @@
 //!
 //! MAC-SONRA-9: root-owned file under `/Library/Application Support/SenseRemote/`. Until then
 //! macOS reads 0 and refuses to store (envelopes are verified there but not applied).
+//!
+//! Sense Remote (G2-5, G2-6): a value that exists but cannot be read is an error, not 0, and
+//! `check_writable` runs before an envelope changes anything.
 
 const REG_VALUE_ENVELOPE_SEQ: &str = "EnvelopeSeq";
 
@@ -28,26 +31,61 @@ pub fn may_store(stored: u64, seq: u64) -> Result<(), StoreError> {
     }
 }
 
-/// Last applied seq, 0 when none was stored (fresh install) or it cannot be read.
+/// Sense Remote (G2-5): a read result → `last_seq`. Only "no key / no value" (fresh install) is 0;
+/// any other error (access denied, wrong value type ...) is an error, so the caller applies
+/// nothing instead of treating the counter as 0 and accepting an old envelope again.
+pub fn seq_or_missing(result: std::io::Result<u64>) -> Result<u64, String> {
+    match result {
+        Ok(seq) => Ok(seq),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// Last applied seq: 0 when none was stored (fresh install), an error when it cannot be read.
 #[cfg(windows)]
-pub fn last_seq() -> u64 {
+pub fn read_last_seq() -> Result<u64, String> {
     use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
-    RegKey::predef(HKEY_LOCAL_MACHINE)
-        .open_subkey(super::REG_SUBKEY)
-        .and_then(|key| key.get_value::<u64, _>(REG_VALUE_ENVELOPE_SEQ))
-        .unwrap_or(0)
+    seq_or_missing(
+        RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey(super::REG_SUBKEY)
+            .and_then(|key| key.get_value::<u64, _>(REG_VALUE_ENVELOPE_SEQ)),
+    )
 }
 
 #[cfg(not(windows))]
-pub fn last_seq() -> u64 {
-    0
+pub fn read_last_seq() -> Result<u64, String> {
+    Ok(0)
+}
+
+/// Sense Remote (G2-6): proves before anything is changed that the seq can be written: opens the
+/// key for writing and writes the stored value back unchanged. An apply that could not store its
+/// seq at the end is refused up front, with the computer untouched.
+#[cfg(windows)]
+pub fn check_writable() -> Result<(), StoreError> {
+    use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+    let (key, _) = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .create_subkey(super::REG_SUBKEY)
+        .map_err(|err| StoreError::Io(err.to_string()))?;
+    let stored = seq_or_missing(key.get_value::<u64, _>(REG_VALUE_ENVELOPE_SEQ))
+        .map_err(StoreError::Io)?;
+    if stored > 0 {
+        key.set_value(REG_VALUE_ENVELOPE_SEQ, &stored)
+            .map_err(|err| StoreError::Io(err.to_string()))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn check_writable() -> Result<(), StoreError> {
+    Err(StoreError::UnsupportedPlatform)
 }
 
 /// Stores `seq` after the envelope was applied successfully. Never lowers the value.
 #[cfg(windows)]
 pub fn store_last_seq(seq: u64) -> Result<(), StoreError> {
     use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
-    may_store(last_seq(), seq)?;
+    may_store(read_last_seq().map_err(StoreError::Io)?, seq)?;
     let (key, _) = RegKey::predef(HKEY_LOCAL_MACHINE)
         .create_subkey(super::REG_SUBKEY)
         .map_err(|err| StoreError::Io(err.to_string()))?;
@@ -76,5 +114,16 @@ mod tests {
             may_store(42, 7),
             Err(StoreError::NotIncreasing { stored: 42, seq: 7 })
         );
+    }
+
+    #[test]
+    fn only_a_missing_value_reads_as_zero() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(seq_or_missing(Ok(9)), Ok(9));
+        assert_eq!(seq_or_missing(Err(Error::from(ErrorKind::NotFound))), Ok(0));
+        // Access denied, a REG_DWORD / REG_SZ value (winreg: InvalidData) ... → not 0.
+        for kind in [ErrorKind::PermissionDenied, ErrorKind::InvalidData, ErrorKind::Other] {
+            assert!(seq_or_missing(Err(Error::from(kind))).is_err(), "{kind:?}");
+        }
     }
 }

@@ -28,7 +28,7 @@
 //! MAC-SONRA: macOS sends no displays yet (CGDisplay / IOKit, plan MAC-SONRA-10); health comes
 //! from `sysinfo` (temperature may be unavailable on Apple Silicon, MAC-SONRA-11).
 
-// Sense Remote: the sync loop starts using these in task I4.
+// Sense Remote: `health()`, `displays()` and `network()` are only used by tests so far.
 #![allow(dead_code)]
 
 use super::{network::SenseNetwork, SenseRole};
@@ -218,12 +218,17 @@ pub fn displays() -> (Vec<Value>, Option<String>) {
 
 /// `sense.network`: Ethernet / Wi-Fi adapters with their IP addresses (no MAC).
 pub fn network() -> Vec<Value> {
-    super::network::collect().iter().filter_map(to_json).collect()
+    super::network::collect()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(to_json)
+        .collect()
 }
 
+/// Sense Remote (K2-5): `Some(vec![])` (no adapter left) is sent as `network: []`, so the panel
+/// stops showing the old addresses; only `None` (adapters could not be read) leaves it out.
 fn network_list() -> Option<Vec<SenseNetwork>> {
-    let list = super::network::collect();
-    (!list.is_empty()).then_some(list)
+    super::network::collect()
 }
 
 // Hash of the network list in the last sysinfo (`None` = no sysinfo built yet) and the time of
@@ -234,6 +239,15 @@ static LAST_NETWORK_CHECK: Mutex<Option<Instant>> = Mutex::new(None);
 /// True when the adapters / addresses differ from those in the last `sysinfo_ext()`: the sync
 /// loop then uploads sysinfo again. Reads the adapters at most once per `HEALTH_INTERVAL`
 /// (otherwise false); false before the first sysinfo (that upload carries the list anyway).
+/// Sense Remote (K2-7): cheap, non-blocking test the sync loop makes before it starts a blocking
+/// task for `network_changed_since_sysinfo` (instead of one every 3 s).
+pub fn network_check_due() -> bool {
+    health_due(
+        *LAST_NETWORK_CHECK.lock().unwrap_or_else(|e| e.into_inner()),
+        Instant::now(),
+    )
+}
+
 pub fn network_changed_since_sysinfo() -> bool {
     let now = Instant::now();
     {
@@ -246,11 +260,16 @@ pub fn network_changed_since_sysinfo() -> bool {
     let Some(sent) = SENT_NETWORK_HASH.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
         return false;
     };
-    network_hash(network_list().as_deref()) != sent
+    // A failed read is not a change (the next sysinfo would leave `network` out anyway).
+    let Some(now) = network_list() else {
+        return false;
+    };
+    network_hash(Some(&now[..])) != sent
 }
 
+/// Sense Remote (K2-5): `None` (not sent) and `Some([])` (sent empty) hash differently.
 fn network_hash(list: Option<&[SenseNetwork]>) -> String {
-    let value = serde_json::to_value(list.unwrap_or_default()).unwrap_or(Value::Null);
+    let value = serde_json::to_value(list).unwrap_or(Value::Null);
     let digest = Sha256::digest(canonical_json(&value).as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -813,6 +832,24 @@ mod tests {
         assert_eq!(keys(&serde_json::to_value(SenseHealth::default()).unwrap()), set(&["at"]));
     }
 
+    /// K2-5: an empty adapter list is sent as `"network": []`; only an unread one is left out.
+    #[test]
+    fn empty_network_is_sent_as_an_empty_list() {
+        let ext = |network| SysinfoExt {
+            v: EXT_VERSION,
+            role: "host".into(),
+            app_version: 1,
+            platform: "windows-x64".into(),
+            displays: None,
+            displays_hash: None,
+            network,
+        };
+        let empty = serde_json::to_value(ext(Some(vec![]))).unwrap();
+        assert_eq!(empty["network"], serde_json::json!([]));
+        let unknown = serde_json::to_value(ext(None)).unwrap();
+        assert!(unknown.get("network").is_none());
+    }
+
     /// The panel's own test bodies parse into these structs (unknown field -> error) and come
     /// back unchanged.
     #[test]
@@ -1059,7 +1096,9 @@ mod tests {
         });
         assert_eq!(network_hash(Some(&two[..])), network_hash(Some(&two.clone()[..])));
         assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&two[..1])));
-        assert_eq!(network_hash(None), network_hash(Some(&[][..])));
+        // K2-5: unplugging the last adapter is a change from "unknown" too.
+        assert_ne!(network_hash(None), network_hash(Some(&[][..])));
+        assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&[][..])));
         let mut moved = two.clone();
         moved[1].ipv4 = vec!["192.168.1.21".into()];
         assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&moved[..])));

@@ -128,13 +128,20 @@ jobs:
           fi
 
       # Sense Remote: anahtarsiz derleme surer ama panelden gelen hicbir yetki uygulanmaz.
+      # G2-9: etiket (yayin) derlemesinde anahtarsizlik hata; k kimlikleri loga yazilir ki
+      # panelin GET /signing-key ciktisiyla karsilastirilabilsin (acik anahtar kimligi, sir degil).
       - name: Check panel envelope keys
         shell: bash
         run: |
           if [ -z "$SENSE_ENVELOPE_KEYS" ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "::error title=SENSE_ENVELOPE_KEYS bos::Yayin (etiket) derlemesi panel anahtari olmadan yapilamaz."
+              exit 1
+            fi
             echo "::warning title=SENSE_ENVELOPE_KEYS bos::Bu derleme panel zarflarini dogrulayacak anahtar icermiyor; istemci her zarfi reddeder (unknown_key). Yayin oncesi repo degiskenine panelin acik anahtarini yazin."
           else
             echo "SENSE_ENVELOPE_KEYS: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | wc -l) anahtar"
+            echo "k: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | cut -d= -f1 | tr -d ' ' | paste -sd' ' -)"
           fi
 
       - name: Build
