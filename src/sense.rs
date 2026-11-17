@@ -22,10 +22,12 @@ use hbb_common::{config, log};
 use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Mutex};
 
-// Sense Remote: signed panel envelopes (wave 2). Verification only; the heartbeat applies them
-// (`hbbs_http/sync.rs`, task I4), until then nothing calls these modules outside tests.
+// Sense Remote: signed panel envelopes (wave 2). `envelope*` verify (I2); `envelope_apply` is the
+// heartbeat side (I4: what may be applied, what is reported); `hbbs_http/sync.rs` calls it.
 #[allow(dead_code)]
 pub mod envelope;
+#[allow(dead_code)]
+pub mod envelope_apply;
 #[allow(dead_code)]
 pub mod envelope_keys;
 #[allow(dead_code)]
@@ -139,6 +141,25 @@ pub fn installed_role() -> Option<SenseRole> {
 /// Called once at start (`load_custom_client`) in every process.
 pub fn apply_installed_role() {
     apply_role(installed_role());
+}
+
+/// Sense Remote: stores a role from a verified panel envelope (Host <-> Host + Controller only,
+/// plan K-ROL). Runs in the `--server` process (SYSTEM), which may write HKLM; the tray and UI
+/// processes read the new role at their next start.
+#[cfg(windows)]
+pub fn store_role(role: SenseRole) -> Result<(), String> {
+    use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+    let (key, _) = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .create_subkey(REG_SUBKEY)
+        .map_err(|err| err.to_string())?;
+    key.set_value(REG_VALUE_ROLE, &role.as_str().to_owned())
+        .map_err(|err| err.to_string())
+}
+
+#[cfg(not(windows))]
+pub fn store_role(_role: SenseRole) -> Result<(), String> {
+    // MAC-SONRA-9: root-owned role file.
+    Err("unsupported platform".to_owned())
 }
 
 /// Computer info from the setup screen. Kept on the computer until the panel exists
@@ -420,12 +441,21 @@ pub fn token_for_rendezvous(_access_token: &str) -> String {
 /// Settings pinned in `OVERWRITE_SETTINGS`: neither the user, a custom.txt nor a panel
 /// strategy can change them. `api-server` is pinned too so the settings page shows the real
 /// (fixed) address.
-pub fn security_overwrite_settings() -> [(&'static str, &'static str); 2] {
+/// Sense Remote (wave 2, plan K-İZİN-b): the connection window can not be hidden, a controller
+/// can not change this computer's settings remotely (permissions come only from signed panel
+/// envelopes) and the upstream updater stays off.
+pub fn security_overwrite_settings() -> [(&'static str, &'static str); 5] {
     [
         (keys::OPTION_API_SERVER, API_SERVER),
         (keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK, "N"),
+        (OPTION_ALLOW_HIDE_CM, "N"),
+        (keys::OPTION_ALLOW_REMOTE_CONFIG_MODIFICATION, "N"),
+        (keys::OPTION_ALLOW_AUTO_UPDATE, "N"),
     ]
 }
+
+/// Read by `hbb_common::password_security` (no shared constant for it).
+const OPTION_ALLOW_HIDE_CM: &str = "allow-hide-cm";
 
 fn apply_security_to(overwrite: &mut HashMap<String, String>) {
     for (k, v) in security_overwrite_settings() {
@@ -436,6 +466,31 @@ fn apply_security_to(overwrite: &mut HashMap<String, String>) {
 /// Called at the end of `load_custom_client` in every process.
 pub fn apply_security_settings() {
     apply_security_to(&mut config::OVERWRITE_SETTINGS.write().unwrap());
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sense Remote: no "license" from the exe name (YOL_HARITASI 2-not).
+//
+// Upstream reads an ID server, public key and API address from the executable's file name
+// (`...-host=evil.example,key=....exe` or an encoded `--licensed--` part) and prefers it over
+// every setting (`get_custom_rendezvous_server`, `get_key`, `get_rendezvous_server`, `bootstrap`,
+// the installer). Whoever renames or re-hosts the file could point a computer at their own ID
+// server and key. Sense builds never read it. (`--config <string>` stays: it needs an elevated,
+// installed client.)
+// ---------------------------------------------------------------------------------------------
+
+/// Whether the exe name may carry server settings. Never in our build.
+pub const EXE_NAME_LICENSE_ALLOWED: bool = false;
+
+/// Gate in front of upstream's exe-name parser (`platform::windows::get_license_from_exe_name`).
+#[allow(dead_code)] // only called on Windows
+pub fn license_from_exe_name(
+    exe: &str,
+) -> hbb_common::ResultType<crate::custom_server::CustomServer> {
+    if !EXE_NAME_LICENSE_ALLOWED {
+        hbb_common::bail!("Sense Remote: server settings from the exe name are disabled");
+    }
+    crate::custom_server::get_custom_server_from_string(exe)
 }
 
 // Sense Remote: the `sense` extension of heartbeat / sysinfo (health, display info, network
@@ -539,6 +594,51 @@ mod tests {
         assert_eq!(overwrite[keys::OPTION_API_SERVER], API_SERVER);
         assert_eq!(overwrite[keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK], "N");
         assert_eq!(overwrite["other"], "kept");
+    }
+
+    #[test]
+    fn hide_cm_remote_config_and_auto_update_are_pinned_off() {
+        let mut overwrite = HashMap::from([
+            (OPTION_ALLOW_HIDE_CM.to_owned(), "Y".to_owned()),
+            (keys::OPTION_ALLOW_REMOTE_CONFIG_MODIFICATION.to_owned(), "Y".to_owned()),
+            (keys::OPTION_ALLOW_AUTO_UPDATE.to_owned(), "Y".to_owned()),
+        ]);
+        apply_security_to(&mut overwrite);
+        for key in [
+            "allow-hide-cm",
+            "allow-remote-config-modification",
+            "allow-auto-update",
+        ] {
+            assert_eq!(overwrite[key], "N", "{key}");
+            assert!(!config::option2bool(key, &overwrite[key]), "{key}");
+            // The panel can not send them either.
+            assert!(envelope::ALLOWED_OPTIONS.iter().all(|(k, _)| *k != key), "{key}");
+        }
+    }
+
+    #[test]
+    fn exe_name_never_sets_servers_or_key() {
+        assert!(!EXE_NAME_LICENSE_ALLOWED);
+        for name in [
+            "SenseRemote-host=evil.example.net,key=Zm9vYmFyLiwyCg==,api=https://evil.example.net.exe",
+            "rustdesk-host=evil.example.net,.exe",
+            "C:\\Users\\x\\Downloads\\SenseRemote-host=10.0.0.1,key=abc.exe",
+        ] {
+            // Upstream accepts these names...
+            assert!(
+                crate::custom_server::get_custom_server_from_string(name)
+                    .is_ok_and(|lic| !lic.host.is_empty()),
+                "{name}"
+            );
+            // ...the Sense gate does not.
+            assert!(license_from_exe_name(name).is_err(), "{name}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn running_exe_has_no_license() {
+        assert!(crate::platform::windows::get_license_from_exe_name().is_err());
     }
 
     #[test]

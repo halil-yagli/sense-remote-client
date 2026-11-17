@@ -92,6 +92,8 @@ async fn start_hbbs_sync_async() {
     let mut last_sent: Option<Instant> = None;
     let mut info_uploaded = InfoUploaded::default();
     let mut sysinfo_ver = "".to_owned();
+    // Sense Remote: envelope state reported in every heartbeat (`sense.envelope_error`, ...).
+    let mut sense_report = crate::sense::envelope_apply::Report::default();
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -123,6 +125,16 @@ async fn start_hbbs_sync_async() {
                 // so it may be able to get the username before login.
                 // But strangely, sometimes we can get the username before login,
                 // we may not be able to get the username before login after the next restart.
+                // Sense Remote: changed adapters / IP addresses → upload sysinfo again, so the
+                // panel shows the current addresses (checked at most once a minute).
+                if info_uploaded.uploaded
+                    && tokio::task::spawn_blocking(crate::sense::report::network_changed_since_sysinfo)
+                        .await
+                        .unwrap_or(false)
+                {
+                    info_uploaded.uploaded = false;
+                    log::info!("Sense Remote: network addresses changed, uploading sysinfo again");
+                }
                 let mut v = crate::get_sysinfo();
                 let sys_username = v["username"].as_str().unwrap_or_default().to_string();
                 // Though the username comparison is only necessary on Windows,
@@ -176,6 +188,11 @@ async fn start_hbbs_sync_async() {
                     let note = Config::get_option(keys::OPTION_PRESET_NOTE);
                     if !note.is_empty() {
                         v[keys::OPTION_PRESET_NOTE] = json!(note);
+                    }
+                    // Sense Remote: role, Sense version, platform, displays, network addresses.
+                    // Measuring blocks (DXGI, adapters), so off the async loop.
+                    if let Ok(Some(sense)) = tokio::task::spawn_blocking(crate::sense::report::sysinfo_ext).await {
+                        v["sense"] = sense;
                     }
                     let v = v.to_string();
                     let mut hash = "".to_owned();
@@ -242,43 +259,149 @@ async fn start_hbbs_sync_async() {
                 }
                 let modified_at = LocalConfig::get_option("strategy_timestamp").parse::<i64>().unwrap_or(0);
                 v["modified_at"] = json!(modified_at);
+                // Sense Remote: `sense` = role, version, displays hash, health (once a minute),
+                // plus the envelope state (applied_seq, envelope_error, clock_skew_s). Not sent
+                // without an installed role.
+                if let Ok(Some(mut sense)) = tokio::task::spawn_blocking(crate::sense::report::heartbeat_base).await {
+                    sense_report.extend(&mut sense, crate::sense::envelope_seq::last_seq());
+                    v["sense"] = sense;
+                }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
                 if let Err(err) = &response {
                     hbb_common::throttled_log!(API_LOG_INTERVAL, warn, "Heartbeat failed: {err:?}");
                 }
+                // Sense Remote: only `sysinfo`, signed `sense_envelopes` and `sense_server_time`
+                // are acted on. The unsigned upstream `strategy`, `disconnect` and `modified_at`
+                // are never applied (anyone answering in the panel's name could set them).
                 if let Ok(s) = response {
-                    if let Ok(mut rsp) = serde_json::from_str::<HashMap::<&str, Value>>(&s) {
-                        if rsp.remove("sysinfo").is_some() {
+                    if let Some(answer) = crate::sense::envelope_apply::parse_answer(&s) {
+                        if answer.sysinfo {
                             info_uploaded.uploaded = false;
                             config::Status::set("sysinfo_hash", "".to_owned());
                             log::info!("sysinfo required to forcely update");
                         }
-                        if let Some(conns)  = rsp.remove("disconnect") {
-                                if let Ok(conns) = serde_json::from_value::<Vec<i32>>(conns) {
-                                    SENDER.lock().unwrap().send(conns).ok();
-                                }
+                        if !answer.ignored.is_empty() {
+                            hbb_common::throttled_log!(
+                                API_LOG_INTERVAL,
+                                warn,
+                                "Sense Remote: heartbeat answer keys not applied: {:?}",
+                                answer.ignored
+                            );
                         }
-                        if let Some(strategy) = rsp.remove("strategy") {
-                            if let Ok(strategy) = serde_json::from_value::<StrategyOptions>(strategy) {
-                                if let Err(error) = handle_config_options(strategy.config_options).await {
-                                    hbb_common::throttled_log!(API_LOG_INTERVAL, error, "Strategy update rejected: {error}");
-                                    continue;
-                                }
-                                log::info!("strategy updated");
-                            }
-                        }
-                        if let Some(rsp_modified_at) = rsp.remove("modified_at") {
-                            if let Ok(rsp_modified_at) = serde_json::from_value::<i64>(rsp_modified_at) {
-                                if rsp_modified_at != modified_at {
-                                    LocalConfig::set_option("strategy_timestamp".to_string(), rsp_modified_at.to_string());
-                                }
-                            }
-                        }
+                        sense_report.server_time(answer.server_time, now_s());
+                        sense_handle_envelopes(&answer.envelopes, &id, &mut sense_report).await;
                     }
                 }
             }
         }
     }
+}
+
+// Sense Remote: local clock, Unix seconds (envelope validity uses only this, plan R8).
+fn now_s() -> i64 {
+    hbb_common::get_time() / 1000
+}
+
+// Sense Remote: verifies and applies the envelopes of one heartbeat answer, in order (the panel
+// sends at most one). Only a verified envelope on a platform that applies them reaches
+// `sense_apply`; every rejection goes to the next heartbeat's `envelope_error`.
+#[cfg(not(any(target_os = "ios")))]
+async fn sense_handle_envelopes(
+    envelopes: &[Value],
+    id: &str,
+    report: &mut crate::sense::envelope_apply::Report,
+) {
+    use crate::sense::{envelope, envelope_apply, envelope_keys, envelope_seq};
+    if envelopes.is_empty() {
+        return;
+    }
+    let iss = envelope::expected_issuer();
+    let duuid = crate::encode64(hbb_common::get_uuid());
+    for item in envelopes {
+        let last_seq = envelope_seq::last_seq();
+        let now = now_s();
+        let expect = envelope::Expect {
+            iss: &iss,
+            did: id,
+            duuid: &duuid,
+            now_s: now,
+            last_seq,
+        };
+        let result = match envelope_apply::check(
+            item,
+            envelope_keys::trusted_keys(),
+            &expect,
+            envelope_apply::APPLIES,
+        ) {
+            Ok(verified) => match sense_apply(&verified).await {
+                Ok(()) => Ok(verified.seq),
+                Err(reason) => Err(envelope::Rejection {
+                    reason,
+                    k: Some(verified.k),
+                    seq: Some(verified.seq),
+                }),
+            },
+            Err(rejection) => Err(rejection),
+        };
+        match result {
+            Ok(seq) => {
+                report.applied();
+                log::info!("Sense Remote: panel envelope {seq} applied");
+            }
+            Err(rejection) => {
+                let (reason, seq) = (rejection.reason, rejection.seq);
+                if report.rejected(rejection, last_seq, now) {
+                    // The panel resends a pending envelope with every heartbeat.
+                    hbb_common::throttled_log!(
+                        API_LOG_INTERVAL,
+                        warn,
+                        "Sense Remote: panel envelope rejected: {} (seq {seq:?})",
+                        reason.as_str()
+                    );
+                }
+            }
+        }
+    }
+}
+
+// Sense Remote: applies a verified envelope. Order: role (HKLM) → settings → disconnect →
+// `EnvelopeSeq`. The seq is stored only when everything before it worked, so a failed apply is
+// retried with the panel's next envelope.
+#[cfg(not(any(target_os = "ios")))]
+async fn sense_apply(
+    verified: &crate::sense::envelope::Verified,
+) -> Result<(), crate::sense::envelope::Reason> {
+    use crate::sense::{envelope::Reason, envelope_apply, envelope_seq};
+    let new_role =
+        envelope_apply::role_change(crate::sense::installed_role(), verified.body.sense_role)?;
+    if let Some(role) = new_role {
+        crate::sense::store_role(role).map_err(|err| {
+            log::error!("Sense Remote: storing role {} failed: {err}", role.as_str());
+            Reason::ApplyFailed
+        })?;
+    }
+    // Allow list already checked; the upstream block list stays as defence in depth.
+    let options: HashMap<String, String> = verified.body.config_options.clone().into_iter().collect();
+    if let Err(err) = handle_config_options(options).await {
+        log::error!("Sense Remote: applying envelope settings failed: {err}");
+        return Err(Reason::ApplyFailed);
+    }
+    if let Some(ids) = &verified.body.disconnect {
+        let conns: Vec<i32> = ids.iter().filter_map(|id| i32::try_from(*id).ok()).collect();
+        if !conns.is_empty() {
+            SENDER.lock().unwrap().send(conns).ok();
+        }
+    }
+    envelope_seq::store_last_seq(verified.seq).map_err(|err| {
+        log::error!("Sense Remote: storing envelope seq failed: {err:?}");
+        Reason::ApplyFailed
+    })?;
+    if let Some(role) = new_role {
+        // This process now; the tray / UI processes read the stored role at their next start.
+        crate::sense::apply_role(Some(role));
+        log::info!("Sense Remote: role changed to {}", role.as_str());
+    }
+    Ok(())
 }
 
 fn heartbeat_url() -> String {
