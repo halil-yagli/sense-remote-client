@@ -35,7 +35,7 @@ const PROJECTS_PATH: &str = "/api/device-group/accessible";
 const PROJECTS_PAGE_SIZE: usize = 100;
 const PROJECTS_MAX_PAGES: usize = 10;
 /// Panel error codes (contract `EnrollErrorCode`); the wizard translates them.
-const ENROLL_ERRORS: [&str; 8] = [
+const ENROLL_ERRORS: [&str; 10] = [
     "token_invalid",
     "install_scope",
     "device_mismatch",
@@ -44,6 +44,10 @@ const ENROLL_ERRORS: [&str; 8] = [
     "uuid_mismatch",
     "rate_limited",
     "retry",
+    // Panel G3-1 (#31), HTTP 409: refused / removed computer; active computer re-registered
+    // with another or no device key without the panel's 30-minute reinstall permission.
+    "device_closed",
+    "reinstall_not_allowed",
 ];
 
 /// Role installed by this process (`sense::install`); registration sends this one, not what
@@ -428,8 +432,13 @@ pub fn enroll(input_json: &str) -> String {
 /// Sense Remote (K3-5): what the wizard offers for an error code. Codes made on this computer
 /// that a retry cannot fix get `none` (contact the team) or `edit` (fix the form); unknown and
 /// panel codes keep the wizard's own mapping (`default`).
+/// Panel G3-1: `device_closed` -> `skip` (no retry: "Kaydı atla" + ask a panel admin);
+/// `reinstall_not_allowed` -> `permit_retry` (an admin grants the reinstall permission in the
+/// panel, then "Yeniden dene" works).
 pub fn error_action(code: &str) -> &'static str {
     match code {
+        "device_closed" => "skip",
+        "reinstall_not_allowed" => "permit_retry",
         "build" | "identity" | "identity-store" | "not-installed" => "none",
         "validation" | "invalid-name" | "invalid-location" | "invalid-note"
         | "invalid-project" => "edit",
@@ -519,6 +528,9 @@ mod tests {
         for code in ["network", "retry", "rate_limited"] {
             assert_eq!(error_action(code), "retry", "{code}");
         }
+        // Panel G3-1: a retry alone never helps.
+        assert_eq!(error_action("device_closed"), "skip");
+        assert_eq!(error_action("reinstall_not_allowed"), "permit_retry");
         // Panel codes the wizard already maps keep its mapping.
         for code in ["token_invalid", "install_scope", "device_mismatch", "uuid_mismatch", "x"] {
             assert_eq!(error_action(code), "default", "{code}");
@@ -659,6 +671,8 @@ mod tests {
             (400, "validation"),
             (404, "project_not_found"),
             (409, "uuid_mismatch"),
+            (409, "device_closed"),
+            (409, "reinstall_not_allowed"),
             (429, "rate_limited"),
             (400, "retry"),
         ] {
