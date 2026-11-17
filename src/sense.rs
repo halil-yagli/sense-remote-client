@@ -22,6 +22,15 @@ use hbb_common::{config, log};
 use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Mutex};
 
+// Sense Remote: signed panel envelopes (wave 2). Verification only; the heartbeat applies them
+// (`hbbs_http/sync.rs`, task I4), until then nothing calls these modules outside tests.
+#[allow(dead_code)]
+pub mod envelope;
+#[allow(dead_code)]
+pub mod envelope_keys;
+#[allow(dead_code)]
+pub mod envelope_seq;
+
 /// Registry key (under HKLM) that holds the installed role and setup info.
 pub const REG_SUBKEY: &str = "SOFTWARE\\SenseRemote";
 const REG_KEY_FOR_CMD: &str = "HKEY_LOCAL_MACHINE\\SOFTWARE\\SenseRemote";
