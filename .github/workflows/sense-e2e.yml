@@ -203,41 +203,38 @@ jobs:
 
       # ——— Panelsiz kip (sır yok) ———
 
-      - name: Start local record server
+      # Tek adım: koşucu bir adımın başlattığı süreçleri adım sonunda kapatır; kayıt sunucusu
+      # kurulumdan Controller doğrulamasına dek bu adımın içinde açık kalmalı.
+      - name: E2E without panel (record server, Host, Controller)
         if: ${{ env.PANEL_MODE != 'true' }}
+        timeout-minutes: 30
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Force kanit | Out-Null
-          Start-Process -FilePath node -ArgumentList "ci/sense-e2e/kayit-sunucusu.mjs", $env:SENSE_E2E_PORT, "$PWD\kanit\kayit.jsonl" -RedirectStandardOutput "$PWD\kanit\kayit-sunucusu.log" -WindowStyle Hidden
-          $deadline = (Get-Date).AddSeconds(30)
-          while (-not (Test-NetConnection 127.0.0.1 -Port $env:SENSE_E2E_PORT -InformationLevel Quiet)) {
-            if ((Get-Date) -gt $deadline) { throw "kayıt sunucusu açılmadı" }
-            Start-Sleep -Seconds 1
+          $kimlik = "$env:RUNNER_TEMP\kimlik.json"
+          $sunucu = Start-Process -PassThru -FilePath node -ArgumentList "ci/sense-e2e/kayit-sunucusu.mjs", $env:SENSE_E2E_PORT, "$PWD\kanit\kayit.jsonl" -RedirectStandardOutput "$PWD\kanit\kayit-sunucusu.log" -NoNewWindow
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            while (-not (Test-NetConnection 127.0.0.1 -Port $env:SENSE_E2E_PORT -InformationLevel Quiet)) {
+              if ((Get-Date) -gt $deadline) { throw "kayıt sunucusu açılmadı" }
+              Start-Sleep -Seconds 1
+            }
+            Write-Host "--- Sessiz kurulum (Host)"
+            $since = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem kur -Uygulama "$PWD\rustdesk" -Rol host
+            # Açık anahtar + uuid (gizli değil; loga yine de yazılmaz).
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem kimlik | Select-Object -Last 1 | Out-File -Encoding utf8NoBOM $kimlik
+            Write-Host "--- Host heartbeat (sense, caps, imzalı rapor)"
+            node ci/sense-e2e/dogrula.mjs kanit/kayit.jsonl $kimlik host $since 300
+            Write-Host "--- Controller rolü"
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem durdur
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem rol -Rol controller
+            $since = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem baslat
+            node ci/sense-e2e/dogrula.mjs kanit/kayit.jsonl $kimlik controller $since 300
+          } finally {
+            Stop-Process -Id $sunucu.Id -Force -ErrorAction SilentlyContinue
           }
-
-      - name: Silent install as Host
-        if: ${{ env.PANEL_MODE != 'true' }}
-        timeout-minutes: 15
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          "since=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" >> $env:GITHUB_ENV
-          pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem kur -Uygulama "$PWD\rustdesk" -Rol host
-          # Açık anahtar + uuid (gizli değil; loga yine de yazılmaz).
-          pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem kimlik | Select-Object -Last 1 | Out-File -Encoding utf8NoBOM "$env:RUNNER_TEMP\kimlik.json"
-
-      - name: Verify Host heartbeat (sense, caps, signed report)
-        if: ${{ env.PANEL_MODE != 'true' }}
-        run: node ci/sense-e2e/dogrula.mjs kanit/kayit.jsonl "$env:RUNNER_TEMP\kimlik.json" host $env:since 300
-
-      - name: Switch to Controller and verify heartbeat
-        if: ${{ env.PANEL_MODE != 'true' }}
-        timeout-minutes: 15
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem durdur
-          pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem rol -Rol controller
-          $since = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem baslat
-          node ci/sense-e2e/dogrula.mjs kanit/kayit.jsonl "$env:RUNNER_TEMP\kimlik.json" controller $since 300
 
       # ——— Kanıt (her iki kip) ———
 
