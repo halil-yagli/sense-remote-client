@@ -504,6 +504,8 @@ pub mod report;
 #[cfg(windows)]
 mod displays_win;
 mod network;
+// Sense Remote: maintenance curtain of ghost mode; privacy mode turns it on (wave 3 I10).
+pub mod curtain;
 
 #[cfg(test)]
 mod tests {
