@@ -1,0 +1,251 @@
+# Sense Remote: Windows uçtan uca testi (Dalga 3, E4). Yalnız elle çalışır (workflow_dispatch).
+# Gerçek istemci, panelin YEREL adresiyle derlenir (SENSE_API_SERVER=http://127.0.0.1:3110 — yalnız
+# bu iş akışında; sürüm derlemesi sense-build.yml'dedir ve yerleşik adresi kullanır), koşucuya
+# sessiz kurulur ve:
+#   - panel kipi (SENSE_PANEL_READ_TOKEN sırrı varsa): özel panel deposu çekilir, gerçek panel-api +
+#     sahte OIDC (Node 24) açılır; Host kurulumu → aynı id/uuid ile kurulum girişi + tarayıcı onayı +
+#     kayıt → etkin, heartbeat'te sense + imzalı rapor (caps) → Controller rolünde heartbeat.
+#   - panelsiz kip (sır yoksa): panel adımları AÇIK bir uyarıyla atlanır; yerel kayıt sunucusu
+#     istemcinin gönderdiklerini kaydeder ve doğrular (Host + Controller heartbeat, imzalı rapor).
+# Gizli değerler loga yazılmaz; panel kaynak kodu esere (artifact) girmez. Bloklamaz (plan E4).
+name: Sense Remote e2e (Windows)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sense-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SCITER_RUST_VERSION: "1.75"
+  LLVM_VERSION: "15.0.6"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  VERSION: "1.5.3"
+  SENSE_VERSION: "1"
+
+jobs:
+  # Panel deposu özel: okumak için ince ayarlı, yalnız okuma izinli bir anahtar gerekir.
+  # Sır yoksa panel kipi atlanır (iş akışı düşmez, uyarı + özet yazar).
+  gate:
+    name: panel access
+    runs-on: ubuntu-24.04
+    outputs:
+      panel: ${{ steps.check.outputs.panel }}
+    steps:
+      - name: Check SENSE_PANEL_READ_TOKEN
+        id: check
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SENSE_PANEL_READ_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "panel=true" >> "$GITHUB_OUTPUT"
+            echo "Panel kipi: SENSE_PANEL_READ_TOKEN tanımlı (değer yazılmaz)."
+          else
+            echo "panel=false" >> "$GITHUB_OUTPUT"
+            MSG="SENSE_PANEL_READ_TOKEN sırrı yok: panel adımları (kurulum girişi, kayıt, panelde etkin, imzalı rapor kabulü) ATLANDI. Yalnız panelsiz kip çalışır. Sır: sense-remote-panel için yalnız 'Contents: Read' izinli ince ayarlı anahtar (Settings > Secrets and variables > Actions)."
+            echo "::warning title=Panel adımları atlandı::$MSG"
+            { echo "### Panel adımları atlandı"; echo; echo "$MSG"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  # İş kimliği bilerek `windows`: Rust önbelleği sense-build.yml'deki Windows işinin anahtarıyla aynı
+  # olsun (yalnız okunur, bu iş önbellek yazmaz). SENSE_API_SERVER yalnız sense crate'ini yeniden derletir.
+  windows:
+    name: windows e2e (${{ needs.gate.outputs.panel == 'true' && 'panel' || 'panelsiz' }})
+    needs: [gate, generate-bridge]
+    runs-on: windows-2022
+    timeout-minutes: 150
+    env:
+      SENSE_E2E_PORT: "3110"
+      # Panelin yerel adresi (E3 yığınının portu). Yalnız bu iş akışında; http yalnız localhost'a izinli.
+      SENSE_API_SERVER: "http://127.0.0.1:3110"
+      PANEL_MODE: ${{ needs.gate.outputs.panel }}
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0 # v2.0.9
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225 # v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
+
+      - name: Replace engine with rustdesk custom flutter engine
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: Patch flutter
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.SCITER_RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: windows-2022
+          save-if: false
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        shell: bash
+        run: |
+          if ! $VCPKG_ROOT/vcpkg install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do echo "$_1:"; cat "$_1"; done
+            exit 1
+          fi
+
+      # Panel zarf anahtarı bu derlemede yok (SENSE_ENVELOPE_KEYS boş): zarf uygulaması bu testin
+      # kapsamı dışında; istemci her zarfı reddeder. Heartbeat, kayıt ve imzalı rapor etkilenmez.
+      - name: Build (SENSE_API_SERVER = local panel)
+        run: |
+          python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          mv ./flutter/build/windows/x64/runner/Release ./rustdesk
+          # install_me <APP_NAME>.exe bekler (sense-build.yml ile aynı ad).
+          mv ./rustdesk/rustdesk.exe ./rustdesk/SenseRemote.exe
+
+      - name: Set up Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      # ——— Panel kipi ———
+
+      - name: Checkout panel (private)
+        if: ${{ env.PANEL_MODE == 'true' }}
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ github.repository_owner }}/sense-remote-panel
+          ref: main
+          path: panel
+          token: ${{ secrets.SENSE_PANEL_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up pnpm
+        if: ${{ env.PANEL_MODE == 'true' }}
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: panel/package.json
+
+      - name: Prepare panel (install, build web, Chromium)
+        if: ${{ env.PANEL_MODE == 'true' }}
+        working-directory: panel
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm install --frozen-lockfile
+          pnpm --filter @sense-remote/site --filter @sense-remote/panel-web run build
+          pnpm --filter @sense-remote/panel-web exec playwright install chromium
+          New-Item -ItemType Directory -Force apps/panel-web/e2e-sense-ci | Out-Null
+          Copy-Item -Force ../ci/sense-e2e/panel/* apps/panel-web/e2e-sense-ci/
+
+      - name: E2E with panel (install, enroll, heartbeat, Controller)
+        if: ${{ env.PANEL_MODE == 'true' }}
+        working-directory: panel
+        timeout-minutes: 40
+        env:
+          SENSE_CI_DIR: ${{ github.workspace }}\ci\sense-e2e
+          SENSE_APP_DIR: ${{ github.workspace }}\rustdesk
+          SENSE_EVIDENCE_DIR: ${{ github.workspace }}\kanit
+        run: pnpm --filter @sense-remote/panel-web exec playwright test -c e2e-sense-ci/playwright.config.ts
+
+      # ——— Panelsiz kip (sır yok) ———
+
+      # Tek adım: koşucu bir adımın başlattığı süreçleri adım sonunda kapatır; kayıt sunucusu
+      # kurulumdan Controller doğrulamasına dek bu adımın içinde açık kalmalı.
+      - name: E2E without panel (record server, Host, Controller)
+        if: ${{ env.PANEL_MODE != 'true' }}
+        timeout-minutes: 30
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Force kanit | Out-Null
+          $kimlik = "$env:RUNNER_TEMP\kimlik.json"
+          $sunucu = Start-Process -PassThru -FilePath node -ArgumentList "ci/sense-e2e/kayit-sunucusu.mjs", $env:SENSE_E2E_PORT, "$PWD\kanit\kayit.jsonl" -RedirectStandardOutput "$PWD\kanit\kayit-sunucusu.log" -NoNewWindow
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            while (-not (Test-NetConnection 127.0.0.1 -Port $env:SENSE_E2E_PORT -InformationLevel Quiet)) {
+              if ((Get-Date) -gt $deadline) { throw "kayıt sunucusu açılmadı" }
+              Start-Sleep -Seconds 1
+            }
+            Write-Host "--- Sessiz kurulum (Host)"
+            $since = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem kur -Uygulama "$PWD\rustdesk" -Rol host
+            # Açık anahtar + uuid (gizli değil; loga yine de yazılmaz).
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem kimlik | Select-Object -Last 1 | Out-File -Encoding utf8NoBOM $kimlik
+            Write-Host "--- Host heartbeat (sense, caps, imzalı rapor)"
+            node ci/sense-e2e/dogrula.mjs kanit/kayit.jsonl $kimlik host $since 300
+            Write-Host "--- Controller rolü"
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem durdur
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem rol -Rol controller
+            $since = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem baslat
+            node ci/sense-e2e/dogrula.mjs kanit/kayit.jsonl $kimlik controller $since 300
+          } finally {
+            Stop-Process -Id $sunucu.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      # ——— Kanıt (her iki kip) ———
+
+      - name: Collect client logs
+        if: ${{ !cancelled() }}
+        run: pwsh -NoProfile -File ci/sense-e2e/istemci.ps1 -Islem topla -Hedef "$PWD\kanit\istemci"
+
+      # Kayıt sunucusunun dosyası id/uuid içerir (tek kullanımlık koşucu); anahtar ve panel kodu yok.
+      - name: Upload evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sense-e2e-kanit
+          path: |
+            kanit/
+            panel/artifacts/sense-e2e/
+          retention-days: 7
+          if-no-files-found: warn
