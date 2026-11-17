@@ -17,6 +17,8 @@ on:
     paths-ignore:
       - "docs/**"
       - "README.md"
+    # Surum: v<n> etiketi (yalniz tam sayi) -> Windows derlemesi -> TASLAK GitHub surumu.
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -41,14 +43,57 @@ env:
   SENSE_ENVELOPE_KEYS: ${{ vars.SENSE_ENVELOPE_KEYS }}
 
 jobs:
+  # Etiket surumu: bicim ve on kosullar derlemeden once denetlenir (etiket disinda atlanir).
+  verify-tag:
+    name: verify release tag
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Check tag, keys and API server
+        id: check
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          KEYS: ${{ vars.SENSE_ENVELOPE_KEYS }}
+          API_SERVER: ${{ vars.SENSE_API_SERVER }}
+        run: |
+          # v<n>: yalniz tam sayi, bastaki sifir yok (v1, v2, v10); v1.2, v01, v1-rc reddedilir.
+          if ! [[ "$TAG" =~ ^v[1-9][0-9]{0,5}$ ]]; then
+            echo "::error title=Gecersiz surum etiketi::'$TAG' kabul edilmez; etiket v<n> olmali (n tam sayi: v1, v2, v3 ...)."
+            exit 1
+          fi
+          # Etiket derlemesi anahtarsiz cikmaz: istemci her zarfi reddederdi (unknown_key).
+          if [ -z "$KEYS" ]; then
+            echo "::error title=SENSE_ENVELOPE_KEYS bos::Etiket derlemesi panelin acik anahtari olmadan yapilmaz. Once repo degiskenini yazin (yayin adimi 6a)."
+            exit 1
+          fi
+          # Surum derlemesi her zaman yerlesik panel adresini (https://remote.snsdpt.com) kullanir.
+          if [ -n "$API_SERVER" ]; then
+            echo "::error title=SENSE_API_SERVER tanimli::Etiket derlemesinde SENSE_API_SERVER tanimsiz olmali; yoksa istemci baska bir panele baglanir."
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
   generate-bridge:
+    needs: [verify-tag]
+    # verify-tag etiket disinda atlanir; atlanmasi derlemeyi engellemez, basarisizligi engeller.
+    if: ${{ !cancelled() && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped') }}
     uses: ./.github/workflows/bridge.yml
 
   windows:
     name: windows-x86_64
-    needs: [generate-bridge]
+    needs: [verify-tag, generate-bridge]
+    if: ${{ !cancelled() && needs.generate-bridge.result == 'success' }}
     runs-on: windows-2022
     steps:
+      # Etiket derlemesinde surum numarasi etiketten gelir (uygulamaya ve dosya adina gider).
+      - name: Set version from tag
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: echo "SENSE_VERSION=${{ needs.verify-tag.outputs.version }}" >> "$GITHUB_ENV"
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
         with:
@@ -128,13 +173,20 @@ jobs:
           fi
 
       # Sense Remote: anahtarsiz derleme surer ama panelden gelen hicbir yetki uygulanmaz.
+      # G2-9: etiket (yayin) derlemesinde anahtarsizlik hata; k kimlikleri loga yazilir ki
+      # panelin GET /signing-key ciktisiyla karsilastirilabilsin (acik anahtar kimligi, sir degil).
       - name: Check panel envelope keys
         shell: bash
         run: |
           if [ -z "$SENSE_ENVELOPE_KEYS" ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "::error title=SENSE_ENVELOPE_KEYS bos::Yayin (etiket) derlemesi panel anahtari olmadan yapilamaz."
+              exit 1
+            fi
             echo "::warning title=SENSE_ENVELOPE_KEYS bos::Bu derleme panel zarflarini dogrulayacak anahtar icermiyor; istemci her zarfi reddeder (unknown_key). Yayin oncesi repo degiskenine panelin acik anahtarini yazin."
           else
             echo "SENSE_ENVELOPE_KEYS: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | wc -l) anahtar"
+            echo "k: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | cut -d= -f1 | tr -d ' ' | paste -sd' ' -)"
           fi
 
       - name: Build
@@ -179,7 +231,8 @@ jobs:
     needs: [generate-bridge]
     # Windows oncelikli (karar 2026-11-16): Mac PR'larda calismaz, yalniz master'a
     # gonderimde ve elle (workflow_dispatch) calisir; Mac kirilmasi boylece yine gorulur.
-    if: ${{ github.event_name != 'pull_request' }}
+    # Etiket (surum) derlemesi yalniz Windows'tur: macOS surum dosyasi bu asamada yok.
+    if: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
@@ -298,3 +351,37 @@ jobs:
           path: out/*.dmg
           if-no-files-found: error
           retention-days: 14
+
+  # Etiket: SHA-256 uret, herkese ACIK OLMAYAN taslak GitHub surumu olustur (yayinlamak insan adimi).
+  release-draft:
+    name: draft release
+    needs: [verify-tag, windows]
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sense-remote-windows-x86_64
+          path: ./release
+
+      - name: Checksums and draft release
+        shell: bash
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          FILE="SenseRemote-Kurulum-${VERSION}.exe"
+          [ -f "$FILE" ] || { echo "::error::$FILE bulunamadi"; ls -la; exit 1; }
+          sha256sum "$FILE" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          # --draft: herkese acik degil; yayinlamayi ekip elle yapar.
+          gh release create "$TAG" "$FILE" SHA256SUMS.txt \
+            --repo "$REPO" --draft --verify-tag \
+            --title "Sense Remote ${VERSION}" \
+            --notes "Taslak. Imzasiz Windows kurulum dosyasi; dogrulama icin SHA256SUMS.txt. Surum notlari yayindan once eklenir."

@@ -138,11 +138,13 @@ pub struct Expect<'a> {
     pub last_seq: u64,
 }
 
-/// Role the panel may set (plan K-ROL): never Controller only.
+/// Role the panel may set. Sense Remote (wave 3, K-ROL-2): all three roles; the panel sends
+/// `controller` only to computers that report the `role_all` capability (this build).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PanelRole {
     Host,
+    Controller,
     HostController,
 }
 
@@ -150,6 +152,7 @@ impl PanelRole {
     pub fn sense_role(self) -> SenseRole {
         match self {
             PanelRole::Host => SenseRole::Host,
+            PanelRole::Controller => SenseRole::Controller,
             PanelRole::HostController => SenseRole::Both,
         }
     }

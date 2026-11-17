@@ -25,6 +25,54 @@ const LOGIN_ACCOUNT_AUTH: &str = "Login account auth";
 pub struct OidcAuthUrl {
     code: String,
     url: Url,
+    // Sense Remote: 6-digit pairing code from the panel (wave 3 K-GİRİŞ). The panel's approval
+    // page shows the same code; the app and the setup wizard show it large so the employee can
+    // compare them before approving. Older panels do not send it.
+    #[serde(default)]
+    pairing_code: Option<String>,
+}
+
+/// Sense Remote: why the client signs in (wave 3 K-GİRİŞ). The panel gives a token from an
+/// `Install` login the right to register this computer (`POST /api/sense/enroll`, 30 min).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginPurpose {
+    App,
+    Install,
+}
+
+impl LoginPurpose {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::App => "app",
+            Self::Install => "install",
+        }
+    }
+}
+
+/// Sense Remote: body of `POST /api/oidc/auth` with the `sense` part (contract v3 `OidcAuthBody`).
+fn auth_request_body(
+    op: &str,
+    id: &str,
+    uuid: &str,
+    device_info: serde_json::Value,
+    api_server: &str,
+    purpose: LoginPurpose,
+) -> serde_json::Value {
+    serde_json::json!({
+        "op": op,
+        "id": id,
+        "uuid": uuid,
+        "deviceInfo": device_info,
+        "apiDomain": api_server,
+        "sense": { "v": 1, "purpose": purpose.as_str() },
+    })
+}
+
+/// Sense Remote: only six ASCII digits are shown; anything else is dropped (contract
+/// `PairingCode`), so a malformed answer can never look like a code to compare.
+pub fn valid_pairing_code(code: Option<&str>) -> Option<String> {
+    let code = code?;
+    (code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit())).then(|| code.to_owned())
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
@@ -124,6 +172,9 @@ pub struct AuthResult {
     pub failed_msg: String,
     pub url: Option<String>,
     pub auth_body: Option<AuthBody>,
+    // Sense Remote: pairing code to show while waiting for the browser (wave 3 K-GİRİŞ).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pairing_code: Option<String>,
 }
 
 impl Default for UserStatus {
@@ -162,15 +213,19 @@ impl OidcSession {
         op: &str,
         id: &str,
         uuid: &str,
+        purpose: LoginPurpose,
     ) -> ResultType<HbbHttpResponse<OidcAuthUrl>> {
         Self::ensure_client(api_server);
-        let body = serde_json::json!({
-            "op": op,
-            "id": id,
-            "uuid": uuid,
-            "deviceInfo": crate::ui_interface::get_login_device_info(),
-            "apiDomain": api_server,
-        })
+        // Sense Remote: the body also says why we sign in (`sense.purpose`).
+        let body = auth_request_body(
+            op,
+            id,
+            uuid,
+            serde_json::to_value(crate::ui_interface::get_login_device_info())
+                .unwrap_or_default(),
+            api_server,
+            purpose,
+        )
         .to_string();
         let resp = crate::post_request_sync(format!("{}/api/oidc/auth", api_server), body, "")?;
         HbbHttpResponse::parse(&resp)
@@ -253,8 +308,9 @@ impl OidcSession {
         uuid: String,
         remember_me: bool,
         auth_attempt: u64,
+        purpose: LoginPurpose,
     ) {
-        let auth_request_res = Self::auth(&api_server, &op, &id, &uuid);
+        let auth_request_res = Self::auth(&api_server, &op, &id, &uuid, purpose);
         log::info!("Request oidc auth result: {:?}", &auth_request_res);
         if !Self::auth_attempt_is_current(auth_attempt) {
             return;
@@ -366,6 +422,20 @@ impl OidcSession {
         uuid: String,
         remember_me: bool,
     ) {
+        Self::account_auth_for(api_server, op, id, uuid, remember_me, LoginPurpose::App)
+    }
+
+    /// Sense Remote: `account_auth` with a purpose. The setup wizard signs in with `Install`
+    /// and `remember_me = false`: the token stays in memory until registration decides
+    /// whether this computer may keep it (wave 3 K-KAYIT-b).
+    pub fn account_auth_for(
+        api_server: String,
+        op: String,
+        id: String,
+        uuid: String,
+        remember_me: bool,
+        purpose: LoginPurpose,
+    ) {
         let auth_attempt = OIDC_SESSION.write().unwrap().start_auth_attempt();
         Self::wait_stop_querying();
         {
@@ -376,7 +446,7 @@ impl OidcSession {
             session.before_task();
         }
         std::thread::spawn(move || {
-            Self::auth_task(api_server, op, id, uuid, remember_me, auth_attempt);
+            Self::auth_task(api_server, op, id, uuid, remember_me, auth_attempt, purpose);
             OIDC_SESSION.write().unwrap().after_task();
         });
     }
@@ -387,6 +457,11 @@ impl OidcSession {
             failed_msg: self.failed_msg.clone(),
             url: self.code_url.as_ref().map(|x| x.url.to_string()),
             auth_body: self.auth_body.clone(),
+            pairing_code: valid_pairing_code(
+                self.code_url
+                    .as_ref()
+                    .and_then(|x| x.pairing_code.as_deref()),
+            ),
         }
     }
 
@@ -396,5 +471,96 @@ impl OidcSession {
 
     pub fn get_result() -> AuthResult {
         OIDC_SESSION.read().unwrap().get_result_()
+    }
+
+    /// Sense Remote: the access token of the finished sign-in, kept only in memory (setup
+    /// wizard; `remember_me = false`).
+    pub fn sense_access_token() -> Option<String> {
+        let session = OIDC_SESSION.read().unwrap();
+        let body = session.auth_body.as_ref()?;
+        (body.r#type == "access_token" && !body.access_token.is_empty())
+            .then(|| body.access_token.clone())
+    }
+
+    /// Sense Remote: the signed-in user of the finished sign-in (name = e-mail).
+    pub fn sense_user() -> Option<UserPayload> {
+        let session = OIDC_SESSION.read().unwrap();
+        session.auth_body.as_ref().map(|body| body.user.clone())
+    }
+
+    /// Sense Remote: stops a running sign-in and forgets a finished one (token and user) in
+    /// this process.
+    pub fn sense_forget_auth() {
+        let mut session = OIDC_SESSION.write().unwrap();
+        session.cancel_auth_attempt();
+        session.state_msg = REQUESTING_ACCOUNT_AUTH;
+        session.failed_msg = "".to_owned();
+        session.code_url = None;
+        session.auth_body = None;
+    }
+}
+
+// Sense Remote: wave 3 K-GİRİŞ (login purpose and pairing code).
+#[cfg(test)]
+mod sense_tests {
+    use super::*;
+
+    #[test]
+    fn auth_body_says_why_we_sign_in() {
+        for (purpose, value) in [(LoginPurpose::App, "app"), (LoginPurpose::Install, "install")] {
+            let body = auth_request_body(
+                "Google",
+                "123456789",
+                "dXVpZA==",
+                serde_json::json!({"os": "windows", "type": "client", "name": "pc"}),
+                "https://remote.snsdpt.com",
+                purpose,
+            );
+            assert_eq!(body["sense"], serde_json::json!({"v": 1, "purpose": value}));
+            assert_eq!(body["op"], "Google");
+            assert_eq!(body["id"], "123456789");
+            assert_eq!(body["uuid"], "dXVpZA==");
+            assert_eq!(body["deviceInfo"]["type"], "client");
+            assert_eq!(body["apiDomain"], "https://remote.snsdpt.com");
+        }
+    }
+
+    #[test]
+    fn auth_url_reads_pairing_code_and_older_answers() {
+        let with: OidcAuthUrl = serde_json::from_str(
+            r#"{"code":"c","url":"https://remote.snsdpt.com/onay/x","pairing_code":"482913"}"#,
+        )
+        .unwrap();
+        assert_eq!(with.pairing_code.as_deref(), Some("482913"));
+        let without: OidcAuthUrl =
+            serde_json::from_str(r#"{"code":"c","url":"https://remote.snsdpt.com/x"}"#).unwrap();
+        assert_eq!(without.pairing_code, None);
+    }
+
+    #[test]
+    fn only_six_digits_are_shown_as_pairing_code() {
+        assert_eq!(valid_pairing_code(Some("482913")), Some("482913".to_owned()));
+        assert_eq!(valid_pairing_code(Some("000000")), Some("000000".to_owned()));
+        for bad in ["", "48291", "4829134", "48291a", "482 913", " 482913", "４８２９１３"] {
+            assert_eq!(valid_pairing_code(Some(bad)), None, "{bad:?}");
+        }
+        assert_eq!(valid_pairing_code(None), None);
+    }
+
+    #[test]
+    fn result_carries_a_valid_pairing_code_only() {
+        let mut session = OidcSession::new();
+        session.code_url = Some(OidcAuthUrl {
+            code: "c".to_owned(),
+            url: Url::parse("https://remote.snsdpt.com/x").unwrap(),
+            pairing_code: Some("123456".to_owned()),
+        });
+        let json = serde_json::to_value(session.get_result_()).unwrap();
+        assert_eq!(json["pairing_code"], "123456");
+        session.code_url.as_mut().unwrap().pairing_code = Some("12345x".to_owned());
+        let json = serde_json::to_value(session.get_result_()).unwrap();
+        assert!(json.get("pairing_code").is_none());
+        session.code_url = None;
+        assert_eq!(session.get_result_().pairing_code, None);
     }
 }

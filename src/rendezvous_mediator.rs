@@ -312,6 +312,15 @@ impl RendezvousMediator {
     pub async fn start_all() {
         crate::test_nat_type();
         if config::is_outgoing_only() {
+            // Sense Remote (wave 3, K-CTRL): a Controller runs the service too, but only for the
+            // panel sync loop (heartbeat, signed envelopes, role changes). No ID server
+            // registration, no direct server, no LAN listening: those stay below this branch.
+            if crate::sense::envelope_apply::service_when_outgoing_only(
+                crate::sense::installed_role(),
+                false,
+            ) {
+                crate::hbbs_http::sync::start();
+            }
             loop {
                 sleep(1.).await;
             }

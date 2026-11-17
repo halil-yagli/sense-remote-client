@@ -21,6 +21,10 @@ import '../../models/shortcut_model.dart';
 import '../../common/shared_state.dart';
 import '../../utils/image.dart';
 import '../widgets/remote_toolbar.dart';
+// Sense Remote: connection window parts.
+import '../widgets/sense_remote_strings.dart' show kSenseRemoteWindow;
+import '../widgets/sense_remote_window.dart'
+    show SenseRemoteOverlay, SenseRemoteSession;
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
 import 'macos_full_screen_focus_recovery.dart';
@@ -700,6 +704,8 @@ class _RemotePageState extends State<RemotePage>
     WakelockManager.disable(_uniqueKey);
     await Get.delete<FFI>(tag: widget.id);
     removeSharedStates(widget.id);
+    // Sense Remote: drop the connection window's Sense state (timers, data).
+    SenseRemoteSession.remove(widget.id);
   }
 
   Widget emptyOverlay() => BlockableOverlay(
@@ -782,6 +788,10 @@ class _RemotePageState extends State<RemotePage>
                             ));
                       }
                     }(),
+              // Sense Remote: ghost-mode strip, status box, display info and
+              // chat panel above the remote image, below the toolbar.
+              if (kSenseRemoteWindow && _ffi.ffiModel.pi.isSet.isTrue)
+                SenseRemoteOverlay(id: widget.id, ffi: _ffi),
               // Use Overlay to enable rebuild every time on menu button click.
               // Hide toolbar when relative mouse mode is active to prevent
               // cursor from escaping to toolbar area.

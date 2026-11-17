@@ -28,7 +28,7 @@
 //! MAC-SONRA: macOS sends no displays yet (CGDisplay / IOKit, plan MAC-SONRA-10); health comes
 //! from `sysinfo` (temperature may be unavailable on Apple Silicon, MAC-SONRA-11).
 
-// Sense Remote: the sync loop starts using these in task I4.
+// Sense Remote: `health()`, `displays()` and `network()` are only used by tests so far.
 #![allow(dead_code)]
 
 use super::{network::SenseNetwork, SenseRole};
@@ -47,6 +47,9 @@ use std::{
 
 /// `v` of the extension (`SENSE_EXT_VERSION` in the contract).
 pub const EXT_VERSION: u32 = 1;
+/// Sense Remote (wave 3, K-ROL-2): capabilities in every heartbeat (`sense.caps`). `role_all`:
+/// this build takes all three roles from the panel. The curtain task (I10) adds `curtain` here.
+pub const CAPS: [&str; 1] = ["role_all"];
 /// Health goes into the heartbeat at most this often (contract: "en çok 60 sn'de bir").
 pub const HEALTH_INTERVAL: Duration = Duration::from_secs(60);
 /// The heartbeat's `displays_hash` is recomputed at most this often (the heartbeat runs every
@@ -155,6 +158,9 @@ pub struct HeartbeatBase {
     pub displays_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<SenseHealth>,
+    /// Sense Remote (K-ROL-2): `CAPS`; covered by the signed report (`report_sig.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caps: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -196,6 +202,7 @@ pub fn heartbeat_base() -> Option<Value> {
         app_version,
         displays_hash: cached_displays_hash(),
         health,
+        caps: Some(CAPS.iter().map(|cap| (*cap).to_owned()).collect()),
     };
     to_json(&base)
 }
@@ -218,12 +225,17 @@ pub fn displays() -> (Vec<Value>, Option<String>) {
 
 /// `sense.network`: Ethernet / Wi-Fi adapters with their IP addresses (no MAC).
 pub fn network() -> Vec<Value> {
-    super::network::collect().iter().filter_map(to_json).collect()
+    super::network::collect()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(to_json)
+        .collect()
 }
 
+/// Sense Remote (K2-5): `Some(vec![])` (no adapter left) is sent as `network: []`, so the panel
+/// stops showing the old addresses; only `None` (adapters could not be read) leaves it out.
 fn network_list() -> Option<Vec<SenseNetwork>> {
-    let list = super::network::collect();
-    (!list.is_empty()).then_some(list)
+    super::network::collect()
 }
 
 // Hash of the network list in the last sysinfo (`None` = no sysinfo built yet) and the time of
@@ -234,6 +246,15 @@ static LAST_NETWORK_CHECK: Mutex<Option<Instant>> = Mutex::new(None);
 /// True when the adapters / addresses differ from those in the last `sysinfo_ext()`: the sync
 /// loop then uploads sysinfo again. Reads the adapters at most once per `HEALTH_INTERVAL`
 /// (otherwise false); false before the first sysinfo (that upload carries the list anyway).
+/// Sense Remote (K2-7): cheap, non-blocking test the sync loop makes before it starts a blocking
+/// task for `network_changed_since_sysinfo` (instead of one every 3 s).
+pub fn network_check_due() -> bool {
+    health_due(
+        *LAST_NETWORK_CHECK.lock().unwrap_or_else(|e| e.into_inner()),
+        Instant::now(),
+    )
+}
+
 pub fn network_changed_since_sysinfo() -> bool {
     let now = Instant::now();
     {
@@ -246,11 +267,16 @@ pub fn network_changed_since_sysinfo() -> bool {
     let Some(sent) = SENT_NETWORK_HASH.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
         return false;
     };
-    network_hash(network_list().as_deref()) != sent
+    // A failed read is not a change (the next sysinfo would leave `network` out anyway).
+    let Some(now) = network_list() else {
+        return false;
+    };
+    network_hash(Some(&now[..])) != sent
 }
 
+/// Sense Remote (K2-5): `None` (not sent) and `Some([])` (sent empty) hash differently.
 fn network_hash(list: Option<&[SenseNetwork]>) -> String {
-    let value = serde_json::to_value(list.unwrap_or_default()).unwrap_or(Value::Null);
+    let value = serde_json::to_value(list).unwrap_or(Value::Null);
     let digest = Sha256::digest(canonical_json(&value).as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -651,8 +677,8 @@ fn displays_hash(displays: &[SenseDisplay]) -> Option<String> {
 /// JCS for the values this module produces: keys sorted (all ASCII, so byte order equals the
 /// UTF-16 order JCS asks for), whole floats written as integers like ECMAScript does, other
 /// numbers and strings as `serde_json` writes them (same shortest form / escapes as JSON.stringify
-/// for these ranges).
-fn canonical_json(value: &Value) -> String {
+/// for these ranges). Sense Remote (wave 3): also the signed heartbeat report (`report_sig.rs`).
+pub(super) fn canonical_json(value: &Value) -> String {
     match value {
         Value::Array(items) => {
             let parts: Vec<String> = items.iter().map(canonical_json).collect();
@@ -699,11 +725,15 @@ mod tests {
     const SCHEMA_DISK_KEYS: [&str; 3] = ["mount", "used_pct", "total_gb"];
     const SCHEMA_SYSINFO_KEYS: [&str; 7] =
         ["v", "role", "app_version", "platform", "displays", "displays_hash", "network"];
-    // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4).
-    const SCHEMA_HEARTBEAT_KEYS: [&str; 9] = [
+    // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4, + wave 3 `caps` and the signed
+    // `report`, contract v3).
+    const SCHEMA_HEARTBEAT_KEYS: [&str; 11] = [
         "v", "role", "app_version", "displays_hash", "health", "applied_seq",
-        "maintenance_curtain", "envelope_error", "clock_skew_s",
+        "maintenance_curtain", "envelope_error", "clock_skew_s", "caps", "report",
     ];
+    // Contract v3: `caps` is at most 16 strings of at most 32 characters.
+    const SCHEMA_CAPS_MAX: usize = 16;
+    const SCHEMA_CAP_MAX_CHARS: usize = 32;
     // SenseNetworkInterface (P0 branch ortak/sozlesme-v2, 40d007a).
     const SCHEMA_NETWORK_KEYS: [&str; 5] = ["name", "kind", "ipv4", "ipv6", "up"];
     const SCHEMA_NETWORK_KINDS: [&str; 3] = ["ethernet", "wifi", "other"];
@@ -799,9 +829,14 @@ mod tests {
             app_version: 1,
             displays_hash: Some("0".repeat(64)),
             health: Some(full_health()),
+            caps: Some(vec!["role_all".into()]),
         })
         .unwrap();
         assert!(keys(&heartbeat).is_subset(&set(&SCHEMA_HEARTBEAT_KEYS)));
+        // K-ROL-2: the capabilities fit the contract and say `role_all`.
+        assert!(CAPS.len() <= SCHEMA_CAPS_MAX);
+        assert!(CAPS.iter().all(|cap| !cap.is_empty() && cap.len() <= SCHEMA_CAP_MAX_CHARS));
+        assert!(CAPS.contains(&"role_all"));
         // Nothing unread is sent: an empty display has only the required fields.
         let minimal = serde_json::to_value(SenseDisplay {
             width: 1,
@@ -811,6 +846,24 @@ mod tests {
         .unwrap();
         assert_eq!(keys(&minimal), set(&SCHEMA_DISPLAY_REQUIRED));
         assert_eq!(keys(&serde_json::to_value(SenseHealth::default()).unwrap()), set(&["at"]));
+    }
+
+    /// K2-5: an empty adapter list is sent as `"network": []`; only an unread one is left out.
+    #[test]
+    fn empty_network_is_sent_as_an_empty_list() {
+        let ext = |network| SysinfoExt {
+            v: EXT_VERSION,
+            role: "host".into(),
+            app_version: 1,
+            platform: "windows-x64".into(),
+            displays: None,
+            displays_hash: None,
+            network,
+        };
+        let empty = serde_json::to_value(ext(Some(vec![]))).unwrap();
+        assert_eq!(empty["network"], serde_json::json!([]));
+        let unknown = serde_json::to_value(ext(None)).unwrap();
+        assert!(unknown.get("network").is_none());
     }
 
     /// The panel's own test bodies parse into these structs (unknown field -> error) and come
@@ -1059,7 +1112,9 @@ mod tests {
         });
         assert_eq!(network_hash(Some(&two[..])), network_hash(Some(&two.clone()[..])));
         assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&two[..1])));
-        assert_eq!(network_hash(None), network_hash(Some(&[][..])));
+        // K2-5: unplugging the last adapter is a change from "unknown" too.
+        assert_ne!(network_hash(None), network_hash(Some(&[][..])));
+        assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&[][..])));
         let mut moved = two.clone();
         moved[1].ipv4 = vec!["192.168.1.21".into()];
         assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&moved[..])));

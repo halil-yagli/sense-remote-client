@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,8 +12,62 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../common.dart';
+// Sense Remote: pairing code texts and 3+3 format (wave 3 K-GİRİŞ).
+import '../../desktop/pages/sense_install_strings.dart';
 import './dialog.dart';
 import './oidc_auth_status.dart';
+
+/// Sense Remote (wave 3 K-GİRİŞ): the 6-digit code the panel's approval page also shows. The
+/// browser opens with it, so it is shown large above the status: the employee approves only
+/// when both codes are the same (phishing defence, security review G-2).
+class SensePairingCode extends StatelessWidget {
+  const SensePairingCode({super.key, required this.code});
+
+  final String code;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.color ?? theme.hintColor;
+    return Container(
+      key: const Key('sense-login-pairing'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        children: [
+          Text(senseInstallText('pairing-label'),
+              style: TextStyle(fontSize: 11, letterSpacing: 1.2, color: muted)),
+          const SizedBox(height: 4),
+          Semantics(
+            container: true,
+            label: senseInstallText('pairing-spoken') +
+                spokenSensePairingCode(code),
+            excludeSemantics: true,
+            child: Text(
+              formatSensePairingCode(code),
+              key: const Key('sense-login-pairing-code'),
+              style: const TextStyle(
+                fontSize: 36,
+                height: 1.15,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 4,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(senseInstallText('pairing-hint'),
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: muted)),
+        ],
+      ),
+    );
+  }
+}
 
 const kOpSvgList = [
   'github',
@@ -279,6 +334,8 @@ class _WidgetOPState extends State<WidgetOP> {
   String _stateMsg = '';
   String _failedMsg = '';
   String _url = '';
+  // Sense Remote: pairing code of the current attempt (wave 3 K-GİRİŞ).
+  String _pairingCode = '';
 
   @override
   void dispose() {
@@ -354,6 +411,7 @@ class _WidgetOPState extends State<WidgetOP> {
   void _invalidateAuthAttempt() {
     _authAttempt++;
     _url = '';
+    _pairingCode = '';
   }
 
   bool _isCurrentAuthAttempt(int authAttempt) {
@@ -425,12 +483,17 @@ class _WidgetOPState extends State<WidgetOP> {
       }
       final stateChanged = _stateMsg != stateMsg || _failedMsg != failedMsg;
       final newUrl = _url.isEmpty && url != null && url.isNotEmpty ? url : null;
-      if (!stateChanged && newUrl == null) {
+      // Sense Remote: the code comes with the URL (Rust passes only 6 digits).
+      final pairingCode = resultMap['pairing_code'] is String
+          ? resultMap['pairing_code'] as String
+          : '';
+      if (!stateChanged && newUrl == null && pairingCode == _pairingCode) {
         return;
       }
       setState(() {
         _stateMsg = stateMsg;
         _failedMsg = failedMsg;
+        _pairingCode = pairingCode;
         if (newUrl != null) {
           _url = newUrl;
         }
@@ -512,6 +575,11 @@ class _WidgetOPState extends State<WidgetOP> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                if (_pairingCode.isNotEmpty && _failedMsg.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10.0),
+                    child: SensePairingCode(code: _pairingCode),
+                  ),
                 if (_stateMsg.isNotEmpty && _failedMsg.isEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
