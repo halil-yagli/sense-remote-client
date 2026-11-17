@@ -23,6 +23,9 @@ import '../../models/platform_model.dart';
 import '../../common/shared_state.dart';
 import './popup_menu.dart';
 import './kb_layout_type_chooser.dart';
+// Sense Remote: connection window parts (map, info, status, chat, ghost).
+import 'sense_remote_strings.dart' show kSenseRemoteWindow;
+import 'sense_remote_window.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
 
@@ -819,20 +822,27 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       toolbarItems.add(_MobileActionMenu(ffi: widget.ffi));
     }
 
-    toolbarItems.add(Obx(() {
-      final privacyModeState = PrivacyModeState.find(widget.id);
-      if ((privacyModeState.isEmpty ||
-              allowDisplaySwitchInPrivacyMode(pi, privacyModeState.value)) &&
-          pi.displaysCount.value > 1) {
-        return _MonitorMenu(
-            id: widget.id,
-            ffi: widget.ffi,
-            edge: edge,
-            setRemoteState: widget.setRemoteState);
-      } else {
-        return Offstage();
-      }
-    }));
+    // Sense Remote: the display map (real arrangement) replaces the stock
+    // monitor buttons.
+    if (kSenseRemoteWindow) {
+      toolbarItems.add(SenseRemoteToolbarMap(
+          id: widget.id, ffi: widget.ffi, vertical: !isHorizontal));
+    } else {
+      toolbarItems.add(Obx(() {
+        final privacyModeState = PrivacyModeState.find(widget.id);
+        if ((privacyModeState.isEmpty ||
+                allowDisplaySwitchInPrivacyMode(pi, privacyModeState.value)) &&
+            pi.displaysCount.value > 1) {
+          return _MonitorMenu(
+              id: widget.id,
+              ffi: widget.ffi,
+              edge: edge,
+              setRemoteState: widget.setRemoteState);
+        } else {
+          return Offstage();
+        }
+      }));
+    }
 
     toolbarItems
         .add(_ControlMenu(id: widget.id, ffi: widget.ffi, state: widget.state));
@@ -846,7 +856,14 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
     }
-    toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
+    // Sense Remote: display info, status, chat panel and ghost mode buttons
+    // (the Sense chat panel replaces the stock floating chat).
+    if (kSenseRemoteWindow) {
+      toolbarItems.add(SenseRemoteToolbarButtons(
+          id: widget.id, ffi: widget.ffi, vertical: !isHorizontal));
+    } else {
+      toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
+    }
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
     }
