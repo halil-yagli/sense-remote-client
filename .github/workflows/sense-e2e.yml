@@ -12,10 +12,6 @@ name: Sense Remote e2e (Windows)
 
 on:
   workflow_dispatch:
-  # GEÇİCİ (birleştirmeden önce silinir): workflow_dispatch yalnız varsayılan daldaki dosyayla
-  # çalışır; PR dalında ilk koşu için.
-  push:
-    branches: [istemci/e2e-windows]
 
 permissions:
   contents: read
