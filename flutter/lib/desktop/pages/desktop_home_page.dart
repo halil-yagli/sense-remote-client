@@ -24,6 +24,17 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
+// Sense Remote: Sense home screens (Controller project cards, small Host home).
+import 'sense_home_controller.dart';
+import 'sense_home_host.dart';
+import 'sense_home_strings.dart';
+
+/// Sense Remote: role of this computer for the home screen (from the role
+/// the installer applied); `none` keeps the stock home screen.
+SenseHomeRole senseHomeRole() => senseHomeRoleFrom(
+    incomingOnly: bind.isIncomingOnly(),
+    outgoingOnly: bind.isOutgoingOnly(),
+    settingsDisabled: bind.isDisableSettings());
 
 class DesktopHomePage extends StatefulWidget {
   const DesktopHomePage({Key? key}) : super(key: key);
@@ -78,8 +89,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   Widget buildLeftPane(BuildContext context) {
     final isIncomingOnly = bind.isIncomingOnly();
     final isOutgoingOnly = bind.isOutgoingOnly();
+    // Sense Remote: on a Host the small Sense card replaces logo, ID and
+    // password boards; the install / permission cards below stay.
+    final senseHost = senseHomeRole() == SenseHomeRole.host;
     final children = <Widget>[
       if (!isOutgoingOnly) buildPresetPasswordWarning(),
+      if (senseHost) const SenseHostHome(),
+      if (!senseHost) ...[
       if (bind.isCustomClient())
         Align(
           alignment: Alignment.center,
@@ -92,6 +108,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       buildTip(context),
       if (!isOutgoingOnly) buildIDBoard(context),
       if (!isOutgoingOnly) buildPasswordBoard(context),
+      ],
       FutureBuilder<Widget>(
         future: Future.value(
             Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
@@ -112,17 +129,21 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       ),
     ];
     if (isIncomingOnly) {
+      final statusWidget = OnlineStatusWidget(
+        onSvcStatusChanged: () {
+          if (isInHomePage()) {
+            Future.delayed(Duration(milliseconds: 300), () {
+              _updateWindowSize();
+            });
+          }
+        },
+      );
       children.addAll([
-        Divider(),
-        OnlineStatusWidget(
-          onSvcStatusChanged: () {
-            if (isInHomePage()) {
-              Future.delayed(Duration(milliseconds: 300), () {
-                _updateWindowSize();
-              });
-            }
-          },
-        ).marginOnly(bottom: 6, right: 6)
+        // Sense Remote: the Sense card shows the status; the stock widget stays
+        // mounted (hidden) because it refreshes `stateGlobal.svcStatus`.
+        if (senseHost) Offstage(child: statusWidget),
+        if (!senseHost) Divider(),
+        if (!senseHost) statusWidget.marginOnly(bottom: 6, right: 6)
       ]);
     }
     final textColor = Theme.of(context).textTheme.titleLarge?.color;
@@ -130,7 +151,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       value: gFFI.serverModel,
       child: Container(
         width: isIncomingOnly ? 280.0 : 200.0,
-        color: Theme.of(context).colorScheme.background,
+        // Sense Remote: the Host home is black like the other Sense screens.
+        color: senseHost
+            ? Colors.black
+            : Theme.of(context).colorScheme.background,
         child: Stack(
           children: [
             Column(
@@ -179,10 +203,17 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   buildRightPane(BuildContext context) {
-    return Container(
+    // Sense Remote: Controller and Host + Controller get the project cards;
+    // without a panel sign-in the stock connection page stays.
+    final stock = Container(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: ConnectionPage(),
     );
+    final role = senseHomeRole();
+    if (role == SenseHomeRole.controller || role == SenseHomeRole.both) {
+      return SenseControllerHome(fallback: stock);
+    }
+    return stock;
   }
 
   buildIDBoard(BuildContext context) {
