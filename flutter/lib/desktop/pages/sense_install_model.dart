@@ -74,7 +74,13 @@ SenseEnrollAction senseEnrollAction(String code) {
     case 'not-installed':
     case 'build':
     case 'identity':
+    case 'identity-store':
+    // Sense Remote: the panel closed this computer (refused / removed); only an admin helps.
+    case 'device_closed':
       return SenseEnrollAction.none;
+    // Sense Remote: already active in the panel; retry after "Yeniden kurulum izni" there.
+    case 'reinstall_not_allowed':
+      return SenseEnrollAction.retry;
     default: // retry, network, other, unknown codes
       return SenseEnrollAction.retry;
   }

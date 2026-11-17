@@ -136,6 +136,13 @@ const Map<String, String> kSenseInstallTr = {
       'Bu kurulum dosyası eksik derlenmiş. Kaydı atla ve Sense ekibine bildir.',
   'enroll-identity':
       'Bu bilgisayarın kimliği okunamadı. Kaydı atla ve Sense ekibine bildir.',
+  'enroll-identity-store':
+      'Bu bilgisayarın kimliği kaydedilemedi. Kaydı atla ve Sense ekibine bildir.',
+  // Sense Remote: panel codes of #31.
+  'enroll-device_closed':
+      'Bu bilgisayar panelde kapatılmış. Panel yöneticisine başvur.',
+  'enroll-reinstall_not_allowed':
+      'Bu bilgisayar panelde zaten kayıtlı. Yeniden kurmak için panelde bu bilgisayarın sayfasından "Yeniden kurulum izni" ver, sonra Yeniden dene.',
   'done-title': 'Kuruldu',
   'done-lead': 'Sense Remote bu bilgisayara kuruldu.',
   'done-lead-locked': 'Ayarlar kilitlendi; değişiklikler panelden yapılır.',
@@ -285,6 +292,12 @@ const Map<String, String> kSenseInstallEn = {
       'This setup file was built incomplete. Skip and tell the Sense team.',
   'enroll-identity':
       'The identity of this computer could not be read. Skip and tell the Sense team.',
+  'enroll-identity-store':
+      'The identity of this computer could not be saved. Skip and tell the Sense team.',
+  'enroll-device_closed':
+      'This computer was closed in the panel. Contact the panel administrator.',
+  'enroll-reinstall_not_allowed':
+      'This computer is already registered in the panel. To reinstall, allow "Reinstall" on its page in the panel, then try again.',
   'done-title': 'Installed',
   'done-lead': 'Sense Remote is installed on this computer.',
   'done-lead-locked': 'Settings are locked; changes come from the panel.',
