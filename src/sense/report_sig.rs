@@ -414,7 +414,7 @@ mod tests {
         // Panel clock unknown (no answer yet): unchanged, as `next_ts_reserved`.
         assert_eq!(next_ts_checked(None, reserved, 1_000, None), next_ts_reserved(None, reserved, 1_000));
         // Clock set back an hour, panel agrees with the old clock: keep increasing.
-        assert_eq!(next_ts_checked(None, Some(1_121), 1_121 - 3_600, Some(3_600)), (1_122, None));
+        assert_eq!(next_ts_checked(None, Some(1_121), 1_121 - 3_600, Some(3_600)), (1_122, Some(1_182)));
     }
 
     #[test]
