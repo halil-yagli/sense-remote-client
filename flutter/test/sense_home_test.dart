@@ -113,7 +113,7 @@ void main() {
     });
 
     test('Turkish upper case for labels', () {
-      expect(senseHomeUpper('Galeri kioskı'), 'GALERİ KIOSKI');
+      expect(senseHomeUpper('Galeri kioskı'), 'GALERİ KİOSKI');
     });
 
     test('version is a plain positive number or nothing', () {
