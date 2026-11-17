@@ -12,8 +12,16 @@
 //!
 //! MAC-SONRA: compiles on macOS but is not checked on a Mac yet (adapter names en0/en1, Wi-Fi
 //! detection through the crate's `networksetup` map).
+//!
+//! Sense Remote (wave 2 review):
+//! - K2-5: `collect` tells "no adapter left" (`Some([])`, sent as `network: []` so the panel
+//!   drops the old addresses) from "could not read" (`None`, field left out = unknown).
+//! - K2-8: an entry that would not pass the panel's `SenseNetworkInterface` is skipped on its
+//!   own, so one odd adapter never makes the panel drop the whole `sense` extension.
+//! - G2-12: IPv6 addresses that carry the MAC (EUI-64, `..ff:fe..`) or an embedded IPv4
+//!   (`::ffff:a.b.c.d`) are not sent.
 
-// Sense Remote: the sync loop starts using these in task I4.
+// Sense Remote: some helpers are only reached on Windows / in tests.
 #![allow(dead_code)]
 
 use serde_derive::{Deserialize, Serialize};
@@ -69,9 +77,15 @@ pub(super) struct RawAdapter {
     pub ipv6: Vec<Ipv6Addr>,
 }
 
-/// Adapters of this computer, filtered and ordered for the panel.
-pub fn collect() -> Vec<SenseNetwork> {
-    build(read_adapters())
+/// Adapters of this computer, filtered and ordered for the panel. `None` when the OS reported
+/// no adapter at all (read failed or unsupported platform; Windows always has a loopback), so the
+/// caller leaves `network` out; `Some(vec![])` when adapters exist but none is worth sending.
+pub fn collect() -> Option<Vec<SenseNetwork>> {
+    from_raw(read_adapters())
+}
+
+fn from_raw(adapters: Vec<RawAdapter>) -> Option<Vec<SenseNetwork>> {
+    (!adapters.is_empty()).then(|| build(adapters))
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -139,9 +153,35 @@ fn keep_ipv4(ip: &Ipv4Addr) -> bool {
 }
 
 fn keep_ipv6(ip: &Ipv6Addr) -> bool {
+    let s = ip.segments();
     // fe80::/10 (link-local) is only reachable on the same link.
-    let link_local = (ip.segments()[0] & 0xffc0) == 0xfe80;
-    !(ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() || link_local)
+    let link_local = (s[0] & 0xffc0) == 0xfe80;
+    // Sense Remote (G2-12): an EUI-64 interface id (`xxxx:xxff:fexx:xxxx`) is built from the
+    // MAC address, which the contract never sends.
+    let eui64 = (s[5] & 0x00ff) == 0x00ff && (s[6] & 0xff00) == 0xfe00;
+    // ::ffff:a.b.c.d (IPv4-mapped) and ::a.b.c.d (old IPv4-compatible) repeat an IPv4 address.
+    let embeds_ipv4 = s[..5] == [0; 5] && (s[5] == 0xffff || s[5] == 0);
+    !(ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || link_local
+        || eui64
+        || embeds_ipv4)
+}
+
+/// Sense Remote (K2-8): the panel's `SenseNetworkInterface` limits (name <= 128 UTF-16 units,
+/// <= 8 addresses each, known kind). `build` already keeps within them; this is the last check
+/// before sending, so an entry that does not fit is skipped instead of failing the whole body.
+fn fits_contract(n: &SenseNetwork) -> bool {
+    let name_ok = !n.name.trim().is_empty()
+        && n.name.encode_utf16().count() <= 128
+        && !n.name.chars().any(char::is_control);
+    let kind_ok = ["ethernet", "wifi", "other"].contains(&n.kind.as_str());
+    let ipv4_ok =
+        n.ipv4.len() <= MAX_ADDRESSES && n.ipv4.iter().all(|ip| ip.parse::<Ipv4Addr>().is_ok());
+    let ipv6 = n.ipv6.as_deref().unwrap_or_default();
+    let ipv6_ok = ipv6.len() <= MAX_ADDRESSES && ipv6.iter().all(|ip| ip.parse::<Ipv6Addr>().is_ok());
+    name_ok && kind_ok && ipv4_ok && ipv6_ok && (!n.ipv4.is_empty() || !ipv6.is_empty())
 }
 
 fn build(adapters: Vec<RawAdapter>) -> Vec<SenseNetwork> {
@@ -160,10 +200,16 @@ fn build(adapters: Vec<RawAdapter>) -> Vec<SenseNetwork> {
         .take(MAX_ADAPTERS)
         .map(|a| {
             let name = a.name.trim();
-            let name = if name.is_empty() {
+            // Sense Remote (K2-8): control characters would make the name unreadable in the panel.
+            let name: String = name
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(MAX_NAME_CHARS)
+                .collect();
+            let name = if name.trim().is_empty() {
                 a.kind.as_str().to_owned()
             } else {
-                name.chars().take(MAX_NAME_CHARS).collect()
+                name
             };
             let ipv4: Vec<String> = a
                 .ipv4
@@ -184,6 +230,13 @@ fn build(adapters: Vec<RawAdapter>) -> Vec<SenseNetwork> {
                 ipv6: (!ipv6.is_empty()).then_some(ipv6),
                 up: Some(a.up),
             }
+        })
+        .filter(|n| {
+            let ok = fits_contract(n);
+            if !ok {
+                hbb_common::log::warn!("Sense Remote: a network adapter entry was skipped");
+            }
+            ok
         })
         .collect()
 }
@@ -251,10 +304,79 @@ mod tests {
         assert!(out.iter().all(|n| n.ipv4.len() == MAX_ADDRESSES));
     }
 
+    #[test]
+    fn no_adapter_left_is_an_empty_list_not_unknown() {
+        // K2-5: cable out, no Wi-Fi: the OS still reports the loopback -> Some([]), sent as
+        // `network: []`.
+        let mut loopback = adapter(1, "Loopback Pseudo-Interface 1", Kind::Other, &["127.0.0.1"]);
+        loopback.loopback = true;
+        let unplugged = adapter(2, "Ethernet", Kind::Ethernet, &[]);
+        assert_eq!(from_raw(vec![loopback, unplugged]), Some(vec![]));
+        // Nothing reported at all: unknown, the field is left out.
+        assert_eq!(from_raw(vec![]), None);
+    }
+
+    #[test]
+    fn ipv6_with_mac_or_ipv4_is_not_sent() {
+        let mut eth = adapter(1, "Ethernet", Kind::Ethernet, &["192.168.1.10"]);
+        eth.ipv6 = [
+            "2001:db8::211:22ff:fe33:4455", // EUI-64 from MAC 00:11:22:33:44:55
+            "2001:db8:0:0:211:22ff:fe33:4455",
+            "::ffff:192.168.1.10",
+            "::192.168.1.10",
+            "2001:db8::5", // temporary / random interface id: kept
+            "fd00::1234",  // ULA: kept
+        ]
+        .iter()
+        .map(|s| s.parse().unwrap())
+        .collect();
+        let out = build(vec![eth]);
+        assert_eq!(
+            out[0].ipv6.as_deref(),
+            Some(&["2001:db8::5".to_owned(), "fd00::1234".to_owned()][..])
+        );
+        // An adapter left with only such addresses is dropped.
+        let mut only_mac = adapter(2, "Wi-Fi", Kind::Wifi, &[]);
+        only_mac.ipv6 = vec!["2001:db8::211:22ff:fe33:4455".parse().unwrap()];
+        assert!(build(vec![only_mac]).is_empty());
+    }
+
+    #[test]
+    fn an_entry_outside_the_contract_is_skipped_alone() {
+        let good = SenseNetwork {
+            name: "Ethernet".into(),
+            kind: "ethernet".into(),
+            ipv4: vec!["10.0.0.7".into()],
+            ipv6: None,
+            up: Some(true),
+        };
+        assert!(fits_contract(&good));
+        let bad = [
+            SenseNetwork { name: " ".into(), ..good.clone() },
+            SenseNetwork { name: "a\u{7}b".into(), ..good.clone() },
+            // 65 astral characters = 130 UTF-16 units > 128.
+            SenseNetwork { name: "\u{1F600}".repeat(65), ..good.clone() },
+            SenseNetwork { kind: "cellular".into(), ..good.clone() },
+            SenseNetwork { ipv4: vec!["10.0.0.300".into()], ..good.clone() },
+            SenseNetwork { ipv4: vec!["10.0.0.1".into(); 9], ..good.clone() },
+            SenseNetwork { ipv6: Some(vec!["fe80::1%12".into()]), ..good.clone() },
+            SenseNetwork { ipv4: vec![], ipv6: None, ..good.clone() },
+        ];
+        for n in &bad {
+            assert!(!fits_contract(n), "{n:?}");
+        }
+        // Names with control characters are cleaned in `build`, not dropped.
+        let out = build(vec![adapter(1, "Eth\u{0}ernet", Kind::Ethernet, &["10.0.0.7"])]);
+        assert_eq!(out[0].name, "Ethernet");
+        let out = build(vec![adapter(1, "\u{1}", Kind::Wifi, &["10.0.0.8"])]);
+        assert_eq!(out[0].name, "wifi");
+    }
+
     /// Real adapters on the CI machine: whatever is found fits the contract.
     #[test]
     fn live_values_fit_contract() {
-        for n in collect() {
+        for n in collect().unwrap_or_default() {
+            assert!(fits_contract(&n), "{n:?}");
             assert!(["ethernet", "wifi", "other"].contains(&n.kind.as_str()));
             assert!(!n.name.is_empty() && n.name.chars().count() <= MAX_NAME_CHARS);
             assert!(n.ipv4.len() <= MAX_ADDRESSES);

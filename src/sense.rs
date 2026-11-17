@@ -482,6 +482,11 @@ pub fn apply_security_settings() {
 /// Whether the exe name may carry server settings. Never in our build.
 pub const EXE_NAME_LICENSE_ALLOWED: bool = false;
 
+/// Sense Remote (G2-8): whether a `custom.txt` (or a custom client config passed at start) is
+/// read. Never in our build: it is signed with RustDesk's key, and it could override the role
+/// locks. Our settings come from the installed role and `apply_security_settings`.
+pub const CUSTOM_CLIENT_FILE_ALLOWED: bool = false;
+
 /// Gate in front of upstream's exe-name parser (`platform::windows::get_license_from_exe_name`).
 #[allow(dead_code)] // only called on Windows
 pub fn license_from_exe_name(
@@ -614,6 +619,15 @@ mod tests {
             // The panel can not send them either.
             assert!(envelope::ALLOWED_OPTIONS.iter().all(|(k, _)| *k != key), "{key}");
         }
+    }
+
+    #[test]
+    fn custom_client_file_is_never_read() {
+        assert!(!CUSTOM_CLIENT_FILE_ALLOWED);
+        // Whatever is passed, nothing changes (the signature is not even checked).
+        let before = config::HARD_SETTINGS.read().unwrap().clone();
+        crate::common::read_custom_client("not-base64 but ignored anyway");
+        assert_eq!(*config::HARD_SETTINGS.read().unwrap(), before);
     }
 
     #[test]

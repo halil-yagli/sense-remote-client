@@ -2543,7 +2543,7 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 pub fn load_custom_client() {
     // Sense Remote: our build always runs as a custom client named SenseRemote. This runs
     // before anything reads APP_NAME (core_main, flutter_ffi and service call it first).
-    // A custom.txt signed by RustDesk's key could still override it below; we ship none.
+    // A custom.txt is never read (`sense::CUSTOM_CLIENT_FILE_ALLOWED`, G2-8).
     *config::APP_NAME.write().unwrap() = SENSE_APP_NAME.to_owned();
     // Sense Remote: apply the role the installer wrote (Host / Controller / both) before
     // anything reads conn-type or the settings locks.
@@ -2653,6 +2653,14 @@ pub fn get_dst_align_rgba() -> usize {
 }
 
 pub fn read_custom_client(config: &str) {
+    // Sense Remote (G2-8): a custom.txt is signed with RustDesk's key, not ours, and could change
+    // the role locks (conn-type, disable-settings). Sense builds never read one.
+    if !crate::sense::CUSTOM_CLIENT_FILE_ALLOWED {
+        if !config.trim().is_empty() {
+            log::warn!("Sense Remote: custom client config ignored");
+        }
+        return;
+    }
     let Ok(data) = decode64(config) else {
         log::error!("Failed to decode custom client config");
         return;

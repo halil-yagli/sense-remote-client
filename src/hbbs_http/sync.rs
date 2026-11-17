@@ -128,6 +128,7 @@ async fn start_hbbs_sync_async() {
                 // Sense Remote: changed adapters / IP addresses → upload sysinfo again, so the
                 // panel shows the current addresses (checked at most once a minute).
                 if info_uploaded.uploaded
+                    && crate::sense::report::network_check_due()
                     && tokio::task::spawn_blocking(crate::sense::report::network_changed_since_sysinfo)
                         .await
                         .unwrap_or(false)
@@ -262,8 +263,14 @@ async fn start_hbbs_sync_async() {
                 // Sense Remote: `sense` = role, version, displays hash, health (once a minute),
                 // plus the envelope state (applied_seq, envelope_error, clock_skew_s). Not sent
                 // without an installed role.
-                if let Ok(Some(mut sense)) = tokio::task::spawn_blocking(crate::sense::report::heartbeat_base).await {
-                    sense_report.extend(&mut sense, crate::sense::envelope_seq::last_seq());
+                // G2-5: `applied_seq` is left out when the stored seq cannot be read.
+                if let Ok(Some((mut sense, applied_seq))) = tokio::task::spawn_blocking(|| {
+                    crate::sense::report::heartbeat_base()
+                        .map(|sense| (sense, crate::sense::envelope_seq::read_last_seq().ok()))
+                })
+                .await
+                {
+                    sense_report.extend(&mut sense, applied_seq);
                     v["sense"] = sense;
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
@@ -304,44 +311,20 @@ fn now_s() -> i64 {
 
 // Sense Remote: verifies and applies the envelopes of one heartbeat answer, in order (the panel
 // sends at most one). Only a verified envelope on a platform that applies them reaches
-// `sense_apply`; every rejection goes to the next heartbeat's `envelope_error`.
+// `sense_apply`; every rejection goes to the next heartbeat's `envelope_error`. The registry reads
+// and writes run off the async loop (K2-7).
 #[cfg(not(any(target_os = "ios")))]
 async fn sense_handle_envelopes(
     envelopes: &[Value],
     id: &str,
     report: &mut crate::sense::envelope_apply::Report,
 ) {
-    use crate::sense::{envelope, envelope_apply, envelope_keys, envelope_seq};
-    if envelopes.is_empty() {
-        return;
-    }
-    let iss = envelope::expected_issuer();
-    let duuid = crate::encode64(hbb_common::get_uuid());
     for item in envelopes {
-        let last_seq = envelope_seq::last_seq();
-        let now = now_s();
-        let expect = envelope::Expect {
-            iss: &iss,
-            did: id,
-            duuid: &duuid,
-            now_s: now,
-            last_seq,
-        };
-        let result = match envelope_apply::check(
-            item,
-            envelope_keys::trusted_keys(),
-            &expect,
-            envelope_apply::APPLIES,
-        ) {
-            Ok(verified) => match sense_apply(&verified).await {
-                Ok(()) => Ok(verified.seq),
-                Err(reason) => Err(envelope::Rejection {
-                    reason,
-                    k: Some(verified.k),
-                    seq: Some(verified.seq),
-                }),
-            },
-            Err(rejection) => Err(rejection),
+        let (item, id) = (item.clone(), id.to_owned());
+        let Ok((last_seq, now, result)) =
+            tokio::task::spawn_blocking(move || sense_check_and_apply(&item, &id)).await
+        else {
+            continue;
         };
         match result {
             Ok(seq) => {
@@ -364,40 +347,116 @@ async fn sense_handle_envelopes(
     }
 }
 
-// Sense Remote: applies a verified envelope. Order: role (HKLM) → settings → disconnect →
-// `EnvelopeSeq`. The seq is stored only when everything before it worked, so a failed apply is
-// retried with the panel's next envelope.
+// Sense Remote: one envelope, blocking (registry). Returns (stored seq or 0, local time, result).
 #[cfg(not(any(target_os = "ios")))]
-async fn sense_apply(
+fn sense_check_and_apply(
+    item: &Value,
+    id: &str,
+) -> (u64, i64, Result<u64, crate::sense::envelope::Rejection>) {
+    use crate::sense::{envelope, envelope_apply, envelope_keys, envelope_seq};
+    // G2-5: an unreadable counter is not 0; the envelope is then refused (`check_stored`).
+    let stored = envelope_seq::read_last_seq();
+    if let Err(err) = &stored {
+        log::error!("Sense Remote: reading the envelope seq failed: {err}");
+    }
+    let last_seq = stored.as_ref().map_or(0, |seq| *seq);
+    let now = now_s();
+    let iss = envelope::expected_issuer();
+    let duuid = crate::encode64(hbb_common::get_uuid());
+    let expect = envelope::Expect {
+        iss: &iss,
+        did: id,
+        duuid: &duuid,
+        now_s: now,
+        last_seq,
+    };
+    let result = envelope_apply::check_stored(
+        item,
+        envelope_keys::trusted_keys(),
+        &expect,
+        envelope_apply::APPLIES,
+        stored.is_ok(),
+    )
+    .and_then(|verified| {
+        sense_apply(&verified)
+            .map(|()| verified.seq)
+            .map_err(|reason| envelope::Rejection {
+                reason,
+                k: Some(verified.k.clone()),
+                seq: Some(verified.seq),
+            })
+    });
+    (last_seq, now, result)
+}
+
+// Sense Remote: the HKLM / `Config` side of `envelope_apply::apply_steps` (K2-2, G2-6).
+#[cfg(not(any(target_os = "ios")))]
+struct SenseApplySteps {
+    options: HashMap<String, String>,
+    seq: u64,
+}
+
+#[cfg(not(any(target_os = "ios")))]
+impl crate::sense::envelope_apply::ApplySteps for SenseApplySteps {
+    type Snapshot = HashMap<String, String>;
+
+    fn check_writable(&mut self) -> Result<(), String> {
+        crate::sense::envelope_seq::check_writable().map_err(|err| format!("{err:?}"))
+    }
+
+    fn snapshot(&mut self) -> HashMap<String, String> {
+        Config::get_options()
+    }
+
+    fn set_options(&mut self) -> Result<(), String> {
+        let options = merge_config_options(self.options.clone());
+        // The allow list has no authentication key, so this never changes 2FA / trusted
+        // devices; refuse rather than take upstream's async authentication path.
+        if crate::trusted_devices::config::changes_authentication(&options) {
+            return Err("envelope would change authentication settings".to_owned());
+        }
+        Config::set_options(options);
+        Ok(())
+    }
+
+    fn restore_options(&mut self, snapshot: HashMap<String, String>) {
+        Config::set_options(snapshot);
+    }
+
+    fn store_role(&mut self, role: crate::sense::SenseRole) -> Result<(), String> {
+        crate::sense::store_role(role)
+    }
+
+    fn store_seq(&mut self) -> Result<(), String> {
+        crate::sense::envelope_seq::store_last_seq(self.seq).map_err(|err| format!("{err:?}"))
+    }
+}
+
+// Sense Remote: applies a verified envelope. Settings -> role (HKLM) -> `EnvelopeSeq`, all or
+// nothing (`envelope_apply::apply_steps`); only then disconnect and the in-process role. A failed
+// apply leaves the computer as it was and is retried with the panel's next envelope.
+#[cfg(not(any(target_os = "ios")))]
+fn sense_apply(
     verified: &crate::sense::envelope::Verified,
 ) -> Result<(), crate::sense::envelope::Reason> {
-    use crate::sense::{envelope::Reason, envelope_apply, envelope_seq};
-    let new_role =
-        envelope_apply::role_change(crate::sense::installed_role(), verified.body.sense_role)?;
-    if let Some(role) = new_role {
-        crate::sense::store_role(role).map_err(|err| {
-            log::error!("Sense Remote: storing role {} failed: {err}", role.as_str());
-            Reason::ApplyFailed
-        })?;
-    }
+    use crate::sense::envelope_apply;
+    let installed = crate::sense::installed_role();
+    let new_role = envelope_apply::role_change(installed, verified.body.sense_role)?;
     // Allow list already checked; the upstream block list stays as defence in depth.
-    let options: HashMap<String, String> = verified.body.config_options.clone().into_iter().collect();
-    if let Err(err) = handle_config_options(options).await {
-        log::error!("Sense Remote: applying envelope settings failed: {err}");
-        return Err(Reason::ApplyFailed);
-    }
+    let mut steps = SenseApplySteps {
+        options: verified.body.config_options.clone().into_iter().collect(),
+        seq: verified.seq,
+    };
+    envelope_apply::apply_steps(&mut steps, installed, new_role)?;
     if let Some(ids) = &verified.body.disconnect {
         let conns: Vec<i32> = ids.iter().filter_map(|id| i32::try_from(*id).ok()).collect();
         if !conns.is_empty() {
             SENDER.lock().unwrap().send(conns).ok();
         }
     }
-    envelope_seq::store_last_seq(verified.seq).map_err(|err| {
-        log::error!("Sense Remote: storing envelope seq failed: {err:?}");
-        Reason::ApplyFailed
-    })?;
     if let Some(role) = new_role {
-        // This process now; the tray / UI processes read the stored role at their next start.
+        // This process now; the tray / UI processes read the stored role at their next start
+        // (K2-6, deferred: see the PR).
         crate::sense::apply_role(Some(role));
         log::info!("Sense Remote: role changed to {}", role.as_str());
     }
@@ -463,9 +522,9 @@ fn filter_config_options(options: &mut HashMap<String, String>) {
     options.retain(|key, _| !BLOCKED_CONFIG_OPTIONS.contains(&key.as_str()));
 }
 
-async fn handle_config_options(
-    mut config_options: HashMap<String, String>,
-) -> hbb_common::ResultType<()> {
+// Sense Remote: the synchronous part of `handle_config_options` (block list + merge into the
+// current options), shared with the envelope apply (`SenseApplySteps::set_options`).
+fn merge_config_options(mut config_options: HashMap<String, String>) -> HashMap<String, String> {
     filter_config_options(&mut config_options);
     let mut options = Config::get_options();
     let default_settings = config::DEFAULT_SETTINGS.read().unwrap().clone();
@@ -482,6 +541,16 @@ async fn handle_config_options(
             }
         })
         .count();
+    options
+}
+
+// Sense Remote: no caller any more (plain heartbeat `strategy` is never applied; envelopes go
+// through `SenseApplySteps`). Kept to stay close to upstream.
+#[allow(dead_code)]
+async fn handle_config_options(
+    config_options: HashMap<String, String>,
+) -> hbb_common::ResultType<()> {
+    let options = merge_config_options(config_options);
     if crate::trusted_devices::config::changes_authentication(&options) {
         let current = Config::get_options();
         let mut non_auth_options = options.clone();
