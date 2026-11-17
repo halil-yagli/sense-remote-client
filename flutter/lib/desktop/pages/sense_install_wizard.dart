@@ -51,6 +51,33 @@ class SenseTokens {
 
 enum SenseInstallStep { account, role, info, summary, register, done }
 
+/// What the employee can do about a refused registration (panel `EnrollErrorCode`).
+enum SenseEnrollAction { retry, relogin, edit, wait, none }
+
+/// Panel `429` comes with `Retry-After: 60`.
+const int kSenseRetryAfterSeconds = 60;
+
+SenseEnrollAction senseEnrollAction(String code) {
+  switch (code) {
+    // The install token is not valid for this computer any more: sign in again.
+    case 'token_invalid':
+    case 'install_scope':
+    case 'device_mismatch':
+      return SenseEnrollAction.relogin;
+    // The details or project choice were refused: fix them.
+    case 'validation':
+    case 'project_not_found':
+      return SenseEnrollAction.edit;
+    case 'rate_limited':
+      return SenseEnrollAction.wait;
+    // Another computer holds this ID (panel alert): retrying can not help.
+    case 'uuid_mismatch':
+      return SenseEnrollAction.none;
+    default: // retry, network, other, unknown codes
+      return SenseEnrollAction.retry;
+  }
+}
+
 /// Lower case as the panel compares project names (`toLocaleLowerCase("tr")`).
 String senseTrLower(String value) =>
     value.replaceAll('I', 'ı').replaceAll('İ', 'i').toLowerCase();
@@ -341,6 +368,14 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
   bool _registered = false;
   List<String> _enrolledProjects = const [];
 
+  /// Installed by this wizard: the role is fixed, only sign-in and details can be redone for
+  /// the registration.
+  bool _installed = false;
+
+  /// Seconds left before "Yeniden dene" after `rate_limited` (panel `Retry-After: 60`).
+  int _waitLeft = 0;
+  Timer? _waitTimer;
+
   @override
   void initState() {
     super.initState();
@@ -350,6 +385,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
   @override
   void dispose() {
     _poll?.cancel();
+    _waitTimer?.cancel();
     _name.dispose();
     _newProject.dispose();
     _location.dispose();
@@ -408,16 +444,20 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
   }
 
   /// "Vazgeç" while waiting, or "Başka hesapla gir" after signing in.
-  void _cancelLogin() {
+  /// `keepProjects`: signing in again for the registration keeps the chosen projects (the
+  /// list is read again after the new sign-in).
+  void _cancelLogin({bool keepProjects = false}) {
     _loginAttempt++;
     _poll?.cancel();
     unawaited(widget.backend.loginCancel());
     setState(() {
       _login = SenseLoginStatus.idle;
       _notice = null;
-      _available = null;
       _projectsError = '';
-      _selectedIds.clear();
+      if (!keepProjects) {
+        _available = null;
+        _selectedIds.clear();
+      }
     });
   }
 
@@ -532,6 +572,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
     setState(() {
       _installing = false;
       if (result.isEmpty) {
+        _installed = true;
         _step = SenseInstallStep.register;
       } else if (result == 'cancelled') {
         _error = _t('error-cancelled');
@@ -564,19 +605,52 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
         _step = SenseInstallStep.done;
       } else {
         _enrollError = result.error;
+        if (senseEnrollAction(result.error) == SenseEnrollAction.wait) {
+          _startWait();
+        }
       }
     });
+  }
+
+  void _startWait() {
+    _waitTimer?.cancel();
+    _waitLeft = kSenseRetryAfterSeconds;
+    _waitTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      setState(() => _waitLeft--);
+      if (_waitLeft <= 0) timer.cancel();
+    });
+  }
+
+  /// Registration after installing, from the summary ("Panele kaydet") or a new sign-in.
+  void _registerAgain() {
+    _go(SenseInstallStep.register);
+    unawaited(_enroll());
+  }
+
+  /// `token_invalid` / `install_scope` / `device_mismatch`: sign in again (new install token for
+  /// this computer's ID), then register.
+  void _reloginForRegister() {
+    _cancelLogin(keepProjects: true);
+    _go(SenseInstallStep.account);
+  }
+
+  /// `validation` / `project_not_found`: fix the details or pick projects again, then register.
+  void _editForRegister() {
+    unawaited(_loadProjects());
+    _go(SenseInstallStep.info);
   }
 
   /// The computer is installed; it shows up in the panel as waiting for approval.
   void _skipRegister() => setState(() {
         _registered = false;
+        _waitTimer?.cancel();
         _step = SenseInstallStep.done;
       });
 
   void _close() {
     // After installing, leave through `finish` so a Host drops the sign-in (K-KAYIT-b).
-    if (_step == SenseInstallStep.register || _step == SenseInstallStep.done) {
+    if (_installed) {
       widget.backend.finish(false);
     } else {
       widget.onClose?.call();
@@ -1028,7 +1102,12 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
       ),
       const SizedBox(width: 12),
       _primaryButton(
-          _t('next'), s.isDone ? () => _go(SenseInstallStep.role) : null,
+          _t('next'),
+          !s.isDone
+              ? null
+              : _installed
+                  ? _registerAgain
+                  : () => _go(SenseInstallStep.role),
           key: const Key('sense-next')),
     ]);
   }
@@ -1404,7 +1483,9 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
           _textInput(_note, _t('note-hint'), kSenseMaxNote,
               key: const Key('sense-note'))),
     ], [
-      _secondaryButton(_t('back'), () => _go(SenseInstallStep.role)),
+      // After installing the role is fixed: no way back to the role step.
+      if (!_installed)
+        _secondaryButton(_t('back'), () => _go(SenseInstallStep.role)),
       const Spacer(),
       _primaryButton(
           _t('next'),
@@ -1617,6 +1698,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
         ),
       ),
       const SizedBox(height: 10),
+      if (!_installed)
       Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
@@ -1629,7 +1711,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
           label: Text(_t('advanced'), style: const TextStyle(fontSize: 12)),
         ),
       ),
-      if (_advanced) _advancedOptions(),
+      if (_advanced && !_installed) _advancedOptions(),
       if (_installing)
         Padding(
           padding: const EdgeInsets.only(top: 12),
@@ -1644,8 +1726,12 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
       _secondaryButton(
           _t('back'), _installing ? null : () => _go(SenseInstallStep.info)),
       const Spacer(),
-      _primaryButton(_t('install'), _installing ? null : _install,
-          key: const Key('sense-install')),
+      // Already installed (details fixed after a refused registration): register only.
+      _installed
+          ? _primaryButton(_t('register-save'), _registerAgain,
+              key: const Key('sense-register-save'))
+          : _primaryButton(_t('install'), _installing ? null : _install,
+              key: const Key('sense-install')),
     ]);
   }
 
@@ -1721,8 +1807,33 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
 
   // ---- Panel registration (after installing) ----
 
+  /// The one action that can fix the panel's answer (contract `EnrollErrorCode`).
+  Widget? _registerAction() {
+    switch (senseEnrollAction(_enrollError)) {
+      case SenseEnrollAction.relogin:
+        return _primaryButton(_t('relogin'), _reloginForRegister,
+            key: const Key('sense-relogin-register'));
+      case SenseEnrollAction.edit:
+        return _primaryButton(_t('edit-details'), _editForRegister,
+            key: const Key('sense-edit-register'));
+      case SenseEnrollAction.wait:
+        return _primaryButton(
+            _waitLeft > 0
+                ? '${_t('retry')} ($_waitLeft ${_t('seconds-short')})'
+                : _t('retry'),
+            _waitLeft > 0 ? null : _enroll,
+            key: const Key('sense-retry-register'));
+      case SenseEnrollAction.retry:
+        return _primaryButton(_t('retry'), _enroll,
+            key: const Key('sense-retry-register'));
+      case SenseEnrollAction.none:
+        return null;
+    }
+  }
+
   Widget _registerPage() {
     final failed = !_enrolling && _enrollError.isNotEmpty;
+    final action = failed ? _registerAction() : null;
     return _page([
       _heading(_t('register-title-a'), _t('register-title-b')),
       const SizedBox(height: 20),
@@ -1741,9 +1852,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
       if (failed) ...[
         _secondaryButton(_t('skip-register'), _skipRegister,
             key: const Key('sense-skip-register')),
-        const SizedBox(width: 10),
-        _primaryButton(_t('retry'), _enroll,
-            key: const Key('sense-retry-register')),
+        if (action != null) ...[const SizedBox(width: 10), action],
       ],
     ]);
   }

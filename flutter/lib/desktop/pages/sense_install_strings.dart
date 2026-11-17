@@ -103,23 +103,27 @@ const Map<String, String> kSenseInstallTr = {
   'registering': 'Bilgisayar panele kaydediliyor…',
   'register-failed': 'Kurulum tamamlandı, panele kayıt yapılamadı.',
   'skip-register': 'Kaydı atla',
+  'relogin': 'Yeniden giriş yap',
+  'edit-details': 'Bilgileri düzenle',
+  'register-save': 'Panele kaydet',
+  'seconds-short': 'sn',
   'enroll-token_invalid':
-      'Giriş geçersiz. Kaydı atlarsan bilgisayar panelde onay bekleyen olarak görünür.',
+      'Giriş geçersiz ya da süresi doldu. Yeniden giriş yapıp kaydı tamamla.',
   'enroll-install_scope':
-      'Giriş 30 dakikadan eski. Kaydı atlarsan bilgisayar panelde onay bekleyen olarak görünür.',
+      'Giriş 30 dakikadan eski. Yeniden giriş yapıp kaydı tamamla.',
   'enroll-device_mismatch':
-      'Bilgisayar kimliği girişteki kimlikle aynı değil. Kaydı atlarsan bilgisayar panelde onay bekleyen olarak görünür.',
+      'Giriş bu bilgisayarın kimliğiyle yapılmamış. Yeniden giriş yapıp kaydı tamamla.',
   'enroll-validation':
-      'Panel bilgileri kabul etmedi; ad, konum ve proje adlarını kontrol et.',
+      'Panel bilgileri kabul etmedi. Ad, konum ve proje adlarını düzeltip yeniden kaydet.',
   'enroll-project_not_found':
-      'Seçilen projelerden biri artık yok (arşivlenmiş olabilir).',
+      'Seçilen projelerden biri artık yok (arşivlenmiş olabilir). Projeleri yeniden seç.',
   'enroll-uuid_mismatch':
-      'Bu kimlikle başka bir bilgisayar kayıtlı. Panelde uyarı oluştu; yöneticiye haber ver.',
-  'enroll-rate_limited': 'Çok fazla deneme. Birkaç dakika sonra yeniden dene.',
+      'Bu kimlikle başka bir bilgisayar kayıtlı; panelde uyarı oluştu. Kaydı atla ve yöneticiye haber ver.',
+  'enroll-rate_limited': 'Çok fazla deneme. 1 dakika bekleyip yeniden dene.',
   'enroll-retry': 'Panel şu anda yanıt veremedi. Yeniden dene.',
   'enroll-network':
       'Panele ulaşılamadı. İnternet bağlantısını kontrol edip yeniden dene.',
-  'enroll-other': 'Kayıt yapılamadı.',
+  'enroll-other': 'Kayıt yapılamadı. Yeniden dene.',
   'done-title': 'Kuruldu',
   'done-lead': 'Sense Remote bu bilgisayara kuruldu.',
   'done-lead-locked': 'Ayarlar kilitlendi; değişiklikler panelden yapılır.',
@@ -234,23 +238,27 @@ const Map<String, String> kSenseInstallEn = {
   'registering': 'Registering the computer with the panel…',
   'register-failed': 'Installed, but the panel registration failed.',
   'skip-register': 'Skip registration',
+  'relogin': 'Sign in again',
+  'edit-details': 'Edit details',
+  'register-save': 'Register with the panel',
+  'seconds-short': 's',
   'enroll-token_invalid':
-      'The sign-in is not valid. If you skip, the computer shows up in the panel as waiting for approval.',
+      'The sign-in is not valid or has expired. Sign in again to finish the registration.',
   'enroll-install_scope':
-      'The sign-in is older than 30 minutes. If you skip, the computer shows up in the panel as waiting for approval.',
+      'The sign-in is older than 30 minutes. Sign in again to finish the registration.',
   'enroll-device_mismatch':
-      'The computer ID differs from the one used to sign in. If you skip, the computer shows up in the panel as waiting for approval.',
+      'The sign-in was not made with this computer\'s ID. Sign in again to finish the registration.',
   'enroll-validation':
-      'The panel did not accept the details; check the name, location and project names.',
+      'The panel did not accept the details. Fix the name, location and project names, then register again.',
   'enroll-project_not_found':
-      'One of the chosen projects no longer exists (it may be archived).',
+      'One of the chosen projects no longer exists (it may be archived). Pick the projects again.',
   'enroll-uuid_mismatch':
-      'Another computer is registered with this ID. The panel raised an alert; tell an administrator.',
-  'enroll-rate_limited': 'Too many attempts. Try again in a few minutes.',
+      'Another computer is registered with this ID; the panel raised an alert. Skip and tell an administrator.',
+  'enroll-rate_limited': 'Too many attempts. Wait 1 minute, then try again.',
   'enroll-retry': 'The panel could not answer right now. Try again.',
   'enroll-network':
       'The panel is not reachable. Check the internet connection and try again.',
-  'enroll-other': 'Registration failed.',
+  'enroll-other': 'Registration failed. Try again.',
   'done-title': 'Installed',
   'done-lead': 'Sense Remote is installed on this computer.',
   'done-lead-locked': 'Settings are locked; changes come from the panel.',

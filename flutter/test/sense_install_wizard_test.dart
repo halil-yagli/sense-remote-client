@@ -406,14 +406,16 @@ void main() {
     expect(find.text(t('enroll-network')), findsOneWidget);
     expect(backend.enrolls, hasLength(1));
 
-    backend.enrollResult = const SenseEnrollResult.error('install_scope');
-    await tapAndSettle(tester, find.byKey(const Key('sense-retry-register')));
-    expect(backend.enrolls, hasLength(2));
-    expect(find.text(t('enroll-install_scope')), findsOneWidget);
-
     backend.enrollResult = const SenseEnrollResult.error('something_new');
     await tapAndSettle(tester, find.byKey(const Key('sense-retry-register')));
+    expect(backend.enrolls, hasLength(2));
     expect(find.text(t('enroll-other')), findsOneWidget);
+
+    // Another computer holds the ID: no retry, only skip.
+    backend.enrollResult = const SenseEnrollResult.error('uuid_mismatch');
+    await tapAndSettle(tester, find.byKey(const Key('sense-retry-register')));
+    expect(find.text(t('enroll-uuid_mismatch')), findsOneWidget);
+    expect(find.byKey(const Key('sense-retry-register')), findsNothing);
 
     await tapAndSettle(tester, find.byKey(const Key('sense-skip-register')));
     final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
@@ -423,6 +425,104 @@ void main() {
     // Leaving through the title bar also goes through `finish` after installing.
     await tapAndSettle(tester, find.byKey(const Key('sense-window-close')));
     expect(backend.finishes, [false]);
+  });
+
+  for (final code in ['token_invalid', 'install_scope', 'device_mismatch']) {
+    testWidgets('registration "$code": sign in again, then register',
+        (tester) async {
+      final backend = FakeBackend()
+        ..enrollResult = SenseEnrollResult.error(code);
+      await pumpWizard(tester, backend);
+      await goToSummary(tester, backend);
+      await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+      expect(find.text(t('enroll-$code')), findsOneWidget);
+      expect(find.byKey(const Key('sense-retry-register')), findsNothing);
+
+      await tapAndSettle(
+          tester, find.byKey(const Key('sense-relogin-register')));
+      expect(backend.loginCancels, 1);
+      expect(find.text(t('google-sign-in')), findsOneWidget);
+      backend.enrollResult = const SenseEnrollResult.ok(['Örnek Müze']);
+      await signIn(tester, backend);
+      // Devam registers directly: the role is installed and can not change.
+      await tapAndSettle(tester, next);
+      expect(backend.installs, hasLength(1));
+      expect(backend.enrolls, hasLength(2));
+      // The project choice survives the new sign-in.
+      expect(jsonDecode(backend.enrolls.last.toJson())['project_ids'], ['prj_1']);
+      expect(find.byKey(const Key('sense-done')), findsOneWidget);
+    });
+  }
+
+  for (final code in ['validation', 'project_not_found']) {
+    testWidgets('registration "$code": edit the details, then register',
+        (tester) async {
+      final backend = FakeBackend()
+        ..enrollResult = SenseEnrollResult.error(code);
+      await pumpWizard(tester, backend);
+      await goToSummary(tester, backend);
+      await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+      expect(find.text(t('enroll-$code')), findsOneWidget);
+
+      await tapAndSettle(tester, find.byKey(const Key('sense-edit-register')));
+      expect(find.byKey(const Key('sense-name')), findsOneWidget);
+      expect(find.text(t('back')), findsNothing);
+      await tapAndSettle(tester, find.byKey(const Key('sense-project-prj_1')));
+      await tapAndSettle(tester, next);
+      expect(find.byKey(const Key('sense-install')), findsNothing);
+      expect(find.byKey(const Key('sense-advanced')), findsNothing);
+
+      backend.enrollResult = const SenseEnrollResult.ok([]);
+      await tapAndSettle(tester, find.byKey(const Key('sense-register-save')));
+      expect(backend.installs, hasLength(1));
+      expect(jsonDecode(backend.enrolls.last.toJson())['project_ids'], isEmpty);
+      expect(find.byKey(const Key('sense-done')), findsOneWidget);
+    });
+  }
+
+  testWidgets('registration "rate_limited": wait a minute, then retry',
+      (tester) async {
+    final backend = FakeBackend()
+      ..enrollResult = const SenseEnrollResult.error('rate_limited');
+    await pumpWizard(tester, backend);
+    await goToSummary(tester, backend);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    expect(find.text(t('enroll-rate_limited')), findsOneWidget);
+    final retry = find.byKey(const Key('sense-retry-register'));
+    expect(enabled(tester, retry), isFalse);
+    expect(find.text('${t('retry')} (60 ${t('seconds-short')})'),
+        findsOneWidget);
+    await tester.pump(const Duration(seconds: 30));
+    expect(find.text('${t('retry')} (30 ${t('seconds-short')})'),
+        findsOneWidget);
+    await tester.pump(const Duration(seconds: 30));
+    expect(enabled(tester, retry), isTrue);
+    backend.enrollResult = const SenseEnrollResult.ok(['Örnek Müze']);
+    await tapAndSettle(tester, retry);
+    expect(backend.enrolls, hasLength(2));
+    expect(find.byKey(const Key('sense-done')), findsOneWidget);
+  });
+
+  test('every panel registration error has a message and an action', () {
+    const actions = {
+      'token_invalid': SenseEnrollAction.relogin,
+      'install_scope': SenseEnrollAction.relogin,
+      'device_mismatch': SenseEnrollAction.relogin,
+      'validation': SenseEnrollAction.edit,
+      'project_not_found': SenseEnrollAction.edit,
+      'uuid_mismatch': SenseEnrollAction.none,
+      'rate_limited': SenseEnrollAction.wait,
+      'retry': SenseEnrollAction.retry,
+      'network': SenseEnrollAction.retry,
+      'other': SenseEnrollAction.retry,
+      'something_new': SenseEnrollAction.retry,
+    };
+    actions.forEach((code, action) {
+      expect(senseEnrollAction(code), action, reason: code);
+      if (code != 'something_new') {
+        expect(kSenseInstallTr['enroll-$code'], isNotNull, reason: code);
+      }
+    });
   });
 
   testWidgets('registration without projects says the computer is active',
