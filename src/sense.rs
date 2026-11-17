@@ -32,6 +32,8 @@ pub mod envelope_apply;
 pub mod envelope_keys;
 #[allow(dead_code)]
 pub mod envelope_seq;
+// Sense Remote: sign-in and registration from the setup wizard (wave 3 I6).
+pub mod enroll;
 
 /// Registry key (under HKLM) that holds the installed role and setup info.
 pub const REG_SUBKEY: &str = "SOFTWARE\\SenseRemote";
@@ -141,6 +143,24 @@ pub fn installed_role() -> Option<SenseRole> {
 /// Called once at start (`load_custom_client`) in every process.
 pub fn apply_installed_role() {
     apply_role(installed_role());
+    // Sense Remote (wave 3 K-YEREL): the Host home screen reads name and location as built-in
+    // options (`sense-name`, `sense-location`); users can not change built-in options.
+    let info = installed_setup_info().unwrap_or_default();
+    let mut builtin = config::BUILTIN_SETTINGS.write().unwrap();
+    for (k, v) in setup_builtin_settings(&info) {
+        builtin.insert(k.to_owned(), v);
+    }
+}
+
+/// Built-in option names for the setup info (read by the Host home screen).
+pub const OPTION_SENSE_NAME: &str = "sense-name";
+pub const OPTION_SENSE_LOCATION: &str = "sense-location";
+
+fn setup_builtin_settings(info: &SetupInfo) -> [(&'static str, String); 2] {
+    [
+        (OPTION_SENSE_NAME, info.name.clone()),
+        (OPTION_SENSE_LOCATION, info.location.clone()),
+    ]
 }
 
 /// Sense Remote: stores a role from a verified panel envelope (Host <-> Host + Controller only,
@@ -162,18 +182,17 @@ pub fn store_role(_role: SenseRole) -> Result<(), String> {
     Err("unsupported platform".to_owned())
 }
 
-/// Computer info from the setup screen. Kept on the computer until the panel exists
-/// (wave 3), then sent with the device registration.
+/// Computer info from the setup screen that stays on the computer (HKLM `Setup`).
+/// Sense Remote (wave 3 K-YEREL): only name and location. Project names may contain a
+/// customer's name, so they are never written here; projects and the note go only to the
+/// panel with the registration (`enroll`). Older installs with `projects` / `note` still
+/// decode (unknown fields are ignored) and lose them on the next install.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetupInfo {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub projects: Vec<String>,
-    #[serde(default)]
     pub location: String,
-    #[serde(default)]
-    pub note: String,
 }
 
 pub const MAX_NAME_CHARS: usize = 64;
@@ -192,30 +211,20 @@ fn clean_text(value: &str, max_chars: usize, error: &'static str) -> Result<Stri
     Ok(value.to_owned())
 }
 
+fn clean_name(value: &str) -> Result<String, &'static str> {
+    let name = clean_text(value, MAX_NAME_CHARS, "invalid-name")?;
+    if name.is_empty() {
+        return Err("invalid-name");
+    }
+    Ok(name)
+}
+
 impl SetupInfo {
     /// Trims, validates and de-duplicates. Errors are short keys the setup screen shows.
     pub fn normalized(&self) -> Result<Self, &'static str> {
-        let name = clean_text(&self.name, MAX_NAME_CHARS, "invalid-name")?;
-        if name.is_empty() {
-            return Err("invalid-name");
-        }
-        let mut projects: Vec<String> = Vec::new();
-        for project in &self.projects {
-            let project = clean_text(project, MAX_PROJECT_CHARS, "invalid-project")?;
-            if !project.is_empty()
-                && !projects.iter().any(|p| p.to_lowercase() == project.to_lowercase())
-            {
-                projects.push(project);
-            }
-        }
-        if projects.len() > MAX_PROJECTS {
-            return Err("invalid-project");
-        }
         Ok(Self {
-            name,
-            projects,
+            name: clean_name(&self.name)?,
             location: clean_text(&self.location, MAX_LOCATION_CHARS, "invalid-location")?,
-            note: clean_text(&self.note, MAX_NOTE_CHARS, "invalid-note")?,
         })
     }
 
@@ -235,8 +244,7 @@ impl SetupInfo {
     }
 }
 
-/// Setup info written by the installer (for wave 3: device registration).
-#[allow(dead_code)]
+/// Setup info written by the installer (name and location for the Host home screen).
 pub fn installed_setup_info() -> Option<SetupInfo> {
     SetupInfo::decode(&read_reg_value(REG_VALUE_SETUP)?)
 }
@@ -305,12 +313,25 @@ fn read_reg_value(_name: &str) -> Option<String> {
 /// administrator prompt was declined, otherwise an error to show.
 #[cfg(windows)]
 pub fn install(options: &str, path: String, role: &str, info_json: &str) -> String {
+    // Sense Remote (wave 3 K-GİRİŞ): only a signed-in Sense employee installs from the setup
+    // screen; the sign-in token also registers the computer right after.
+    if !enroll::is_signed_in() {
+        return "not-signed-in".to_owned();
+    }
     if let Err(err) = prepare_install(role, info_json) {
         return err.to_owned();
     }
+    // Sense Remote (K-R2-3): create the device key pair before `install_me`, so the service
+    // imports the same pair (`--import-config`) whose public key the registration sends.
+    let _ = config::Config::get_key_pair();
     // silent = true: the setup screen shows "Kuruldu" and opens the app on request.
     match crate::platform::windows::install_me(options, path, true, false) {
-        Ok(()) => String::new(),
+        Ok(()) => {
+            if let Some(role) = SenseRole::parse(role) {
+                enroll::remember_installed_role(role);
+            }
+            String::new()
+        }
         Err(err) => {
             let cancelled = err
                 .downcast_ref::<::windows::core::Error>()
@@ -335,6 +356,8 @@ pub fn install(_options: &str, _path: String, _role: &str, _info_json: &str) -> 
 
 /// Leaves the setup screen, optionally opening the installed app first.
 pub fn finish_install(open_app: bool) {
+    // Sense Remote (K-KAYIT-b): a Host keeps no sign-in, also when registration was skipped.
+    enroll::finish();
     #[cfg(windows)]
     if open_app {
         let (_, _, _, exe) = crate::platform::windows::get_install_info();
@@ -736,23 +759,15 @@ mod tests {
     fn info() -> SetupInfo {
         SetupInfo {
             name: "  Galeri kioskı ".to_owned(),
-            projects: vec![
-                "Örnek Müze".to_owned(),
-                " ".to_owned(),
-                "örnek müze".to_owned(),
-                "Ekip".to_owned(),
-            ],
-            location: "Galeri 1".to_owned(),
-            note: "2 ekran \"LED\" & 100% ^ | <>".to_owned(),
+            location: " Galeri 1 \"LED\" & 100% ^ | <>".to_owned(),
         }
     }
 
     #[test]
-    fn info_is_trimmed_and_deduplicated() {
+    fn info_is_trimmed() {
         let info = info().normalized().unwrap();
         assert_eq!(info.name, "Galeri kioskı");
-        assert_eq!(info.projects, vec!["Örnek Müze", "Ekip"]);
-        assert_eq!(info.location, "Galeri 1");
+        assert_eq!(info.location, "Galeri 1 \"LED\" & 100% ^ | <>");
     }
 
     #[test]
@@ -767,11 +782,8 @@ mod tests {
         bad.name = "x".repeat(MAX_NAME_CHARS + 1);
         assert_eq!(bad.normalized(), Err("invalid-name"));
         let mut bad = info();
-        bad.projects = (0..=MAX_PROJECTS).map(|i| format!("P{i}")).collect();
-        assert_eq!(bad.normalized(), Err("invalid-project"));
-        let mut bad = info();
-        bad.note = "n".repeat(MAX_NOTE_CHARS + 1);
-        assert_eq!(bad.normalized(), Err("invalid-note"));
+        bad.location = "l".repeat(MAX_LOCATION_CHARS + 1);
+        assert_eq!(bad.normalized(), Err("invalid-location"));
         let mut ok = info();
         ok.name = "ı".repeat(MAX_NAME_CHARS);
         assert!(ok.normalized().is_ok());
@@ -790,16 +802,66 @@ mod tests {
     fn largest_valid_info_fits_the_cmd_line() {
         let info = SetupInfo {
             name: "ğ".repeat(MAX_NAME_CHARS),
-            projects: (0..MAX_PROJECTS)
-                .map(|i| format!("{i}{}", "ş".repeat(MAX_PROJECT_CHARS - 1)))
-                .collect(),
             location: "ü".repeat(MAX_LOCATION_CHARS),
-            note: "ö".repeat(MAX_NOTE_CHARS),
         }
         .normalized()
         .unwrap();
         let commands = install_commands(SenseRole::Both, &info.encode().unwrap());
         assert!(commands.lines().all(|line| line.len() < 8000));
+    }
+
+    // Wave 3 K-YEREL: project names (they may name a customer) and the note never reach HKLM.
+    #[test]
+    fn setup_info_keeps_only_name_and_location() {
+        let from_screen = r#"{"name":"Kiosk","location":"Galeri 1","projects":["Örnek Müze"],
+            "project_ids":["prj_1"],"new_projects":["Yeni Müze"],"note":"LED"}"#;
+        let info: SetupInfo = serde_json::from_str(from_screen).unwrap();
+        let encoded = info.normalized().unwrap().encode().unwrap();
+        let stored = String::from_utf8(hex::decode(&encoded).unwrap()).unwrap();
+        let stored: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        assert_eq!(
+            stored,
+            serde_json::json!({"name": "Kiosk", "location": "Galeri 1"})
+        );
+        let commands = install_commands(SenseRole::Host, &encoded);
+        assert!(!commands.to_lowercase().contains("project"));
+        assert!(!commands.contains(&hex::encode("Örnek Müze")));
+        assert!(!commands.contains(&hex::encode("Yeni Müze")));
+        assert!(!commands.contains(&hex::encode("LED")));
+    }
+
+    #[test]
+    fn older_setup_value_with_projects_still_decodes() {
+        let old = hex::encode(
+            r#"{"name":"Kiosk","projects":["Örnek Müze"],"location":"G1","note":"n"}"#,
+        );
+        assert_eq!(
+            SetupInfo::decode(&old),
+            Some(SetupInfo {
+                name: "Kiosk".to_owned(),
+                location: "G1".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn setup_info_becomes_builtin_name_and_location() {
+        let info = SetupInfo {
+            name: "Kiosk".to_owned(),
+            location: "Galeri 1".to_owned(),
+        };
+        assert_eq!(
+            setup_builtin_settings(&info),
+            [
+                ("sense-name", "Kiosk".to_owned()),
+                ("sense-location", "Galeri 1".to_owned())
+            ]
+        );
+        // Not installed: both empty, so the home screen shows nothing instead of stale values.
+        assert_eq!(
+            setup_builtin_settings(&SetupInfo::default()),
+            [("sense-name", String::new()), ("sense-location", String::new())]
+        );
     }
 
     #[test]

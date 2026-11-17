@@ -9,31 +9,59 @@ const Map<String, String> kSenseInstallTr = {
   'step-role': 'Bu bilgisayarın rolü',
   'step-info': 'Bilgisayar bilgisi',
   'step-summary': 'Özet ve kurulum',
-  'soon': 'Yakında',
+  // Step 1: Sense sign-in (wave 3 K-GİRİŞ).
+  'account-title-a': 'Sense',
+  'account-title-b': ' hesabınla gir',
+  'account-lead':
+      'Kurulumu yalnızca Sense Department çalışanı yapabilir. Bilgisayar senin hesabın üzerinden panele bağlanır.',
+  'google-sign-in': 'Google ile giriş yap',
+  'sign-in-note': 'tarayıcıda açılır · iki adımlı doğrulama istenir',
+  'domain-hint': '@sensedepartment.com dışındaki hesaplar kabul edilmez',
+  'requesting': 'Panele bağlanılıyor…',
+  'pairing-label': 'Eşleştirme kodu',
+  'pairing-spoken': 'Eşleştirme kodu: ',
+  'pairing-hint':
+      'Tarayıcıdaki onay ekranında aynı kod görünmeli. Farklıysa onaylama.',
+  'open-browser': 'Tarayıcıda onayla',
+  'copy-link': 'Bağlantıyı kopyala',
+  'link-copied': 'Bağlantı kopyalandı.',
+  'waiting': 'Tarayıcıdaki onay bekleniyor (en çok 3 dakika).',
+  'cancel': 'Vazgeç',
+  'verified': 'doğrulandı',
+  'other-account': 'Başka hesapla gir',
+  'login-timeout': 'Giriş süresi doldu (3 dakika). Yeni kodla yeniden dene.',
+  'login-failed': 'Giriş tamamlanamadı.',
+  'new-code': 'Yeni kod al',
+  'retry': 'Yeniden dene',
   'role-title-a': 'Bu bilgisayarın ',
   'role-title-b': 'rolü',
   'role-lead':
       'Birini ya da ikisini birden seç. Kurulumdan sonra yalnızca panelden değiştirilebilir.',
-  'account-soon':
-      'Sense hesabıyla giriş, panel hazır olunca kuruluma eklenecek. Şimdilik bu adım atlanır.',
   'host-desc':
       'Ekip bu bilgisayara uzaktan bağlanabilir. Müze, mekân ve marka kurulumları için.',
   'controller-desc':
-      'Bu bilgisayardan başka bilgisayarlara bağlanırsın. Ekip bilgisayarları için.',
+      'Bu bilgisayardan, hesabının yönettiği bilgisayarlara bağlanırsın. Ekip bilgisayarları için.',
   'no-role': 'Henüz seçim yok.',
   'both-desc':
-      ' — ekip bu bilgisayara bağlanabilir, buradan da başka bilgisayarlara bağlanılabilir.',
+      ' — ekip bu bilgisayara bağlanabilir, sen de buradan başka bilgisayarlara bağlanabilirsin.',
   'info-title-a': 'Bilgisayar ',
   'info-title-b': 'bilgisi',
   'info-lead':
-      'Bilgiler bu bilgisayarda saklanır; panel hazır olunca panele gönderilir.',
+      'Bilgisayar seçtiğin projelerin sayfasına eklenir; panelde bu bilgilerle görünür.',
   'name': 'Bilgisayar adı',
   'name-hint': 'Örn. Galeri kioskı',
   'projects': 'Projeler',
-  'projects-multi': '(birden fazla eklenebilir)',
-  'project-hint': 'Proje adı yaz, Enter',
-  'add-project': 'Projeyi ekle',
+  'projects-multi': '(birden fazla seçilebilir)',
+  'projects-loading': 'Projeler yükleniyor…',
+  'projects-empty': 'Henüz proje yok; aşağıya yeni proje adı yaz.',
+  'projects-error': 'Proje listesi alınamadı.',
+  'projects-error-token_invalid': 'Proje listesi alınamadı: giriş geçersiz.',
+  'projects-error-network': 'Proje listesi alınamadı: panele ulaşılamadı.',
+  'projects-max': 'En çok 10 proje seçilebilir.',
+  'project-hint': 'Yeni proje adı yaz, Enter',
+  'add-project': 'Yeni projeyi ekle',
   'remove-project': 'Projeyi kaldır',
+  'new-tag': 'yeni',
   'location': 'Konum',
   'location-hint': 'Örn. Galeri 1',
   'note': 'Not (isteğe bağlı)',
@@ -44,7 +72,6 @@ const Map<String, String> kSenseInstallTr = {
   'summary-lead-controller':
       'Kurulumdan sonra bu bilgisayardan başka bilgisayarlara bağlanabilirsin.',
   'account': 'Hesap',
-  'account-value': 'Yakında — panel hazır olunca',
   'role': 'Rol',
   'update': 'Güncelleme',
   'update-value': 'Otomatik',
@@ -63,14 +90,44 @@ const Map<String, String> kSenseInstallTr = {
   'installing': 'Kuruluyor… Windows yönetici onayı isteyecek.',
   'error-cancelled': 'Yönetici onayı verilmedi; kurulum yapılmadı.',
   'error-failed': 'Kurulum tamamlanamadı.',
+  'error-not-signed-in': 'Önce Sense hesabınla giriş yap.',
   'error-invalid-name': 'Bilgisayar adı boş ya da çok uzun.',
-  'error-invalid-project': 'Proje adlarından biri çok uzun ya da çok fazla proje var.',
+  'error-invalid-project':
+      'Proje adlarından biri çok uzun ya da çok fazla proje var.',
   'error-invalid-location': 'Konum çok uzun.',
   'error-invalid-note': 'Not çok uzun.',
-  'error-info-too-long': 'Bilgiler çok uzun; notu kısalt.',
+  'error-info-too-long': 'Bilgiler çok uzun; konumu kısalt.',
+  // Registration (wave 3 K-KAYIT): the computer is already installed at this point.
+  'register-title-a': 'Panele ',
+  'register-title-b': 'kayıt',
+  'registering': 'Bilgisayar panele kaydediliyor…',
+  'register-failed': 'Kurulum tamamlandı, panele kayıt yapılamadı.',
+  'skip-register': 'Kaydı atla',
+  'enroll-token_invalid':
+      'Giriş geçersiz. Kaydı atlarsan bilgisayar panelde onay bekleyen olarak görünür.',
+  'enroll-install_scope':
+      'Giriş 30 dakikadan eski. Kaydı atlarsan bilgisayar panelde onay bekleyen olarak görünür.',
+  'enroll-device_mismatch':
+      'Bilgisayar kimliği girişteki kimlikle aynı değil. Kaydı atlarsan bilgisayar panelde onay bekleyen olarak görünür.',
+  'enroll-validation':
+      'Panel bilgileri kabul etmedi; ad, konum ve proje adlarını kontrol et.',
+  'enroll-project_not_found':
+      'Seçilen projelerden biri artık yok (arşivlenmiş olabilir).',
+  'enroll-uuid_mismatch':
+      'Bu kimlikle başka bir bilgisayar kayıtlı. Panelde uyarı oluştu; yöneticiye haber ver.',
+  'enroll-rate_limited': 'Çok fazla deneme. Birkaç dakika sonra yeniden dene.',
+  'enroll-retry': 'Panel şu anda yanıt veremedi. Yeniden dene.',
+  'enroll-network':
+      'Panele ulaşılamadı. İnternet bağlantısını kontrol edip yeniden dene.',
+  'enroll-other': 'Kayıt yapılamadı.',
   'done-title': 'Kuruldu',
   'done-lead': 'Sense Remote bu bilgisayara kuruldu.',
   'done-lead-locked': 'Ayarlar kilitlendi; değişiklikler panelden yapılır.',
+  'done-panel-project': 'Bilgisayar panelde {projects} sayfasında.',
+  'done-panel-projects': 'Bilgisayar panelde {projects} sayfalarında.',
+  'done-panel-none': 'Bilgisayar panelde etkin.',
+  'done-pending':
+      'Panele kayıt yapılmadı: bilgisayar panelde onay bekleyen olarak görünecek; bir Sense çalışanı onaylayabilir.',
   'open-app': 'Sense Remote\'u aç',
 };
 
@@ -82,28 +139,60 @@ const Map<String, String> kSenseInstallEn = {
   'step-role': 'Role of this computer',
   'step-info': 'Computer details',
   'step-summary': 'Summary and install',
-  'soon': 'Soon',
+  'account-title-a': 'Sign in',
+  'account-title-b': ' with Sense',
+  'account-lead':
+      'Only a Sense Department employee can install. The computer joins the panel through your account.',
+  'google-sign-in': 'Sign in with Google',
+  'sign-in-note': 'opens in the browser · two-step verification required',
+  'domain-hint': 'Only @sensedepartment.com accounts are accepted',
+  'requesting': 'Connecting to the panel…',
+  'pairing-label': 'Pairing code',
+  'pairing-spoken': 'Pairing code: ',
+  'pairing-hint':
+      'The approval page in the browser must show the same code. If it differs, do not approve.',
+  'open-browser': 'Approve in the browser',
+  'copy-link': 'Copy link',
+  'link-copied': 'Link copied.',
+  'waiting': 'Waiting for the approval in the browser (up to 3 minutes).',
+  'cancel': 'Cancel',
+  'verified': 'verified',
+  'other-account': 'Use another account',
+  'login-timeout': 'Sign-in timed out (3 minutes). Try again with a new code.',
+  'login-failed': 'Sign-in could not be completed.',
+  'new-code': 'Get a new code',
+  'retry': 'Try again',
   'role-title-a': 'Role of this ',
   'role-title-b': 'computer',
   'role-lead':
       'Pick one or both. After installation it can only be changed from the panel.',
-  'account-soon':
-      'Sign-in with the Sense account comes with the panel. This step is skipped for now.',
-  'host-desc': 'The team can connect to this computer. For venues and installations.',
-  'controller-desc': 'Connect from this computer to others. For team computers.',
+  'host-desc':
+      'The team can connect to this computer. For venues and installations.',
+  'controller-desc':
+      'Connect from this computer to the computers your account manages. For team computers.',
   'no-role': 'Nothing selected yet.',
-  'both-desc': ' — the team can connect here, and this computer can connect to others.',
+  'both-desc':
+      ' — the team can connect here, and you can connect from here to others.',
   'info-title-a': 'Computer ',
   'info-title-b': 'details',
   'info-lead':
-      'Kept on this computer; sent to the panel once the panel is ready.',
+      'The computer is added to the pages of the projects you pick; the panel shows these details.',
   'name': 'Computer name',
   'name-hint': 'e.g. Gallery kiosk',
   'projects': 'Projects',
-  'projects-multi': '(you can add several)',
-  'project-hint': 'Type a project, Enter',
-  'add-project': 'Add project',
+  'projects-multi': '(you can pick several)',
+  'projects-loading': 'Loading projects…',
+  'projects-empty': 'No projects yet; type a new project name below.',
+  'projects-error': 'Could not load the project list.',
+  'projects-error-token_invalid':
+      'Could not load the project list: sign-in is not valid.',
+  'projects-error-network':
+      'Could not load the project list: the panel is not reachable.',
+  'projects-max': 'At most 10 projects.',
+  'project-hint': 'Type a new project name, Enter',
+  'add-project': 'Add new project',
   'remove-project': 'Remove project',
+  'new-tag': 'new',
   'location': 'Location',
   'location-hint': 'e.g. Gallery 1',
   'note': 'Note (optional)',
@@ -114,7 +203,6 @@ const Map<String, String> kSenseInstallEn = {
   'summary-lead-controller':
       'After installation you can connect from this computer to others.',
   'account': 'Account',
-  'account-value': 'Soon — once the panel is ready',
   'role': 'Role',
   'update': 'Updates',
   'update-value': 'Automatic',
@@ -131,18 +219,57 @@ const Map<String, String> kSenseInstallEn = {
   'next': 'Continue',
   'install': 'Install',
   'installing': 'Installing… Windows will ask for administrator approval.',
-  'error-cancelled': 'Administrator approval was not given; nothing was installed.',
+  'error-cancelled':
+      'Administrator approval was not given; nothing was installed.',
   'error-failed': 'Installation could not be completed.',
+  'error-not-signed-in': 'Sign in with your Sense account first.',
   'error-invalid-name': 'Computer name is empty or too long.',
-  'error-invalid-project': 'A project name is too long, or there are too many projects.',
+  'error-invalid-project':
+      'A project name is too long, or there are too many projects.',
   'error-invalid-location': 'Location is too long.',
   'error-invalid-note': 'Note is too long.',
-  'error-info-too-long': 'The details are too long; shorten the note.',
+  'error-info-too-long': 'The details are too long; shorten the location.',
+  'register-title-a': 'Panel ',
+  'register-title-b': 'registration',
+  'registering': 'Registering the computer with the panel…',
+  'register-failed': 'Installed, but the panel registration failed.',
+  'skip-register': 'Skip registration',
+  'enroll-token_invalid':
+      'The sign-in is not valid. If you skip, the computer shows up in the panel as waiting for approval.',
+  'enroll-install_scope':
+      'The sign-in is older than 30 minutes. If you skip, the computer shows up in the panel as waiting for approval.',
+  'enroll-device_mismatch':
+      'The computer ID differs from the one used to sign in. If you skip, the computer shows up in the panel as waiting for approval.',
+  'enroll-validation':
+      'The panel did not accept the details; check the name, location and project names.',
+  'enroll-project_not_found':
+      'One of the chosen projects no longer exists (it may be archived).',
+  'enroll-uuid_mismatch':
+      'Another computer is registered with this ID. The panel raised an alert; tell an administrator.',
+  'enroll-rate_limited': 'Too many attempts. Try again in a few minutes.',
+  'enroll-retry': 'The panel could not answer right now. Try again.',
+  'enroll-network':
+      'The panel is not reachable. Check the internet connection and try again.',
+  'enroll-other': 'Registration failed.',
   'done-title': 'Installed',
   'done-lead': 'Sense Remote is installed on this computer.',
   'done-lead-locked': 'Settings are locked; changes come from the panel.',
+  'done-panel-project': 'The computer is on the {projects} page in the panel.',
+  'done-panel-projects':
+      'The computer is on the {projects} pages in the panel.',
+  'done-panel-none': 'The computer is active in the panel.',
+  'done-pending':
+      'Not registered: the computer shows up in the panel as waiting for approval; any Sense employee can approve it.',
   'open-app': 'Open Sense Remote',
 };
 
 String senseInstallText(String key) =>
     kSenseInstallTr[key] ?? kSenseInstallEn[key] ?? key;
+
+/// Sense Remote: pairing code in two groups of three, like the panel's approval page
+/// (`ClientApprove.tsx`: "482 913").
+String formatSensePairingCode(String code) =>
+    code.length == 6 ? '${code.substring(0, 3)} ${code.substring(3)}' : code;
+
+/// Digit by digit for screen readers ("4 8 2 9 1 3").
+String spokenSensePairingCode(String code) => code.split('').join(' ');

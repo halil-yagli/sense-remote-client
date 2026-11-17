@@ -2491,6 +2491,30 @@ pub fn install_sense_finish(open_app: bool) {
     crate::sense::finish_install(open_app)
 }
 
+// Sense Remote (wave 3 I6): Sense sign-in on the setup screen (purpose "install"). The token
+// stays in Rust; the status JSON carries the state, the panel URL and the pairing code.
+pub fn install_sense_login_start() {
+    crate::sense::enroll::login_start()
+}
+
+pub fn install_sense_login_status() -> String {
+    crate::sense::enroll::login_status()
+}
+
+pub fn install_sense_login_cancel() {
+    crate::sense::enroll::login_cancel()
+}
+
+// Sense Remote (wave 3 I6): projects the signed-in employee can pick (JSON).
+pub fn install_sense_projects() -> String {
+    crate::sense::enroll::projects()
+}
+
+// Sense Remote (wave 3 I6): registers the installed computer with the panel (JSON in and out).
+pub fn install_sense_enroll(request: String) -> String {
+    crate::sense::enroll::enroll(&request)
+}
+
 pub fn main_account_auth(op: String, remember_me: bool) {
     let id = get_id();
     let uuid = get_uuid();
