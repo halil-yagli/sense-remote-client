@@ -33,6 +33,8 @@ pub mod envelope_keys;
 #[allow(dead_code)]
 pub mod envelope_seq;
 // Sense Remote: sign-in and registration from the setup wizard (wave 3 I6).
+// Only the Flutter UI has the setup wizard and the panel sign-in (`hbbs_http::account`).
+#[cfg(feature = "flutter")]
 pub mod enroll;
 
 /// Registry key (under HKLM) that holds the installed role and setup info.
@@ -315,6 +317,7 @@ fn read_reg_value(_name: &str) -> Option<String> {
 pub fn install(options: &str, path: String, role: &str, info_json: &str) -> String {
     // Sense Remote (wave 3 K-GİRİŞ): only a signed-in Sense employee installs from the setup
     // screen; the sign-in token also registers the computer right after.
+    #[cfg(feature = "flutter")]
     if !enroll::is_signed_in() {
         return "not-signed-in".to_owned();
     }
@@ -327,6 +330,7 @@ pub fn install(options: &str, path: String, role: &str, info_json: &str) -> Stri
     // silent = true: the setup screen shows "Kuruldu" and opens the app on request.
     match crate::platform::windows::install_me(options, path, true, false) {
         Ok(()) => {
+            #[cfg(feature = "flutter")]
             if let Some(role) = SenseRole::parse(role) {
                 enroll::remember_installed_role(role);
             }
@@ -357,6 +361,7 @@ pub fn install(_options: &str, _path: String, _role: &str, _info_json: &str) -> 
 /// Leaves the setup screen, optionally opening the installed app first.
 pub fn finish_install(open_app: bool) {
     // Sense Remote (K-KAYIT-b): a Host keeps no sign-in, also when registration was skipped.
+    #[cfg(feature = "flutter")]
     enroll::finish();
     #[cfg(windows)]
     if open_app {

@@ -1189,15 +1189,18 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
             ),
           ),
         const SizedBox(height: 16),
-        Row(
+        // Wrap, not Row: long labels (or a larger system font) move to a second line instead
+        // of overflowing.
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             _primaryButton(
                 _t('open-browser'), () => widget.backend.openUrl(s.url),
                 key: const Key('sense-open-browser')),
-            const SizedBox(width: 6),
             _textButton(_t('copy-link'), _copyLink,
                 key: const Key('sense-copy-link')),
-            const Spacer(),
             _textButton(_t('cancel'), _cancelLogin,
                 key: const Key('sense-login-cancel')),
           ],
