@@ -57,7 +57,9 @@ class SenseCmTokens {
   static const accent2 = Color(0xFF640164);
   static const live = Color(0xFF00FFB6);
   static const idle = Color(0xFF55555F);
-  static const danger = Color(0xFFFF3B4D);
+  // Sense Remote: white 12 px text on #FF3B4D was 3.5:1; #D81E30 is about
+  // 5.1:1 (WCAG AA, design review T3-6).
+  static const danger = Color(0xFFD81E30);
   static const radius = 10.0;
   static const radiusCard = 14.0;
   static const font = 'Poppins';

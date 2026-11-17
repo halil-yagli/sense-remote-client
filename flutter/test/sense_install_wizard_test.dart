@@ -516,6 +516,14 @@ void main() {
       'network': SenseEnrollAction.retry,
       'other': SenseEnrollAction.retry,
       'something_new': SenseEnrollAction.retry,
+      // Sense Remote (review K3-5): local codes of src/sense/enroll.rs.
+      'invalid-name': SenseEnrollAction.edit,
+      'invalid-location': SenseEnrollAction.edit,
+      'invalid-note': SenseEnrollAction.edit,
+      'invalid-project': SenseEnrollAction.edit,
+      'not-installed': SenseEnrollAction.none,
+      'build': SenseEnrollAction.none,
+      'identity': SenseEnrollAction.none,
     };
     actions.forEach((code, action) {
       expect(senseEnrollAction(code), action, reason: code);
@@ -535,6 +543,41 @@ void main() {
     final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
     expect(done, contains(t('done-panel-none')));
     expect(done, contains(t('done-lead-locked')));
+  });
+
+  // Sense Remote (design review T3-2): a Host has no large window to open.
+  testWidgets('Host only: the done page only closes', (tester) async {
+    final backend = FakeBackend();
+    await pumpWizard(tester, backend);
+    await goToSummary(tester, backend);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
+    expect(done, contains(t('done-host-background')));
+    expect(find.byKey(const Key('sense-finish-open')), findsNothing);
+    await tapAndSettle(tester, find.byKey(const Key('sense-finish-close')));
+    expect(backend.finishes, [false]);
+  });
+
+  // Sense Remote (design review T3-11): the version comes from the build.
+  testWidgets('the sidebar shows the build version, none without it',
+      (tester) async {
+    tester.view.physicalSize = const Size(860, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    Widget wizard(String version) => MaterialApp(
+          home: SenseInstallWizard(
+            initialPath: r'C:\Program Files\SenseRemote',
+            icon: const SizedBox(),
+            backend: FakeBackend(),
+            version: version,
+          ),
+        );
+    await tester.pumpWidget(wizard('7'));
+    await tester.pumpAndSettle();
+    expect(find.text('${t('version')} 7'), findsOneWidget);
+    await tester.pumpWidget(wizard(''));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('sense-version')), findsNothing);
   });
 
   testWidgets('declined administrator prompt stays on the summary',

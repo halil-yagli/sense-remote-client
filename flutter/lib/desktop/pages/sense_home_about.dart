@@ -160,7 +160,8 @@ class SenseAboutView extends StatelessWidget {
                       '${senseHomeText('copyright', {
                             'year': '${year ?? DateTime.now().year}'
                           })} · ',
-                      style: _T.text(size: 10, color: _T.idle)),
+                      // Sense Remote: muted, not idle (#55555F is under 4.5:1).
+                      style: _T.text(size: 10, color: _T.muted)),
                   InkWell(
                     key: const Key('sense-about-licenses'),
                     onTap: () => showDialog(

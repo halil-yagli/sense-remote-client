@@ -40,6 +40,7 @@ import 'desktop/pages/view_camera_page.dart' as desktop_view_camera;
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'models/model.dart';
 import 'models/platform_model.dart';
+import 'common/sense_theme.dart'; // Sense Remote
 
 import 'package:flutter_hbb/native/win32.dart'
     if (dart.library.html) 'package:flutter_hbb/web/win32.dart';
@@ -577,6 +578,8 @@ class MyTheme {
   );
 
   static ThemeMode getThemeModePreference() {
+    // Sense Remote: an installed Sense computer is always dark (Sense theme).
+    if (senseRoleInstalled()) return ThemeMode.dark;
     return themeModeFromString(bind.mainGetLocalOption(key: kCommConfKeyTheme));
   }
 
@@ -3771,7 +3774,9 @@ Color? disabledTextColor(BuildContext context, bool enabled) {
 }
 
 Widget loadPowered(BuildContext context) {
-  if (bind.mainGetBuildinOption(key: "hide-powered-by-me") == 'Y') {
+  // Sense Remote: no "Powered by RustDesk" line (see kSenseHideStockBranding).
+  if (kSenseHideStockBranding ||
+      bind.mainGetBuildinOption(key: "hide-powered-by-me") == 'Y') {
     return SizedBox.shrink();
   }
   return MouseRegion(

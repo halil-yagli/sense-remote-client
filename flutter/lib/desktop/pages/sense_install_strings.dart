@@ -124,9 +124,24 @@ const Map<String, String> kSenseInstallTr = {
   'enroll-network':
       'Panele ulaşılamadı. İnternet bağlantısını kontrol edip yeniden dene.',
   'enroll-other': 'Kayıt yapılamadı. Yeniden dene.',
+  // Sense Remote: local checks before the panel is asked (review K3-5).
+  'enroll-invalid-name': 'Bilgisayar adı geçersiz. Adı düzeltip yeniden kaydet.',
+  'enroll-invalid-location': 'Konum geçersiz. Konumu düzeltip yeniden kaydet.',
+  'enroll-invalid-note': 'Not çok uzun ya da geçersiz. Notu düzeltip yeniden kaydet.',
+  'enroll-invalid-project':
+      'Proje seçimi geçersiz (en çok 10 proje, adlar kısa olmalı). Projeleri düzeltip yeniden kaydet.',
+  'enroll-not-installed':
+      'Kurulum tamamlanmamış görünüyor. Kaydı atla ve Sense ekibine bildir.',
+  'enroll-build':
+      'Bu kurulum dosyası eksik derlenmiş. Kaydı atla ve Sense ekibine bildir.',
+  'enroll-identity':
+      'Bu bilgisayarın kimliği okunamadı. Kaydı atla ve Sense ekibine bildir.',
   'done-title': 'Kuruldu',
   'done-lead': 'Sense Remote bu bilgisayara kuruldu.',
   'done-lead-locked': 'Ayarlar kilitlendi; değişiklikler panelden yapılır.',
+  // Sense Remote: a Host has no large window to open (decision: no large UI on the Host).
+  'done-host-background':
+      'Sense Remote arka planda çalışıyor; bağlantı sırasında ekranın sağ alt köşesinde küçük bir simge görünür.',
   'done-panel-project': 'Bilgisayar panelde {projects} sayfasında.',
   'done-panel-projects': 'Bilgisayar panelde {projects} sayfalarında.',
   'done-panel-none': 'Bilgisayar panelde etkin.',
@@ -259,9 +274,22 @@ const Map<String, String> kSenseInstallEn = {
   'enroll-network':
       'The panel is not reachable. Check the internet connection and try again.',
   'enroll-other': 'Registration failed. Try again.',
+  'enroll-invalid-name': 'The computer name is not valid. Fix it and save again.',
+  'enroll-invalid-location': 'The location is not valid. Fix it and save again.',
+  'enroll-invalid-note': 'The note is too long or not valid. Fix it and save again.',
+  'enroll-invalid-project':
+      'The project choice is not valid (at most 10 projects, short names). Fix it and save again.',
+  'enroll-not-installed':
+      'The installation does not look complete. Skip and tell the Sense team.',
+  'enroll-build':
+      'This setup file was built incomplete. Skip and tell the Sense team.',
+  'enroll-identity':
+      'The identity of this computer could not be read. Skip and tell the Sense team.',
   'done-title': 'Installed',
   'done-lead': 'Sense Remote is installed on this computer.',
   'done-lead-locked': 'Settings are locked; changes come from the panel.',
+  'done-host-background':
+      'Sense Remote runs in the background; during a connection a small icon shows in the bottom-right corner.',
   'done-panel-project': 'The computer is on the {projects} page in the panel.',
   'done-panel-projects':
       'The computer is on the {projects} pages in the panel.',

@@ -22,6 +22,8 @@ import 'package:bot_toast/bot_toast.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../models/platform_model.dart';
+// Sense Remote: connection window in Sense colors.
+import '../widgets/sense_remote_strings.dart' show kSenseRemoteWindow;
 
 class _MenuTheme {
   static const Color blueColor = MyTheme.button;
@@ -143,7 +145,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
             const AddButton(),
           ],
         ),
-        selectedBorderColor: MyTheme.accent,
+        // Sense Remote: white accent instead of RustDesk's blue (T3-7).
+        selectedBorderColor: kSenseRemoteWindow ? Colors.white : MyTheme.accent,
         pageViewBuilder: (pageView) => pageView,
         labelGetter: DesktopTab.tablabelGetter,
         tabBuilder: (key, icon, label, themeConf) => Obx(() {

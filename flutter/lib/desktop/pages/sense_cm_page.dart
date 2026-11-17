@@ -144,8 +144,12 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
         final fits = constraints.maxWidth >= kSenseCmPanelSize.width * 0.6 &&
             constraints.maxHeight >= kSenseCmPanelSize.height * 0.6;
         if (clients.isEmpty || !open || !fits) {
+          // Sense Remote: the window behind the rounded icon stays transparent
+          // (window options use a transparent background), so no black square
+          // shows around it on the desktop (design review T3-4).
           return Container(
-            color: SenseCmTokens.black,
+            key: const ValueKey('sense-cm-icon-root'),
+            color: Colors.transparent,
             alignment: Alignment.center,
             child: SenseCmIcon(
               live: live,

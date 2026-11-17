@@ -136,6 +136,40 @@ void main() {
     });
   });
 
+  // Sense Remote (review K3-3): `sense.display_count` is optional.
+  group('display count', () {
+    test('reads a whole number from 1 to 64, nothing else', () {
+      expect(senseDisplayCountFrom({'display_count': 3}), 3);
+      expect(senseDisplayCountFrom({'display_count': 2.0}), 2);
+      expect(senseDisplayCountFrom({'display_count': 2.5}), isNull);
+      expect(senseDisplayCountFrom({'display_count': 0}), isNull);
+      expect(senseDisplayCountFrom({'display_count': 65}), isNull);
+      expect(senseDisplayCountFrom({'display_count': '3'}), isNull);
+      expect(senseDisplayCountFrom({'display_count': double.infinity}),
+          isNull);
+      expect(senseDisplayCountFrom({'projects': []}), isNull);
+      expect(senseDisplayCountFrom(null), isNull);
+    });
+
+    test('panel order carries the counts it was sent', () {
+      final with2 = PeerPayload.fromJson({
+        'id': '1',
+        'info': <String, dynamic>{},
+        'sense': {
+          'projects': [
+            {'project_id': 'prj_a', 'sort_key': 'a0'}
+          ],
+          'display_count': 2,
+        },
+      });
+      final o = SensePanelOrder.build([_group('Alpha', 'prj_a', 'a0')],
+          [with2, _peer('2', projects: [
+            ['prj_a', 'a1']
+          ])])!;
+      expect(o.displayCounts, {'1': 2});
+    });
+  });
+
   test('sort option: empty means panel order, stored choice is kept', () {
     expect(PeerSortType.values.first, PeerSortType.panelOrder);
     expect(peerSortOrDefault(''), PeerSortType.panelOrder);

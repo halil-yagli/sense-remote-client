@@ -31,6 +31,7 @@ import 'mobile/pages/home_page.dart';
 import 'mobile/pages/server_page.dart';
 import 'mobile/widgets/deploy_dialog.dart';
 import 'models/platform_model.dart';
+import 'common/sense_theme.dart'; // Sense Remote
 
 /// Basic window and launch properties.
 int? kWindowId;
@@ -393,7 +394,7 @@ void _runApp(
       debugShowCheckedModeBanner: false,
       title: title,
       theme: MyTheme.lightTheme,
-      darkTheme: MyTheme.darkTheme,
+      darkTheme: senseAppDarkTheme(), // Sense Remote
       themeMode: themeMode,
       home: home,
       localizationsDelegates: const [
@@ -424,6 +425,8 @@ void runInstallPage() async {
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     // Sense Remote: taskbar title of the setup window.
     windowManager.setTitle('Sense Remote Kurulum');
+    // Sense Remote: the wizard layout needs the prototype size (T3-17).
+    windowManager.setMinimumSize(const Size(760, 540));
     windowManager.show();
     windowManager.focus();
     windowManager.setOpacity(1);
@@ -532,7 +535,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
               ? '${bind.mainGetAppNameSync()} Web Client V2 (Preview)'
               : bind.mainGetAppNameSync(),
           theme: MyTheme.lightTheme,
-          darkTheme: MyTheme.darkTheme,
+          darkTheme: senseAppDarkTheme(), // Sense Remote
           themeMode: MyTheme.currentThemeMode(),
           home: isDesktop
               ? const DesktopTabPage()

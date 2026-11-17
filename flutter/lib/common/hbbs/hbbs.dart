@@ -85,6 +85,9 @@ class PeerPayload {
   // Sense Remote: all project tags of the peer from the panel's `sense`
   // extension; null when the server does not send it (stock behaviour).
   List<SenseProjectRef>? senseProjects;
+  // Sense Remote: screen count of the peer (`sense.display_count`, optional;
+  // review K3-3). Null when the panel does not send it.
+  int? senseDisplayCount;
 
   PeerPayload.fromJson(Map<String, dynamic> json)
       : id = json['id'] ?? '',
@@ -94,7 +97,8 @@ class PeerPayload {
         user_name = json['user_name'] ?? '',
         device_group_name = json['device_group_name'] ?? '',
         note = json['note'] ?? '',
-        senseProjects = SenseProjectRef.listFromSense(json['sense']);
+        senseProjects = SenseProjectRef.listFromSense(json['sense']),
+        senseDisplayCount = senseDisplayCountFrom(json['sense']);
 
   static Peer toPeer(PeerPayload p) {
     return Peer.fromJson({
@@ -339,6 +343,19 @@ class SenseProjectRef {
   }
 }
 
+/// Sense Remote: `sense.display_count` of a peer list item: a whole number
+/// from 1 to 64, otherwise null (no guess on the card).
+int? senseDisplayCountFrom(dynamic sense) {
+  if (sense is! Map) return null;
+  final value = sense['display_count'];
+  final n = value is int
+      ? value
+      : value is double && value.isFinite && value == value.roundToDouble()
+          ? value.toInt()
+          : null;
+  return n != null && n >= 1 && n <= 64 ? n : null;
+}
+
 /// Sense Remote: panel order of the Controller list (pure, no global state).
 class SensePanelOrder {
   // peer id -> position in the panel response (project order, then in-project order)
@@ -346,7 +363,10 @@ class SensePanelOrder {
   // peer id -> {project (group) name -> in-project sort key}
   final Map<String, Map<String, String>> _peerKeys;
 
-  SensePanelOrder._(this._peerIndex, this._peerKeys);
+  /// Sense Remote: peer id -> screen count (`sense.display_count`, K3-3).
+  final Map<String, int> displayCounts;
+
+  SensePanelOrder._(this._peerIndex, this._peerKeys, this.displayCounts);
 
   /// True when any device group came with the `sense` extension.
   static bool groupsHaveSense(List<DeviceGroupPayload> groups) =>
@@ -381,7 +401,10 @@ class SensePanelOrder {
       }
       peerKeys[p.id] = keys;
     }
-    return SensePanelOrder._(peerIndex, peerKeys);
+    return SensePanelOrder._(peerIndex, peerKeys, {
+      for (final p in peers)
+        if (p.senseDisplayCount != null) p.id: p.senseDisplayCount!
+    });
   }
 
   bool knowsPeer(String peerId) => _peerKeys.containsKey(peerId);
