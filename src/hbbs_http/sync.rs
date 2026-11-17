@@ -284,6 +284,7 @@ async fn start_hbbs_sync_async() {
                         &id,
                         &mut sense_report_ts,
                         &mut sense_report_reserved,
+                        sense_report.server_offset_s,
                     );
                     v["sense"] = sense;
                 }
@@ -329,15 +330,30 @@ fn sense_sign_report(
     id: &str,
     last_ts: &mut Option<i64>,
     reserved: &mut Option<i64>,
+    server_offset_s: Option<i64>,
 ) {
-    let (ts, reservation) =
-        crate::sense::report_sig::next_ts_reserved(*last_ts, *reserved, now_s());
+    // Sense Remote (G3-6): a reservation beyond the panel's `future` limit is dropped.
+    let (ts, reservation) = crate::sense::report_sig::next_ts_checked(
+        *last_ts,
+        *reserved,
+        now_s(),
+        server_offset_s,
+    );
     if let Some(reservation) = reservation {
         LocalConfig::set_option(SENSE_REPORT_TS.to_owned(), reservation.to_string());
         *reserved = Some(reservation);
     }
     let uuid = crate::encode64(hbb_common::get_uuid());
-    let (secret_key, _) = Config::get_key_pair();
+    let (secret_key, public_key) = Config::get_key_pair();
+    // Sense Remote (K3-2): the public key once per run, to compare with the registration log
+    // and the panel's `device_pk` at the first device test (public; the secret key is not).
+    static KEY_LOGGED: std::sync::Once = std::sync::Once::new();
+    KEY_LOGGED.call_once(|| {
+        log::info!(
+            "Sense Remote: signing reports for {id} with device key {}",
+            crate::sense::identity::public_key_label(&public_key)
+        )
+    });
     if crate::sense::report_sig::sign_into(sense, id, &uuid, ts, &secret_key) {
         *last_ts = Some(ts);
     } else {

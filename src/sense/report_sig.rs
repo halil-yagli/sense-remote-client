@@ -68,6 +68,29 @@ pub fn next_ts_reserved(last: Option<i64>, reserved: Option<i64>, now_s: i64) ->
     (ts, new_reservation)
 }
 
+/// Panel A7: a report `ts` more than this ahead of the panel clock is refused (`future`).
+pub const PANEL_FUTURE_S: i64 = 300;
+
+/// Sense Remote (G3-6): `next_ts_reserved`, but a floor (last `ts` or stored reservation) the
+/// panel can never have accepted (beyond its `future` limit, by the panel clock from the last
+/// answer) is dropped: after a clock that ran ahead is corrected, reports resume at once
+/// instead of after the clock catches up. Without a known panel clock nothing changes (a clock
+/// set back must not lower `ts`). The panel's own replay check still protects.
+pub fn next_ts_checked(
+    last: Option<i64>,
+    reserved: Option<i64>,
+    now_s: i64,
+    server_offset_s: Option<i64>,
+) -> (i64, Option<i64>) {
+    if let Some(offset) = server_offset_s {
+        let limit = now_s.saturating_add(offset).saturating_add(PANEL_FUTURE_S);
+        if last.or(reserved).is_some_and(|floor| floor > limit) {
+            return (now_s, Some(now_s.saturating_add(RESERVE_S)));
+        }
+    }
+    next_ts_reserved(last, reserved, now_s)
+}
+
 /// Stored reservation as written by the sync loop; anything else counts as none.
 pub fn parse_reservation(value: &str) -> Option<i64> {
     value.trim().parse::<i64>().ok().filter(|ts| *ts > 0)
@@ -376,6 +399,22 @@ mod tests {
         assert_eq!(parse_reservation(""), None);
         assert_eq!(parse_reservation("-5"), None);
         assert_eq!(parse_reservation("x"), None);
+    }
+
+    #[test]
+    fn a_reservation_from_a_clock_that_ran_ahead_is_dropped() {
+        let year = 365 * 24 * 3_600;
+        // Clock ran a year ahead: reservation stored at now + 1 year. The panel refused those
+        // reports (`future`). Clock corrected; the last answer said panel = local.
+        let reserved = Some(1_000 + year + RESERVE_S);
+        assert_eq!(next_ts_checked(None, reserved, 1_000, Some(0)), (1_000, Some(1_060)));
+        assert_eq!(next_ts_checked(Some(1_000 + year), reserved, 1_000, Some(0)), (1_000, Some(1_060)));
+        // Within the panel's limit: unchanged (strictly increasing, no lowering).
+        assert_eq!(next_ts_checked(Some(1_200), Some(1_260), 1_000, Some(0)), (1_201, None));
+        // Panel clock unknown (no answer yet): unchanged, as `next_ts_reserved`.
+        assert_eq!(next_ts_checked(None, reserved, 1_000, None), next_ts_reserved(None, reserved, 1_000));
+        // Clock set back an hour, panel agrees with the old clock: keep increasing.
+        assert_eq!(next_ts_checked(None, Some(1_121), 1_121 - 3_600, Some(3_600)), (1_122, Some(1_182)));
     }
 
     #[test]

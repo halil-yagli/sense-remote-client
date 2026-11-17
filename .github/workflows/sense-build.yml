@@ -41,6 +41,11 @@ env:
   # Panelin imza acik anahtar(lar)i: k1=<base64url>,k2=... (acik anahtar, sir degil). Repo
   # degiskeni (Settings > Variables) yoksa bos gelir: istemci her zarfi reddeder (unknown_key).
   SENSE_ENVELOPE_KEYS: ${{ vars.SENSE_ENVELOPE_KEYS }}
+  # Sense Remote (G3-2): RustDesk'in Flutter motoru (rustdesk/engine, surum eki "main",
+  # varlik kimligi 210168939, 2024-12-01). Ozet sabit: dosya degisirse derleme duser.
+  # Motor guncellemesi ayri PR'da: yeni ozet + kimlik buraya, gerekce PR'a.
+  ENGINE_WINDOWS_URL: "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
+  ENGINE_WINDOWS_SHA256: "ec8cabf36ee4ff24c8d98de25b00e70781eb03876265aee84d0fe554a110036e"
 
 jobs:
   # Etiket surumu: bicim ve on kosullar derlemeden once denetlenir (etiket disinda atlanir).
@@ -51,6 +56,23 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
+      # Sense Remote (G3-3): yayin yalniz master'daki (incelenmis, CI'dan gecmis) commit'ten.
+      - name: Checkout history
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check that the tagged commit is on master
+        shell: bash
+        run: |
+          git fetch --no-tags origin master
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error title=Etiket master'da degil::'$GITHUB_REF_NAME' etiketi master'da olmayan bir commit'e ($GITHUB_SHA) atanmis. Surum yalniz master'daki commit'ten derlenir."
+            exit 1
+          fi
+          echo "Etiketlenen commit master'da: $GITHUB_SHA"
+
       - name: Check tag, keys and API server
         id: check
         shell: bash
@@ -66,7 +88,7 @@ jobs:
           fi
           # Etiket derlemesi anahtarsiz cikmaz: istemci her zarfi reddederdi (unknown_key).
           if [ -z "$KEYS" ]; then
-            echo "::error title=SENSE_ENVELOPE_KEYS bos::Etiket derlemesi panelin acik anahtari olmadan yapilmaz. Once repo degiskenini yazin (yayin adimi 6a)."
+            echo "::error title=SENSE_ENVELOPE_KEYS bos::Etiket derlemesi panelin acik anahtari olmadan yapilmaz. Once repo degiskenini yazin (YAYIN_ADIMLARI adim 11)."
             exit 1
           fi
           # Surum derlemesi her zaman yerlesik panel adresini (https://remote.snsdpt.com) kullanir.
@@ -128,7 +150,14 @@ jobs:
         run: |
           flutter doctor -v
           flutter precache --windows
-          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Invoke-WebRequest -Uri $env:ENGINE_WINDOWS_URL -OutFile windows-x64-release.zip
+          # Sense Remote (G3-2): ozet tutmazsa derleme durur (dagitilan kurulum dosyasina girer).
+          $actual = (Get-FileHash -Algorithm SHA256 windows-x64-release.zip).Hash.ToLowerInvariant()
+          if ($actual -ne $env:ENGINE_WINDOWS_SHA256) {
+            Write-Output "::error title=Motor ozeti tutmuyor::beklenen $env:ENGINE_WINDOWS_SHA256, gelen $actual"
+            exit 1
+          }
+          Write-Output "Motor SHA-256 dogrulandi: $actual"
           Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
           mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
 
@@ -232,7 +261,9 @@ jobs:
     # Windows oncelikli (karar 2026-11-16): Mac PR'larda calismaz, yalniz master'a
     # gonderimde ve elle (workflow_dispatch) calisir; Mac kirilmasi boylece yine gorulur.
     # Etiket (surum) derlemesi yalniz Windows'tur: macOS surum dosyasi bu asamada yok.
-    if: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') }}
+    # Sense Remote (K3-1): generate-bridge atlanmis verify-tag'a bagli; durum islevi
+    # (!cancelled) olmadan GitHub bu isi de "skipped" sayiyordu (#12'den beri hic calismadi).
+    if: ${{ !cancelled() && needs.generate-bridge.result == 'success' && github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false

@@ -240,6 +240,9 @@ pub struct EnvelopeError {
 pub struct Report {
     pub error: Option<EnvelopeError>,
     pub clock_skew_s: Option<i64>,
+    /// Sense Remote (G3-6): panel − local clock from the last answer that had it (`None`
+    /// until then); lets the report `ts` drop a reservation the panel can never have accepted.
+    pub server_offset_s: Option<i64>,
 }
 
 impl Report {
@@ -268,6 +271,7 @@ impl Report {
     pub fn server_time(&mut self, server_s: Option<i64>, local_s: i64) {
         if let Some(server_s) = server_s {
             self.clock_skew_s = clock_skew(server_s, local_s);
+            self.server_offset_s = Some(server_s.saturating_sub(local_s));
         }
     }
 
@@ -566,12 +570,17 @@ mod tests {
         // Panel an hour behind = this computer ahead -> positive.
         assert_eq!(clock_skew(NOW - 3_600, NOW), Some(3_600));
         let mut report = Report::default();
+        assert_eq!(report.server_offset_s, None);
         report.server_time(Some(NOW + 900), NOW);
         assert_eq!(report.clock_skew_s, Some(-900));
+        assert_eq!(report.server_offset_s, Some(900));
         report.server_time(None, NOW);
         assert_eq!(report.clock_skew_s, Some(-900));
+        assert_eq!(report.server_offset_s, Some(900));
         report.server_time(Some(NOW), NOW);
         assert_eq!(report.clock_skew_s, None);
+        // G3-6: a small difference is not reported, but the panel clock is known.
+        assert_eq!(report.server_offset_s, Some(0));
     }
 
     #[test]
