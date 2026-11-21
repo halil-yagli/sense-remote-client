@@ -53,6 +53,8 @@ env:
   # Motor guncellemesi ayri PR'da: yeni ozet + kimlik buraya, gerekce PR'a.
   ENGINE_WINDOWS_URL: "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
   ENGINE_WINDOWS_SHA256: "ec8cabf36ee4ff24c8d98de25b00e70781eb03876265aee84d0fe554a110036e"
+  # Sense Remote (G4-5): macOS isindeki NASM 2.16.03 zip dosyasinin sabit ozeti.
+  NASM_MACOS_SHA256: "0d29bcd8a5fc617333f4549c7c1f93d1866a4a0915c40359e0a8585bb1a5aa75"
 
 jobs:
   # Etiket surumu: bicim ve on kosullar derlemeden once denetlenir (etiket disinda atlanir).
@@ -318,6 +320,10 @@ jobs:
       - name: Install NASM
         run: |
           wget --tries=6 --waitretry=20 --retry-connrefused https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/macosx/nasm-2.16.03-macosx.zip
+          # Sense Remote (G4-5): ozet tutmazsa adim durur (derleyici dagitilan pakete girer).
+          # nasm.us ozet yayinlamiyor; deger resmi adresten indirilen dosyadan hesaplandi
+          # (2026-11-21, 1686077 bayt, Last-Modified 2024-04-17).
+          echo "${NASM_MACOS_SHA256}  nasm-2.16.03-macosx.zip" | shasum -a 256 -c -
           unzip nasm-2.16.03-macosx.zip
           sudo cp nasm-2.16.03/nasm /usr/local/bin/nasm
           nasm --version
@@ -393,7 +399,7 @@ jobs:
           fi
           ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
 
-      # Sense Remote: ad-hoc imza (Developer ID / notarization yok, sir kullanilmaz), dmg ve
+      # Sense Remote: ad-hoc imza + hardened runtime (Developer ID / notarization yok, sir yok), dmg ve
       # dmg iceriginin dogrulanmasi (codesign, spctl, ad, --version, boyut, SHA-256).
       - name: Package (ad-hoc signed dmg) and verify
         shell: bash
