@@ -824,8 +824,10 @@ fn get_rendezvous_server_(_ms_timeout: u64) -> (String, Vec<String>) {
 
 #[inline]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-async fn get_rendezvous_server_(ms_timeout: u64) -> (String, Vec<String>) {
-    crate::ipc::get_rendezvous_server(ms_timeout).await
+async fn get_rendezvous_server_(_ms_timeout: u64) -> (String, Vec<String>) {
+    // Sense Remote: the fixed ID server (`sense::server`), not whatever the service reports
+    // over IPC (upstream: `crate::ipc::get_rendezvous_server`).
+    (crate::sense::server::rendezvous_server_with_port(), Vec::new())
 }
 
 #[inline]
@@ -2189,27 +2191,10 @@ pub fn decode64<T: AsRef<[u8]>>(input: T) -> Result<Vec<u8>, base64::DecodeError
     base64::decode(input)
 }
 
-pub async fn get_key(sync: bool) -> String {
-    #[cfg(windows)]
-    if let Ok(lic) = crate::platform::windows::get_license_from_exe_name() {
-        if !lic.key.is_empty() {
-            return lic.key;
-        }
-    }
-    #[cfg(target_os = "ios")]
-    let mut key = Config::get_option("key");
-    #[cfg(not(target_os = "ios"))]
-    let mut key = if sync {
-        Config::get_option("key")
-    } else {
-        let mut options = crate::ipc::get_options_async().await;
-        options.remove("key").unwrap_or_default()
-    };
-    if key.is_empty() {
-        // Sense Remote: our hbbs key, never RustDesk's (`sense::server`).
-        key = crate::sense::server::RS_PUB_KEY.to_owned();
-    }
-    key
+pub async fn get_key(_sync: bool) -> String {
+    // Sense Remote: always our hbbs key (`sense::server`), never one from the exe name, the
+    // service over IPC or RustDesk's built-in key (upstream read them in that order).
+    crate::sense::server::RS_PUB_KEY.to_owned()
 }
 
 pub fn pk_to_fingerprint(pk: Vec<u8>) -> String {
