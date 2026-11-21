@@ -2119,6 +2119,8 @@ pub fn get_id() -> String {
     Config::get_id()
 }
 
+// Sense Remote: unused (`common::get_rendezvous_server_` reads `sense::server`); kept for upstream.
+#[allow(dead_code)]
 pub async fn get_rendezvous_server(ms_timeout: u64) -> (String, Vec<String>) {
     if let Ok(Some(v)) = get_config_async("rendezvous_server", ms_timeout).await {
         let mut urls = v.split(",");
