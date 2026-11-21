@@ -9,7 +9,9 @@
 //!   without a break, checked again after the download and right before the installation.
 //!   Neither the user nor the panel can make an exception.
 //! - Window: `idle` = as soon as idle; `night` = local hour in
-//!   `NIGHT_START_HOUR..NIGHT_END_HOUR` and idle. "Güncelle" in the app is always `idle`.
+//!   `NIGHT_START_HOUR..NIGHT_END_HOUR` and idle. "Güncelle" in the app is `idle` only when
+//!   no panel order is held; it keeps a held order's `night` window (the panel's choice is
+//!   not overridden from the computer), it only skips the random delay.
 //! - A panel order waits a random 0..=`MAX_JITTER_S` before downloading; a local request does
 //!   not.
 //! - At most `MAX_ATTEMPTS` per version in 24 h, waiting `RETRY_AFTER_S` in between, then
@@ -294,11 +296,9 @@ impl State {
         )
     }
 
+    /// A held panel order's window, whoever started the job; `idle` without an order.
     fn window(&self) -> Window {
-        match (self.source, &self.order) {
-            (Some(UpdateSource::Panel), Some(order)) => order.window,
-            _ => Window::Idle,
-        }
+        self.order.as_ref().map_or(Window::Idle, |order| order.window)
     }
 
     /// `sense.update` of the heartbeat (§3.5).
@@ -481,6 +481,9 @@ fn on_release(s: &mut State, release: Release, ctx: &Ctx, actions: &mut Vec<Acti
     }
     if s.error == Some(UpdateError::ManifestInvalid) {
         clear_error(s);
+    }
+    if s.release.as_ref().is_some_and(|held| release.version < held.version) {
+        return; // an older notice never replaces a newer one
     }
     if let Some(held) = &s.release {
         if same_file(held, &release) {

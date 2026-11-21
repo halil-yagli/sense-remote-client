@@ -3,8 +3,8 @@
 //! - Source: only `Release::url`, which `manifest::verify` has tied to
 //!   `API_SERVER + "/indir/" + file`. The panel's HTTP client is used (`hbb_common`, TLS with
 //!   certificate checks); no other host: a redirect that ends on another origin is refused.
-//! - Target: the privileged folder (`super::apply::download_dir`): Windows
-//!   `C:\ProgramData\SenseRemote\update\dl\` (ACL SYSTEM + Administrators only, reparse points
+//! - Target: the privileged folder, made safe once per download
+//!   (`super::apply::prepare_download_dir`): Windows `C:\ProgramData\SenseRemote\update\dl\` (ACL SYSTEM + Administrators only, reparse points
 //!   refused), macOS a root 0700 `mktemp -d` folder. Written as `<file>.part`, renamed to
 //!   `<file>` only when complete and matching; any failure removes the part.
 //! - Stops as soon as more than `size` bytes arrive (`size_mismatch`; a shorter body is

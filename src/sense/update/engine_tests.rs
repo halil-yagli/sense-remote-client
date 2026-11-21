@@ -226,13 +226,40 @@ fn night_window_waits_for_03_to_05() {
 }
 
 #[test]
-fn local_request_ignores_the_night_window_and_the_delay() {
+fn local_request_skips_the_delay_but_keeps_the_panels_night_window() {
     let delayed = Ctx { jitter_s: 900, ..ctx() };
     let (ordered, _) = next(available(4), Event::Order(Ok(order(OID, 4, Window::Night))), &delayed);
     let (state, actions) = next(ordered, Event::InstallRequested { version: 4 }, &ctx());
-    assert_eq!(state.phase, UpdateState::Downloading);
+    assert_eq!(state.phase, UpdateState::WaitingIdle);
+    assert_eq!(state.blocked, Some(Blocked::NightWindow));
     assert_eq!(state.source, Some(UpdateSource::Local));
+    assert!(!actions.contains(&Action::Download));
+    let night = Ctx { local_hour: 3, ..ctx() };
+    let (state, actions) = next(state, Event::Tick, &night);
+    assert_eq!(state.phase, UpdateState::Downloading);
     assert!(actions.contains(&Action::Download));
+    // An `idle` order: the local request starts at once, without the delay.
+    let (ordered, _) = next(available(4), Event::Order(Ok(order(OID, 4, Window::Idle))), &delayed);
+    let (state, _) = next(ordered, Event::InstallRequested { version: 4 }, &ctx());
+    assert_eq!(state.phase, UpdateState::Downloading);
+    // A night order arriving while a local request waits keeps the night window too.
+    let busy = Ctx { idle_s: 0, ..ctx() };
+    let (waiting, _) = next(available(4), Event::InstallRequested { version: 4 }, &busy);
+    let (state, _) = next(waiting, Event::Order(Ok(order(OID, 4, Window::Night))), &ctx());
+    assert_eq!(state.source, Some(UpdateSource::Local));
+    let (state, _) = next(state, Event::Tick, &ctx());
+    assert_eq!(state.blocked, Some(Blocked::NightWindow));
+}
+
+#[test]
+fn an_older_notice_never_replaces_a_newer_one() {
+    let held = available(5);
+    let (state, actions) = next(held.clone(), Event::Release(Ok(release(4))), &ctx());
+    assert_eq!(state, held);
+    assert!(actions.is_empty());
+    let (ordered, _) = next(held, Event::Order(Ok(order(OID, 5, Window::Night))), &ctx());
+    let (state, _) = next(ordered.clone(), Event::Release(Ok(release(4))), &ctx());
+    assert_eq!(state, ordered);
 }
 
 #[test]

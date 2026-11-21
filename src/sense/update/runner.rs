@@ -13,6 +13,8 @@
 //! - Idle time is measured here: `updater::has_no_active_conns()` at every step; a connection
 //!   resets it. The engine asks for `IDLE_S` without a break and the installation job asks
 //!   once more right before `apply::install`.
+//! - The download folder: every step only computes its path (`apply::download_dir_path`);
+//!   it is made safe once per download (`apply::prepare_download_dir`, U3/U4: ACL, owner).
 //! - The heartbeat answer's release and order are verified here (`manifest::verify`,
 //!   `order::verify`) with this build's keys, the local clock, own id and uuid.
 
@@ -132,7 +134,7 @@ impl Runner {
             self.idle_since = None;
         }
         let free_bytes = if with_disk {
-            apply::download_dir().and_then(|dir| download::free_bytes(&dir))
+            apply::download_dir_path().and_then(|dir| download::free_bytes(&dir))
         } else {
             None
         };
@@ -170,7 +172,7 @@ impl Runner {
         if let Action::Persist = action {
             return Some(Job::Persist(self.state.clone()));
         }
-        let Some(dir) = apply::download_dir() else {
+        let Some(dir) = apply::download_dir_path() else {
             return match action {
                 Action::DropFile { .. } => None,
                 _ => Some(Job::Fail(UpdateError::Unsupported)),
@@ -232,8 +234,19 @@ fn perform(job: Job) {
                 }
             }
         }
-        Job::Download(request) => {
+        Job::Download(mut request) => {
             tokio::spawn(async move {
+                // The folder is made safe (ACL, owner, no reparse point) once per download;
+                // every other step only computes its path.
+                let prepared = tokio::task::spawn_blocking(apply::prepare_download_dir).await;
+                match prepared.ok().flatten() {
+                    Some(dir) => request.dir = dir,
+                    None => {
+                        log::error!("Sense Remote: update download folder not safe");
+                        step(Event::Failed(UpdateError::DownloadFailed));
+                        return;
+                    }
+                }
                 let progress = |pct: u8| step(Event::DownloadProgress(pct));
                 let event = match download::fetch(&request, &progress).await {
                     Ok(_) => Event::Downloaded,
