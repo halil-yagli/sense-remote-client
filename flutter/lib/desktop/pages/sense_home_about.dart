@@ -12,6 +12,8 @@ import '../../models/platform_model.dart';
 import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
 import 'sense_home_strings.dart';
+import 'sense_update_model.dart'; // Sense Remote: update line (§6)
+import 'sense_update_strings.dart';
 
 typedef _T = SenseCmTokens;
 
@@ -45,7 +47,11 @@ class SenseAboutPage extends StatelessWidget {
     final builtin = bind.mainGetBuildinOption(key: kSenseVersionOption);
     final version =
         senseVersionFrom(builtin) ?? senseVersionFrom(kSenseVersionDefine);
+    // Sense Remote (update plan §6): "Güncel" / "Sürüm N hazır" and the last
+    // check, from GuiStatus.
     return FutureBuilder<String>(
+      future: bind.mainSenseUpdateStatus(),
+      builder: (context, update) => FutureBuilder<String>(
       future: bind.mainGetVersion(),
       builder: (context, snap) => Obx(() => SenseAboutView(
             version: version,
@@ -53,8 +59,11 @@ class SenseAboutPage extends StatelessWidget {
             account: gFFI.userModel.displayNameOrUserName,
             baseVersion: snap.data ?? '',
             onOpenUrl: (url) => launchUrlString(url),
+            updateText: senseAboutUpdateText(
+                SenseUpdateStatus.parse(update.data ?? ''),
+                DateTime.now().millisecondsSinceEpoch ~/ 1000),
           )),
-    );
+    ));
   }
 }
 
@@ -68,6 +77,7 @@ class SenseAboutView extends StatelessWidget {
     required this.onOpenUrl,
     this.baseVersion = '',
     this.year,
+    this.updateText,
   });
 
   final int? version;
@@ -77,12 +87,17 @@ class SenseAboutView extends StatelessWidget {
   final void Function(String url) onOpenUrl;
   final int? year;
 
+  /// Sense Remote (update plan §6): update line; null hides the row.
+  final String? updateText;
+
   @override
   Widget build(BuildContext context) {
     final rows = <MapEntry<String, String>>[
       MapEntry(senseHomeText('role'), senseRoleLabel(role)),
       MapEntry(senseHomeText('panel'),
           senseAboutPanelText(role: role, account: account)),
+      if (updateText != null)
+        MapEntry(senseUpdateText('about_label'), updateText!),
     ];
     return Container(
       color: _T.black,

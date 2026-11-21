@@ -18,6 +18,8 @@ import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
 import 'sense_home_connect_id.dart';
 import 'sense_home_strings.dart';
+import 'sense_update_view.dart'; // Sense Remote: update strip (§6)
+import '../widgets/sense_version_chip.dart'; // Sense Remote: version label (§6)
 
 typedef _T = SenseCmTokens;
 
@@ -177,7 +179,9 @@ class _SenseControllerHomeState extends State<SenseControllerHome> {
       final peers = group.peers.toList();
       final loading = group.groupLoading.value;
       final error = group.groupLoadError.value;
-      return AnimatedBuilder(
+      // Sense Remote (update plan §6): version label and update strip.
+      return SenseUpdateWatch(
+        builder: (context, strip) => AnimatedBuilder(
         animation: group.peersModel,
         builder: (context, _) => SenseControllerHomeView(
           projectNames: names,
@@ -190,8 +194,11 @@ class _SenseControllerHomeState extends State<SenseControllerHome> {
           error: error,
           onConnect: (id) => connect(context, id),
           onRefresh: () => group.pull(force: true),
+          versionChip: SenseVersionChip(
+              version: senseAppVersion(), onTap: senseOpenAbout),
+          updateStrip: strip,
         ),
-      );
+      ));
     });
   }
 }
@@ -208,6 +215,8 @@ class SenseControllerHomeView extends StatefulWidget {
     this.error = '',
     this.onRefresh,
     this.displayCounts = const {},
+    this.versionChip,
+    this.updateStrip,
   });
 
   final List<String> projectNames;
@@ -218,6 +227,11 @@ class SenseControllerHomeView extends StatefulWidget {
   final void Function(String id) onConnect;
   final VoidCallback? onRefresh;
   final Map<String, int> displayCounts;
+
+  /// Sense Remote (update plan §6): "Sürüm N" next to the title, and the
+  /// update strip on top (null when there is nothing to say).
+  final Widget? versionChip;
+  final Widget? updateStrip;
 
   @override
   State<SenseControllerHomeView> createState() =>
@@ -249,6 +263,10 @@ class _SenseControllerHomeViewState extends State<SenseControllerHomeView> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(26, 22, 26, 26),
         children: [
+          if (widget.updateStrip != null)
+            Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: widget.updateStrip!),
           _header(),
           if (typedId != null) _connectById(typedId),
           ..._body(projects),
@@ -266,8 +284,14 @@ class _SenseControllerHomeViewState extends State<SenseControllerHomeView> {
         spacing: 14,
         runSpacing: 10,
         children: [
-          Text(senseHomeText('computers'),
-              style: _T.text(size: 22, weight: FontWeight.w700)),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(senseHomeText('computers'),
+                style: _T.text(size: 22, weight: FontWeight.w700)),
+            if (widget.versionChip != null) ...[
+              const SizedBox(width: 8),
+              widget.versionChip!,
+            ],
+          ]),
           // Sense Remote: a Wrap, so the header does not overflow in a
           // narrow window now that it carries one more button.
           Wrap(
