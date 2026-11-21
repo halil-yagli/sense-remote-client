@@ -218,6 +218,25 @@ pub fn run_uninstall_script() -> Result<(), String> {
     }
 }
 
+/// Security review G4-1: paths of this bundle that root executes but that are not root's
+/// (owner, group / other write access, symbolic link). Empty = fine. The install script
+/// makes them root's; this is the daemon's own look at start.
+pub fn untrusted_bundle_paths() -> Vec<String> {
+    use std::os::unix::fs::MetadataExt;
+    let app = format!("/Applications/{}.app", crate::get_app_name());
+    Vec::from(mac_script::root_executed_paths(&app, &crate::get_app_name()))
+        .into_iter()
+        .filter(|path| match std::fs::symlink_metadata(path) {
+            Ok(meta) => !mac_script::bundle_file_trusted(
+                meta.uid(),
+                meta.mode(),
+                meta.file_type().is_symlink(),
+            ),
+            Err(_) => true,
+        })
+        .collect()
+}
+
 /// Leaves the setup wizard (`sense::finish_install` on macOS, after `enroll::finish`). The
 /// wizard runs inside the installed app with the role it had at its own start, so it never
 /// continues as the app: it exits, and with `open_app` a new instance starts first and reads

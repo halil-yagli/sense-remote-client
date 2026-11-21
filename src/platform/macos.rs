@@ -290,6 +290,22 @@ pub fn sense_launchctl_ok(args: &[&str]) -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
+/// Sense Remote (security review G4-1): the daemon runs as root from the app bundle; when a
+/// path it is started from is not root's, a user process could replace the binary. The
+/// install script hands the bundle to root; this only reports (paths, nothing secret) so a
+/// bundle that was replaced later shows up in the service log.
+pub fn sense_log_bundle_ownership() {
+    let untrusted = crate::sense::install_mac::untrusted_bundle_paths();
+    if untrusted.is_empty() {
+        log::info!("Sense Remote: app bundle is owned by root");
+    } else {
+        log::error!(
+            "Sense Remote: root runs from paths that are not root-only, reinstall: {:?}",
+            untrusted
+        );
+    }
+}
+
 /// Sense Remote (Mac M2, plan §3.2): `service --sense-install-state <role> <hex>`. `None` =
 /// another call; otherwise the exit code (0 stored; 1 not root, wrong arguments, value not
 /// allowed or state file not writable). `sense` is private to the library, so the `service`

@@ -21,5 +21,7 @@ fn main() {
         std::process::exit(code);
     }
     hbb_common::init_log(false, "service");
+    // Sense Remote (security review G4-1): report when this daemon's own bundle is not root's.
+    librustdesk::platform::sense_log_bundle_ownership();
     crate::start_os_service();
 }

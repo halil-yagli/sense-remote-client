@@ -17,6 +17,12 @@
 //! hex (`[0-9a-f]`), the numeric uid, and paths / launchd labels checked by `ScriptEnv::check`.
 //! The script holds no secret: the sign-in token is in the user's *local* config, which is
 //! never copied.
+//!
+//! Security review G4-1: an app dragged into `/Applications` belongs to the user, and both the
+//! script and the daemon run `Contents/MacOS/service` from it as root. Before the first call
+//! the script hands the whole bundle to `root:wheel`, removes group / other write access and
+//! checks the owner of every path root executes (`root_executed_paths`); the daemon checks the
+//! same paths at start (`bundle_file_trusted`).
 
 use super::super::{SenseRole, SetupInfo, MAX_SETUP_JSON_BYTES};
 use std::time::Duration;
@@ -108,6 +114,24 @@ pub fn install_state_args(args: &[String]) -> Option<Result<(&str, &str), &'stat
 pub fn runs_from_applications(exe: &str, app_name: &str) -> bool {
     is_safe_token(app_name)
         && exe.starts_with(&format!("/Applications/{app_name}.app/Contents/MacOS/"))
+}
+
+/// Paths inside the bundle that root executes or walks through to get there (daemon plist,
+/// install script): all of them must belong to root, or the user could swap the binary.
+pub fn root_executed_paths(app_bundle: &str, app_name: &str) -> [String; 5] {
+    [
+        app_bundle.to_owned(),
+        format!("{app_bundle}/Contents"),
+        format!("{app_bundle}/Contents/MacOS"),
+        format!("{app_bundle}/Contents/MacOS/service"),
+        format!("{app_bundle}/Contents/MacOS/{app_name}"),
+    ]
+}
+
+/// A path root executes is trusted when root owns it, it is no symbolic link and neither the
+/// group nor others may write it (the rule of the state file, plan §3.1).
+pub fn bundle_file_trusted(uid: u32, mode: u32, is_symlink: bool) -> bool {
+    uid == 0 && !is_symlink && mode & 0o022 == 0
 }
 
 /// Everything the scripts need. Production values come from `production`; tests point the
@@ -206,7 +230,7 @@ impl ScriptEnv {
 /// Shell script run as root by `install.scpt`. `state` = role and setup hex from the wizard;
 /// `None` keeps the stored role (service started again outside the wizard).
 ///
-/// Order (plan §3.2): checks → stop the old daemon / agent → create root's config directory
+/// Order (plan §3.2, G4-1): checks → bundle to root + owner check → stop the old daemon / agent → create root's config directory
 /// and copy the user's config (ID + key pair) → role into the state file → plists → daemon →
 /// agent. When a step fails after the old jobs were stopped, they are started again.
 pub fn install_script(
@@ -237,13 +261,18 @@ pub fn install_script(
     let daemon = env.daemon_target();
     let agent = env.agent_target();
     let uid = env.uid;
+    // Each path is made of checked values only (`env.check` above); quoted for the `for` list.
+    let root_paths = root_executed_paths(app_bundle, app_name)
+        .map(|path| format!("\"{path}\""))
+        .join(" ");
     Ok(format!(
         r#"set -eu
 PATH="{path}"; export PATH
 umask 022
 step=check
 stopped=0
-service="{app_bundle}/Contents/MacOS/service"
+app="{app_bundle}"
+service="$app/Contents/MacOS/service"
 src="{user_config_dir}"
 dst="{root_config_dir}"
 start_jobs() {{
@@ -277,11 +306,20 @@ copy_config() {{
   mv -f "$dst/$1.new" "$dst/$1"
   cmp -s "$src/$1" "$dst/$1"
 }}
+[ -d "$app" ]
+[ ! -L "$app" ]
 [ -x "$service" ]
 step=identity-source
 [ -f "$src/{app_name}.toml" ]
 [ ! -L "$src/{app_name}.toml" ]
 [ ! -L "$src/{app_name}2.toml" ]
+step=harden
+chown -R root:wheel "$app"
+chmod -R go-w "$app"
+for f in {root_paths}; do
+  [ ! -L "$f" ]
+  [ "$(stat -f %u "$f")" = 0 ]
+done
 step=stop
 stopped=1
 launchctl bootout "{daemon}" 2>/dev/null || true
@@ -624,6 +662,10 @@ mod tests {
         let order = [
             at("\n[ -x \"$service\" ]"),
             at("\n[ -f \"$src/SenseRemote.toml\" ]"),
+            // G4-1: the bundle belongs to root before root runs anything from it.
+            at("\nchown -R root:wheel \"$app\"\n"),
+            at("\nchmod -R go-w \"$app\"\n"),
+            at("[ \"$(stat -f %u \"$f\")\" = 0 ]"),
             at("\nlaunchctl bootout \"system/com.carriez.SenseRemote_service\""),
             // Risk 3: the directory is created before anything is copied into it.
             at("\n  mkdir -p \"$dst\""),
@@ -642,6 +684,48 @@ mod tests {
         assert!(script.contains("dst=\"/var/root/Library/Preferences/com.carriez.SenseRemote\""));
         assert!(script.contains("cmp -s \"$src/$1\" \"$dst/$1\""));
         assert!(script.starts_with("set -eu\nPATH=\"/usr/bin:/bin:/usr/sbin:/sbin\"; export PATH\n"));
+    }
+
+    /// G4-1: nothing from the bundle runs as root before the bundle is root's, in the
+    /// wizard's script and in the one without a role (`start_service_again`).
+    #[test]
+    fn bundle_is_handed_to_root_before_the_first_service_call() {
+        let hex = setup_hex();
+        for script in [
+            install_script(&env(), Some((SenseRole::Host, &hex))).unwrap(),
+            install_script(&env(), None).unwrap(),
+        ] {
+            let first_call = script.find("\n\"$service\" ").expect("service is called");
+            let chown = script.find("\nchown -R root:wheel \"$app\"\n").expect("chown");
+            let chmod = script.find("\nchmod -R go-w \"$app\"\n").expect("chmod");
+            let check = script.find("[ \"$(stat -f %u \"$f\")\" = 0 ]").expect("owner check");
+            assert!(chown < chmod && chmod < check && check < first_call);
+            // Also before launchd is told to run the daemon from that path.
+            assert!(check < script.find("\nstart_jobs\n").unwrap());
+            // The owner check covers the bundle, the way down and both binaries.
+            let list = [
+                "for f in \"/Applications/SenseRemote.app\"",
+                "\"/Applications/SenseRemote.app/Contents\"",
+                "\"/Applications/SenseRemote.app/Contents/MacOS\"",
+                "\"/Applications/SenseRemote.app/Contents/MacOS/service\"",
+                "\"/Applications/SenseRemote.app/Contents/MacOS/SenseRemote\"; do\n",
+            ]
+            .join(" ");
+            assert!(script.contains(&list), "{script}");
+            assert!(script.contains("  [ ! -L \"$f\" ]\n"));
+        }
+    }
+
+    #[test]
+    fn only_root_owned_unwritable_files_are_trusted() {
+        assert!(bundle_file_trusted(0, 0o100755, false));
+        assert!(bundle_file_trusted(0, 0o40755, false));
+        assert!(bundle_file_trusted(0, 0o100700, false));
+        // The dragged-in app: owned by the user.
+        assert!(!bundle_file_trusted(501, 0o100755, false));
+        assert!(!bundle_file_trusted(0, 0o100775, false));
+        assert!(!bundle_file_trusted(0, 0o100757, false));
+        assert!(!bundle_file_trusted(0, 0o100755, true));
     }
 
     #[test]
@@ -813,6 +897,15 @@ mod tests {
                     &format!("echo \"launchctl $*\" >> \"{log}\"\n[ \"$1\" != print ]"),
                 );
                 stub(&bin.join("chown"), &format!("echo \"chown $*\" >> \"{log}\""));
+                // BSD `stat -f %u <path>`: the owner's uid; 0 unless a test says otherwise.
+                let uid_file = dir("stat-uid");
+                stub(
+                    &bin.join("stat"),
+                    &format!(
+                        "echo \"stat $*\" >> \"{log}\"\n\
+                         if [ -f \"{uid_file}\" ]; then cat \"{uid_file}\"; else echo 0; fi"
+                    ),
+                );
                 stub(&bin.join("sleep"), "exit 0");
                 let env = ScriptEnv {
                     path: format!("{}:/usr/bin:/bin", bin.to_str().unwrap()),
@@ -831,6 +924,10 @@ mod tests {
                 stub(
                     &Path::new(&env.app_bundle).join("Contents/MacOS/service"),
                     &format!("echo \"service $*\" >> \"{log}\"\n{service_body}"),
+                );
+                stub(
+                    &Path::new(&env.app_bundle).join("Contents/MacOS/SenseRemote"),
+                    "exit 0",
                 );
                 fs::create_dir_all(&env.user_config_dir).unwrap();
                 let sandbox = Self { root, env };
@@ -910,6 +1007,19 @@ mod tests {
             let daemon = sandbox.call_index("launchctl bootstrap system ").unwrap();
             let agent = sandbox.call_index("launchctl bootstrap gui/501 ").unwrap();
             assert!(stop < state && state < plists && plists < daemon && daemon < agent);
+            // G4-1: the bundle went to root and all five owners were checked before that.
+            let harden = sandbox
+                .call_index(&format!("chown -R root:wheel {}", sandbox.env.app_bundle))
+                .expect("bundle handed to root");
+            let checks: Vec<usize> = sandbox
+                .calls()
+                .iter()
+                .enumerate()
+                .filter(|(_, call)| call.starts_with("stat -f %u "))
+                .map(|(index, _)| index)
+                .collect();
+            assert_eq!(checks.len(), 5);
+            assert!(harden < checks[0] && checks[4] < stop);
             let calls = sandbox.calls();
             assert_eq!(calls.iter().filter(|c| c.starts_with("service ")).count(), 2);
             assert!(calls.contains(&format!("chown 0:0 {}", sandbox.env.root_config_dir)));
@@ -959,6 +1069,44 @@ mod tests {
             // The running daemon was not stopped, no role stored, nothing started.
             assert_eq!(sandbox.calls(), Vec::<String>::new());
             assert!(!Path::new(&sandbox.env.root_config_dir).exists());
+        }
+
+        /// G4-1: when the bundle is still not root's after `chown` (the stub `stat` reports
+        /// the user), nothing from it runs as root and the running jobs are left alone.
+        #[test]
+        fn bundle_not_owned_by_root_stops_before_service_runs() {
+            for state in [Some(SenseRole::Host), None] {
+                let sandbox = Sandbox::new(&format!("owner-{}", state.is_some()), "");
+                fs::write(sandbox.root.join("stat-uid"), "501\n").unwrap();
+                let hex = setup_hex();
+                let (ok, stderr) = sandbox.install(state.map(|role| (role, hex.as_str())));
+                assert!(!ok);
+                assert_eq!(
+                    classify_osascript(ok, &stderr),
+                    ScriptOutcome::Failed("harden".to_owned())
+                );
+                assert_eq!(sandbox.call_index("service "), None);
+                assert_eq!(sandbox.call_index("launchctl "), None);
+                assert!(!Path::new(&sandbox.env.root_config_dir).exists());
+            }
+        }
+
+        /// G4-1: group / other write access is really removed from the whole bundle.
+        #[test]
+        fn bundle_loses_group_and_other_write_access() {
+            let sandbox = Sandbox::new("go-w", "");
+            let service = Path::new(&sandbox.env.app_bundle).join("Contents/MacOS/service");
+            let resources = Path::new(&sandbox.env.app_bundle).join("Contents/Resources");
+            fs::create_dir_all(&resources).unwrap();
+            for path in [service.as_path(), resources.as_path()] {
+                fs::set_permissions(path, fs::Permissions::from_mode(0o777)).unwrap();
+            }
+            let (ok, stderr) = sandbox.install(Some((SenseRole::Host, &setup_hex())));
+            assert!(ok, "{stderr}");
+            for path in [service.as_path(), resources.as_path()] {
+                let mode = fs::metadata(path).unwrap().permissions().mode();
+                assert_eq!(mode & 0o777, 0o755, "{path:?}");
+            }
         }
 
         #[test]
