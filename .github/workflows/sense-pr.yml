@@ -1,0 +1,277 @@
+# Sense Remote: PR'larda hızlı kontrol (kullanıcı isteği 2026-11-21: küçük değişiklik için
+# saatlerce derleme beklenmesin). Tam Windows + macOS paket derlemesi PR'da YOK; o iş
+# sense-build.yml'de master'a gönderimde, v<n> etiketinde ve elle çalışır.
+# Burada yalnız Linux koşucuları ve yalnız değişen alan:
+#   flutter/** (ya da src/flutter_ffi.rs)          -> Dart testleri (+ değişen dosyalarda analyze)
+#   src/**, libs/**, Cargo.*, build.rs, vcpkg.json -> Rust birim testleri (Windows'taki komut)
+#   .github/workflows/sense-*.yml                  -> actionlint (iş akışı sözdizimi)
+#   bu dosya, bridge.yml ya da .github/patches/**  -> hepsi (iş akışının kendisi sınanır)
+# Tek sonuç işi: "PR kontrolu" (dal koruması yalnız bunu zorunlu tutabilir).
+name: Sense Remote PR
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# Aynı PR'a yeni commit gelince eski koşu iptal edilir.
+concurrency:
+  group: sense-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # sense-build.yml'deki Windows işiyle aynı sürümler (Linux'ta geçen kod Windows'ta da derlensin).
+  SCITER_RUST_VERSION: "1.75"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  ACTIONLINT_VERSION: "v1.7.12"
+
+jobs:
+  changes:
+    name: changed areas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      dart: ${{ steps.filter.outputs.dart }}
+      rust: ${{ steps.filter.outputs.rust }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      # Üçüncü taraf eylem yok: değişen dosyalar GitHub API'sinden okunur. Dosya adları yalnız
+      # dosyaya yazılıp grep ile okunur (komut satırına ya da ifadeye girmez).
+      - name: List changed files
+        id: filter
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > files.txt
+          count=$(wc -l < files.txt)
+          echo "Değişen dosya: $count"
+          has() { if grep -Eq "$1" files.txt; then echo true; else echo false; fi; }
+          all=$(has '^\.github/workflows/(sense-pr|bridge)\.yml$|^\.github/patches/')
+          # API en çok 3000 dosya listeler; liste kesilmiş olabilirse her şey koşar.
+          if [ "$count" -ge 3000 ]; then all=true; fi
+          dart=$(has '^flutter/|^src/flutter_ffi\.rs$')
+          rust=$(has '^(src|libs)/|^Cargo\.(toml|lock)$|^build\.rs$|^vcpkg\.json$')
+          workflows=$(has '^\.github/workflows/sense-[^/]*\.yml$')
+          if [ "$all" = true ]; then dart=true; rust=true; fi
+          {
+            echo "dart=$dart"
+            echo "rust=$rust"
+            echo "workflows=$workflows"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "| Alan | Koşar mı |"
+            echo "| --- | --- |"
+            echo "| Dart testleri | $dart |"
+            echo "| Rust testleri | $rust |"
+            echo "| İş akışı denetimi | $workflows |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  generate-bridge:
+    needs: [changes]
+    if: ${{ needs.changes.outputs.dart == 'true' || needs.changes.outputs.rust == 'true' }}
+    uses: ./.github/workflows/bridge.yml
+
+  dart:
+    name: dart tests (linux)
+    needs: [changes, generate-bridge]
+    if: ${{ needs.changes.outputs.dart == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225 # v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      # Windows işindeki yamanın aynısı; önbellekten gelen Flutter zaten yamalıysa geçilir.
+      - name: Patch flutter
+        shell: bash
+        run: |
+          patch="$PWD/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+          cd "$(dirname "$(dirname "$(which flutter)")")"
+          if git apply --check "$patch" 2>/dev/null; then
+            git apply "$patch"
+          else
+            git apply -R --check "$patch"
+            echo "Yama zaten uygulanmış."
+          fi
+
+      - name: Run the Dart tests
+        working-directory: flutter
+        run: flutter test --timeout 60s
+
+      # Yalnız PR'da değişen Dart dosyaları; yalnız hata (error) düzeyi sayılır. Şimdilik
+      # bilgi amaçlı (continue-on-error): mevcut kodda çözümleyici hatası olup olmadığı
+      # ölçülmeden zorunlu yapılmadı.
+      - name: Analyze changed Dart files
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[].filename' > "$RUNNER_TEMP/files.txt"
+          files=()
+          while IFS= read -r f; do
+            case "$f" in
+              flutter/lib/generated_*) ;;
+              flutter/lib/*.dart|flutter/test/*.dart) [ -f "$f" ] && files+=("${f#flutter/}") ;;
+            esac
+          done < "$RUNNER_TEMP/files.txt"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "Değişen Dart dosyası yok."
+            exit 0
+          fi
+          cd flutter
+          flutter analyze --no-fatal-infos --no-fatal-warnings -- "${files[@]}"
+
+  rust:
+    name: rust tests (linux)
+    needs: [changes, generate-bridge]
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      # ci.yml'deki Linux ön koşullarının aynısı.
+      - name: Install prerequisites
+        shell: bash
+        run: |
+          sudo apt-get -y update
+          sudo apt-get install -y \
+            clang cmake curl gcc git g++ \
+            libasound2-dev libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libgtk-3-dev libpulse-dev libva-dev libvdpau-dev \
+            libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxdo-dev libxfixes-dev \
+            nasm wget
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+
+      # Kurulu vcpkg paketleri (≈7 dk derleme) aynı PR'ın sonraki koşularında önbellekten gelir.
+      - name: Cache installed vcpkg packages
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3
+        with:
+          path: /opt/artifacts/vcpkg/installed
+          key: sense-pr-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json', 'res/vcpkg/**') }}
+
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.SCITER_RUST_VERSION }}
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: sense-pr
+
+      # Windows işindeki komutun aynısı (build.py özellik listesi + --lib); hız için hata
+      # ayıklama profili ve Linux'ta kurulu olmayan hwcodec/vram olmadan. cfg(windows) ve
+      # cfg(target_os = "macos") testleri burada derlenmez; onlar master derlemesinde koşar.
+      - name: Run the Rust tests
+        shell: bash
+        run: |
+          FEATURES=$(python3 ./build.py --flutter --print-features)
+          echo "features: $FEATURES"
+          # Atlanan tek test RustDesk'in Windows klavye davranışı testi: ekransız Linux
+          # koşucusunda klavye bağlamı açılamadığı için düşer ("kbd context error");
+          # master'daki Windows derlemesinde koşmaya devam eder.
+          cargo test --locked --lib --features "$FEATURES" --             --skip keyboard::shortcuts::tests::alt_only_shortcut_neutralizes_windows_menu
+
+  workflows:
+    name: workflow lint
+    needs: [changes]
+    if: ${{ needs.changes.outputs.workflows == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # Sürüm sabit; Go modül özeti sum.golang.org ile doğrulanır. Yalnız Sense iş akışları
+      # (RustDesk'ten gelen dosyalar yukarı akışla aynı kalsın diye denetlenmez).
+      - name: Run actionlint on the Sense workflows
+        shell: bash
+        run: |
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          "$(go env GOPATH)/bin/actionlint" -shellcheck= -pyflakes= .github/workflows/sense-*.yml
+
+  # Tek zorunlu kontrol: koşan her iş başarılı (ya da alanı değişmediği için atlanmış) olmalı.
+  pr-check:
+    name: PR kontrolu
+    needs: [changes, generate-bridge, dart, rust, workflows]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check job results
+        shell: bash
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          BRIDGE: ${{ needs.generate-bridge.result }}
+          DART: ${{ needs.dart.result }}
+          RUST: ${{ needs.rust.result }}
+          WORKFLOWS: ${{ needs.workflows.result }}
+        run: |
+          echo "changes=$CHANGES bridge=$BRIDGE dart=$DART rust=$RUST workflows=$WORKFLOWS"
+          [ "$CHANGES" = success ] || { echo "::error::Değişen alanlar belirlenemedi."; exit 1; }
+          for r in "$BRIDGE" "$DART" "$RUST" "$WORKFLOWS"; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::Bir kontrol başarısız ya da iptal: $r"; exit 1 ;;
+            esac
+          done

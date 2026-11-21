@@ -2,7 +2,8 @@
 # RustDesk'in flutter-build.yml dosyasindaki Windows ve macOS adimlarindan sadelestirildi:
 # sertifikali imzalama, notarization, MSI, Linux/Android/iOS ve Windows arm64 yok.
 # Windows ciktisi imzasiz; macOS ciktisi ad-hoc imzali (Apple Developer ID yok, ucretsiz kural).
-# PR'larda yalniz Windows; macOS master'da, etikette ve elle calisir (Windows oncelikli).
+# PR'larda CALISMAZ (2026-11-21): PR kontrolu sense-pr.yml'de (Linux, yalniz degisen alan).
+# Tam Windows + macOS derlemesi ve testler master'a gonderimde, etikette ve elle calisir.
 name: Sense Remote build
 
 on:
@@ -13,11 +14,6 @@ on:
         description: "Yalniz macOS paketini derle (Windows atlanir)"
         type: boolean
         default: false
-  pull_request:
-    branches: [master]
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
   push:
     branches: [master]
     paths-ignore:
@@ -29,9 +25,11 @@ on:
 permissions:
   contents: read
 
+# Sense Remote: master ve etiket derlemesi yarida kesilmez (pes pese birlestirmede calisan
+# kosu biter; kuyrukta yalniz en yeni commit bekler).
 concurrency:
   group: sense-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   SCITER_RUST_VERSION: "1.75"
