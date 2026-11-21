@@ -759,10 +759,12 @@ async fn sense_service_update(
     message: crate::sense::update::SenseUpdateIpc,
     stream: &mut Connection,
 ) {
-    // The call limit is per peer process, as for envelopes (G4-4).
+    // The call limit is per peer process and per uid (G4-4, U4).
     let peer_pid = stream.peer_pid();
+    // Sense Remote (U4): the uid too, for the limit over all processes of one user.
+    let peer_uid = stream.peer_uid();
     let reply = tokio::task::spawn_blocking(move || {
-        crate::sense::update::daemon_mac::on_service_ipc(message, peer_pid)
+        crate::sense::update::daemon_mac::on_service_ipc(message, peer_pid, peer_uid)
     })
     .await
     .ok()
@@ -2582,7 +2584,7 @@ mod test {
         let start = source.find("async fn sense_service_update(").unwrap();
         let body = &source[start..];
         let body = &body[..body.find("\n}\n").unwrap()];
-        assert!(body.contains("crate::sense::update::daemon_mac::on_service_ipc(message, peer_pid)"));
+        assert!(body.contains("crate::sense::update::daemon_mac::on_service_ipc(message, peer_pid, peer_uid)"));
         assert!(!body.contains("on_ipc(message)"));
     }
 

@@ -1,49 +1,65 @@
-//! Sense Remote (update plan 2026-11-21, package U4): the macOS-only part of `daemon_mac`.
+//! Sense Remote (update plan 2026-11-21, package U4): the daemon's runner, the macOS counterpart
+//! of `update/runner.rs` (same engine, same jobs, same store rules).
+//!
+//! - One engine state behind a mutex; every event goes through `engine::next` under the lock
+//!   (`step`), the resulting actions become jobs for the runner thread.
+//! - The runner thread keeps a deadline for the timer: jobs and events never postpone a tick.
+//!   Idle time is measured only there (`has_no_active_conns_ipc` starts its own runtime and
+//!   asks every session's agent), and only while the engine waits for an idle computer.
+//! - Download, verification and installation run on threads of their own, outside any
+//!   runtime; the installation asks once more for an idle computer right before
+//!   `apply::install`, which asks again before it changes anything.
 
 use super::*;
 use crate::sense::update::{
-    apply, current_version, download, engine::{Action, Ctx}, keys, sign_mac, store,
-    InstallJob, UpdateError, UpdateSource, UpdateState,
+    apply, current_version, download,
+    engine::{self, Action, Ctx, State, MAX_JITTER_S},
+    keys, sign_mac, store, InstallJob, UpdateError, UpdateSource, UpdateState,
 };
-use crate::sense::mac_apply::CallLimiter;
-use hbb_common::{libc, log};
+use hbb_common::{config::Config, libc, log};
 use std::{
     path::PathBuf,
-    sync::{mpsc, Mutex, OnceLock},
+    sync::{mpsc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
+/// Timer of the engine (as `runner::TICK_S`).
+const TICK: Duration = Duration::from_secs(crate::sense::update::runner::TICK_S);
+
 struct Daemon {
-    held: Held,
-    state: engine::State,
-    limiter: CallLimiter,
+    state: State,
+    limiter: PeerLimiter,
     clock: Instant,
+    /// Since when no connection is active (Unix s), measured on the timer thread.
+    idle_since: Option<i64>,
+    /// Last `Offer` (= last heartbeat answer).
     checked_at: Option<i64>,
-    /// The downloaded installer, once `download::fetch` returned it.
-    file: Option<PathBuf>,
-    events: Option<mpsc::Sender<Event>>,
+    /// The phase the last `Offer` answer gave the agent for its heartbeat.
+    reported: Option<UpdateState>,
+    jobs: mpsc::Sender<Job>,
 }
 
-fn daemon() -> std::sync::MutexGuard<'static, Daemon> {
-    static DAEMON: OnceLock<Mutex<Daemon>> = OnceLock::new();
-    DAEMON
-        .get_or_init(|| {
-            Mutex::new(Daemon {
-                held: Held::default(),
-                state: engine::State::default(),
-                limiter: CallLimiter::default(),
-                clock: Instant::now(),
-                checked_at: None,
-                file: None,
-                events: None,
-            })
-        })
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
+enum Job {
+    Persist(State),
+    Download(download::Request),
+    Verify {
+        file: PathBuf,
+        sha256: String,
+        size: u64,
+    },
+    Install(InstallJob),
+    DropFile(PathBuf),
+    Fail(UpdateError),
+}
+
+static DAEMON: Mutex<Option<Daemon>> = Mutex::new(None);
+
+fn lock() -> MutexGuard<'static, Option<Daemon>> {
+    DAEMON.lock().unwrap_or_else(|err| err.into_inner())
 }
 
 fn now_s() -> i64 {
-    hbb_common::get_time() / 1000
+    crate::sense::update::runner::now_s()
 }
 
 fn is_root() -> bool {
@@ -51,75 +67,12 @@ fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
-fn send(event: Event) {
-    if let Some(events) = &daemon().events {
-        let _ = events.send(event);
-    }
+fn local_hour() -> u8 {
+    use hbb_common::chrono::Timelike;
+    hbb_common::chrono::Local::now().hour() as u8
 }
 
-pub fn start() {
-    if !is_root() {
-        return;
-    }
-    let (tx, rx) = mpsc::channel();
-    daemon().events = Some(tx);
-    let spawned = std::thread::Builder::new()
-        .name("sense-update".to_owned())
-        .spawn(move || work(rx));
-    if let Err(err) = spawned {
-        log::error!("Sense Remote: update worker not started: {err}");
-    }
-}
-
-pub fn on_service_ipc(message: SenseUpdateIpc, peer_pid: Option<u32>) -> Option<SenseUpdateIpc> {
-    if !is_root() {
-        return None;
-    }
-    let iss = crate::sense::envelope::expected_issuer();
-    let did = hbb_common::config::Config::get_id();
-    let duuid = crate::encode64(hbb_common::get_uuid());
-    let installed = store::installed_version();
-    let ctx = DaemonCtx {
-        panel_keys: keys::panel_keys(),
-        build_keys: keys::release_keys(),
-        iss: &iss,
-        api_server: crate::sense::API_SERVER,
-        platform: crate::sense::report::platform(),
-        did: &did,
-        duuid: &duuid,
-        now_s: now_s(),
-        installed,
-    };
-    let mut daemon = daemon();
-    let now_ms = daemon.clock.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    // A peer without a readable pid shares one slot.
-    let allowed = daemon.limiter.allow(peer_pid.unwrap_or(0), now_ms);
-    let events = handle(&message, allowed, &ctx, &mut daemon.held)?;
-    if matches!(message, SenseUpdateIpc::Offer { .. }) {
-        daemon.checked_at = Some(ctx.now_s);
-    }
-    if let Some(sender) = &daemon.events {
-        for event in events {
-            let _ = sender.send(event);
-        }
-    }
-    Some(SenseUpdateIpc::DaemonStatus(status_json(&daemon)))
-}
-
-fn status_json(daemon: &Daemon) -> String {
-    let stored = store::read().ok().flatten();
-    let warning = permission_warning(crate::sense::installed_role(), sign_mac::sign_kind());
-    let status = gui_status(
-        &daemon.state,
-        current_version(),
-        daemon.checked_at,
-        warning,
-        stored.as_ref(),
-    );
-    serde_json::to_string(&status).unwrap_or_default()
-}
-
-/// Phases in which the engine asks whether the computer is idle.
+/// Phases in which the engine waits for an idle computer.
 fn needs_idle(phase: UpdateState) -> bool {
     matches!(
         phase,
@@ -130,215 +83,283 @@ fn needs_idle(phase: UpdateState) -> bool {
     )
 }
 
-fn work(rx: mpsc::Receiver<Event>) {
-    if let Err(err) = apply::self_check() {
-        log::error!("Sense Remote: self-check: {}", err.as_str());
+pub fn start() {
+    if !is_root() || !crate::sense::update::SUPPORTED {
+        return;
     }
-    let mut idle_since: Option<Instant> = None;
-    loop {
-        let event = match rx.recv_timeout(Duration::from_millis(TICK_MS)) {
-            Ok(event) => event,
-            Err(mpsc::RecvTimeoutError::Timeout) => Event::Tick,
-            Err(mpsc::RecvTimeoutError::Disconnected) => return,
-        };
-        let phase = daemon().state.phase;
-        // Asked only when it matters: the check talks to every session's agent.
-        if event == Event::Tick {
-            idle_since = if needs_idle(phase) && crate::updater::has_no_active_conns_ipc() {
-                idle_since.or_else(|| Some(Instant::now()))
-            } else {
-                None
-            };
-        }
-        let ctx = Ctx {
-            now_s: now_s(),
-            local_hour: local_hour(),
-            installed: store::installed_version(),
-            idle_s: idle_since.map_or(0, |since| since.elapsed().as_secs()),
-            // Only once there is something to download (the call creates the folder).
-            free_bytes: if phase == UpdateState::Idle {
-                None
-            } else {
-                apply::download_dir().and_then(|dir| free_bytes(&dir))
-            },
-            jitter_s: jitter(),
-        };
-        let actions = {
-            let mut daemon = daemon();
-            let state = std::mem::take(&mut daemon.state);
-            let (state, actions) = engine::next(state, event, &ctx);
-            daemon.state = state;
-            actions
-        };
-        for action in actions {
-            perform(action);
-        }
-    }
-}
-
-fn local_hour() -> u8 {
-    use hbb_common::chrono::Timelike;
-    hbb_common::chrono::Local::now().hour() as u8
-}
-
-fn jitter() -> u64 {
-    use hbb_common::rand::Rng;
-    hbb_common::rand::thread_rng().gen_range(0..=engine::MAX_JITTER_S)
-}
-
-fn free_bytes(dir: &std::path::Path) -> Option<u64> {
-    use std::os::unix::ffi::OsStrExt;
-    let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
-    // SAFETY: `path` is NUL-terminated and lives across the call; `stat` is plain data.
-    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(path.as_ptr(), &mut stat) } != 0 {
-        return None;
-    }
-    Some((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
-}
-
-fn perform(action: Action) {
-    match action {
-        Action::Download => run_download(),
-        Action::Verify => run_verify(),
-        Action::Install => run_install(),
-        Action::DropFile => {
-            if let Some(file) = daemon().file.take() {
-                let _ = std::fs::remove_file(file);
+    let spawned = std::thread::Builder::new()
+        .name("sense-update".to_owned())
+        .spawn(|| {
+            if let Err(err) = apply::self_check() {
+                log::error!("Sense Remote: update self-check failed: {}", err.as_str());
             }
-        }
-        Action::Persist => run_persist(),
+            let (jobs, receiver) = mpsc::channel();
+            *lock() = Some(Daemon {
+                state: State::restore(&store::read(), now_s()),
+                limiter: PeerLimiter::default(),
+                clock: Instant::now(),
+                idle_since: None,
+                checked_at: None,
+                reported: None,
+                jobs,
+            });
+            work(receiver);
+        });
+    if let Err(err) = spawned {
+        log::error!("Sense Remote: update runner not started: {err}");
     }
 }
 
-fn run_download() {
-    let release = daemon().state.release.clone();
-    let (Some(release), Some(dir)) = (release, apply::download_dir()) else {
-        send(Event::Failed(UpdateError::DownloadFailed));
-        return;
-    };
-    let request = download::Request {
-        url: release.url.clone(),
-        sha256: release.sha256.clone(),
-        size: release.size,
-        dir,
-        file: release.file.clone(),
-    };
-    let progress = |pct: u8| daemon().state.progress_pct = Some(pct);
-    let result = match hbb_common::tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime.block_on(download::fetch(&request, &progress)),
-        Err(_) => Err(UpdateError::DownloadFailed),
-    };
-    match result {
-        Ok(file) => {
-            daemon().file = Some(file);
-            send(Event::Downloaded);
-        }
-        Err(error) => send(Event::Failed(error)),
-    }
-}
-
-/// Size and SHA-256 once more, on the file in the root folder.
-fn run_verify() {
-    let release = daemon().state.release.clone();
-    let file = daemon().file.clone();
-    let (Some(release), Some(file)) = (release, file) else {
-        send(Event::Failed(UpdateError::DownloadFailed));
-        return;
-    };
-    send(match file_matches(&file, release.size, &release.sha256) {
-        Ok(()) => Event::Verified,
-        Err(error) => Event::Failed(error),
-    });
-}
-
-fn file_matches(file: &std::path::Path, size: u64, sha256: &str) -> Result<(), UpdateError> {
-    use hbb_common::sha2::{Digest, Sha256};
-    use std::io::Read;
-    let meta = std::fs::symlink_metadata(file).map_err(|_| UpdateError::DownloadFailed)?;
-    if !meta.is_file() || meta.len() != size {
-        return Err(UpdateError::SizeMismatch);
-    }
-    let mut reader = std::fs::File::open(file).map_err(|_| UpdateError::DownloadFailed)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 64 * 1024];
+fn work(receiver: mpsc::Receiver<Job>) {
+    let mut next_tick = Instant::now();
     loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|_| UpdateError::DownloadFailed)?;
-        if read == 0 {
-            break;
+        let now = Instant::now();
+        if now >= next_tick {
+            next_tick = now + TICK;
+            measure_idle();
+            step(Event::Tick);
+            continue;
         }
-        hasher.update(&buffer[..read]);
-    }
-    if hex::encode(hasher.finalize()) == sha256.to_ascii_lowercase() {
-        Ok(())
-    } else {
-        Err(UpdateError::HashMismatch)
+        match receiver.recv_timeout(next_tick - now) {
+            Ok(job) => perform(job),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        }
     }
 }
 
-fn run_install() {
-    let (release, order, source, file) = {
-        let daemon = daemon();
-        (
-            daemon.state.release.clone(),
-            daemon.state.order.clone(),
-            daemon.state.source,
-            daemon.file.clone(),
-        )
-    };
-    let (Some(release), Some(file)) = (release, file) else {
-        send(Event::Failed(UpdateError::InstallFailed));
-        return;
-    };
-    let job = InstallJob {
-        file,
-        version: release.version,
-        sha256: release.sha256.clone(),
-        size: release.size,
-        source: source.unwrap_or(UpdateSource::Local),
-        oid: order.map(|order| order.oid),
-    };
-    if let Err(error) = apply::install(&job) {
-        send(Event::Failed(error));
-    }
-}
-
-/// The engine's state into `update.json`. A record the guard is watching (`installing`,
-/// `unhealthy`) is never overwritten from here.
-fn run_persist() {
-    let stored = match store::read() {
-        Ok(stored) => stored,
-        Err(err) => {
-            log::error!("Sense Remote: update state not readable: {err}");
-            return;
-        }
-    };
-    if let Some(stored) = &stored {
-        if matches!(stored.state, StoredState::Installing | StoredState::Unhealthy) {
-            return;
-        }
-    }
-    let state = daemon().state.clone();
-    let Some(mut record) = stored.or_else(|| {
-        serde_json::from_str::<Persisted>(r#"{"state":"idle"}"#).ok()
-    }) else {
-        return;
-    };
-    record.state = match StoredState::parse(state.phase.as_str()) {
-        Some(phase) => phase,
+/// Outside the lock: the check talks to every session's agent.
+fn measure_idle() {
+    let phase = match lock().as_ref() {
+        Some(daemon) => daemon.state.phase,
         None => return,
     };
-    record.target = state.release.as_ref().map(|release| release.version);
-    record.source = state.source;
-    record.oid = state.order.as_ref().map(|order| order.oid.clone());
-    record.attempts = state.attempts;
-    record.last_error = state.error;
-    if let Err(err) = store::write(&record) {
-        log::error!("Sense Remote: update state not written: {err}");
+    let idle = needs_idle(phase) && crate::updater::has_no_active_conns_ipc();
+    if let Some(daemon) = lock().as_mut() {
+        if idle {
+            daemon.idle_since.get_or_insert(now_s());
+        } else {
+            daemon.idle_since = None;
+        }
+    }
+}
+
+impl Daemon {
+    fn ctx(&self, with_disk: bool) -> Ctx {
+        let now = now_s();
+        let free_bytes = if with_disk {
+            apply::download_dir().and_then(|dir| download::free_bytes(&dir))
+        } else {
+            None
+        };
+        Ctx {
+            now_s: now,
+            local_hour: local_hour(),
+            installed: current_version(),
+            idle_s: self.idle_since.map_or(0, |t| (now - t).max(0) as u64),
+            free_bytes,
+            jitter_s: hbb_common::rand::random::<u64>() % (MAX_JITTER_S + 1),
+        }
+    }
+
+    /// Disk space is read only when a download may start (as `runner.rs`).
+    fn needs_disk(&self, event: &Event) -> bool {
+        matches!(event, Event::InstallRequested { .. } | Event::Order(Ok(_)))
+            || matches!(
+                self.state.phase,
+                UpdateState::Available | UpdateState::Scheduled | UpdateState::WaitingIdle
+            ) && self.state.source.is_some()
+    }
+
+    fn advance(&mut self, event: Event, ctx: &Ctx) {
+        let state = std::mem::take(&mut self.state);
+        let (state, actions) = engine::next(state, event, ctx);
+        self.state = state;
+        for action in actions {
+            if let Some(job) = self.job_for(action) {
+                let _ = self.jobs.send(job);
+            }
+        }
+    }
+
+    fn job_for(&self, action: Action) -> Option<Job> {
+        if let Action::Persist = action {
+            return Some(Job::Persist(self.state.clone()));
+        }
+        let Some(dir) = apply::download_dir() else {
+            return match action {
+                Action::DropFile { .. } => None,
+                _ => Some(Job::Fail(UpdateError::Unsupported)),
+            };
+        };
+        if let Action::DropFile { file } = action {
+            return download::is_plain_file_name(&file).then(|| Job::DropFile(dir.join(file)));
+        }
+        let release = self.state.release.as_ref()?;
+        let file = dir.join(&release.file);
+        Some(match action {
+            Action::Download => Job::Download(download::Request {
+                url: release.url.clone(),
+                sha256: release.sha256.clone(),
+                size: release.size,
+                dir,
+                file: release.file.clone(),
+            }),
+            Action::Verify => Job::Verify {
+                file,
+                sha256: release.sha256.clone(),
+                size: release.size,
+            },
+            _ => Job::Install(InstallJob {
+                file,
+                version: release.version,
+                sha256: release.sha256.clone(),
+                size: release.size,
+                source: self.state.source.unwrap_or(UpdateSource::Local),
+                oid: self.state.order.as_ref().map(|o| o.oid.clone()),
+            }),
+        })
+    }
+}
+
+fn step(event: Event) {
+    let mut guard = lock();
+    let Some(daemon) = guard.as_mut() else {
+        return;
+    };
+    let ctx = daemon.ctx(daemon.needs_disk(&event));
+    daemon.advance(event, &ctx);
+}
+
+fn perform(job: Job) {
+    match job {
+        Job::Persist(state) => {
+            let old = match store::read() {
+                Ok(old) => old,
+                Err(err) => {
+                    log::warn!("Sense Remote: update store not written, unreadable: {err}");
+                    return;
+                }
+            };
+            if let Some(record) = state.persisted(old) {
+                if let Err(err) = store::write(&record) {
+                    log::error!("Sense Remote: update store not written: {err}");
+                }
+            }
+        }
+        Job::Download(request) => spawn("sense-update-dl", move || {
+            let progress = |pct: u8| step(Event::DownloadProgress(pct));
+            let result = hbb_common::tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| UpdateError::DownloadFailed)
+                .and_then(|runtime| runtime.block_on(download::fetch(&request, &progress)));
+            step(match result {
+                Ok(_) => Event::Downloaded,
+                Err(err) => Event::Failed(err),
+            });
+        }),
+        Job::Verify { file, sha256, size } => spawn("sense-update-verify", move || {
+            step(match download::verify_file(&file, size, &sha256) {
+                Ok(()) => Event::Verified,
+                Err(err) => Event::Failed(err),
+            });
+        }),
+        Job::Install(job) => spawn("sense-update-install", move || {
+            // Never during a connection: asked once more right before the installer.
+            if !crate::updater::has_no_active_conns_ipc() {
+                step(Event::Failed(UpdateError::Busy));
+                return;
+            }
+            log::info!("Sense Remote: installing update {}", job.version);
+            if let Err(err) = apply::install(&job) {
+                step(Event::Failed(err));
+            }
+        }),
+        Job::DropFile(path) => {
+            let _ = std::fs::remove_file(path);
+        }
+        Job::Fail(err) => step(Event::Failed(err)),
+    }
+}
+
+fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
+    if let Err(err) = std::thread::Builder::new().name(name.to_owned()).spawn(work) {
+        log::error!("Sense Remote: {name} not started: {err}");
+        step(Event::Failed(UpdateError::InstallFailed));
+    }
+}
+
+pub fn on_service_ipc(
+    message: SenseUpdateIpc,
+    peer_pid: Option<u32>,
+    peer_uid: Option<u32>,
+) -> Option<SenseUpdateIpc> {
+    if !is_root() {
+        return None;
+    }
+    let iss = crate::sense::envelope::expected_issuer();
+    let did = Config::get_id();
+    let duuid = crate::encode64(hbb_common::get_uuid());
+    let now = now_s();
+    let mut guard = lock();
+    let daemon = guard.as_mut()?;
+    let now_ms = daemon.clock.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let allowed = daemon.limiter.allow(peer_pid, peer_uid, now_ms);
+    let ctx = DaemonCtx {
+        panel_keys: keys::panel_keys(),
+        build_keys: keys::release_keys(),
+        iss: &iss,
+        api_server: crate::sense::API_SERVER,
+        platform: crate::sense::report::platform(),
+        did: &did,
+        duuid: &duuid,
+        now_s: now,
+        installed: current_version(),
+    };
+    let held = daemon.state.release.clone();
+    match classify(&message, allowed, &ctx, held.as_ref())? {
+        Call::Offer(events) => {
+            daemon.checked_at = Some(now);
+            // The status given with the previous answer went out with the heartbeat that
+            // brought this one.
+            if matches!(
+                daemon.reported.take(),
+                Some(UpdateState::Installed | UpdateState::RolledBack)
+            ) {
+                let ctx = daemon.ctx(false);
+                daemon.advance(Event::Reported, &ctx);
+            }
+            for event in events {
+                let ctx = daemon.ctx(daemon.needs_disk(&event));
+                daemon.advance(event, &ctx);
+            }
+            daemon.reported = Some(daemon.state.phase);
+            let status = daemon.state.status(now, Some(sign_mac::sign_kind()));
+            serde_json::to_string(&status)
+                .ok()
+                .map(SenseUpdateIpc::DaemonStatus)
+        }
+        Call::Install(version) => {
+            let ctx = daemon.ctx(true);
+            let code = match engine::check_install(&daemon.state, version, &ctx) {
+                Ok(()) => {
+                    daemon.advance(Event::InstallRequested { version }, &ctx);
+                    engine::INSTALL_ACCEPTED
+                }
+                Err(code) => code,
+            };
+            Some(SenseUpdateIpc::InstallAnswer(code.to_owned()))
+        }
+        Call::Status => {
+            let warning =
+                permission_warning(crate::sense::installed_role(), sign_mac::sign_kind());
+            let status = daemon
+                .state
+                .gui_status(current_version(), daemon.checked_at);
+            serde_json::to_string(&with_warning(status, warning))
+                .ok()
+                .map(SenseUpdateIpc::DaemonStatus)
+        }
     }
 }
