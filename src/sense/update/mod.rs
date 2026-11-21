@@ -232,6 +232,9 @@ pub struct Have {
 pub struct GuiStatus {
     /// Sense version of this build; 0 without `SENSE_VERSION` (local builds).
     pub current: u32,
+    /// `SUPPORTED`: this build installs updates; when false the UI only informs.
+    #[serde(default)]
+    pub supported: bool,
     pub state: UpdateState,
     pub target: Option<u32>,
     pub source: Option<UpdateSource>,
@@ -262,6 +265,7 @@ impl GuiStatus {
     pub fn idle(current: u32) -> Self {
         Self {
             current,
+            supported: SUPPORTED,
             state: UpdateState::Idle,
             target: None,
             source: None,
@@ -661,15 +665,16 @@ mod tests {
             [
                 "blocked", "checked_at", "current", "error", "error_detail", "last_result",
                 "mac_permission_warning", "notes_url", "progress_pct", "source", "state",
-                "target",
+                "supported", "target",
             ]
         );
         assert_eq!(status["state"], "idle");
         assert_eq!(status["current"], current_version());
         assert_eq!(status["target"], Value::Null);
+        assert_eq!(status["supported"], SUPPORTED);
         // The plan's example reads back.
         let example = json!({
-            "current": 3, "state": "available", "target": 4, "source": null,
+            "current": 3, "supported": true, "state": "available", "target": 4, "source": null,
             "progress_pct": null, "error": null, "error_detail": null,
             "blocked": "session_active", "notes_url": "https://panel.example/#surum-4",
             "checked_at": 1_795_000_000, "mac_permission_warning": false,

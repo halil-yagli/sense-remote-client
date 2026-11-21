@@ -333,6 +333,7 @@ impl State {
     pub fn gui_status(&self, current: u32, checked_at: Option<i64>) -> GuiStatus {
         GuiStatus {
             current,
+            supported: super::SUPPORTED,
             state: self.phase,
             target: self.target_version(),
             source: self.source,
