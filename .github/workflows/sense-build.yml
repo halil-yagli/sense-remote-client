@@ -1,7 +1,12 @@
 # Sense Remote: Windows (x64) + macOS (yalniz Apple Silicon) derlemesi.
 # RustDesk'in flutter-build.yml dosyasindaki Windows ve macOS adimlarindan sadelestirildi:
-# sertifikali imzalama, notarization, MSI, Linux/Android/iOS ve Windows arm64 yok.
-# Windows ciktisi imzasiz; macOS ciktisi ad-hoc imzali (Apple Developer ID yok, ucretsiz kural).
+# Apple/Microsoft sertifikasi, notarization, MSI, Linux/Android/iOS ve Windows arm64 yok.
+# Windows ciktisi imzasiz. macOS ciktisi ad-hoc imzali ya da (SENSE_MAC_SIGN=cert) kalici,
+# kendinden imzali sertifikayla imzali (Apple Developer ID yok, ucretsiz kural).
+# Etiket derlemesi her kurulum dosyasi icin YAPI BEYANI uretir ve yapi anahtariyla imzalar
+# (.github/scripts/sense-sign-build.sh); istemci guncellemeyi bu imza olmadan kurmaz.
+# Sirlar yalniz GitHub ortamlarinda: "surum" (yapi anahtari; yalniz v* etiketi) ve "imza"
+# (Mac sertifikasi; master + v* etiketi). Kurulumu: tools/sense-keys/README.md.
 # PR'larda CALISMAZ (2026-11-21): PR kontrolu sense-pr.yml'de (Linux, yalniz degisen alan).
 # Tam Windows + macOS derlemesi ve testler master'a gonderimde, etikette ve elle calisir.
 name: Sense Remote build
@@ -14,6 +19,12 @@ on:
         description: "Yalniz macOS paketini derle (Windows atlanir)"
         type: boolean
         default: false
+      # Sense Remote: guncelleme denemeleri icin (901 -> 902). Yalniz 900-999, etikette
+      # kullanilamaz; yayin surumu numarasi yalniz v<n> etiketinden gelir.
+      deneme_surumu:
+        description: "Deneme surum numarasi (900-999; bos = normal derleme)"
+        type: string
+        default: ""
   push:
     branches: [master]
     paths-ignore:
@@ -46,6 +57,9 @@ env:
   # Panelin imza acik anahtar(lar)i: k1=<base64url>,k2=... (acik anahtar, sir degil). Repo
   # degiskeni (Settings > Variables) yoksa bos gelir: istemci her zarfi reddeder (unknown_key).
   SENSE_ENVELOPE_KEYS: ${{ vars.SENSE_ENVELOPE_KEYS }}
+  # Yapi anahtarinin acik anahtar(lar)i, ayni bicim (acik anahtar, sir degil). Bossa istemci
+  # hicbir guncellemeyi kabul etmez (build_unknown_key); etiket derlemesi bos cikmaz.
+  SENSE_RELEASE_KEYS: ${{ vars.SENSE_RELEASE_KEYS }}
   # Sense Remote (G3-2): RustDesk'in Flutter motoru (rustdesk/engine, surum eki "main",
   # varlik kimligi 210168939, 2024-12-01). Ozet sabit: dosya degisirse derleme duser.
   # Motor guncellemesi ayri PR'da: yeni ozet + kimlik buraya, gerekce PR'a.
@@ -105,15 +119,107 @@ jobs:
           fi
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
+      # Etiket derlemesi yapi anahtarsiz cikmaz: istemci hicbir guncellemeyi dogrulayamazdi.
+      # check-keys: bicim (k = SHA-256(acik anahtar) ilk 8 bayt); SENSE_ENVELOPE_KEYS ile kesisim
+      # (ayni k ya da ayni acik anahtar: iki imza kurali tek imzaya duserdi); iki listede ortak
+      # test vektorunun DENEME anahtar kimlikleri. Herhangi biri derlemeyi durdurur.
+      - name: Check release keys
+        shell: bash
+        run: |
+          if [ -z "$SENSE_RELEASE_KEYS" ]; then
+            echo "::error title=SENSE_RELEASE_KEYS bos::Etiket derlemesi yapi anahtarinin acik anahtari olmadan yapilmaz. Once tools/sense-keys/yapi-anahtari-uret.sh calistirilir (tools/sense-keys/README.md)."
+            exit 1
+          fi
+          bash .github/scripts/sense-sign-build.sh check-keys
+
+      # Mac imza yolu etikette kesin olmali: cert ise parmak izi de tanimli olmali (sirlar Mac
+      # isinde denetlenir; burada "imza" ortami yok).
+      - name: Check macOS signing mode
+        shell: bash
+        env:
+          MAC_SIGN: ${{ vars.SENSE_MAC_SIGN }}
+          MAC_CERT_SHA1: ${{ vars.SENSE_MAC_CERT_SHA1 }}
+        run: |
+          case "$MAC_SIGN" in
+            ""|adhoc)
+              echo "::warning title=Mac imzasi ad-hoc::Bu surumde macOS paketi ad-hoc imzalanir; guncellemede Mac izinleri (Ekran Kaydi, Erisilebilirlik) duser."
+              ;;
+            cert)
+              if ! [[ "$MAC_CERT_SHA1" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+                echo "::error title=SENSE_MAC_CERT_SHA1 eksik::SENSE_MAC_SIGN=cert iken SENSE_MAC_CERT_SHA1 40 hex olmali (tools/sense-keys/mac-sertifika-uret.sh yazar)."
+                exit 1
+              fi
+              echo "Mac imzasi: sertifika (sha1 $MAC_CERT_SHA1)"
+              ;;
+            *)
+              echo "::error title=SENSE_MAC_SIGN gecersiz::'$MAC_SIGN' kabul edilmez; cert ya da adhoc olmali."
+              exit 1
+              ;;
+          esac
+
+  # Her kosuda (hizli, Linux): imza ve anahtar betikleri shellcheck + birim testi (gecici deneme
+  # anahtari, sahte gh; sir kullanmaz) ve deneme surumu girdisinin denetimi. Dusmesi derlemeyi
+  # baslatmadan durdurur.
+  preflight:
+    name: signing scripts and inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      trial_version: ${{ steps.trial.outputs.version }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check the trial version input
+        id: trial
+        shell: bash
+        env:
+          TRIAL: ${{ inputs.deneme_surumu }}
+        run: |
+          if [ -z "$TRIAL" ]; then
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "::error title=Deneme surumu::deneme_surumu yalniz elle calistirmada ve etiket disinda kullanilir."
+            exit 1
+          fi
+          if ! [[ "$TRIAL" =~ ^9[0-9]{2}$ ]]; then
+            echo "::error title=Deneme surumu::deneme_surumu 900-999 arasinda olmali."
+            exit 1
+          fi
+          echo "::notice title=Deneme derlemesi::Surum numarasi $TRIAL (deneme). Bu kosu yayin surumu uretmez, yapi beyani imzalamaz."
+          echo "version=$TRIAL" >> "$GITHUB_OUTPUT"
+
+      # Yapi anahtari tanimliysa (etiket disinda da) liste denetlenir: bozuk bicim, panel
+      # anahtarlariyla kesisim ya da deneme anahtar kimligi derlemeyi baslatmadan durdurur.
+      - name: Check the release key list
+        if: ${{ vars.SENSE_RELEASE_KEYS != '' }}
+        shell: bash
+        run: bash .github/scripts/sense-sign-build.sh check-keys
+
+      - name: Shellcheck the signing scripts
+        shell: bash
+        run: |
+          shellcheck --version | sed -n 2p
+          shellcheck .github/scripts/sense-sign-build.sh .github/scripts/sense-macos-package.sh \
+            tools/sense-keys/*.sh
+
+      - name: Test the signing scripts (trial key, fake gh)
+        shell: bash
+        run: bash tools/sense-keys/test.sh
+
   generate-bridge:
-    needs: [verify-tag]
+    needs: [verify-tag, preflight]
     # verify-tag etiket disinda atlanir; atlanmasi derlemeyi engellemez, basarisizligi engeller.
-    if: ${{ !cancelled() && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped') }}
     uses: ./.github/workflows/bridge.yml
 
   windows:
     name: windows-x86_64
-    needs: [verify-tag, generate-bridge]
+    needs: [verify-tag, preflight, generate-bridge]
     if: ${{ !cancelled() && needs.generate-bridge.result == 'success' && !(github.event_name == 'workflow_dispatch' && inputs.only_macos) }}
     runs-on: windows-2022
     steps:
@@ -122,6 +228,14 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         shell: bash
         run: echo "SENSE_VERSION=${{ needs.verify-tag.outputs.version }}" >> "$GITHUB_ENV"
+
+      # Deneme derlemesi (workflow_dispatch, deneme_surumu): numara preflight'ta denetlendi.
+      - name: Set trial version
+        if: ${{ needs.preflight.outputs.trial_version != '' }}
+        shell: bash
+        env:
+          TRIAL_VERSION: ${{ needs.preflight.outputs.trial_version }}
+        run: echo "SENSE_VERSION=$TRIAL_VERSION" >> "$GITHUB_ENV"
 
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -225,6 +339,22 @@ jobs:
             echo "k: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | cut -d= -f1 | tr -d ' ' | paste -sd' ' -)"
           fi
 
+      # Sense Remote: yapi anahtari (guncelleme imzasi) icin ayni kural. k degerleri panelin
+      # SR_RELEASE_KEYS ayariyla ayni olmali (acik anahtar kimligi, sir degil).
+      - name: Check release keys
+        shell: bash
+        run: |
+          if [ -z "$SENSE_RELEASE_KEYS" ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "::error title=SENSE_RELEASE_KEYS bos::Yayin (etiket) derlemesi yapi anahtari olmadan yapilamaz."
+              exit 1
+            fi
+            echo "::warning title=SENSE_RELEASE_KEYS bos::Bu derleme yapi beyanlarini dogrulayacak anahtar icermiyor; istemci hicbir guncellemeyi kabul etmez (build_unknown_key). Yayin oncesi tools/sense-keys/yapi-anahtari-uret.sh calistirilir."
+          else
+            echo "SENSE_RELEASE_KEYS: $(echo "$SENSE_RELEASE_KEYS" | tr ',' '\n' | wc -l) anahtar"
+            echo "k: $(echo "$SENSE_RELEASE_KEYS" | tr ',' '\n' | cut -d= -f1 | tr -d ' ' | paste -sd' ' -)"
+          fi
+
       - name: Build
         run: |
           python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
@@ -264,13 +394,17 @@ jobs:
 
   macos:
     name: macos-${{ matrix.job.arch }}
-    needs: [verify-tag, generate-bridge]
+    needs: [verify-tag, preflight, generate-bridge]
     # Windows oncelikli (karar 2026-11-16): Mac PR'larda calismaz; master'a gonderimde,
     # etiket (surum) derlemesinde ve elle (workflow_dispatch) calisir.
     # Sense Remote (K3-1): generate-bridge atlanmis verify-tag'a bagli; durum islevi
     # (!cancelled) olmadan GitHub bu isi de "skipped" sayiyordu (#12'den beri hic calismadi).
     if: ${{ !cancelled() && needs.generate-bridge.result == 'success' && github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.job.os }}
+    # Sense Remote: Mac sertifikasi sirlari "imza" ortaminda; ortam yalniz master ve v* etiketine
+    # acik. Baska dalda (ya da SENSE_MAC_SIGN=cert degilken) ortam istenmez: is sirsiz calisir ve
+    # paket betigi ad-hoc imzalar (dalda cert isteniyorsa uyariyla).
+    environment: ${{ (vars.SENSE_MAC_SIGN == 'cert' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))) && 'imza' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -282,6 +416,14 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         shell: bash
         run: echo "SENSE_VERSION=${{ needs.verify-tag.outputs.version }}" >> "$GITHUB_ENV"
+
+      # Deneme derlemesi (workflow_dispatch, deneme_surumu): numara preflight'ta denetlendi.
+      - name: Set trial version
+        if: ${{ needs.preflight.outputs.trial_version != '' }}
+        shell: bash
+        env:
+          TRIAL_VERSION: ${{ needs.preflight.outputs.trial_version }}
+        run: echo "SENSE_VERSION=$TRIAL_VERSION" >> "$GITHUB_ENV"
 
       # Sense Remote: Windows'taki kuralin aynisi (G2-9) - etikette anahtarsiz derleme durur.
       - name: Check panel envelope keys
@@ -298,6 +440,22 @@ jobs:
             echo "k: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | cut -d= -f1 | tr -d ' ' | paste -sd' ' -)"
           fi
 
+      # Sense Remote: yapi anahtari (guncelleme imzasi) icin ayni kural. k degerleri panelin
+      # SR_RELEASE_KEYS ayariyla ayni olmali (acik anahtar kimligi, sir degil).
+      - name: Check release keys
+        shell: bash
+        run: |
+          if [ -z "$SENSE_RELEASE_KEYS" ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "::error title=SENSE_RELEASE_KEYS bos::Yayin (etiket) derlemesi yapi anahtari olmadan yapilamaz."
+              exit 1
+            fi
+            echo "::warning title=SENSE_RELEASE_KEYS bos::Bu derleme yapi beyanlarini dogrulayacak anahtar icermiyor; istemci hicbir guncellemeyi kabul etmez (build_unknown_key). Yayin oncesi tools/sense-keys/yapi-anahtari-uret.sh calistirilir."
+          else
+            echo "SENSE_RELEASE_KEYS: $(echo "$SENSE_RELEASE_KEYS" | tr ',' '\n' | wc -l) anahtar"
+            echo "k: $(echo "$SENSE_RELEASE_KEYS" | tr ',' '\n' | cut -d= -f1 | tr -d ' ' | paste -sd' ' -)"
+          fi
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
         with:
@@ -309,6 +467,13 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
+
+      # Sense Remote: sertifika imza yolu her Mac kosusunda kucuk bir deneme paketiyle sinanir
+      # (kosuda uretilen GECICI sertifika; gercek sir kullanmaz). Uzun derlemeden once dusmesi icin
+      # burada.
+      - name: Test the signing scripts (trial certificate)
+        shell: bash
+        run: bash tools/sense-keys/test.sh
 
       - name: Install build runtime
         run: |
@@ -397,12 +562,18 @@ jobs:
           fi
           ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
 
-      # Sense Remote: ad-hoc imza + hardened runtime (Developer ID / notarization yok, sir yok), dmg ve
-      # dmg iceriginin dogrulanmasi (codesign, spctl, ad, --version, boyut, SHA-256).
-      - name: Package (ad-hoc signed dmg) and verify
+      # Sense Remote: imza (ad-hoc ya da SENSE_MAC_SIGN=cert ile kalici sertifika) + hardened
+      # runtime (Developer ID / notarization yok), dmg ve dmg iceriginin dogrulanmasi (codesign,
+      # DR, spctl, ad, --version, boyut, SHA-256). Sirlar yalniz bu adima verilir; "imza" ortami
+      # yoksa bos gelir.
+      - name: Package (signed dmg) and verify
         shell: bash
         env:
           EXPECTED_BASE_VERSION: ${{ env.VERSION }}
+          SENSE_MAC_SIGN: ${{ vars.SENSE_MAC_SIGN }}
+          SENSE_MAC_CERT_SHA1: ${{ vars.SENSE_MAC_CERT_SHA1 }}
+          SENSE_MAC_CERT_P12: ${{ secrets.SENSE_MAC_CERT_P12 }}
+          SENSE_MAC_CERT_PASSWORD: ${{ secrets.SENSE_MAC_CERT_PASSWORD }}
         run: |
           bash .github/scripts/sense-macos-package.sh \
             ./flutter/build/macos/Build/Products/Release/SenseRemote.app \
@@ -427,15 +598,23 @@ jobs:
           FEATURES=$(./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }} --print-features)
           cargo test --locked --release --lib --features "$FEATURES"
 
-  # Etiket: SHA-256 uret, herkese ACIK OLMAYAN taslak GitHub surumu olustur (yayinlamak insan adimi).
+  # Etiket: SHA-256 + imzali yapi beyanlari uret, herkese ACIK OLMAYAN taslak GitHub surumu olustur
+  # (yayinlamak insan adimi). Yapi anahtari yalniz bu iste, "surum" ortamindan gelir (ortam
+  # yalniz v* etiketine acik).
   release-draft:
     name: draft release
     needs: [verify-tag, windows, macos]
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
+    environment: surum
     permissions:
       contents: write
     steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
       - name: Download Windows build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -448,14 +627,11 @@ jobs:
           name: sense-remote-macos-aarch64
           path: ./release
 
-      - name: Checksums and draft release
+      - name: Checksums
         shell: bash
         working-directory: release
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.verify-tag.outputs.version }}
-          REPO: ${{ github.repository }}
         run: |
           FILE="SenseRemote-Kurulum-${VERSION}.exe"
           DMG="SenseRemote-${VERSION}.dmg"
@@ -464,8 +640,53 @@ jobs:
           done
           sha256sum "$FILE" "$DMG" > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      # Gizli anahtar yalniz bu adimin ortaminda; betik onu gecici dosyada (umask 077) tutar,
+      # cikista siler, loga yazmaz.
+      - name: Sign build statements
+        shell: bash
+        env:
+          SENSE_RELEASE_SIGNING_KEY: ${{ secrets.SENSE_RELEASE_SIGNING_KEY }}
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+        run: |
+          if [ -z "$SENSE_RELEASE_SIGNING_KEY" ]; then
+            echo "::error title=Yapi anahtari yok::'surum' ortaminda SENSE_RELEASE_SIGNING_KEY sirri tanimli degil (tools/sense-keys/README.md)."
+            exit 1
+          fi
+          for f in "SenseRemote-Kurulum-${VERSION}.exe" "SenseRemote-${VERSION}.dmg"; do
+            bash .github/scripts/sense-sign-build.sh sign "release/$f" "$VERSION" "$GITHUB_SHA" \
+              "$GITHUB_RUN_ID" "release/$f.yapi.json"
+          done
+
+      # Kendi urettigi imzayi, gizli anahtar OLMADAN, istemciye gomulen acik anahtarla dogrular.
+      - name: Verify build statements with the public keys
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+        run: |
+          for f in "SenseRemote-Kurulum-${VERSION}.exe" "SenseRemote-${VERSION}.dmg"; do
+            bash .github/scripts/sense-sign-build.sh verify "release/$f" "release/$f.yapi.json"
+          done
+
+      - name: Draft release
+        shell: bash
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          REPO: ${{ github.repository }}
+          MAC_SIGN: ${{ vars.SENSE_MAC_SIGN }}
+        run: |
+          FILE="SenseRemote-Kurulum-${VERSION}.exe"
+          DMG="SenseRemote-${VERSION}.dmg"
+          if [ "$MAC_SIGN" = "cert" ]; then
+            MAC_NOTE="kalici, kendinden imzali sertifikayla imzali"
+          else
+            MAC_NOTE="ad-hoc imzali"
+          fi
           # --draft: herkese acik degil; yayinlamayi ekip elle yapar.
-          gh release create "$TAG" "$FILE" "$DMG" SHA256SUMS.txt \
+          gh release create "$TAG" "$FILE" "$DMG" "$FILE.yapi.json" "$DMG.yapi.json" SHA256SUMS.txt \
             --repo "$REPO" --draft --verify-tag \
             --title "Sense Remote ${VERSION}" \
-            --notes "Taslak. Imzasiz Windows kurulum dosyasi ve ad-hoc imzali (notarization yok) macOS Apple Silicon paketi; dogrulama icin SHA256SUMS.txt. Surum notlari yayindan once eklenir."
+            --notes "Taslak. Imzasiz Windows kurulum dosyasi ve ${MAC_NOTE} (notarization yok) macOS Apple Silicon paketi; dogrulama icin SHA256SUMS.txt ve yapi beyanlari (*.yapi.json, yapi anahtariyla imzali). Surum notlari yayindan once eklenir."
