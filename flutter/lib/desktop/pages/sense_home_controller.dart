@@ -285,8 +285,10 @@ class _SenseControllerHomeViewState extends State<SenseControllerHomeView> {
         runSpacing: 10,
         children: [
           Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(senseHomeText('computers'),
-                style: _T.text(size: 22, weight: FontWeight.w700)),
+            Flexible(
+              child: Text(senseHomeText('computers'),
+                  style: _T.text(size: 22, weight: FontWeight.w700)),
+            ),
             if (widget.versionChip != null) ...[
               const SizedBox(width: 8),
               widget.versionChip!,
