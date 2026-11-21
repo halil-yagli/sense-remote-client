@@ -28,10 +28,10 @@
 			<key>CFBundleURLIconFile</key>
 			<string></string>
 			<key>CFBundleURLName</key>
-			<string>com.carriez.rustdesk</string>
+			<string>com.sensedepartment.remote</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>rustdesk</string>
+				<string>senseremote</string>
 			</array>
 		</dict>
 	</array>
@@ -44,7 +44,7 @@
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Record the sound from microphone for the purpose of the remote desktop.</string>
+	<string>Sense Remote, uzak bağlantı sırasında sesli görüşme için mikrofonu kullanır.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
     <key>LSUIElement</key>

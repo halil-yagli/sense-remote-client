@@ -387,6 +387,10 @@ pub enum Data {
     FS(FS),
     Test,
     SyncConfig(Option<Box<(Config, Config2)>>),
+    // Sense Remote (Mac M5, plan §3.3): signed panel envelopes, user process -> root daemon
+    // (`Apply`) and the daemon's outcomes back (`Result`). Only acted on in the `_service`
+    // channel of the macOS daemon, which verifies every envelope itself.
+    SenseEnvelope(crate::sense::mac_apply::SenseEnvelopeIpc),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -664,7 +668,16 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
                                     #[cfg(any(target_os = "linux", target_os = "macos"))]
                                     if postfix == crate::POSTFIX_SERVICE {
                                         if matches!(&data, Data::SyncConfig(_)) {
+                                            // Sense Remote (G4-3): with an installed role the
+                                            // daemon keeps its own permission, access and
+                                            // identity values.
+                                            #[cfg(target_os = "macos")]
+                                            let data = sense_keep_root_config(data);
                                             handle(data, &mut stream).await;
+                                        // Sense Remote (Mac M5): the one other message this
+                                        // channel takes; everything else is still rejected.
+                                        } else if sense_service_accepts(&data) {
+                                            sense_service_envelope(data, &mut stream).await;
                                         } else {
                                             log::warn!(
                                                 "Rejected non-sync data on protected _service IPC channel: postfix={}, data_kind={:?}, peer_uid={:?}",
@@ -701,6 +714,85 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
                 }
             }
         }
+    }
+}
+
+// Sense Remote (Mac M5, plan §3.3): besides `SyncConfig`, the protected `_service` channel takes
+// exactly one message: an envelope `Apply` call. A `Result` (the daemon's own answer) or any other
+// `Data` coming from a client is rejected and the connection closed, as before.
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+fn sense_service_accepts(data: &Data) -> bool {
+    matches!(
+        data,
+        Data::SenseEnvelope(crate::sense::mac_apply::SenseEnvelopeIpc::Apply { .. })
+    )
+}
+
+// Sense Remote (Mac M5): the root daemon verifies and applies the envelopes with its own data
+// (`mac_apply::apply_in_daemon`; file and config writes, so off the async loop) and answers with
+// one outcome per envelope. Nothing of the envelopes is logged.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn sense_service_envelope(data: Data, stream: &mut Connection) {
+    use crate::sense::mac_apply::{apply_in_daemon, SenseEnvelopeIpc};
+    let Data::SenseEnvelope(SenseEnvelopeIpc::Apply {
+        envelopes,
+        server_time,
+    }) = data
+    else {
+        return;
+    };
+    // G4-4: the call limit is per peer process.
+    let peer_pid = stream.peer_pid();
+    let outcomes =
+        tokio::task::spawn_blocking(move || apply_in_daemon(&envelopes, server_time, peer_pid))
+            .await
+            .unwrap_or_default();
+    allow_err!(
+        stream
+            .send(&Data::SenseEnvelope(SenseEnvelopeIpc::Result(outcomes)))
+            .await
+    );
+}
+
+// Sense Remote (security review G4-3): on macOS the user process syncs its whole config to the
+// root daemon (`SyncConfig(Some)`, upstream). The session user must not be able to change what
+// the panel decides that way: with an installed Host / Host + Controller role the daemon keeps
+// its own values for the envelope's permission settings, the access settings
+// (`verification-method`, `approve-mode`, `whitelist`), the permanent password (+ salt), the id
+// and the key pair; everything else is taken as before. Those values only change through a
+// signed envelope (`mac_apply`) or the installer (root). A root config that is still empty is
+// not protected (first sync after an install).
+#[cfg(target_os = "macos")]
+fn sense_keep_root_config(data: Data) -> Data {
+    use crate::sense::{mac_apply, mac_state};
+    match data {
+        Data::SyncConfig(Some(configs)) => {
+            let root = Config::get();
+            let state = mac_state::read().map(|state| state.map(|state| state.role));
+            if root.is_empty() || !mac_apply::sync_protected(state) {
+                return Data::SyncConfig(Some(configs));
+            }
+            let (config, mut config2) = *configs;
+            // The identity fields are private to `hbb_common`: merge the serde form (the one
+            // this IPC carries). Anything unexpected keeps root's config as it is.
+            let config = match (serde_json::to_value(&config), serde_json::to_value(&root)) {
+                (Ok(mut incoming), Ok(own)) => {
+                    let merged = mac_apply::keep_root_fields(
+                        &mut incoming,
+                        &own,
+                        &mac_apply::PROTECTED_CONFIG_FIELDS,
+                    );
+                    match serde_json::from_value(incoming) {
+                        Ok(config) if merged => config,
+                        _ => root,
+                    }
+                }
+                _ => root,
+            };
+            mac_apply::keep_root_options(&mut config2.options, &Config2::get().options);
+            Data::SyncConfig(Some(Box::new((config, config2))))
+        }
+        other => other,
     }
 }
 
@@ -2417,6 +2509,82 @@ pub async fn set_install_option(k: String, v: String) -> ResultType<()> {
 
 #[cfg(test)]
 mod test {
+    // Sense Remote (Mac M5): the `_service` allow list grew by exactly one message.
+    #[test]
+    fn sense_service_channel_takes_only_an_envelope_apply() {
+        use super::{sense_service_accepts, Data};
+        use crate::sense::mac_apply::{SenseApplyOutcome, SenseEnvelopeIpc};
+        assert!(sense_service_accepts(&Data::SenseEnvelope(
+            SenseEnvelopeIpc::Apply {
+                envelopes: vec!["{}".to_owned()],
+                server_time: None,
+            }
+        )));
+        // The daemon's answer is not something a client may send.
+        let result = SenseEnvelopeIpc::Result(vec![SenseApplyOutcome::Applied {
+            seq: 9,
+            role: Some("both".to_owned()),
+            disconnect: vec![],
+        }]);
+        assert!(!sense_service_accepts(&Data::SenseEnvelope(result)));
+        // `SyncConfig` keeps its own branch; everything else is still rejected.
+        for data in [
+            Data::SyncConfig(None),
+            Data::Close,
+            Data::Test,
+            Data::Empty,
+            Data::Options(None),
+            Data::Options(Some(Default::default())),
+            Data::Config(("id".to_owned(), Some("1".to_owned()))),
+            Data::ConfirmedKey(None),
+            Data::Deployed,
+        ] {
+            assert!(!sense_service_accepts(&data), "{data:?}");
+        }
+        // Code path: in the `_service` branch the reject arm is still the last one.
+        let source = include_str!("ipc.rs").replace("\r\n", "\n");
+        let branch_start = source.find("if postfix == crate::POSTFIX_SERVICE {").unwrap();
+        let branch = &source[branch_start..];
+        let branch = &branch[..branch.find("continue;").unwrap()];
+        let sync = branch.find("if matches!(&data, Data::SyncConfig(_)) {").unwrap();
+        let sense = branch.find("} else if sense_service_accepts(&data) {").unwrap();
+        let reject = branch.find("Rejected non-sync data").unwrap();
+        assert!(sync < sense && sense < reject, "{branch}");
+        assert_eq!(branch.matches("else if").count(), 1, "{branch}");
+        assert!(branch[reject..].contains("break;"), "{branch}");
+
+        // G4-3, code path: on macOS a `SyncConfig` on this channel passes
+        // `sense_keep_root_config` before `handle` writes it into the root config ...
+        let sync_arm = &branch[sync..sense];
+        let keep = sync_arm
+            .find("let data = sense_keep_root_config(data);")
+            .unwrap();
+        assert!(sync_arm[..keep].trim_end().ends_with("#[cfg(target_os = \"macos\")]"));
+        assert!(keep < sync_arm.find("handle(data, &mut stream).await;").unwrap());
+        // ... which keeps root's identity, password, permission and access values whenever the
+        // state says so and root has a config.
+        let start = source.find("fn sense_keep_root_config(data: Data) -> Data {").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        for needed in [
+            "mac_state::read()",
+            "if root.is_empty() || !mac_apply::sync_protected(state) {",
+            "&mac_apply::PROTECTED_CONFIG_FIELDS,",
+            "Ok(config) if merged => config,",
+            "_ => root,",
+            "mac_apply::keep_root_options(&mut config2.options, &Config2::get().options);",
+        ] {
+            assert!(body.contains(needed), "{needed}");
+        }
+        // The protected fields are the serde names of `Config`'s identity and password fields.
+        let fields = crate::sense::mac_apply::PROTECTED_CONFIG_FIELDS;
+        assert_eq!(fields, ["id", "enc_id", "password", "salt", "key_pair"]);
+        let config = serde_json::to_value(super::Config::default()).unwrap();
+        for field in fields.iter().copied().filter(|field| *field != "id") {
+            assert!(config.get(field).is_some(), "Config has no field {field}");
+        }
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::*;
 

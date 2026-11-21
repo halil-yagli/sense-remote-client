@@ -32,6 +32,9 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
               ),
             ),
           ),
+          // Sense Remote (Mac M3): macOS keeps its own window buttons (top left), so the
+          // wizard draws no second close button there.
+          if (!widget.mac)
           Tooltip(
             message: _t('close'),
             child: InkWell(
@@ -50,13 +53,21 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
   }
 
   Widget _sidebar() {
-    const steps = [
+    final steps = [
       SenseInstallStep.account,
       SenseInstallStep.role,
       SenseInstallStep.info,
       SenseInstallStep.summary,
+      // Sense Remote (Mac M3): the permissions are a step of their own on macOS.
+      if (widget.mac) SenseInstallStep.permissions,
     ];
-    const labels = ['step-account', 'step-role', 'step-info', 'step-summary'];
+    final labels = [
+      'step-account',
+      'step-role',
+      'step-info',
+      'step-summary',
+      if (widget.mac) 'step-permissions',
+    ];
     return Container(
       width: 230,
       decoration: const BoxDecoration(
@@ -190,6 +201,12 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
   Widget _body() {
     final Widget page;
     switch (_step) {
+      case SenseInstallStep.applications:
+        page = _applicationsPage();
+        break;
+      case SenseInstallStep.permissions:
+        page = _permissionsPage();
+        break;
       case SenseInstallStep.account:
         page = _accountPage();
         break;
