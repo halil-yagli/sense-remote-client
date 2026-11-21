@@ -53,7 +53,14 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
   }
 
   Widget _sidebar() {
-    final steps = [
+    // Sense Remote (U7): the upgrade has its own short list.
+    final upgrading = widget.upgrade != null;
+    final steps = upgrading
+        ? [
+            SenseInstallStep.upgrade,
+            if (widget.mac) SenseInstallStep.permissions,
+          ]
+        : [
       SenseInstallStep.account,
       SenseInstallStep.role,
       SenseInstallStep.info,
@@ -61,7 +68,12 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
       // Sense Remote (Mac M3): the permissions are a step of their own on macOS.
       if (widget.mac) SenseInstallStep.permissions,
     ];
-    final labels = [
+    final labels = upgrading
+        ? [
+            'step-upgrade',
+            if (widget.mac) 'step-permissions',
+          ]
+        : [
       'step-account',
       'step-role',
       'step-info',
@@ -201,6 +213,9 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
   Widget _body() {
     final Widget page;
     switch (_step) {
+      case SenseInstallStep.upgrade:
+        page = _upgradePage();
+        break;
       case SenseInstallStep.applications:
         page = _applicationsPage();
         break;
@@ -223,7 +238,7 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
         page = _registerPage();
         break;
       case SenseInstallStep.done:
-        page = _donePage();
+        page = widget.upgrade != null ? _upgradeDonePage() : _donePage();
         break;
     }
     return Padding(

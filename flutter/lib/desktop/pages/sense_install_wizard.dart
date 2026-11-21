@@ -24,6 +24,8 @@ part 'sense_install_steps_info.dart';
 part 'sense_install_steps_finish.dart';
 // Sense Remote (Mac M3): the two macOS steps (Applications folder, privacy permissions).
 part 'sense_install_steps_mac.dart';
+// Sense Remote (update plan §8, U7): the one-time move from version 2 (no sign-in, no registration).
+part 'sense_install_steps_upgrade.dart';
 
 String _t(String key) => senseInstallText(key);
 
@@ -42,6 +44,7 @@ class SenseInstallWizard extends StatefulWidget {
     this.icon,
     this.pollInterval = const Duration(seconds: 1),
     this.mac = false,
+    this.upgrade,
   });
 
   final String initialPath;
@@ -66,13 +69,20 @@ class SenseInstallWizard extends StatefulWidget {
   /// A parameter (not a platform check) so the wizard stays pure UI and testable anywhere.
   final bool mac;
 
+  /// Sense Remote (update plan §8, U7): set when this computer already has a Sense role. The
+  /// wizard then shows only the upgrade (or "already installed") screen.
+  final SenseUpgrade? upgrade;
+
   @override
   State<SenseInstallWizard> createState() => _SenseInstallWizardState();
 }
 
 class _SenseInstallWizardState extends State<SenseInstallWizard> {
-  late SenseInstallStep _step =
-      widget.mac ? SenseInstallStep.applications : SenseInstallStep.account;
+  late SenseInstallStep _step = widget.upgrade != null
+      ? SenseInstallStep.upgrade
+      : widget.mac
+          ? SenseInstallStep.applications
+          : SenseInstallStep.account;
 
   // Sign-in.
   SenseLoginStatus _login = SenseLoginStatus.idle;
@@ -127,11 +137,23 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
   bool _permissionsSkipped = false;
   bool _agentRestartFailed = false;
 
+  // Sense Remote (U7): state of the upgrade screen (sense_install_steps_upgrade.dart).
+  bool _upgradeRunning = false;
+  String _upgradeError = '';
+  bool _upgradeNotNewer = false;
+
   @override
   void initState() {
     super.initState();
     _name.addListener(_refresh);
-    if (widget.mac) unawaited(_checkApplications());
+    final upgrade = widget.upgrade;
+    if (upgrade != null) {
+      // The installed role decides which permissions macOS needs after the move.
+      _host = upgrade.host;
+      _controller = upgrade.controller;
+    } else if (widget.mac) {
+      unawaited(_checkApplications());
+    }
   }
 
   @override
@@ -155,7 +177,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
         _notice = null;
       });
 
-  bool get _busy => _installing || _enrolling;
+  bool get _busy => _installing || _enrolling || _upgradeRunning;
 
   // ---- Sign-in ----
 

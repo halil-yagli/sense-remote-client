@@ -47,7 +47,10 @@ class SenseTokens {
 
 // Sense Remote (Mac M3): `applications` and `permissions` are macOS only; Windows never
 // enters them. The order is the order of the wizard (the sidebar compares indexes).
+// Sense Remote (update plan §8, U7): `upgrade` is the one-time move from version 2; it replaces
+// sign-in, role, info and registration (only `permissions` on macOS and `done` follow it).
 enum SenseInstallStep {
+  upgrade,
   applications,
   account,
   role,

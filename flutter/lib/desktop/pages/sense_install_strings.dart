@@ -201,6 +201,37 @@ const Map<String, String> kSenseInstallTr = {
       'Ekran Kaydı izni verildi ama arka plan hizmeti yeniden başlatılamadı. Görüntü gelmezse bilgisayarı yeniden başlat.',
   'done-permissions-missing':
       'macOS izinleri eksik: Sistem Ayarları › Gizlilik ve Güvenlik bölümünden verilmeden bağlantı tam çalışmaz.',
+  // Sense Remote (update plan §8, U7): one-time move from version 2.
+  'step-upgrade': 'Güncelleme',
+  'upgrade-title-a': 'Sense Remote ',
+  'upgrade-title-b': 'güncellemesi',
+  'upgrade-lead':
+      'Bu bilgisayarda Sense Remote {from} kurulu. Sürüm {to} kurulacak; hesap, rol, projeler ve bağlantı kimliği korunur.',
+  'upgrade-note':
+      'Windows yönetici onayı ister. Giriş ve yeniden kayıt gerekmez. Güncelleme sırasında bağlantı kısa süre kopar.',
+  'upgrade-start': 'Güncelle',
+  'upgrade-running': 'Güncelleme başlatılıyor…',
+  'upgrade-error-cancelled': 'Yönetici onayı verilmedi. Güncellemek için yeniden dene.',
+  'upgrade-error-not_installed':
+      'Bu bilgisayarda kurulu Sense Remote bulunamadı. Pencereyi kapatıp kurulum dosyasını yeniden aç.',
+  'upgrade-error-failed':
+      'Güncelleme başlatılamadı. Yeniden dene; sorun sürerse ekibe haber ver.',
+  'upgrade-current-title-a': 'Sürüm {n}',
+  'upgrade-current-title-b': ' kurulu',
+  'upgrade-current-lead':
+      'Bu bilgisayarda Sense Remote {n} kurulu. Bu kurulum dosyası aynı ya da daha eski bir sürüm; bir şey değiştirilmedi.',
+  'upgrade-done-title': 'Güncelleme başladı',
+  'upgrade-done-lead':
+      'Sense Remote birkaç dakika içinde Sürüm {to} ile yeniden başlar. Bu pencereyi kapatabilirsin.',
+  'upgrade-mac-title-a': 'Geçişi ',
+  'upgrade-mac-title-b': 'tamamla',
+  'upgrade-mac-lead':
+      'Sense Remote {to} Uygulamalar klasörüne kopyalandı. Yönetici parolasıyla geçiş tamamlanır: arka plan hizmeti yeni sürümle yeniden başlar. Hesap, rol, projeler ve bağlantı kimliği korunur.',
+  'upgrade-mac-note':
+      'Giriş ve yeniden kayıt gerekmez. Ardından macOS izinleri yeniden onaylanır; bu adım bilgisayarın başında yapılır.',
+  'upgrade-mac-start': 'Geçişi tamamla',
+  'upgrade-done-title-mac': 'Geçiş tamamlandı',
+  'upgrade-done-lead-mac': 'Sense Remote Sürüm {to} ile çalışıyor.',
 };
 
 const Map<String, String> kSenseInstallEn = {
@@ -403,6 +434,37 @@ const Map<String, String> kSenseInstallEn = {
       'Screen Recording was granted but the background service could not be restarted. If no picture arrives, restart the computer.',
   'done-permissions-missing':
       'macOS permissions are missing: until they are granted in System Settings › Privacy & Security the connection does not fully work.',
+  // Sense Remote (update plan §8, U7): one-time move from version 2.
+  'step-upgrade': 'Update',
+  'upgrade-title-a': 'Sense Remote ',
+  'upgrade-title-b': 'update',
+  'upgrade-lead':
+      'Sense Remote {from} is installed on this computer. Version {to} will be installed; account, role, projects and connection ID are kept.',
+  'upgrade-note':
+      'Windows asks for administrator approval. No sign-in or new registration. The connection drops briefly during the update.',
+  'upgrade-start': 'Update',
+  'upgrade-running': 'Starting the update…',
+  'upgrade-error-cancelled': 'Administrator approval was not given. Try again to update.',
+  'upgrade-error-not_installed':
+      'No installed Sense Remote was found. Close this window and open the setup file again.',
+  'upgrade-error-failed':
+      'The update could not be started. Try again; if it keeps failing, tell the team.',
+  'upgrade-current-title-a': 'Version {n}',
+  'upgrade-current-title-b': ' installed',
+  'upgrade-current-lead':
+      'Sense Remote {n} is installed on this computer. This setup file is the same or an older version; nothing was changed.',
+  'upgrade-done-title': 'Update started',
+  'upgrade-done-lead':
+      'Sense Remote restarts with version {to} within a few minutes. You can close this window.',
+  'upgrade-mac-title-a': 'Finish the ',
+  'upgrade-mac-title-b': 'move',
+  'upgrade-mac-lead':
+      'Sense Remote {to} was copied to Applications. The administrator password finishes the move: the background service restarts with the new version. Account, role, projects and connection ID are kept.',
+  'upgrade-mac-note':
+      'No sign-in or new registration. The macOS permissions are approved again afterwards, at the computer itself.',
+  'upgrade-mac-start': 'Finish the move',
+  'upgrade-done-title-mac': 'Move finished',
+  'upgrade-done-lead-mac': 'Sense Remote runs version {to}.',
 };
 
 String senseInstallText(String key) =>
