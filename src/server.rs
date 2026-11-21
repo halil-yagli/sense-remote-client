@@ -350,6 +350,11 @@ async fn identity_handshake(stream: &mut Stream, secure: bool) -> ResultType<()>
         }
     }
 
+    // Sense Remote: the host never runs an unencrypted session (controller without a verified
+    // key, relay requested as not secure, or a direct connection without the handshake).
+    if !stream.is_secured() {
+        crate::sense::server::refuse_unsecured("controller did not set up encryption")?;
+    }
     Ok(())
 }
 

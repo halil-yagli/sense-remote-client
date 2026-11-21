@@ -614,8 +614,9 @@ pub fn api_tcp_proxy_allowed(upstream_eligible: bool) -> bool {
 
 /// Token to put in messages to the ID / relay server (`PunchHoleRequest`, `RequestRelay`,
 /// `HealthCheck`). Always empty: the panel access token belongs to the panel only, and the
-/// ID server is RustDesk's public one. Without a token the client connects like any
-/// signed-out RustDesk client.
+/// ID server is not the panel (Sense Remote 2026-11-21: it is our own hbbs, `server`, but the
+/// token still stays with the panel). Without a token the client connects like any signed-out
+/// RustDesk client.
 pub fn token_for_rendezvous(_access_token: &str) -> String {
     String::new()
 }
@@ -626,9 +627,14 @@ pub fn token_for_rendezvous(_access_token: &str) -> String {
 /// Sense Remote (wave 2, plan K-İZİN-b): the connection window can not be hidden, a controller
 /// can not change this computer's settings remotely (permissions come only from signed panel
 /// envelopes) and the upstream updater stays off.
-pub fn security_overwrite_settings() -> [(&'static str, &'static str); 5] {
+/// Sense Remote (2026-11-21): the ID server, relay server and key are our own (`server`), so
+/// the client never talks to RustDesk's public server.
+pub fn security_overwrite_settings() -> [(&'static str, &'static str); 8] {
     [
         (keys::OPTION_API_SERVER, API_SERVER),
+        (keys::OPTION_CUSTOM_RENDEZVOUS_SERVER, server::RENDEZVOUS_SERVER),
+        (keys::OPTION_RELAY_SERVER, server::RELAY_SERVER),
+        (keys::OPTION_KEY, server::RS_PUB_KEY),
         (keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK, "N"),
         (OPTION_ALLOW_HIDE_CM, "N"),
         (keys::OPTION_ALLOW_REMOTE_CONFIG_MODIFICATION, "N"),
@@ -705,6 +711,8 @@ pub mod mac_apply;
 pub mod mac_perm;
 #[cfg(target_os = "macos")]
 pub mod mac_state;
+// Sense Remote: our own ID / relay server and its key (2026-11-21).
+pub mod server;
 // Sense Remote: maintenance curtain of ghost mode; privacy mode turns it on (wave 3 I10).
 pub mod curtain;
 
@@ -802,6 +810,24 @@ mod tests {
         assert_eq!(overwrite[keys::OPTION_API_SERVER], API_SERVER);
         assert_eq!(overwrite[keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK], "N");
         assert_eq!(overwrite["other"], "kept");
+    }
+
+    #[test]
+    fn id_relay_server_and_key_are_pinned_to_ours() {
+        let mut overwrite = HashMap::from([
+            (keys::OPTION_CUSTOM_RENDEZVOUS_SERVER.to_owned(), "rs-ny.rustdesk.com".to_owned()),
+            (keys::OPTION_RELAY_SERVER.to_owned(), "rs-ny.rustdesk.com".to_owned()),
+            (keys::OPTION_KEY.to_owned(), config::RS_PUB_KEY.to_owned()),
+        ]);
+        apply_security_to(&mut overwrite);
+        assert_eq!(overwrite[keys::OPTION_CUSTOM_RENDEZVOUS_SERVER], server::RENDEZVOUS_SERVER);
+        assert_eq!(overwrite[keys::OPTION_RELAY_SERVER], server::RELAY_SERVER);
+        assert_eq!(overwrite[keys::OPTION_KEY], server::RS_PUB_KEY);
+        // No pinned value names RustDesk's servers or carries its key.
+        for (k, v) in security_overwrite_settings() {
+            assert!(!v.contains("rustdesk"), "{k}={v}");
+            assert_ne!(v, config::RS_PUB_KEY, "{k}");
+        }
     }
 
     #[test]

@@ -67,6 +67,12 @@ env:
   # Deneme yapi anahtarinin acik anahtar(lar)i (acik bilgi). Yalniz deneme_surumu derlemesinde
   # SENSE_RELEASE_KEYS'in yerine gecer; check-keys uretim listeleriyle kesismedigini denetler.
   SENSE_TRIAL_RELEASE_KEYS: ${{ vars.SENSE_TRIAL_RELEASE_KEYS }}
+  # Sense Remote: kendi ID/aktarma sunucumuz ve acik anahtari (sir degil). Repo degiskeni bos
+  # ya da yoksa kodun varsayilani kullanilir (src/sense/server.rs); sunucu tasininca yalniz
+  # degisken yazilir. Gecersiz deger (bos olmayan, rustdesk adli) derlemeyi durdurur.
+  SENSE_RENDEZVOUS_SERVER: ${{ vars.SENSE_RENDEZVOUS_SERVER }}
+  SENSE_RELAY_SERVER: ${{ vars.SENSE_RELAY_SERVER }}
+  SENSE_RS_PUB_KEY: ${{ vars.SENSE_RS_PUB_KEY }}
   # Sense Remote (G3-2): RustDesk'in Flutter motoru (rustdesk/engine, surum eki "main",
   # varlik kimligi 210168939, 2024-12-01). Ozet sabit: dosya degisirse derleme duser.
   # Motor guncellemesi ayri PR'da: yeni ozet + kimlik buraya, gerekce PR'a.

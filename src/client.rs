@@ -47,7 +47,7 @@ use hbb_common::{
     bail,
     config::{
         self, use_ws, Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution,
-        CONNECT_TIMEOUT, READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS,
+        CONNECT_TIMEOUT, READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT,
     },
     futures::future::{select_ok, BoxFuture, FutureExt},
     get_version_number, log,
@@ -475,18 +475,13 @@ impl Client {
         let (rendezvous_server, servers, contained) = if other_server.is_empty() {
             crate::get_rendezvous_server(1_000).await
         } else {
-            if other_server == PUBLIC_SERVER {
-                (
-                    check_port(RENDEZVOUS_SERVERS[0], RENDEZVOUS_PORT),
-                    RENDEZVOUS_SERVERS[1..]
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect(),
-                    true,
-                )
-            } else {
-                (check_port(other_server, RENDEZVOUS_PORT), Vec::new(), true)
-            }
+            // Sense Remote: `<id>@public` and `<id>@<our server>` go to our own ID server;
+            // every other server is refused (`sense::server::other_server_target`).
+            (
+                crate::sense::server::other_server_target(other_server, PUBLIC_SERVER)?,
+                Vec::new(),
+                true,
+            )
         };
 
         // Same relay gate as the v6 socket below: under any forced relay the v6 punch cannot
@@ -1659,8 +1654,9 @@ impl Client {
         key: &str,
         conn: &mut Stream,
     ) -> ResultType<Option<Vec<u8>>> {
+        // Sense Remote: no fallback to RustDesk's key (`sense::server`).
         let rs_pk = get_rs_pk(if key.is_empty() {
-            config::RS_PUB_KEY
+            crate::sense::server::RS_PUB_KEY
         } else {
             key
         });
@@ -1695,6 +1691,8 @@ impl Client {
                 // under our root), so no fingerprint binding is possible. Fall through like TCP's
                 // non-secure path with is_secured() false: bailing would only move the session to
                 // a relay that fails the same check and then runs in plaintext.
+                // Sense Remote: no unencrypted session without a verified peer key.
+                crate::sense::server::refuse_unsecured("no verified peer key")?;
                 // send an empty message out in case server is setting up secure and waiting for first message
                 conn.send(&Message::new()).await?;
                 return Ok(option_pk);
@@ -1753,6 +1751,7 @@ impl Client {
                                     bail!("WebRTC handshake id mismatch (possible MITM)");
                                 }
                                 log::error!("Handshake failed: sign failure");
+                                crate::sense::server::refuse_unsecured("peer id mismatch")?;
                                 conn.send(&Message::new()).await?;
                             }
                         } else {
@@ -1761,6 +1760,7 @@ impl Client {
                             }
                             // fall back to non-secure connection in case pk mismatch
                             log::info!("pk mismatch, fall back to non-secure");
+                            crate::sense::server::refuse_unsecured("peer key mismatch")?;
                             let mut msg_out = Message::new();
                             msg_out.set_public_key(PublicKey::new());
                             conn.send(&msg_out).await?;
@@ -1770,6 +1770,7 @@ impl Client {
                             bail!("WebRTC handshake received an unexpected message type");
                         }
                         log::error!("Handshake failed: invalid message type");
+                        crate::sense::server::refuse_unsecured("invalid handshake message")?;
                         conn.send(&Message::new()).await?;
                     }
                 } else {
@@ -1777,6 +1778,7 @@ impl Client {
                         bail!("WebRTC handshake received a malformed message");
                     }
                     log::error!("Handshake failed: invalid message format");
+                    crate::sense::server::refuse_unsecured("malformed handshake message")?;
                     conn.send(&Message::new()).await?;
                 }
             }
@@ -2925,21 +2927,11 @@ impl LoginConfigHandler {
             let raw_id: &str = v.next().unwrap_or_default();
             let mut server_key = v.next().unwrap_or_default().split('?');
             let server = server_key.next().unwrap_or_default();
-            let args = server_key.next().unwrap_or_default();
-            let key = if server == PUBLIC_SERVER {
-                config::RS_PUB_KEY.to_owned()
-            } else {
-                let mut args_map: HashMap<String, &str> = HashMap::new();
-                for arg in args.split('&') {
-                    if let Some(kv) = arg.find('=') {
-                        let k = arg[0..kv].to_lowercase();
-                        let v = &arg[kv + 1..];
-                        args_map.insert(k, v);
-                    }
-                }
-                let key = args_map.remove("key").unwrap_or_default();
-                key.to_owned()
-            };
+            // Sense Remote: the only server `<id>@<server>` may reach is ours (`public` included,
+            // see `sense::server::other_server_target`), so the key is always ours; a `?key=`
+            // argument is ignored.
+            let _args = server_key.next().unwrap_or_default();
+            let key = crate::sense::server::RS_PUB_KEY.to_owned();
 
             // here we can check <id>/r@server
             let real_id = crate::ui_interface::handle_relay_id(raw_id).to_string();
