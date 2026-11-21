@@ -5,10 +5,10 @@
 //! The `--server` process runs as SYSTEM and can write it. The uninstaller deletes the whole key,
 //! so a reinstall starts from 0 and the panel re-signs its last set with a new seq.
 //!
-//! macOS (Mac M0, plan 2026-11-21 §3.1): `envelope_seq` in the root-owned state file
-//! (`mac_state`); only root (the daemon) can store it. M0 is the skeleton: `mac_state` reads
-//! nothing and writes nothing yet, so macOS still reads 0 and refuses to store (envelopes are
-//! verified there but not applied) until M1 / M5.
+//! macOS (plan 2026-11-21 §3.1, §3.3): `envelope_seq` in the root-owned state file
+//! (`mac_state`). Every process can read it; only root can store it, so the user process
+//! forwards envelopes to the daemon, which verifies them again and stores the seq
+//! (`mac_apply`). The uninstaller removes the state directory, so a reinstall starts from 0.
 //!
 //! Sense Remote (G2-5, G2-6): a value that exists but cannot be read is an error, not 0, and
 //! `check_writable` runs before an envelope changes anything.
@@ -59,7 +59,14 @@ pub fn read_last_seq() -> Result<u64, String> {
 /// error (G2-5), never 0.
 #[cfg(target_os = "macos")]
 pub fn read_last_seq() -> Result<u64, String> {
-    Ok(super::mac_state::read()?.map_or(0, |state| state.envelope_seq))
+    seq_of(super::mac_state::read())
+}
+
+/// Pure part: one read of the state file → `last_seq`. No file (not installed) is 0, a file
+/// that can not be used is an error (G2-5).
+#[cfg(target_os = "macos")]
+fn seq_of(read: Result<Option<super::mac_state::MacState>, String>) -> Result<u64, String> {
+    Ok(read?.map_or(0, |state| state.envelope_seq))
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
@@ -85,7 +92,7 @@ pub fn check_writable() -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Sense Remote (Mac M0): rewrites the state unchanged; fails for every process but root.
+/// Sense Remote: rewrites the state unchanged; fails for every process but root.
 #[cfg(target_os = "macos")]
 pub fn check_writable() -> Result<(), StoreError> {
     super::mac_state::update(|_| {}).map_err(StoreError::Io)
@@ -108,12 +115,19 @@ pub fn store_last_seq(seq: u64) -> Result<(), StoreError> {
         .map_err(|err| StoreError::Io(err.to_string()))
 }
 
-/// Sense Remote (Mac M0): the comparison and the write happen inside one `mac_state::update`
-/// (under its lock), so two writers can not move the counter back.
+/// Sense Remote: the comparison and the write happen inside one `mac_state` update (under its
+/// lock), so two writers can not move the counter back.
 #[cfg(target_os = "macos")]
 pub fn store_last_seq(seq: u64) -> Result<(), StoreError> {
+    store_seq_in(std::path::Path::new(super::mac_state::STATE_DIR), true, seq)
+}
+
+/// `store_last_seq` for the state in `dir` (`mac_state::update_in`; `require_root` is off only
+/// in tests with a temporary directory).
+#[cfg(target_os = "macos")]
+fn store_seq_in(dir: &std::path::Path, require_root: bool, seq: u64) -> Result<(), StoreError> {
     let mut checked = Ok(());
-    super::mac_state::update(|state| {
+    super::mac_state::update_in(dir, require_root, |state| {
         checked = may_store(state.envelope_seq, seq);
         if checked.is_ok() {
             state.envelope_seq = seq;
@@ -146,13 +160,49 @@ mod tests {
         );
     }
 
-    // Sense Remote (Mac M0): skeleton behaviour, unchanged for the caller (0, nothing stored).
+    // Sense Remote (K4-6): the macOS seq against a temporary state directory. The real
+    // `/Library/Application Support/SenseRemote` is never read, so the result is the same on a
+    // Mac with Sense Remote installed.
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_skeleton_reads_zero_and_stores_nothing() {
-        assert_eq!(read_last_seq(), Ok(0));
-        assert!(matches!(check_writable(), Err(StoreError::Io(_))));
-        assert!(matches!(store_last_seq(1), Err(StoreError::Io(_))));
+    fn macos_seq_lives_in_the_state_file() {
+        use crate::sense::mac_state;
+        let base = std::env::temp_dir().join(format!("sense-seq-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let dir = base.join("SenseRemote");
+        let read = || seq_of(mac_state::read_in(&dir, false));
+        // Not installed: 0.
+        assert_eq!(read(), Ok(0));
+        assert_eq!(store_seq_in(&dir, false, 7), Ok(()));
+        assert_eq!(read(), Ok(7));
+        // The counter never goes back, and a refused seq changes nothing.
+        for seq in [7, 3] {
+            assert_eq!(
+                store_seq_in(&dir, false, seq),
+                Err(StoreError::NotIncreasing { stored: 7, seq })
+            );
+        }
+        assert_eq!(read(), Ok(7));
+        assert_eq!(store_seq_in(&dir, false, 8), Ok(()));
+        assert_eq!(read(), Ok(8));
+        // The real rule: a process that is not root stores nothing.
+        if unsafe { hbb_common::libc::geteuid() } != 0 {
+            assert_eq!(
+                store_seq_in(&dir, true, 9),
+                Err(StoreError::Io(mac_state::ERR_NOT_ROOT.to_owned()))
+            );
+            assert_eq!(read(), Ok(8));
+        }
+        // A file that can not be used is an error, not 0 (G2-5), and is not written over.
+        std::fs::write(dir.join(mac_state::STATE_FILE), "not json").unwrap();
+        assert!(read().is_err());
+        assert!(matches!(store_seq_in(&dir, false, 9), Err(StoreError::Io(_))));
+        assert_eq!(
+            std::fs::read_to_string(dir.join(mac_state::STATE_FILE)).unwrap(),
+            "not json"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

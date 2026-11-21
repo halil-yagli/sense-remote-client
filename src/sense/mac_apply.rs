@@ -10,9 +10,9 @@
 //! seq, undo on error; `envelope_apply::apply_steps`).
 //!
 //! What the daemon takes from the user process is only the envelope text. Role, settings, seq
-//! and the connection ids to close all come out of the signed payload; `server_time` is not
-//! used (validity is checked against the daemon's clock, plan R8). Nothing of an envelope is
-//! logged: only the reason of a rejection and, once the signature is valid, its seq.
+//! and the connection ids to close all come out of the signed payload; the panel's server time
+//! is not passed on (validity is checked against the daemon's clock, plan R8). Nothing of an
+//! envelope is logged: only the reason of a rejection and, once the signature is valid, its seq.
 //!
 //! Security review 2026-11-21:
 //! - G4-2: the user process reports the seq it has *followed* (`Followed`), not the daemon's.
@@ -22,7 +22,7 @@
 //!   can catch up (settings, disconnect, role) and only then reports the seq.
 //! - G4-3: with an installed role the daemon keeps its own values for the permission settings,
 //!   the access settings and the identity when a user process syncs its config to root
-//!   (`keep_root_options`, `keep_root_fields`).
+//!   (`keep_root_options`, `keep_root_config`).
 //! - G4-4: the call limit is per peer process (`CallLimiter`); a call that came too soon is
 //!   answered with `busy` and does not take anything from other peers.
 //!
@@ -65,12 +65,10 @@ pub const MAC_UNSUPPORTED_OPTIONS: [&str; 1] = [keys::OPTION_ENABLE_PRIVACY_MODE
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum SenseEnvelopeIpc {
-    /// User process → daemon: raw envelope JSON as received from the panel (≤ `MAX_ENVELOPES`)
-    /// and the server time of the heartbeat answer.
-    Apply {
-        envelopes: Vec<String>,
-        server_time: Option<i64>,
-    },
+    /// User process → daemon: raw envelope JSON as received from the panel (≤ `MAX_ENVELOPES`).
+    /// Earlier builds also sent `server_time` (always `null`, never used); a message that still
+    /// carries it is read as before, the field is ignored.
+    Apply { envelopes: Vec<String> },
     /// Daemon → user process: one outcome per envelope, in order. Empty when the call was
     /// ignored (limits).
     Result(Vec<SenseApplyOutcome>),
@@ -94,12 +92,6 @@ pub enum SenseApplyOutcome {
 pub fn within_limits(envelopes: &[String]) -> bool {
     envelopes.len() <= MAX_ENVELOPES
         && envelopes.iter().map(String::len).sum::<usize>() <= MAX_TOTAL_BYTES
-}
-
-/// Pure part of the rate limit. `since_last_ms` = time since the previous accepted call of the
-/// same peer, `None` for its first one.
-pub fn call_allowed(since_last_ms: Option<u64>) -> bool {
-    since_last_ms.map_or(true, |ms| ms >= MIN_CALL_INTERVAL_MS)
 }
 
 /// Sense Remote (G4-4): the call limit per peer process (pid of the IPC peer), so one local
@@ -423,6 +415,42 @@ pub fn keep_root_fields(incoming: &mut Value, root: &Value, fields: &[&str]) -> 
     true
 }
 
+/// Sense Remote (G4-3, K4-10): `incoming` (the config a user process syncs) with `fields`
+/// replaced by root's, through the serde form: serialize both → `keep_root_fields` →
+/// deserialize. `Err` names the step that failed. It never carries the serde message: that
+/// can quote a value (password, key), and the caller logs the error.
+pub fn merge_root_fields<T>(incoming: &T, root: &T, fields: &[&str]) -> Result<T, &'static str>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let mut merged = serde_json::to_value(incoming).map_err(|_| "serialize-incoming")?;
+    let own = serde_json::to_value(root).map_err(|_| "serialize-root")?;
+    if !keep_root_fields(&mut merged, &own, fields) {
+        return Err("not-an-object");
+    }
+    serde_json::from_value(merged).map_err(|_| "deserialize-merged")
+}
+
+/// Sense Remote (G4-3, K4-10): what the daemon takes from a config sync. When the merge fails
+/// nothing of the user's config is taken: root's own config is kept as it is, and the failure
+/// is logged (throttled: a user process syncs again and again).
+pub fn keep_root_config<T>(incoming: &T, root: T, fields: &[&str]) -> T
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    match merge_root_fields(incoming, &root, fields) {
+        Ok(merged) => merged,
+        Err(step) => {
+            hbb_common::throttled_log!(
+                std::time::Duration::from_secs(60),
+                error,
+                "Sense Remote: config sync of a user process not merged ({step}), root config kept"
+            );
+            root
+        }
+    }
+}
+
 /// User process: what the daemon did with one forwarded envelope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedByDaemon {
@@ -474,11 +502,7 @@ pub fn settle(
 /// One call at a time (the lock also carries the per-peer rate limit). `peer_pid` = pid of the
 /// IPC peer, only for the rate limit.
 #[cfg(target_os = "macos")]
-pub fn apply_in_daemon(
-    envelopes: &[String],
-    _server_time: Option<i64>,
-    peer_pid: Option<u32>,
-) -> Vec<SenseApplyOutcome> {
+pub fn apply_in_daemon(envelopes: &[String], peer_pid: Option<u32>) -> Vec<SenseApplyOutcome> {
     use std::{
         sync::{Mutex, OnceLock},
         time::Instant,
@@ -509,11 +533,7 @@ pub fn apply_in_daemon(
 /// Other platforms have no root daemon that applies envelopes: every envelope is rejected and
 /// nothing changes.
 #[cfg(not(target_os = "macos"))]
-pub fn apply_in_daemon(
-    envelopes: &[String],
-    _server_time: Option<i64>,
-    _peer_pid: Option<u32>,
-) -> Vec<SenseApplyOutcome> {
+pub fn apply_in_daemon(envelopes: &[String], _peer_pid: Option<u32>) -> Vec<SenseApplyOutcome> {
     envelopes
         .iter()
         .take(MAX_ENVELOPES)
@@ -566,22 +586,14 @@ pub async fn request_daemon(envelopes: Vec<String>) -> Option<Vec<SenseApplyOutc
     }
     // Only a peer with uid 0 is accepted as the daemon.
     let mut conn = ipc::connect_trusted_device_service(1000).await.ok()?;
-    conn.send(&Data::SenseEnvelope(SenseEnvelopeIpc::Apply {
-        envelopes,
-        server_time: None,
-    }))
-    .await
-    .ok()?;
+    conn.send(&Data::SenseEnvelope(SenseEnvelopeIpc::Apply { envelopes }))
+        .await
+        .ok()?;
     match conn.next_timeout(DAEMON_TIMEOUT_MS).await {
         Ok(Some(Data::SenseEnvelope(SenseEnvelopeIpc::Result(outcomes)))) => Some(outcomes),
         _ => None,
     }
 }
-
-/// Called from `platform::macos::start_os_service` (root daemon). The daemon side needs no
-/// start of its own: it is the `_service` IPC handler (`ipc.rs` → `apply_in_daemon`).
-#[cfg(target_os = "macos")]
-pub fn start_daemon_side() {}
 
 #[cfg(test)]
 mod tests;

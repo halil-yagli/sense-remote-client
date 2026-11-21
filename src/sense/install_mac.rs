@@ -27,10 +27,9 @@ use super::{
 use hbb_common::{config, libc, log};
 use std::time::Duration;
 
-/// `install` results (strings the wizard maps to Turkish text). `""` = installed.
+/// `install` results (strings the wizard maps to Turkish text). `""` = installed; a closed
+/// administrator password prompt is `cancelled` (`mac_script::install_code`).
 pub const INSTALL_OK: &str = "";
-/// The administrator password prompt was closed (osascript `-128`).
-pub const INSTALL_CANCELLED: &str = "cancelled";
 pub const INSTALL_NOT_SIGNED_IN: &str = "not-signed-in";
 /// The app does not run from `/Applications/SenseRemote.app` (App Translocation, opened in
 /// the dmg).
@@ -38,8 +37,6 @@ pub const INSTALL_NOT_IN_APPLICATIONS: &str = "not-in-applications";
 /// The daemon did not read `state.json` / the agent was not loaded within
 /// `DAEMON_TIMEOUT_SECS`.
 pub const INSTALL_DAEMON_TIMEOUT: &str = "daemon-timeout";
-/// Result on platforms / builds without the installation.
-pub const UNSUPPORTED: &str = "unsupported";
 
 pub const DAEMON_TIMEOUT_SECS: u64 = 15;
 
@@ -309,7 +306,7 @@ mod tests {
         assert_eq!(mac_script::install_code(&ScriptOutcome::Done), INSTALL_OK);
         assert_eq!(
             mac_script::install_code(&ScriptOutcome::Cancelled),
-            INSTALL_CANCELLED
+            "cancelled"
         );
         assert_eq!(SERVICE_ARG_INSTALL_STATE, "--sense-install-state");
         // The uninstall script removes exactly the directory the state module writes.

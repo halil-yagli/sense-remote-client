@@ -2524,15 +2524,6 @@ pub fn install_sense_restart_agent() -> String {
     return "unsupported".to_owned();
 }
 
-// Sense Remote (Mac M0, plan §3.2): macOS privacy permissions of this process as JSON
-// {"screen_recording":bool,"accessibility":bool,"input_monitoring":bool}; "{}" elsewhere.
-pub fn main_sense_mac_permissions() -> String {
-    #[cfg(target_os = "macos")]
-    return crate::sense::mac_perm::current_json();
-    #[cfg(not(target_os = "macos"))]
-    return "{}".to_owned();
-}
-
 pub fn main_account_auth(op: String, remember_me: bool) {
     let id = get_id();
     let uuid = get_uuid();

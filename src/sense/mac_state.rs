@@ -46,8 +46,6 @@ pub const STATE_VERSION: u32 = 1;
 
 /// `update` / `update_in` result when the caller is not root.
 pub const ERR_NOT_ROOT: &str = "not-root";
-/// Kept from the M0 skeleton (no longer returned).
-pub const ERR_UNSUPPORTED: &str = "unsupported";
 /// `update` result when the closure lowered `envelope_seq`; nothing is written.
 pub const ERR_SEQ_BACK: &str = "seq-not-increasing";
 

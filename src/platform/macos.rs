@@ -890,8 +890,8 @@ pub fn start_os_service() {
     if let Err(err) = crate::ipc::start("_service") {
         log::error!("Failed to start ipc_service: {}", err);
     }
-    // Sense Remote (Mac M0, plan §3.3): daemon side of applying signed panel envelopes.
-    crate::sense::mac_apply::start_daemon_side();
+    // Sense Remote (plan §3.3): the daemon side of applying signed panel envelopes needs no
+    // start of its own; it is the `_service` IPC handler above (`mac_apply::apply_in_daemon`).
 
     /* // mouse/keyboard works in prelogin now with launchctl asuser.
        // below can avoid multi-users logged in problem, but having its own below problem.
