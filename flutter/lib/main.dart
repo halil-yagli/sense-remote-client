@@ -9,6 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
+import 'package:flutter_hbb/desktop/pages/sense_install_model.dart'
+    show senseMacNeedsSetup; // Sense Remote (Mac M3)
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
@@ -112,11 +114,25 @@ Future<void> main(List<String> args) async {
   } else {
     desktopType = DesktopType.main;
     await windowManager.ensureInitialized();
+    // Sense Remote (Mac M3): on macOS the app is its own setup file. Without an installed
+    // role (root-owned state file) the Sense setup wizard opens instead of the main window;
+    // Windows gets there with `--install` from the setup exe. The role is read from the
+    // native side, so the environment is initialised here once and not again below.
+    var envReady = false;
+    if (isMacOS) {
+      await initEnv(kAppTypeMain);
+      envReady = true;
+      if (senseMacNeedsSetup(
+          isMac: true, roleInstalled: senseRoleInstalled())) {
+        runInstallPage(envReady: true);
+        return;
+      }
+    }
     windowManager.setPreventClose(true);
     if (isMacOS) {
       disableWindowMovable(kWindowId);
     }
-    runMainApp(true);
+    runMainApp(true, envReady: envReady);
   }
 }
 
@@ -133,9 +149,10 @@ Future<void> initEnv(String appType) async {
   updateSystemWindowTheme();
 }
 
-void runMainApp(bool startService) async {
+void runMainApp(bool startService, {bool envReady = false}) async {
   // register uni links
-  await initEnv(kAppTypeMain);
+  // Sense Remote (Mac M3): `envReady` when main() already initialised it (macOS).
+  if (!envReady) await initEnv(kAppTypeMain);
   checkUpdate();
   // trigger connection status updater
   await bind.mainCheckConnectStatus();
@@ -416,9 +433,10 @@ void _runApp(
   ));
 }
 
-void runInstallPage() async {
+void runInstallPage({bool envReady = false}) async {
   await windowManager.ensureInitialized();
-  await initEnv(kAppTypeMain);
+  // Sense Remote (Mac M3): `envReady` when main() already initialised it (macOS).
+  if (!envReady) await initEnv(kAppTypeMain);
   _runApp('', const InstallPage(), MyTheme.currentThemeMode());
   WindowOptions windowOptions =
       getHiddenTitleBarWindowOptions(size: Size(800, 600), center: true);

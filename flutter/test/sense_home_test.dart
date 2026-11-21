@@ -4,6 +4,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/hbbs/hbbs.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_about.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_controller.dart';
@@ -295,6 +296,163 @@ void main() {
       await tester.tap(find.byKey(const Key('sense-home-refresh')));
       expect(refreshed, 1);
     });
+
+    // Sense Remote: connect by ID is always visible (user test 2026-11-21).
+    const openKey = Key('sense-home-connect-id-open');
+    const dialogKey = Key('sense-connect-id-dialog');
+    const fieldKey = Key('sense-connect-id-field');
+    const goKey = Key('sense-connect-id-go');
+
+    Future<List<String>> pumpAndOpen(WidgetTester tester,
+        {Size size = const Size(1000, 700)}) async {
+      final f = Fixture();
+      final connected = <String>[];
+      await _pump(
+          tester,
+          SenseControllerHomeView(
+              projectNames: f.names,
+              peers: f.peers,
+              order: f.order,
+              onConnect: connected.add,
+              onRefresh: () {}),
+          size: size);
+      expect(find.byKey(dialogKey), findsNothing);
+      await tester.tap(find.byKey(openKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(dialogKey), findsOneWidget);
+      return connected;
+    }
+
+    testWidgets('connect by ID button is always there; hints mention the ID',
+        (tester) async {
+      // with computers, without a search
+      final f = Fixture();
+      await _pump(
+          tester,
+          SenseControllerHomeView(
+              key: UniqueKey(),
+              projectNames: f.names,
+              peers: f.peers,
+              order: f.order,
+              onConnect: (_) {},
+              onRefresh: () {}));
+      expect(find.byKey(openKey), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byKey(openKey), matching: find.text(t('connect_id'))),
+          findsOneWidget);
+      expect(t('search_hint'), 'Proje, bilgisayar, konum ya da kimlik');
+      expect(find.text(t('search_hint')), findsOneWidget);
+
+      // empty list: the button and a pointer to it
+      await _pump(
+          tester,
+          SenseControllerHomeView(
+              key: UniqueKey(),
+              projectNames: const [],
+              peers: const [],
+              onConnect: (_) {}));
+      expect(find.byKey(openKey), findsOneWidget);
+      expect(t('empty'), contains('“${t('connect_id')}”'));
+      expect(find.text(t('empty')), findsOneWidget);
+    });
+
+    testWidgets('header does not overflow in a narrow window', (tester) async {
+      final f = Fixture();
+      await _pump(
+          tester,
+          SenseControllerHomeView(
+              projectNames: f.names,
+              peers: f.peers,
+              order: f.order,
+              onConnect: (_) {},
+              onRefresh: () {}),
+          size: const Size(360, 700));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(openKey), findsOneWidget);
+    });
+
+    testWidgets('connect by ID window: title, note, no password field',
+        (tester) async {
+      await pumpAndOpen(tester);
+      final dialog = find.byKey(dialogKey);
+      expect(find.descendant(of: dialog, matching: find.text(t('connect_id'))),
+          findsOneWidget);
+      expect(find.text(t('connect_id_note')), findsOneWidget);
+      expect(find.text(t('cancel')), findsOneWidget);
+      // only the ID is asked here; the password belongs to the connection window
+      final fields = tester
+          .widgetList<TextField>(
+              find.descendant(of: dialog, matching: find.byType(TextField)))
+          .toList();
+      expect(fields.length, 1);
+      expect(fields.single.obscureText, isFalse);
+    });
+
+    testWidgets('invalid ID: connect is inactive; digits and spaces only',
+        (tester) async {
+      final connected = await pumpAndOpen(tester);
+
+      // empty
+      await tester.tap(find.byKey(goKey), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(connected, isEmpty);
+      expect(find.byKey(dialogKey), findsOneWidget);
+
+      // too short, also with Enter
+      await tester.enterText(find.byKey(fieldKey), '123');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(goKey), warnIfMissed: false);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(connected, isEmpty);
+      expect(find.byKey(dialogKey), findsOneWidget);
+
+      // letters are dropped
+      await tester.enterText(find.byKey(fieldKey), 'a1b2-3');
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(fieldKey)).controller!.text,
+          '123');
+    });
+
+    testWidgets('valid ID with spaces goes to onConnect without spaces',
+        (tester) async {
+      final connected = await pumpAndOpen(tester);
+      await tester.enterText(find.byKey(fieldKey), '987 654 321');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(goKey));
+      await tester.pumpAndSettle();
+      expect(connected, ['987654321']);
+      expect(find.byKey(dialogKey), findsNothing);
+    });
+
+    testWidgets('Enter connects', (tester) async {
+      final connected = await pumpAndOpen(tester);
+      await tester.enterText(find.byKey(fieldKey), '123 456 789');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(connected, ['123456789']);
+      expect(find.byKey(dialogKey), findsNothing);
+    });
+
+    testWidgets('Esc and cancel close without connecting', (tester) async {
+      final connected = await pumpAndOpen(tester);
+      await tester.enterText(find.byKey(fieldKey), '123 456 789');
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(dialogKey), findsNothing);
+
+      await tester.tap(find.byKey(openKey));
+      await tester.pumpAndSettle();
+      // a reopened window starts empty
+      expect(tester.widget<TextField>(find.byKey(fieldKey)).controller!.text,
+          '');
+      await tester.tap(find.byKey(const Key('sense-connect-id-cancel')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(dialogKey), findsNothing);
+      expect(connected, isEmpty);
+    });
   });
 
   group('Host home view', () {
@@ -414,6 +572,7 @@ void main() {
   test('no upstream product name in the Sense home screens', () {
     const files = [
       'lib/desktop/pages/sense_home_controller.dart',
+      'lib/desktop/pages/sense_home_connect_id.dart',
       'lib/desktop/pages/sense_home_host.dart',
       'lib/desktop/pages/sense_home_about.dart',
       'lib/desktop/pages/sense_home_strings.dart',

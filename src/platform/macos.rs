@@ -238,53 +238,90 @@ pub fn is_installed_daemon(prompt: bool) -> bool {
         return true;
     }
 
-    let Some(install_script) = PRIVILEGES_SCRIPTS_DIR.get_file("install.scpt") else {
-        return false;
-    };
-    let Some(install_script_body) = install_script.contents_utf8().map(correct_app_name) else {
-        return false;
-    };
-
-    let Some(daemon_plist) = PRIVILEGES_SCRIPTS_DIR.get_file("daemon.plist") else {
-        return false;
-    };
-    let Some(daemon_plist_body) = daemon_plist.contents_utf8().map(correct_app_name) else {
-        return false;
-    };
-
-    let Some(agent_plist) = PRIVILEGES_SCRIPTS_DIR.get_file("agent.plist") else {
-        return false;
-    };
-    let Some(agent_plist_body) = agent_plist.contents_utf8().map(correct_app_name) else {
-        return false;
-    };
-
+    // Sense Remote (Mac M2, plan §3.2): upstream ran its own install.scpt here (plists through
+    // `echo`, config copied into a root directory that might not exist, so root could make up
+    // a new ID and key pair). The same privileged script as the setup wizard runs instead,
+    // without a role: the stored role stays.
     std::thread::spawn(move || {
-        match std::process::Command::new("osascript")
-            .arg("-e")
-            .arg(install_script_body)
-            .arg(daemon_plist_body)
-            .arg(agent_plist_body)
-            .arg(&get_active_username())
-            .status()
-        {
-            Err(e) => {
-                log::error!("run osascript failed: {}", e);
-            }
-            _ => {
-                let installed = std::path::Path::new(&agent_plist_file).exists();
-                log::info!("Agent file {} installed: {}", agent_plist_file, installed);
-                if installed {
-                    log::info!("launch server");
-                    std::process::Command::new("launchctl")
-                        .args(&["load", "-w", &agent_plist_file])
-                        .status()
-                        .ok();
-                }
-            }
-        }
+        let code = crate::sense::install_mac::start_service_again();
+        let installed = std::path::Path::new(&agent_plist_file).exists();
+        log::info!(
+            "Agent file {} installed: {} (result {:?})",
+            agent_plist_file,
+            installed,
+            code
+        );
     });
     false
+}
+
+/// Sense Remote (Mac M2, plan §3.2): runs one embedded privileged script (`install.scpt` /
+/// `uninstall.scpt`) and waits for it. `shell` is the root shell script, `prompt` the text of
+/// the administrator password prompt. Returns (success, stderr); the caller maps stderr with
+/// `mac_script::classify_osascript`. The shell text is not logged (it carries the setup info).
+pub fn sense_run_privileged(
+    script_file: &str,
+    shell: &str,
+    prompt: &str,
+) -> ResultType<(bool, String)> {
+    let Some(script) = PRIVILEGES_SCRIPTS_DIR
+        .get_file(script_file)
+        .and_then(|file| file.contents_utf8())
+    else {
+        bail!("{} not found in embedded resources", script_file);
+    };
+    let output = std::process::Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .arg(shell)
+        .arg(prompt)
+        .output()?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    ))
+}
+
+/// Sense Remote (Mac M2): `launchctl <args>` succeeded (job loaded, kickstart done ...).
+pub fn sense_launchctl_ok(args: &[&str]) -> bool {
+    std::process::Command::new("/bin/launchctl")
+        .args(args)
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+/// Sense Remote (security review G4-1): the daemon runs as root from the app bundle; when a
+/// path it is started from is not root's, a user process could replace the binary. The
+/// install script hands the bundle to root; this only reports (paths, nothing secret) so a
+/// bundle that was replaced later shows up in the service log.
+pub fn sense_log_bundle_ownership() {
+    let untrusted = crate::sense::install_mac::untrusted_bundle_paths();
+    if untrusted.is_empty() {
+        log::info!("Sense Remote: app bundle is owned by root");
+    } else {
+        log::error!(
+            "Sense Remote: root runs from paths that are not root-only, reinstall: {:?}",
+            untrusted
+        );
+    }
+}
+
+/// Sense Remote (Mac M2, plan §3.2): `service --sense-install-state <role> <hex>`. `None` =
+/// another call; otherwise the exit code (0 stored; 1 not root, wrong arguments, value not
+/// allowed or state file not writable). `sense` is private to the library, so the `service`
+/// binary comes through here.
+pub fn sense_install_state_exit_code(args: &[String]) -> Option<i32> {
+    use crate::sense::identity::mac_script::install_state_args;
+    let stored = install_state_args(args)?
+        .map_err(str::to_owned)
+        .and_then(|(role, hex)| crate::sense::install_mac::store_install_state(role, hex));
+    Some(match stored {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("Sense Remote: install state not stored: {err}");
+            1
+        }
+    })
 }
 
 enum UpdateSource {
@@ -427,19 +464,10 @@ pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
         return false;
     }
 
-    let Some(script_file) = PRIVILEGES_SCRIPTS_DIR.get_file("uninstall.scpt") else {
-        return false;
-    };
-    let Some(script_body) = script_file.contents_utf8().map(correct_app_name) else {
-        return false;
-    };
-
     let func = move || {
-        match std::process::Command::new("osascript")
-            .arg("-e")
-            .arg(script_body)
-            .status()
-        {
+        // Sense Remote (Mac M2, plan §3.2): the uninstall script comes from
+        // `install_mac` (Turkish prompt, also removes the root-owned Sense state directory).
+        match crate::sense::install_mac::run_uninstall_script() {
             Err(e) => {
                 log::error!("run osascript failed: {}", e);
             }

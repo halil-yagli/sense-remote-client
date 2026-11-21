@@ -14,6 +14,14 @@ fn main() {
         }
         std::process::exit(0);
     }
+    // Sense Remote (Mac M2, plan §3.2): the privileged install script stores the role chosen
+    // in the setup wizard (and the setup info) in the root-owned state file. Not root or a
+    // value that is not allowed: nothing is written, exit 1.
+    if let Some(code) = librustdesk::platform::sense_install_state_exit_code(&args) {
+        std::process::exit(code);
+    }
     hbb_common::init_log(false, "service");
+    // Sense Remote (security review G4-1): report when this daemon's own bundle is not root's.
+    librustdesk::platform::sense_log_bundle_ownership();
     crate::start_os_service();
 }

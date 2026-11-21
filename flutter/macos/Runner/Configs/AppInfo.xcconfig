@@ -8,7 +8,8 @@
 PRODUCT_NAME = SenseRemote
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.carriez.flutterHbb
+// Sense Remote: resmî RustDesk ile aynı kimlik macOS izinlerini (TCC) karıştırır; kendi kimliğimiz.
+PRODUCT_BUNDLE_IDENTIFIER = com.sensedepartment.remote
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 Purslane Tech Pte. Ltd. All rights reserved.
+PRODUCT_COPYRIGHT = © 2026 Sense Department

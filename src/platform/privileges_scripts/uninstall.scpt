@@ -1,6 +1,6 @@
-set sh1 to "launchctl unload -w /Library/LaunchDaemons/com.carriez.RustDesk_service.plist;"
-set sh2 to "/bin/rm /Library/LaunchDaemons/com.carriez.RustDesk_service.plist;"
-set sh3 to "/bin/rm /Library/LaunchAgents/com.carriez.RustDesk_server.plist;"
-
-set sh to sh1 & sh2 & sh3
-do shell script sh with prompt "RustDesk wants to unload daemon" with administrator privileges
+-- Sense Remote (Mac M2, plan 2026-11-21 section 3.2): the shell script and the prompt text
+-- come from Rust (src/sense/identity/mac_script.rs uninstall_script, install_mac.rs
+-- PROMPT_UNINSTALL).
+on run {sh, prompt_text}
+  do shell script sh with prompt prompt_text with administrator privileges
+end run
