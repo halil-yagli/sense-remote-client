@@ -177,14 +177,24 @@ fn reason_of(outcome: &SenseApplyOutcome) -> &str {
 fn ipc_wire_format() {
     let apply = SenseEnvelopeIpc::Apply {
         envelopes: vec!["{}".to_owned()],
-        server_time: Some(7),
     };
     let json = serde_json::to_string(&apply).unwrap();
-    assert_eq!(
-        json,
-        r#"{"t":"Apply","c":{"envelopes":["{}"],"server_time":7}}"#
-    );
+    assert_eq!(json, r#"{"t":"Apply","c":{"envelopes":["{}"]}}"#);
     assert_eq!(serde_json::from_str::<SenseEnvelopeIpc>(&json).unwrap(), apply);
+    // K4-7: `server_time` left the message. An agent of an earlier build still sends it
+    // (always `null`); the daemon reads that message as before and ignores the field.
+    for old in [
+        r#"{"t":"Apply","c":{"envelopes":["{}"],"server_time":null}}"#,
+        r#"{"t":"Apply","c":{"envelopes":["{}"],"server_time":7}}"#,
+    ] {
+        assert_eq!(serde_json::from_str::<SenseEnvelopeIpc>(old).unwrap(), apply, "{old}");
+    }
+    // The whole IPC message, the way an earlier build's daemon reads it without the field
+    // (`Option` → `None` there): the tags did not change.
+    assert_eq!(
+        serde_json::to_string(&crate::ipc::Data::SenseEnvelope(apply.clone())).unwrap(),
+        r#"{"t":"SenseEnvelope","c":{"t":"Apply","c":{"envelopes":["{}"]}}}"#
+    );
 
     let result = SenseEnvelopeIpc::Result(vec![
         SenseApplyOutcome::Applied {
@@ -211,14 +221,6 @@ fn limits_count_and_size() {
     assert!(!within_limits(&vec!["x".to_owned(); MAX_ENVELOPES + 1]));
     assert!(within_limits(&["x".repeat(MAX_TOTAL_BYTES)]));
     assert!(!within_limits(&["x".repeat(MAX_TOTAL_BYTES), "x".to_owned()]));
-}
-
-#[test]
-fn one_call_per_second() {
-    assert!(call_allowed(None));
-    assert!(!call_allowed(Some(0)));
-    assert!(!call_allowed(Some(MIN_CALL_INTERVAL_MS - 1)));
-    assert!(call_allowed(Some(MIN_CALL_INTERVAL_MS)));
 }
 
 // G4-4: the limit is per peer process; a flooding process does not take the agent's call.
@@ -732,6 +734,112 @@ fn root_keeps_its_protected_values_in_a_config_sync() {
     assert!(!keep_root_fields(&mut theirs, &json!(null), &PROTECTED_CONFIG_FIELDS));
 }
 
+// K4-10: the G4-3 merge with the real `Config` (the type the `SyncConfig` IPC carries), through
+// the same steps the daemon runs: serialize → `keep_root_fields` → deserialize.
+#[test]
+fn sync_merge_round_trips_a_real_config() {
+    use hbb_common::config::Config;
+    let config = |value: Value| serde_json::from_value::<Config>(value).unwrap();
+    let form = |config: &Config| serde_json::to_value(config).unwrap();
+
+    let root_json = json!({
+        "id": "111111111", "enc_id": "root-enc", "password": "root-pw", "salt": "root-salt",
+        "key_pair": [[1, 2, 3], [4, 5, 6]], "key_confirmed": true,
+        "keys_confirmed": {"rs-root": true},
+    });
+    let user_json = json!({
+        "id": "999999999", "enc_id": "user-enc", "password": "user-pw", "salt": "user-salt",
+        "key_pair": [[9], [9, 9]], "key_confirmed": false,
+        "keys_confirmed": {"rs-user": true},
+    });
+    let (root, user) = (config(root_json.clone()), config(user_json.clone()));
+    // `Config` reads leniently (a field of the wrong shape becomes its default), so first make
+    // sure both configs carry exactly what was written, key pair included.
+    assert_eq!(form(&root), root_json);
+    assert_eq!(form(&user), user_json);
+
+    let merged = merge_root_fields(&user, &root, &PROTECTED_CONFIG_FIELDS).unwrap();
+    // Identity, password and key pair are root's; everything else is the user's.
+    assert_eq!(
+        form(&merged),
+        json!({
+            "id": "111111111", "enc_id": "root-enc", "password": "root-pw", "salt": "root-salt",
+            "key_pair": [[1, 2, 3], [4, 5, 6]], "key_confirmed": false,
+            "keys_confirmed": {"rs-user": true},
+        })
+    );
+    assert!(!merged.is_empty());
+    assert_eq!(
+        keep_root_config(&user, root.clone(), &PROTECTED_CONFIG_FIELDS),
+        merged
+    );
+    // Syncing root's own config back changes nothing.
+    assert_eq!(
+        merge_root_fields(&root, &root, &PROTECTED_CONFIG_FIELDS),
+        Ok(root.clone())
+    );
+
+    // A field root does not have is not taken from the user either: `id` is not serialized
+    // while it is empty, and an empty user config gets no identity of its own.
+    let bare_json = json!({
+        "enc_id": "root-enc", "password": "", "salt": "", "key_pair": [[1], [2]],
+        "key_confirmed": false, "keys_confirmed": {},
+    });
+    let bare = config(bare_json.clone());
+    assert_eq!(form(&bare), bare_json);
+    let merged = merge_root_fields(&user, &bare, &PROTECTED_CONFIG_FIELDS).unwrap();
+    assert_eq!(
+        form(&merged),
+        json!({
+            "enc_id": "root-enc", "password": "", "salt": "", "key_pair": [[1], [2]],
+            "key_confirmed": false, "keys_confirmed": {"rs-user": true},
+        })
+    );
+    assert_eq!(
+        merge_root_fields(&Config::default(), &root, &PROTECTED_CONFIG_FIELDS).map(|c| form(&c)),
+        Ok(json!({
+            "id": "111111111", "enc_id": "root-enc", "password": "root-pw", "salt": "root-salt",
+            "key_pair": [[1, 2, 3], [4, 5, 6]], "key_confirmed": false, "keys_confirmed": {},
+        }))
+    );
+}
+
+// K4-10: a merge that can not be completed takes nothing from the user process. Root's config
+// is kept as it is (and the failed step is logged, without any value).
+#[test]
+fn failed_sync_merge_keeps_the_root_config() {
+    // Serializes as `out`, reads only `back`: the merged form can not be read again.
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    struct OneWay {
+        id: String,
+        #[serde(rename(serialize = "out", deserialize = "back"))]
+        other: String,
+    }
+    let one_way = |id: &str, other: &str| OneWay {
+        id: id.to_owned(),
+        other: other.to_owned(),
+    };
+    let (root, user) = (one_way("root", "root-other"), one_way("user", "user-other"));
+    assert_eq!(
+        merge_root_fields(&user, &root, &["id"]),
+        Err("deserialize-merged")
+    );
+    assert_eq!(keep_root_config(&user, root.clone(), &["id"]), root);
+
+    // Not an object on either side: the same.
+    let (root, user) = ("root".to_owned(), "user".to_owned());
+    assert_eq!(merge_root_fields(&user, &root, &["id"]), Err("not-an-object"));
+    assert_eq!(keep_root_config(&user, root.clone(), &["id"]), root);
+    assert_eq!(
+        merge_root_fields(&json!({"id": "user"}), &json!(null), &["id"]),
+        Err("not-an-object")
+    );
+    assert_eq!(
+        keep_root_config(&json!({"id": "user"}), json!(null), &["id"]),
+        json!(null)
+    );
+}
+
 // The panel's shared vector: the daemon gives the same verdict as the client check for every
 // case, and nothing but an accepted full set changes the state.
 #[test]
@@ -874,7 +982,7 @@ fn user_process_reads_the_daemon_answer() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn other_platforms_reject_in_the_daemon_entry() {
-    let out = apply_in_daemon(&["{}".to_owned(), "{}".to_owned()], None, Some(1));
+    let out = apply_in_daemon(&["{}".to_owned(), "{}".to_owned()], Some(1));
     let rejected = SenseApplyOutcome::Rejected {
         reason: "unsupported_platform".to_owned(),
     };

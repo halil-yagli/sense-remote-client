@@ -14,10 +14,12 @@
 //! server strategy can override. Later the role will change only through a signed panel
 //! payload (wave 2b).
 //!
-//! macOS (Mac M0, plan 2026-11-21 §3.1): the role, setup info and envelope seq live in the
-//! root-owned `/Library/Application Support/SenseRemote/state.json` (`mac_state`); only root
-//! (installer step, daemon) writes it. M0 is the skeleton: `mac_state` reads nothing yet, so
-//! `installed_role` still returns `None` there (full UI) until M1 / M2.
+//! macOS (plan 2026-11-21 §3.1): the role, setup info and envelope seq live in the root-owned
+//! `/Library/Application Support/SenseRemote/state.json` (`mac_state`). Only root writes it:
+//! the privileged installer step (`install_mac`) and the daemon when it applies a signed panel
+//! envelope (`mac_apply`). Every process reads it at start like the registry on Windows; a
+//! missing file means "not installed" (`installed_role` is `None`, full UI), a file that breaks
+//! the rules (owner, mode, symlink, content) gives no role either and is logged.
 
 use base::config::keys;
 use hbb_common::{config, log};
@@ -337,10 +339,25 @@ fn read_reg_value(name: &str) -> Option<String> {
 /// and no value: no role is applied rather than one a user could have planted.
 #[cfg(target_os = "macos")]
 fn read_reg_value(name: &str) -> Option<String> {
-    match mac_state::read() {
+    mac_value_from(mac_state::read(), name)
+}
+
+/// The value `name` out of one read of the state file (`mac_state::read` / `read_in`).
+/// Sense Remote (K4-11): long-running processes read the role again and again, so a broken
+/// file is logged at most once a minute, with the number of reads the line stands for.
+#[cfg(target_os = "macos")]
+fn mac_value_from(
+    read: Result<Option<mac_state::MacState>, String>,
+    name: &str,
+) -> Option<String> {
+    match read {
         Ok(state) => mac_state_value(&state?, name),
         Err(err) => {
-            log::error!("Sense Remote: state file not usable, {name} not read: {err}");
+            hbb_common::throttled_log!(
+                std::time::Duration::from_secs(60),
+                error,
+                "Sense Remote: state file not usable, {name} not read: {err}"
+            );
             None
         }
     }
@@ -631,23 +648,22 @@ pub mod report_sig;
 #[cfg(windows)]
 mod displays_win;
 mod network;
-// Sense Remote (Mac M0, plan 2026-11-21 §3): skeleton modules of the macOS work. Each one is
-// filled in by its own package (state file M1, installation M2, displays + permissions M4,
-// envelope apply through the root daemon M5); until then they have safe defaults.
+// Sense Remote (plan 2026-11-21 §3): the macOS modules: state file (M1), installation (M2),
+// displays + permissions (M4), envelope apply through the root daemon (M5).
+// `displays_mac` and `mac_perm` are still being filled in by M4; parts of them are unused.
 #[cfg(target_os = "macos")]
 #[allow(dead_code)]
 mod displays_mac;
 #[cfg(target_os = "macos")]
-#[allow(dead_code)]
 pub mod install_mac;
-// The IPC types are shared with `ipc::Data` (every platform); the daemon entry is macOS-only.
-#[allow(dead_code)]
+// The IPC types are shared with `ipc::Data` (every platform); the daemon and the user-process
+// side only run on macOS, so elsewhere most of the module is used by its tests alone.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod mac_apply;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)]
 pub mod mac_perm;
 #[cfg(target_os = "macos")]
-#[allow(dead_code)]
 pub mod mac_state;
 // Sense Remote: maintenance curtain of ghost mode; privacy mode turns it on (wave 3 I10).
 pub mod curtain;
@@ -796,7 +812,9 @@ mod tests {
         }
     }
 
-    // Sense Remote (Mac M0): role and setup info come from the state file fields.
+    // Sense Remote: role and setup info come from the state file fields. The file is a
+    // temporary one (K4-6): the real `/Library/Application Support/SenseRemote` is never read,
+    // so the result is the same on a Mac with Sense Remote installed.
     #[cfg(target_os = "macos")]
     #[test]
     fn mac_state_maps_to_the_registry_value_names() {
@@ -817,8 +835,30 @@ mod tests {
         let empty = mac_state::MacState::default();
         assert_eq!(mac_state_value(&empty, REG_VALUE_ROLE), None);
         assert_eq!(mac_state_value(&empty, REG_VALUE_SETUP), None);
-        // Skeleton: nothing is installed, and the user process never stores a role.
-        assert_eq!(installed_role(), None);
+
+        let base = std::env::temp_dir().join(format!("sense-role-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let dir = base.join("SenseRemote");
+        let value = |name: &str| mac_value_from(mac_state::read_in(&dir, false), name);
+        let role = || value(REG_VALUE_ROLE).and_then(|role| SenseRole::parse(&role));
+        // Not installed: no directory, no role.
+        assert_eq!(role(), None);
+        // Installed: every process reads what was stored.
+        mac_state::update_in(&dir, false, |state| {
+            state.role = Some(SenseRole::Host);
+            state.setup_hex = "7b7d".to_owned();
+        })
+        .unwrap();
+        assert_eq!(role(), Some(SenseRole::Host));
+        assert_eq!(value(REG_VALUE_SETUP).as_deref(), Some("7b7d"));
+        // A broken file is no role (and a throttled log line), not a default one.
+        std::fs::write(dir.join(mac_state::STATE_FILE), "not json").unwrap();
+        assert!(mac_state::read_in(&dir, false).is_err());
+        assert_eq!(role(), None);
+        assert_eq!(value(REG_VALUE_SETUP), None);
+        let _ = std::fs::remove_dir_all(&base);
+        // The user process never stores a role.
         assert_eq!(store_role(SenseRole::Host), Err("daemon-only".to_owned()));
     }
 

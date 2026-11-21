@@ -734,19 +734,14 @@ fn sense_service_accepts(data: &Data) -> bool {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn sense_service_envelope(data: Data, stream: &mut Connection) {
     use crate::sense::mac_apply::{apply_in_daemon, SenseEnvelopeIpc};
-    let Data::SenseEnvelope(SenseEnvelopeIpc::Apply {
-        envelopes,
-        server_time,
-    }) = data
-    else {
+    let Data::SenseEnvelope(SenseEnvelopeIpc::Apply { envelopes }) = data else {
         return;
     };
     // G4-4: the call limit is per peer process.
     let peer_pid = stream.peer_pid();
-    let outcomes =
-        tokio::task::spawn_blocking(move || apply_in_daemon(&envelopes, server_time, peer_pid))
-            .await
-            .unwrap_or_default();
+    let outcomes = tokio::task::spawn_blocking(move || apply_in_daemon(&envelopes, peer_pid))
+        .await
+        .unwrap_or_default();
     allow_err!(
         stream
             .send(&Data::SenseEnvelope(SenseEnvelopeIpc::Result(outcomes)))
@@ -774,21 +769,10 @@ fn sense_keep_root_config(data: Data) -> Data {
             }
             let (config, mut config2) = *configs;
             // The identity fields are private to `hbb_common`: merge the serde form (the one
-            // this IPC carries). Anything unexpected keeps root's config as it is.
-            let config = match (serde_json::to_value(&config), serde_json::to_value(&root)) {
-                (Ok(mut incoming), Ok(own)) => {
-                    let merged = mac_apply::keep_root_fields(
-                        &mut incoming,
-                        &own,
-                        &mac_apply::PROTECTED_CONFIG_FIELDS,
-                    );
-                    match serde_json::from_value(incoming) {
-                        Ok(config) if merged => config,
-                        _ => root,
-                    }
-                }
-                _ => root,
-            };
+            // this IPC carries). A merge that fails keeps root's config as it is and is logged
+            // (K4-10; `mac_apply::keep_root_config`, tested there with the real `Config`).
+            let config =
+                mac_apply::keep_root_config(&config, root, &mac_apply::PROTECTED_CONFIG_FIELDS);
             mac_apply::keep_root_options(&mut config2.options, &Config2::get().options);
             Data::SyncConfig(Some(Box::new((config, config2))))
         }
@@ -2517,7 +2501,6 @@ mod test {
         assert!(sense_service_accepts(&Data::SenseEnvelope(
             SenseEnvelopeIpc::Apply {
                 envelopes: vec!["{}".to_owned()],
-                server_time: None,
             }
         )));
         // The daemon's answer is not something a client may send.
@@ -2569,9 +2552,7 @@ mod test {
         for needed in [
             "mac_state::read()",
             "if root.is_empty() || !mac_apply::sync_protected(state) {",
-            "&mac_apply::PROTECTED_CONFIG_FIELDS,",
-            "Ok(config) if merged => config,",
-            "_ => root,",
+            "mac_apply::keep_root_config(&config, root, &mac_apply::PROTECTED_CONFIG_FIELDS);",
             "mac_apply::keep_root_options(&mut config2.options, &Config2::get().options);",
         ] {
             assert!(body.contains(needed), "{needed}");
