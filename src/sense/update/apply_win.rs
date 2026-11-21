@@ -34,8 +34,17 @@ use std::path::PathBuf;
 /// Name of the guard's scheduled task.
 pub const GUARD_TASK: &str = "SenseRemoteUpdateGuard";
 
-/// The privileged folder downloads go to; `None` when it can not be made safe. U0: none.
-pub fn download_dir() -> Option<PathBuf> {
+/// Where downloads go (the privileged folder), path only: no file system work, no ACL, no
+/// process. Called on every engine step (disk space, file names). `None` on a platform without
+/// updates. U0: none.
+pub fn download_dir_path() -> Option<PathBuf> {
+    None
+}
+
+/// Makes `download_dir_path()` safe (creates it, owner and ACL / mode, refuses reparse points
+/// and symlinks) and returns it; called once per download, right before it starts. `None` when
+/// it can not be made safe (the download then fails). U0: none.
+pub fn prepare_download_dir() -> Option<PathBuf> {
     None
 }
 
@@ -104,7 +113,8 @@ mod tests {
         };
         assert_eq!(install(&job), Err(UpdateError::Unsupported));
         assert_eq!(roll_back(), Err(UpdateError::Unsupported));
-        assert_eq!(download_dir(), None);
+        assert_eq!(download_dir_path(), None);
+        assert_eq!(prepare_download_dir(), None);
         assert_eq!(upgrade_local(&[]), 1);
     }
 }
