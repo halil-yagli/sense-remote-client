@@ -14,8 +14,10 @@
 //! server strategy can override. Later the role will change only through a signed panel
 //! payload (wave 2b).
 //!
-//! MAC-SONRA: macOS stores nothing yet (`installed_role` returns `None`, full UI). The plan is
-//! a root-owned file written by the installer package.
+//! macOS (Mac M0, plan 2026-11-21 §3.1): the role, setup info and envelope seq live in the
+//! root-owned `/Library/Application Support/SenseRemote/state.json` (`mac_state`); only root
+//! (installer step, daemon) writes it. M0 is the skeleton: `mac_state` reads nothing yet, so
+//! `installed_role` still returns `None` there (full UI) until M1 / M2.
 
 use base::config::keys;
 use hbb_common::{config, log};
@@ -196,9 +198,16 @@ pub fn store_role(role: SenseRole) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
-#[cfg(not(windows))]
+/// Sense Remote (Mac M0, plan §3.3): on macOS the `--server` process is the session user and
+/// can not write the root-owned state file. Only the daemon stores a role (`mac_apply`, with
+/// `mac_state::update`), after verifying the envelope itself.
+#[cfg(target_os = "macos")]
 pub fn store_role(_role: SenseRole) -> Result<(), String> {
-    // MAC-SONRA-9: root-owned role file.
+    Err("daemon-only".to_owned())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn store_role(_role: SenseRole) -> Result<(), String> {
     Err("unsupported platform".to_owned())
 }
 
@@ -323,9 +332,32 @@ fn read_reg_value(name: &str) -> Option<String> {
         .ok()
 }
 
-#[cfg(not(windows))]
+/// Sense Remote (Mac M0, plan §3.1): macOS reads the same two values from the root-owned state
+/// file. A file that breaks the rules (owner, mode, symlink, content) is an error in the log
+/// and no value: no role is applied rather than one a user could have planted.
+#[cfg(target_os = "macos")]
+fn read_reg_value(name: &str) -> Option<String> {
+    match mac_state::read() {
+        Ok(state) => mac_state_value(&state?, name),
+        Err(err) => {
+            log::error!("Sense Remote: state file not usable, {name} not read: {err}");
+            None
+        }
+    }
+}
+
+/// Pure part: the Windows registry value names mapped to the fields of the macOS state.
+#[cfg(target_os = "macos")]
+fn mac_state_value(state: &mac_state::MacState, name: &str) -> Option<String> {
+    match name {
+        REG_VALUE_ROLE => state.role.map(|role| role.as_str().to_owned()),
+        REG_VALUE_SETUP => Some(state.setup_hex.clone()).filter(|hex| !hex.is_empty()),
+        _ => None,
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn read_reg_value(_name: &str) -> Option<String> {
-    // MAC-SONRA: read the root-owned role file.
     None
 }
 
@@ -406,9 +438,15 @@ fn store_identity_for_import() -> Result<(), &'static str> {
     ready
 }
 
-#[cfg(not(windows))]
+/// Sense Remote (Mac M0, plan §3.2): the macOS installation lives in `install_mac` (same
+/// arguments and result strings, plus the macOS codes listed there).
+#[cfg(target_os = "macos")]
+pub fn install(options: &str, path: String, role: &str, info_json: &str) -> String {
+    install_mac::install(options, path, role, info_json)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn install(_options: &str, _path: String, _role: &str, _info_json: &str) -> String {
-    // MAC-SONRA: macOS installs from the dmg; the role step comes with the pkg installer.
     "unsupported".to_owned()
 }
 
@@ -424,8 +462,13 @@ pub fn finish_install(open_app: bool) {
             log::error!("Failed to open {exe}: {err}");
         }
     }
-    #[cfg(not(windows))]
+    // Sense Remote (Mac M0): on macOS the wizard runs inside the installed app; `install_mac`
+    // decides how it is left (the skeleton exits like before).
+    #[cfg(target_os = "macos")]
+    install_mac::finish_install(open_app);
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = open_app;
+    #[cfg(not(target_os = "macos"))]
     std::process::exit(0);
 }
 
@@ -588,6 +631,24 @@ pub mod report_sig;
 #[cfg(windows)]
 mod displays_win;
 mod network;
+// Sense Remote (Mac M0, plan 2026-11-21 §3): skeleton modules of the macOS work. Each one is
+// filled in by its own package (state file M1, installation M2, displays + permissions M4,
+// envelope apply through the root daemon M5); until then they have safe defaults.
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+mod displays_mac;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+pub mod install_mac;
+// The IPC types are shared with `ipc::Data` (every platform); the daemon entry is macOS-only.
+#[allow(dead_code)]
+pub mod mac_apply;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+pub mod mac_perm;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+pub mod mac_state;
 // Sense Remote: maintenance curtain of ghost mode; privacy mode turns it on (wave 3 I10).
 pub mod curtain;
 
@@ -733,6 +794,32 @@ mod tests {
             // ...the Sense gate does not.
             assert!(license_from_exe_name(name).is_err(), "{name}");
         }
+    }
+
+    // Sense Remote (Mac M0): role and setup info come from the state file fields.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_state_maps_to_the_registry_value_names() {
+        let state = mac_state::MacState {
+            role: Some(SenseRole::Both),
+            setup_hex: "7b7d".to_owned(),
+            envelope_seq: 9,
+        };
+        assert_eq!(
+            mac_state_value(&state, REG_VALUE_ROLE).as_deref(),
+            Some("both")
+        );
+        assert_eq!(
+            mac_state_value(&state, REG_VALUE_SETUP).as_deref(),
+            Some("7b7d")
+        );
+        assert_eq!(mac_state_value(&state, "EnvelopeSeq"), None);
+        let empty = mac_state::MacState::default();
+        assert_eq!(mac_state_value(&empty, REG_VALUE_ROLE), None);
+        assert_eq!(mac_state_value(&empty, REG_VALUE_SETUP), None);
+        // Skeleton: nothing is installed, and the user process never stores a role.
+        assert_eq!(installed_role(), None);
+        assert_eq!(store_role(SenseRole::Host), Err("daemon-only".to_owned()));
     }
 
     #[cfg(windows)]
