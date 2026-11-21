@@ -154,6 +154,36 @@ pub fn installed_role() -> Option<SenseRole> {
     role
 }
 
+/// Sense Remote (security review of PR #40): the installed role for the locks
+/// (`password::guard`). Unlike `installed_role`, a role that is there but can not be read or is
+/// not valid is an error, not "not installed": the locks stay closed on it.
+pub fn installed_role_state() -> Result<Option<SenseRole>, String> {
+    #[cfg(windows)]
+    return role_state_from(read_reg_value_state(REG_SUBKEY, REG_VALUE_ROLE));
+    #[cfg(target_os = "macos")]
+    return match mac_state::read() {
+        Ok(None) => Ok(None),
+        Ok(Some(state)) => state
+            .role
+            .map(Some)
+            .ok_or_else(|| "state file without a role".to_owned()),
+        Err(err) => Err(err),
+    };
+    #[cfg(not(any(windows, target_os = "macos")))]
+    return Ok(None);
+}
+
+/// Pure part of `installed_role_state` (Windows): the raw `Role` value read.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn role_state_from(read: Result<Option<String>, String>) -> Result<Option<SenseRole>, String> {
+    match read? {
+        None => Ok(None),
+        Some(value) => SenseRole::parse(&value)
+            .map(Some)
+            .ok_or_else(|| "unknown installed role".to_owned()),
+    }
+}
+
 /// Called once at start (`load_custom_client`) in every process.
 pub fn apply_installed_role() {
     apply_role(installed_role());
@@ -372,6 +402,25 @@ fn read_reg_value_in(subkey: &str, name: &str) -> Option<String> {
         .ok()?
         .get_value::<String, _>(name)
         .ok()
+}
+
+/// Sense Remote (security review of PR #40): like `read_reg_value_in`, but a missing key or
+/// value (`Ok(None)`) is told apart from one that can not be read (`Err`, e.g. wrong type or no
+/// access).
+#[cfg(windows)]
+fn read_reg_value_state(subkey: &str, name: &str) -> Result<Option<String>, String> {
+    use std::io::ErrorKind::NotFound;
+    use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+    let key = match RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(subkey) {
+        Ok(key) => key,
+        Err(err) if err.kind() == NotFound => return Ok(None),
+        Err(err) => return Err(format!("registry key not readable: {:?}", err.kind())),
+    };
+    match key.get_value::<String, _>(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(err) if err.kind() == NotFound => Ok(None),
+        Err(err) => Err(format!("registry value not readable: {:?}", err.kind())),
+    }
 }
 
 /// Sense Remote (Mac M0, plan §3.1): macOS reads the same two values from the root-owned state
@@ -955,6 +1004,18 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(effective, "N");
         assert!(!config::option2bool(key, &effective));
+    }
+
+    // Security review of PR #40: a role that is there but unreadable or unknown is an error
+    // (locks closed), only a missing one is "not installed".
+    #[test]
+    fn role_state_tells_missing_from_unreadable() {
+        assert_eq!(role_state_from(Ok(None)), Ok(None));
+        assert_eq!(role_state_from(Ok(Some("host".to_owned()))), Ok(Some(SenseRole::Host)));
+        assert_eq!(role_state_from(Ok(Some("both".to_owned()))), Ok(Some(SenseRole::Both)));
+        assert!(role_state_from(Ok(Some("Host".to_owned()))).is_err());
+        assert!(role_state_from(Ok(Some(String::new()))).is_err());
+        assert!(role_state_from(Err("denied".to_owned())).is_err());
     }
 
     #[test]

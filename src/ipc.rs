@@ -1167,11 +1167,12 @@ async fn handle(data: Data, stream: &mut Connection) {
             }
             Some(value) => {
                 // Sense Remote (permanent password plan §3.7): with a role installed the
-                // permanent password and its salt change only through the app's signed grant
-                // (`Data::SensePassword`), not this older way in (command line, UI process).
+                // permanent password, its salt and the ID change only through the app's signed
+                // grant (`Data::SensePassword`) or the installer, not this older way in
+                // (command line, UI process).
                 if crate::sense::password::guard::refuses_config_write(
                     &name,
-                    crate::sense::installed_role(),
+                    &crate::sense::installed_role_state(),
                 ) {
                     log::warn!("Sense Remote: IPC write of {name} refused, role installed");
                     if name == "permanent-password" {
@@ -1253,6 +1254,20 @@ async fn handle(data: Data, stream: &mut Connection) {
                 allow_err!(stream.send(&Data::Options(Some(v))).await);
             }
             Some(value) => {
+                // Sense Remote (security review of PR #40): on Windows, with a role that takes
+                // incoming connections, a UI process keeps SYSTEM's access and permission
+                // settings (the macOS daemon's list, `guard::keep_options`); envelopes are
+                // applied by `--server` itself, not through this message.
+                #[cfg(windows)]
+                let value = {
+                    let mut value = value;
+                    crate::sense::password::guard::keep_options(
+                        &crate::sense::installed_role_state(),
+                        &mut value,
+                        Config::get_options,
+                    );
+                    value
+                };
                 let _chk = CheckIfRestart::new();
                 let _nat = CheckTestNatType::new();
                 if let Some(v) = value.get("privacy-mode-impl-key") {
@@ -1293,11 +1308,16 @@ async fn handle(data: Data, stream: &mut Connection) {
             // with a role installed a UI process must not replace SYSTEM's identity, key pair,
             // password or salt this way (macOS: `sense_keep_root_config`, G4-3).
             #[cfg(windows)]
-            let config = crate::sense::password::guard::sync_config_for(
-                crate::sense::installed_role(),
-                config,
-                Config::get,
-            );
+            let (config, config2) = {
+                let state = crate::sense::installed_role_state();
+                let config =
+                    crate::sense::password::guard::sync_config_for(&state, config, Config::get);
+                let mut config2 = config2;
+                crate::sense::password::guard::keep_options(&state, &mut config2.options, || {
+                    Config2::get().options
+                });
+                (config, config2)
+            };
             let _chk = CheckIfRestart::new();
             if let Err(error) = crate::trusted_devices::config::update(move || {
                 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -2696,7 +2716,7 @@ mod test {
     }
 
     // Sense Remote (permanent password plan §3.7): the locks sit on the main IPC write paths.
-    // `Config("permanent-password" | "salt", Some)` is checked before any write, and on Windows
+    // `Config("permanent-password" | "salt" | "id", Some)` is checked before any write; on Windows
     // `SyncConfig(Some)` passes `guard::sync_config_for` before it is written.
     #[test]
     fn main_ipc_write_paths_pass_the_password_guard() {
@@ -2716,11 +2736,25 @@ mod test {
         let start = source.find("        Data::SyncConfig(Some(configs)) => {").unwrap();
         let arm = &source[start..];
         let arm = &arm[..arm.find("        Data::SyncConfig(None) => {").unwrap()];
-        let filter = arm
-            .find("let config = crate::sense::password::guard::sync_config_for(")
-            .unwrap();
+        let filter = arm.find("let (config, config2) = {").unwrap();
         assert!(arm[..filter].trim_end().ends_with("#[cfg(windows)]"), "{arm}");
+        let block = &arm[filter..];
+        assert!(block.contains("guard::sync_config_for(&state, config, Config::get)"));
+        assert!(block.contains("guard::keep_options(&state, &mut config2.options"));
         assert!(filter < arm.find("set_config(config)").unwrap());
+        assert!(filter < arm.find("set_config2(config2)").unwrap());
+
+        // Security review of PR #40: `Options(Some)` passes `guard::keep_options` on Windows
+        // before it is written.
+        let start = source.find("        Data::Options(value) => match value {").unwrap();
+        let arm = &source[start..];
+        let arm = &arm[..arm.find("        Data::SenseUpdate(message) => {").unwrap()];
+        let keep = arm
+            .find("crate::sense::password::guard::keep_options(")
+            .unwrap();
+        let cfg = arm.find("#[cfg(windows)]\n                let value = {").unwrap();
+        assert!(cfg < keep);
+        assert!(keep < arm.find("update_options(value)").unwrap());
     }
 
     // Sense Remote (Mac M5): the `_service` allow list grew by exactly one message.
