@@ -1,12 +1,25 @@
 //! Sense Remote (update plan 2026-11-21, §4.4, §5, §8): installing and rolling back on Windows.
 //! Package U3. Runs as SYSTEM (`--server`, the guard) or elevated (`--sense-upgrade-local`).
 //!
+//! The privileged folder is `<ProgramData>\SenseRemote` (`FOLDERID_ProgramData`). It is created
+//! in one step with its security descriptor (`CreateDirectoryW`, protected DACL: SYSTEM and
+//! Administrators only, `SENSE_DIR_DACL`). An existing folder is used only when it is a real
+//! folder owned by SYSTEM or Administrators with exactly that DACL; anything else (a standard
+//! user can create folders in ProgramData beforehand) is moved aside under a random name and
+//! the folder is created again: an existing tree is never repaired and reused, so no handle,
+//! hard link or oplock of someone else can reach what SYSTEM writes there. Inside, `prev\` and
+//! `guard\` are deleted and created fresh for every update.
+//!
 //! `install` (§4.4):
-//! 1. HKLM `Update`: `State=installing`, `Target`, `From`, `FromId`, `FromKeyHash`, `StartedAt`.
-//! 2. Installation folder → `C:\ProgramData\SenseRemote\update\prev\` (robocopy `/MIR /XJ`).
-//! 3. Guard task `GUARD_TASK`: SYSTEM, at start-up and every minute,
-//!    `prev\SenseRemote.exe --sense-update-guard`.
-//! 4. Upstream's path: copy and verify the file once more
+//! 1. Preparing: the store keeps the engine's state (`verifying`) while the old installation is
+//!    copied to `update\prev\` (robocopy `/MIR /XJ`) and the guard task `GUARD_TASK` is
+//!    registered (SYSTEM, at start-up and every minute, `prev\SenseRemote.exe
+//!    --sense-update-guard`; Task Scheduler XML written `create_new` under a random name in the
+//!    protected folder and removed right after).
+//! 2. Only then HKLM `Update`: `State=installing`, `Target`, `From`, `FromId`, `FromKeyHash`,
+//!    `StartedAt`. So `installing` always has a guard; a crash before it leaves the engine's
+//!    own state (B-U3-2), and `recover_on_start` clears what a crash between the steps leaves.
+//! 3. Upstream's path: copy and verify the file once more
 //!    (`copy_and_verify_update_file_sha256`), then
 //!    `launch_privileged_process(session, "\"<verified copy>\" --update")` (as `updater.rs`),
 //!    which ends in `update_me`. `update_me` renames the program to `SenseRemote.exe`, so the
@@ -24,13 +37,13 @@
 //! HKLM `Version`; otherwise `State=unhealthy` + `identity_changed` and the guard rolls back.
 //!
 //! Rules: every path in a command line is a constant or a checked path (absolute, none of
-//! `" % CR LF NUL`), passed as its own argument or quoted; `C:\ProgramData\SenseRemote` gets an
-//! ACL for SYSTEM + Administrators only (owner Administrators, inheritance cut) and reparse
-//! points are refused on every level; never during an active connection (the engine checks,
-//! `install` checks again right before the installer starts).
+//! `" % CR LF NUL`), passed as its own argument or quoted; reparse points are refused on every
+//! level; never during an active connection (the engine checks, `install` checks again right
+//! before the installer starts).
 //!
-//! The command lines, the task XML and the self-check decision are pure and tested on every
-//! platform; what runs them is `cfg(windows)`. Elsewhere the functions answer "unsupported".
+//! The command lines, the task XML, the descriptor check and the decisions are pure and tested
+//! on every platform; what runs them is `cfg(windows)`. Elsewhere the functions answer
+//! "unsupported".
 
 use super::{
     store::{Persisted, StoredState},
@@ -44,6 +57,9 @@ pub const GUARD_TASK: &str = "SenseRemoteUpdateGuard";
 pub const INSTALLED_EXE: &str = "SenseRemote.exe";
 /// Service name (`crate::get_app_name()` of the installed program).
 pub const SERVICE: &str = "SenseRemote";
+/// DACL of `<ProgramData>\SenseRemote`: protected (no inheritance), full access for SYSTEM and
+/// Administrators, inherited by everything inside. No one else, not even read.
+pub const SENSE_DIR_DACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
 
 /// `upgrade_local` exit codes (U7 maps them to `manual::*`).
 pub const UPGRADE_OK: i32 = 0;
@@ -55,7 +71,7 @@ pub const UPGRADE_NOT_ELEVATED: i32 = 4;
 /// Characters a path in a command line, a quoted command or the task XML must not hold.
 const UNSAFE_PATH_CHARS: &[char] = &['"', '%', '\r', '\n', '\0'];
 
-/// `<ProgramData>\SenseRemote`: the folder whose ACL `secure_tree` sets.
+/// `<ProgramData>\SenseRemote`: the protected folder.
 pub fn sense_data_dir(program_data: &Path) -> PathBuf {
     program_data.join("SenseRemote")
 }
@@ -79,6 +95,16 @@ pub fn dl_dir(program_data: &Path) -> PathBuf {
 /// old version 2 has no `--sense-update-guard`.
 pub fn guard_dir(program_data: &Path) -> PathBuf {
     update_dir(program_data).join("guard")
+}
+
+/// Where an untrusted `SenseRemote` folder is moved: next to it, random name.
+pub fn aside_dir(program_data: &Path, random: &str) -> PathBuf {
+    program_data.join(format!("SenseRemote.untrusted-{random}"))
+}
+
+/// Task XML file name inside `update\`: random, created with `create_new`.
+pub fn guard_xml_name(random: &str) -> String {
+    format!("guard-{random}.xml")
 }
 
 /// Absolute, valid UTF-8 and none of `UNSAFE_PATH_CHARS`.
@@ -118,28 +144,34 @@ pub fn robocopy_succeeded(code: Option<i32>) -> bool {
     matches!(code, Some(0..=7))
 }
 
-/// icacls runs, in order, for `<ProgramData>\SenseRemote`: owner Administrators (whole tree),
-/// drop explicit entries (whole tree), cut inheritance and allow only SYSTEM and Administrators.
-/// `/L` acts on a link itself, never on its target.
-pub fn icacls_runs(dir: &Path) -> Vec<Vec<String>> {
-    let dir = dir.to_string_lossy().trim_end_matches('\\').to_owned();
-    let run = |args: &[&str]| {
-        std::iter::once(dir.clone())
-            .chain(args.iter().map(|a| (*a).to_owned()))
-            .collect::<Vec<_>>()
+/// Whether the owner + DACL of an existing `<ProgramData>\SenseRemote`, as SDDL
+/// (`O:..D:..`), is what `create_protected_dir` makes: owner SYSTEM or Administrators, a
+/// protected DACL with exactly the two entries (any order; auto-inherit flags allowed).
+pub fn is_expected_sddl(sddl: &str) -> bool {
+    let Some(rest) = sddl.strip_prefix("O:") else {
+        return false;
     };
-    vec![
-        run(&["/setowner", "*S-1-5-32-544", "/T", "/L", "/Q"]),
-        run(&["/reset", "/T", "/L", "/Q"]),
-        run(&[
-            "/inheritance:r",
-            "/grant:r",
-            "*S-1-5-18:(OI)(CI)F",
-            "*S-1-5-32-544:(OI)(CI)F",
-            "/L",
-            "/Q",
-        ]),
-    ]
+    let Some((owner, dacl)) = rest.split_once("D:") else {
+        return false;
+    };
+    // `G:` may follow the owner when the group was asked for; this check never asks for it.
+    if owner != "SY" && owner != "BA" {
+        return false;
+    }
+    let flags_end = dacl.find('(').unwrap_or(dacl.len());
+    let (flags, aces) = dacl.split_at(flags_end);
+    let flags_ok = flags.contains('P')
+        && flags
+            .replace("AI", "")
+            .replace("AR", "")
+            .chars()
+            .all(|c| c == 'P');
+    if !flags_ok || !aces.starts_with('(') || !aces.ends_with(')') {
+        return false;
+    }
+    let mut entries: Vec<&str> = aces[1..aces.len() - 1].split(")(").collect();
+    entries.sort_unstable();
+    entries == ["A;OICI;FA;;;BA", "A;OICI;FA;;;SY"]
 }
 
 fn xml_escape(text: &str) -> String {
@@ -195,6 +227,10 @@ pub fn schtasks_delete_args() -> Vec<String> {
     ["/Delete", "/TN", GUARD_TASK, "/F"].map(str::to_owned).to_vec()
 }
 
+pub fn schtasks_query_args() -> Vec<String> {
+    ["/Query", "/TN", GUARD_TASK].map(str::to_owned).to_vec()
+}
+
 /// Kills the installed program's processes by image name, never the calling process (the guard
 /// runs as `SenseRemote.exe` itself).
 pub fn taskkill_args(self_pid: u32) -> Vec<String> {
@@ -247,7 +283,39 @@ pub fn check_self(state: Option<&Persisted>, my_version: u32, observed: &Observe
     }
 }
 
-/// Step 1 of `install`: what the store says while installing. Keeps `attempts` (the engine
+/// What a start finds left over by a crash (B-U3-2), after `check_self` said `NotMine`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recovery {
+    Nothing,
+    /// `installing` for another version with no guard: nothing will ever finish it. The
+    /// installation did not happen (or the old version is back): `failed`, so the engine is
+    /// free again.
+    Fail,
+    /// A guard without an installation (the crash fell between registering the guard and
+    /// writing `installing`): remove it.
+    RemoveGuard,
+}
+
+pub fn recover_on_start(state: &Persisted, my_version: u32, guard_exists: bool) -> Recovery {
+    match state.state {
+        StoredState::Installing if state.target != Some(my_version) && !guard_exists => {
+            Recovery::Fail
+        }
+        StoredState::Idle
+        | StoredState::Available
+        | StoredState::Scheduled
+        | StoredState::WaitingIdle
+        | StoredState::Downloading
+        | StoredState::Verifying
+            if guard_exists =>
+        {
+            Recovery::RemoveGuard
+        }
+        _ => Recovery::Nothing,
+    }
+}
+
+/// Step 2 of `install`: what the store says while installing. Keeps `attempts` (the engine
 /// counts them), clears the old verdict.
 pub fn installing_state(
     before: Option<&Persisted>,
@@ -272,6 +340,16 @@ pub fn installing_state(
     }
 }
 
+/// `failed` + `install_failed` on top of `before` (the engine's state or `installing`).
+pub fn failed_state(before: Option<&Persisted>, job: &InstallJob) -> Persisted {
+    let mut state = before.cloned().unwrap_or_else(|| installing_state(None, job, 0, None, None, 0));
+    state.state = StoredState::Failed;
+    state.target = Some(job.version);
+    state.source = Some(job.source);
+    state.last_error = Some(UpdateError::InstallFailed);
+    state
+}
+
 /// After a rollback: `rolled_back`; the reason stays (`identity_changed` from the self-check),
 /// otherwise the new version never declared itself healthy (`health_timeout`).
 pub fn rolled_back_state(before: &Persisted) -> Persisted {
@@ -289,11 +367,22 @@ fn now_s() -> i64 {
 }
 
 #[cfg(windows)]
-pub use win::{download_dir, install, remove_guard, roll_back, self_check, upgrade_local};
+pub use win::{
+    download_dir_path, install, prepare_download_dir, remove_guard, roll_back, self_check,
+    upgrade_local,
+};
 
-/// The privileged folder downloads go to; `None` when it can not be made safe.
+/// Where downloads go (the privileged folder), path only: no file system work, no ACL, no
+/// process. `None` on a platform without updates.
 #[cfg(not(windows))]
-pub fn download_dir() -> Option<PathBuf> {
+pub fn download_dir_path() -> Option<PathBuf> {
+    None
+}
+
+/// Makes `download_dir_path()` safe and returns it; called once per download, right before it
+/// starts. `None` when it can not be made safe (the download then fails).
+#[cfg(not(windows))]
+pub fn prepare_download_dir() -> Option<PathBuf> {
     None
 }
 
@@ -317,7 +406,8 @@ pub fn remove_guard() -> Result<(), UpdateError> {
     Err(UpdateError::Unsupported)
 }
 
-/// The new version's check at start (§5.3). `Ok` also when there was nothing to check.
+/// The new version's check at start (§5.3), plus `recover_on_start`. `Ok` also when there was
+/// nothing to check.
 #[cfg(not(windows))]
 pub fn self_check() -> Result<(), UpdateError> {
     Ok(())
@@ -339,15 +429,30 @@ mod win {
     use super::*;
     use crate::sense::update::{current_version, store, UpdateSource};
     use hbb_common::{config::Config, log};
-    use std::{os::windows::fs::MetadataExt, process::Command};
+    use std::{
+        io::Write,
+        os::windows::fs::{MetadataExt, OpenOptionsExt},
+        process::Command,
+    };
 
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 
-    fn program_data() -> PathBuf {
-        std::env::var_os("ProgramData")
-            .map(PathBuf::from)
-            .filter(|p| is_safe_path(p) && p.is_dir())
-            .unwrap_or_else(|| PathBuf::from("C:\\ProgramData"))
+    fn random() -> String {
+        uuid::Uuid::new_v4().simple().to_string()
+    }
+
+    /// `FOLDERID_ProgramData`, never an environment variable.
+    fn program_data() -> Option<PathBuf> {
+        use windows::Win32::{
+            System::Com::CoTaskMemFree,
+            UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath, KF_FLAG_DEFAULT},
+        };
+        let value = unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, KF_FLAG_DEFAULT, None) }
+            .ok()?;
+        let path = unsafe { value.to_string() };
+        unsafe { CoTaskMemFree(Some(value.0.cast())) };
+        let path = PathBuf::from(path.ok()?);
+        is_safe_path(&path).then_some(path)
     }
 
     fn run(program: &str, args: &[String]) -> Option<i32> {
@@ -383,49 +488,167 @@ mod win {
         }
     }
 
-    /// Creates `dir` under `base` level by level, refusing reparse points on the way.
-    fn make_dirs(base: &Path, dir: &Path) -> Result<(), String> {
-        let rest = dir.strip_prefix(base).map_err(|_| "outside base".to_owned())?;
-        let mut path = base.to_path_buf();
-        if !plain_dir(&path)? {
-            return Err(format!("missing: {}", path.display()));
+    /// Creates the folder with `SENSE_DIR_DACL` in the same call (as upstream's
+    /// `installer_handoff::directory::create`); fails when it already exists.
+    pub(super) fn create_protected_dir(path: &Path) -> Result<(), String> {
+        use windows::{
+            core::{HSTRING, PCWSTR},
+            Win32::{
+                Foundation::{LocalFree, HLOCAL},
+                Security::{
+                    Authorization::{
+                        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+                    },
+                    PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
+                },
+                Storage::FileSystem::CreateDirectoryW,
+            },
+        };
+        let path_text = path.to_str().filter(|_| is_safe_path(path)).ok_or("unsafe path")?;
+        let wide_path = crate::platform::wide_string(path_text);
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        unsafe {
+            // The literal is `SENSE_DIR_DACL` (`w!` needs a literal; a test compares them).
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                w!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                None,
+            )
         }
-        for part in rest.components() {
-            path.push(part);
-            if !plain_dir(&path)? {
-                std::fs::create_dir(&path).map_err(|err| err.to_string())?;
-                if !plain_dir(&path)? {
-                    return Err(format!("not created: {}", path.display()));
-                }
-            }
-        }
-        Ok(())
+        .map_err(|err| err.to_string())?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor.0,
+            bInheritHandle: false.into(),
+        };
+        let result = unsafe { CreateDirectoryW(PCWSTR(wide_path.as_ptr()), Some(&attributes)) };
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+        result.map_err(|err| format!("{}: {err}", path.display()))
     }
 
-    /// `secure` on any root (tests use a temporary one): the folders exist, no level is a
-    /// reparse point, and `<root>\SenseRemote` is SYSTEM + Administrators only.
-    pub(super) fn secure_in(program_data: &Path, dirs: &[PathBuf]) -> Result<(), String> {
+    /// Owner + DACL of `path` as SDDL.
+    pub(super) fn sddl_of(path: &Path) -> Result<String, String> {
+        use windows::{
+            core::{PCWSTR, PWSTR},
+            Win32::{
+                Foundation::{LocalFree, HLOCAL},
+                Security::{
+                    Authorization::{
+                        ConvertSecurityDescriptorToStringSecurityDescriptorW,
+                        GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
+                    },
+                    DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+                },
+            },
+        };
+        let path_text = path.to_str().ok_or("path is not unicode")?;
+        let wide_path = crate::platform::wide_string(path_text);
+        let info = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        let result = unsafe {
+            GetNamedSecurityInfoW(
+                PCWSTR(wide_path.as_ptr()),
+                SE_FILE_OBJECT,
+                info,
+                None,
+                None,
+                None,
+                None,
+                &mut descriptor,
+            )
+        };
+        if result.0 != 0 {
+            return Err(format!("GetNamedSecurityInfoW: {}", result.0));
+        }
+        let mut text = PWSTR::null();
+        let converted = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                SDDL_REVISION_1,
+                info,
+                &mut text,
+                None,
+            )
+        };
+        let sddl = match converted {
+            Ok(()) => {
+                let value = unsafe { text.to_string() }.map_err(|err| err.to_string());
+                unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+                value
+            }
+            Err(err) => Err(err.to_string()),
+        };
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+        sddl
+    }
+
+    /// `<program_data>\SenseRemote` exists, is ours and protected (see the module comment).
+    /// Never repairs an existing folder: an untrusted one is moved aside and created anew.
+    pub(super) fn secure_top(program_data: &Path) -> Result<PathBuf, String> {
+        if !plain_dir(program_data)? {
+            return Err(format!("missing: {}", program_data.display()));
+        }
         let top = sense_data_dir(program_data);
-        make_dirs(program_data, &top)?;
-        for args in icacls_runs(&top) {
-            if !run_ok("icacls", &args) {
-                return Err(format!("icacls failed: {}", args[1]));
+        if plain_dir(&top).unwrap_or(true) {
+            // Exists (or is a link / file): keep it only when it is exactly ours.
+            let trusted = plain_dir(&top).unwrap_or(false)
+                && sddl_of(&top).is_ok_and(|sddl| is_expected_sddl(&sddl))
+                && plain_dir(&top).unwrap_or(false);
+            if trusted {
+                return Ok(top);
             }
+            let aside = aside_dir(program_data, &random());
+            log::warn!(
+                "Sense Remote: untrusted {} moved to {}",
+                top.display(),
+                aside.display()
+            );
+            std::fs::rename(&top, &aside).map_err(|err| format!("not moved aside: {err}"))?;
         }
-        for dir in dirs {
-            make_dirs(program_data, dir)?;
+        create_protected_dir(&top)?;
+        let sddl = sddl_of(&top)?;
+        if !plain_dir(&top)? || !is_expected_sddl(&sddl) {
+            return Err(format!("unexpected security after creation: {sddl}"));
+        }
+        Ok(top)
+    }
+
+    /// A sub folder of the protected tree: created when missing (it inherits the protected
+    /// DACL), refused when it is not a real folder.
+    fn sub_dir(dir: &Path) -> Result<(), String> {
+        if !plain_dir(dir)? {
+            std::fs::create_dir(dir).map_err(|err| format!("{}: {err}", dir.display()))?;
+            if !plain_dir(dir)? {
+                return Err(format!("not created: {}", dir.display()));
+            }
         }
         Ok(())
     }
 
-    fn secure(dirs: &[PathBuf]) -> Result<(), String> {
-        secure_in(&program_data(), dirs)
+    /// A sub folder created anew: whatever was there is deleted first.
+    pub(super) fn fresh_dir(dir: &Path) -> Result<(), String> {
+        if plain_dir(dir)? {
+            std::fs::remove_dir_all(dir).map_err(|err| format!("{}: {err}", dir.display()))?;
+        }
+        sub_dir(dir)
     }
 
-    pub fn download_dir() -> Option<PathBuf> {
-        let dir = dl_dir(&program_data());
-        match secure(std::slice::from_ref(&dir)) {
-            Ok(()) => Some(dir),
+    pub fn download_dir_path() -> Option<PathBuf> {
+        program_data().map(|pd| dl_dir(&pd))
+    }
+
+    pub fn prepare_download_dir() -> Option<PathBuf> {
+        let result = (|| {
+            let pd = program_data().ok_or("no ProgramData")?;
+            secure_top(&pd)?;
+            sub_dir(&update_dir(&pd))?;
+            let dir = dl_dir(&pd);
+            sub_dir(&dir)?;
+            Ok::<_, String>(dir)
+        })();
+        match result {
+            Ok(dir) => Some(dir),
             Err(err) => {
                 log::error!("Sense Remote: update download folder not safe: {err}");
                 None
@@ -455,17 +678,24 @@ mod win {
         Ok(path)
     }
 
-    fn register_guard(exe: &Path) -> Result<(), String> {
+    fn register_guard(update: &Path, exe: &Path) -> Result<(), String> {
         let xml = guard_task_xml(exe).ok_or("unsafe guard path")?;
-        let file = update_dir(&program_data()).join("guard.xml");
+        let file = update.join(guard_xml_name(&random()));
         // Task Scheduler reads UTF-16 with a byte order mark.
         let bytes: Vec<u8> = std::iter::once(0xFEFF_u16)
             .chain(xml.encode_utf16())
             .flat_map(u16::to_le_bytes)
             .collect();
-        std::fs::write(&file, bytes).map_err(|err| err.to_string())?;
-        let created = run_ok("schtasks", &schtasks_create_args(&file));
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        let written = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&file)
+            .and_then(|mut f| f.write_all(&bytes));
+        let created = written.is_ok() && run_ok("schtasks", &schtasks_create_args(&file));
         let _ = std::fs::remove_file(&file);
+        written.map_err(|err| err.to_string())?;
         if created {
             Ok(())
         } else {
@@ -473,17 +703,16 @@ mod win {
         }
     }
 
+    fn guard_exists() -> bool {
+        run_ok("schtasks", &schtasks_query_args())
+    }
+
     pub fn remove_guard() -> Result<(), UpdateError> {
-        if run_ok("schtasks", &schtasks_delete_args()) {
+        if run_ok("schtasks", &schtasks_delete_args()) || !guard_exists() {
             return Ok(());
         }
-        let query = ["/Query", "/TN", GUARD_TASK].map(str::to_owned).to_vec();
-        if run_ok("schtasks", &query) {
-            log::error!("Sense Remote: update guard task not removed");
-            Err(UpdateError::InstallFailed)
-        } else {
-            Ok(())
-        }
+        log::error!("Sense Remote: update guard task not removed");
+        Err(UpdateError::InstallFailed)
     }
 
     fn write_state(state: &Persisted) {
@@ -492,41 +721,55 @@ mod win {
         }
     }
 
-    /// Steps 1–3 shared by `install` and `upgrade_local`: state, backup, guard. On error the
-    /// state says `failed` and no guard is left behind.
+    /// Until `disarm`: on drop the guard is removed and the store says `failed`, so every early
+    /// return leaves a clean state.
+    struct Armed {
+        failed: Persisted,
+        armed: bool,
+    }
+
+    impl Armed {
+        fn new(job: &InstallJob) -> Self {
+            let before = store::read().ok().flatten();
+            Self {
+                failed: failed_state(before.as_ref(), job),
+                armed: true,
+            }
+        }
+
+        fn disarm(mut self) {
+            self.armed = false;
+        }
+    }
+
+    impl Drop for Armed {
+        fn drop(&mut self) {
+            if self.armed {
+                let _ = remove_guard();
+                write_state(&self.failed);
+            }
+        }
+    }
+
+    /// Steps 1–2 shared by `install` and `upgrade_local`: backup, guard, then `installing`.
     fn prepare(
+        armed: &mut Armed,
         job: &InstallJob,
         from: u32,
         identity: Option<(String, String)>,
         guard_from: Option<&Path>,
-    ) -> Result<PersistedGuard, String> {
+    ) -> Result<(), String> {
         let install = install_dir()?;
-        let before = store::read()?;
-        let (from_id, from_key_hash) = identity.unzip();
-        let state = installing_state(
-            before.as_ref(),
-            job,
-            from,
-            from_id,
-            from_key_hash,
-            now_s(),
-        );
-        store::write(&state)?;
-        let failed = PersistedGuard {
-            state,
-            install,
-            armed: true,
-        };
-        let pd = program_data();
-        let mut dirs = vec![prev_dir(&pd)];
-        if guard_from.is_some() {
-            dirs.push(guard_dir(&pd));
-        }
-        secure(&dirs)?;
-        mirror(&failed.install, &prev_dir(&pd))?;
+        let pd = program_data().ok_or("no ProgramData")?;
+        secure_top(&pd)?;
+        let update = update_dir(&pd);
+        sub_dir(&update)?;
+        fresh_dir(&prev_dir(&pd))?;
+        mirror(&install, &prev_dir(&pd))?;
         let guard_exe = match guard_from {
             // Manual move: the old version 2 has no guard; a copy of this new program guards.
             Some(own_dir) => {
+                fresh_dir(&guard_dir(&pd))?;
                 mirror(own_dir, &guard_dir(&pd))?;
                 let name = std::env::current_exe()
                     .ok()
@@ -539,43 +782,20 @@ mod win {
         if !guard_exe.is_file() {
             return Err("guard program missing".to_owned());
         }
-        register_guard(&guard_exe)?;
-        Ok(failed)
-    }
-
-    /// Writes `failed` and removes the guard unless `disarm` was called: every early return
-    /// after step 1 leaves a clean state.
-    struct PersistedGuard {
-        state: Persisted,
-        install: PathBuf,
-        armed: bool,
-    }
-
-    impl PersistedGuard {
-        fn disarm(mut self) {
-            self.armed = false;
-        }
-    }
-
-    impl Drop for PersistedGuard {
-        fn drop(&mut self) {
-            if self.armed {
-                let _ = remove_guard();
-                let mut state = self.state.clone();
-                state.state = StoredState::Failed;
-                state.last_error = Some(UpdateError::InstallFailed);
-                write_state(&state);
-            }
-        }
-    }
-
-    fn mark_failed(job: &InstallJob, before: u32) {
-        let _ = remove_guard();
-        let current = store::read().ok().flatten();
-        let mut state = installing_state(current.as_ref(), job, before, None, None, now_s());
-        state.state = StoredState::Failed;
-        state.last_error = Some(UpdateError::InstallFailed);
-        write_state(&state);
+        register_guard(&update, &guard_exe)?;
+        let before = store::read()?;
+        let (from_id, from_key_hash) = identity.unzip();
+        let state = installing_state(
+            before.as_ref(),
+            job,
+            from,
+            from_id,
+            from_key_hash,
+            now_s(),
+        );
+        store::write(&state)?;
+        armed.failed = failed_state(Some(&state), job);
+        Ok(())
     }
 
     fn identity() -> (String, String) {
@@ -594,15 +814,7 @@ mod win {
         let Some(file) = job.file.to_str().filter(|_| is_safe_path(&job.file)) else {
             return Err(UpdateError::InstallFailed);
         };
-        let guard = match prepare(job, mine, Some(identity()), None) {
-            Ok(guard) => guard,
-            Err(err) => {
-                log::error!("Sense Remote: update {} not prepared: {err}", job.version);
-                mark_failed(job, mine);
-                return Err(UpdateError::InstallFailed);
-            }
-        };
-        // Step 4, as upstream's `update_new_version`: a private, locked copy checked once more.
+        // Checked before anything is touched: a bad file changes nothing.
         let verified = match crate::platform::copy_and_verify_update_file_sha256(file, &job.sha256)
         {
             Ok(verified) => verified,
@@ -628,6 +840,12 @@ mod win {
             verified.cleanup();
             return Err(UpdateError::InstallFailed);
         };
+        let mut armed = Armed::new(job);
+        if let Err(err) = prepare(&mut armed, job, mine, Some(identity()), None) {
+            log::error!("Sense Remote: update {} not prepared: {err}", job.version);
+            verified.cleanup();
+            return Err(UpdateError::InstallFailed);
+        }
         if !crate::updater::has_no_active_conns() {
             verified.cleanup();
             return Err(UpdateError::Busy);
@@ -649,7 +867,7 @@ mod win {
                 log::info!("Sense Remote: update {} started", job.version);
                 // The started `--update` schedules the removal of its own verified copy.
                 drop(verified);
-                guard.disarm();
+                armed.disarm();
                 Ok(())
             }
             Ok(_) | Err(_) => {
@@ -678,8 +896,10 @@ mod win {
                 return Err(UpdateError::RollbackFailed);
             }
         };
-        let pd = program_data();
-        let prev = prev_dir(&pd);
+        let prev = match program_data() {
+            Some(pd) => prev_dir(&pd),
+            None => return Err(UpdateError::RollbackFailed),
+        };
         let install = match install_dir() {
             Ok(install) if prev.join(INSTALLED_EXE).is_file() => install,
             _ => {
@@ -691,8 +911,7 @@ mod win {
         let _ = run("sc", &["stop".to_owned(), SERVICE.to_owned()]);
         wait_service_stopped();
         let _ = run("taskkill", &taskkill_args(std::process::id()));
-        let copied = plain_dir(&prev).and_then(|_| mirror(&prev, &install));
-        let result = match copied {
+        let result = match mirror(&prev, &install) {
             Ok(()) => {
                 if let Err(err) = store::store_installed_version(before.from.unwrap_or(0)) {
                     log::error!("Sense Remote: version not restored: {err}");
@@ -714,7 +933,8 @@ mod win {
 
     pub fn self_check() -> Result<(), UpdateError> {
         let state = match store::read() {
-            Ok(state) => state,
+            Ok(Some(state)) => state,
+            Ok(None) => return Ok(()),
             Err(err) => {
                 log::error!("Sense Remote: update state unreadable: {err}");
                 return Ok(());
@@ -728,11 +948,23 @@ mod win {
             key_hash,
             api_server_is_builtin: crate::sense::api_server() == crate::sense::API_SERVER,
         };
-        let Some(mut state) = state else {
-            return Ok(());
-        };
+        let mut state = state;
         match check_self(Some(&state), mine, &observed) {
-            SelfCheck::NotMine => Ok(()),
+            SelfCheck::NotMine => {
+                match recover_on_start(&state, mine, guard_exists()) {
+                    Recovery::Nothing => {}
+                    Recovery::Fail => {
+                        log::warn!("Sense Remote: unfinished update {:?} marked failed", state.target);
+                        state.state = StoredState::Failed;
+                        state.last_error = Some(UpdateError::InstallFailed);
+                        write_state(&state);
+                    }
+                    Recovery::RemoveGuard => {
+                        let _ = remove_guard();
+                    }
+                }
+                Ok(())
+            }
             SelfCheck::Healthy => {
                 if let Err(err) = store::store_installed_version(mine) {
                     log::error!("Sense Remote: version not stored: {err}");
@@ -787,14 +1019,11 @@ mod win {
             source: UpdateSource::Manual,
             oid: None,
         };
-        let guard = match prepare(&job, installed, None, Some(&own_dir)) {
-            Ok(guard) => guard,
-            Err(err) => {
-                log::error!("Sense Remote: manual update not prepared: {err}");
-                mark_failed(&job, installed);
-                return UPGRADE_FAILED;
-            }
-        };
+        let mut armed = Armed::new(&job);
+        if let Err(err) = prepare(&mut armed, &job, installed, None, Some(&own_dir)) {
+            log::error!("Sense Remote: manual update not prepared: {err}");
+            return UPGRADE_FAILED;
+        }
         // As `core_main`'s `--update`, in this elevated process: `update_me` copies this
         // program's folder over the installation and restarts the service.
         match crate::platform::prepare_custom_client_update() {
@@ -803,7 +1032,7 @@ mod win {
         }
         match crate::platform::update_me(false) {
             Ok(()) => {
-                guard.disarm();
+                armed.disarm();
                 UPGRADE_OK
             }
             Err(err) => {
@@ -850,10 +1079,10 @@ mod tests {
         )
     }
 
-    // Outside Windows the flag never does anything.
+    // Outside Windows the platform side never does anything.
     #[cfg(not(windows))]
     #[test]
-    fn upgrade_local_is_windows_only() {
+    fn nothing_happens_outside_windows() {
         let args = |list: &[&str]| list.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>();
         assert_eq!(upgrade_local(&[]), 1);
         assert_eq!(upgrade_local(&args(&["SenseRemote-Kurulum-3.exe"])), 1);
@@ -861,7 +1090,8 @@ mod tests {
         assert_eq!(crate::sense::update::run_cli(&cli), Some(1));
         assert_eq!(install(&job(4)), Err(UpdateError::Unsupported));
         assert_eq!(roll_back(), Err(UpdateError::Unsupported));
-        assert_eq!(download_dir(), None);
+        assert_eq!(download_dir_path(), None);
+        assert_eq!(prepare_download_dir(), None);
     }
 
     #[test]
@@ -871,6 +1101,11 @@ mod tests {
         assert_eq!(text(prev_dir(pd)), "C:\\ProgramData\\SenseRemote\\update\\prev");
         assert_eq!(text(dl_dir(pd)), "C:\\ProgramData\\SenseRemote\\update\\dl");
         assert_eq!(text(guard_dir(pd)), "C:\\ProgramData\\SenseRemote\\update\\guard");
+        assert_eq!(
+            text(aside_dir(pd, "abc")),
+            "C:\\ProgramData\\SenseRemote.untrusted-abc"
+        );
+        assert_eq!(guard_xml_name("abc"), "guard-abc.xml");
     }
 
     #[test]
@@ -925,10 +1160,11 @@ mod tests {
         let xml = guard_task_xml(Path::new("C:\\A&B\\SenseRemote.exe")).unwrap();
         assert!(xml.contains("<Command>C:\\A&amp;B\\SenseRemote.exe</Command>"));
         assert_eq!(
-            schtasks_create_args(Path::new("C:\\x\\guard.xml")),
-            ["/Create", "/TN", "SenseRemoteUpdateGuard", "/XML", "C:\\x\\guard.xml", "/F"]
+            schtasks_create_args(Path::new("C:\\x\\guard-1.xml")),
+            ["/Create", "/TN", "SenseRemoteUpdateGuard", "/XML", "C:\\x\\guard-1.xml", "/F"]
         );
         assert_eq!(schtasks_delete_args(), ["/Delete", "/TN", "SenseRemoteUpdateGuard", "/F"]);
+        assert_eq!(schtasks_query_args(), ["/Query", "/TN", "SenseRemoteUpdateGuard"]);
     }
 
     #[test]
@@ -936,16 +1172,34 @@ mod tests {
         assert_eq!(taskkill_args(42), ["/F", "/IM", "SenseRemote.exe", "/FI", "PID ne 42"]);
     }
 
+    // B-U3-1: only a folder exactly like the one we create is used.
     #[test]
-    fn acl_is_system_and_administrators_only() {
-        let runs = icacls_runs(Path::new("C:\\ProgramData\\SenseRemote"));
-        assert_eq!(runs.len(), 3);
-        assert!(runs.iter().all(|r| r[0] == "C:\\ProgramData\\SenseRemote"));
-        assert!(runs.iter().all(|r| r.contains(&"/L".to_owned())), "links are not followed");
-        let grants = runs[2].join(" ");
-        assert!(grants.contains("/inheritance:r"));
-        assert!(grants.contains("*S-1-5-18:(OI)(CI)F") && grants.contains("*S-1-5-32-544:(OI)(CI)F"));
-        assert!(!grants.contains("S-1-5-11") && !grants.contains("S-1-5-32-545"));
+    fn only_our_own_protected_folder_is_trusted() {
+        // The descriptor the folder is created with is the one checked.
+        assert!(include_str!("apply_win.rs").contains(&format!("w!(\"{SENSE_DIR_DACL}\")")));
+        for good in [
+            "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+            "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+            "O:SYD:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)",
+        ] {
+            assert!(is_expected_sddl(good), "{good}");
+        }
+        for bad in [
+            // A user's own folder: owner, inheritance, more entries.
+            "O:S-1-5-21-1-2-3-1001D:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;CO)",
+            "O:S-1-5-21-1-2-3-1001D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+            "O:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+            "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1301bf;;;BU)",
+            "O:SYD:P(A;OICI;FA;;;SY)",
+            "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;WD)",
+            "O:SYD:P(A;OICI;FA;;;SY)(D;OICI;FA;;;BA)",
+            "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BA)",
+            "O:SYD:NO_ACCESS_CONTROL",
+            "O:SY",
+            "",
+        ] {
+            assert!(!is_expected_sddl(bad), "{bad}");
+        }
     }
 
     // §4.4: after an update the program is `SenseRemote.exe`, which is not a setup name, so
@@ -997,6 +1251,27 @@ mod tests {
         }
     }
 
+    // B-U3-2: a crash never leaves the engine locked.
+    #[test]
+    fn start_clears_what_a_crash_left() {
+        let state = installing(4);
+        // `installing` for another version without a guard: nothing would ever finish it.
+        assert_eq!(recover_on_start(&state, 3, false), Recovery::Fail);
+        // With its guard, the guard decides (rollback after the timeout).
+        assert_eq!(recover_on_start(&state, 3, true), Recovery::Nothing);
+        // A guard registered, `installing` never written.
+        let mut verifying = state.clone();
+        verifying.state = StoredState::Verifying;
+        assert_eq!(recover_on_start(&verifying, 3, true), Recovery::RemoveGuard);
+        assert_eq!(recover_on_start(&verifying, 3, false), Recovery::Nothing);
+        // Finished states belong to the guard.
+        for done in [StoredState::Installed, StoredState::Failed, StoredState::RolledBack] {
+            let mut other = state.clone();
+            other.state = done;
+            assert_eq!(recover_on_start(&other, 4, true), Recovery::Nothing, "{done:?}");
+        }
+    }
+
     #[test]
     fn states_around_an_installation() {
         let mut before = installing(4);
@@ -1007,6 +1282,11 @@ mod tests {
         assert_eq!((state.target, state.from, state.attempts), (Some(5), None, 2));
         assert_eq!((state.started_at, state.healthy_at, state.last_error), (Some(7), None, None));
         assert_eq!(state.source, Some(UpdateSource::Panel));
+        let failed = failed_state(Some(&before), &job(5));
+        assert_eq!(failed.state, StoredState::Failed);
+        assert_eq!((failed.target, failed.attempts), (Some(5), 2));
+        assert_eq!(failed.last_error, Some(UpdateError::InstallFailed));
+        assert_eq!(failed_state(None, &job(5)).state, StoredState::Failed);
         let back = rolled_back_state(&installing(4));
         assert_eq!(back.state, StoredState::RolledBack);
         assert_eq!(back.last_error, Some(UpdateError::HealthTimeout));
@@ -1017,11 +1297,12 @@ mod tests {
         assert_eq!(rolled_back_state(&unhealthy).last_error, Some(UpdateError::IdentityChanged));
     }
 
-    // Windows CI: the folder tree is SYSTEM + Administrators only, a junction is refused, and
-    // a backup → broken installation → restore round really restores (robocopy).
+    // Windows CI (elevated), in a temporary "ProgramData": a folder a user made beforehand is
+    // moved aside, never reused; ours is created protected and kept; prev is created anew;
+    // backup -> broken installation -> restore really restores (robocopy); a junction is refused.
     #[cfg(windows)]
     #[test]
-    fn backup_break_and_restore_in_a_temporary_tree() {
+    fn protected_tree_backup_and_restore() {
         if !crate::platform::is_elevated(None).unwrap_or(false) {
             assert!(std::env::var_os("GITHUB_ACTIONS").is_none(), "CI runs elevated");
             return;
@@ -1030,23 +1311,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Planted beforehand, with a file inside: inherited ACL, not ours.
+            let top = sense_data_dir(&base);
+            std::fs::create_dir_all(top.join("update")).unwrap();
+            std::fs::write(top.join("update").join("planted.txt"), b"x").unwrap();
+            assert!(!is_expected_sddl(&win::sddl_of(&top).unwrap()));
+            assert_eq!(win::secure_top(&base).unwrap(), top);
+            let sddl = win::sddl_of(&top).unwrap();
+            assert!(is_expected_sddl(&sddl), "{sddl}");
+            assert!(!top.join("update").exists(), "the planted tree is not reused");
+            let aside = std::fs::read_dir(&base)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().starts_with("SenseRemote.untrusted-"))
+                .count();
+            assert_eq!(aside, 1);
+            // Ours stays.
+            std::fs::create_dir(update_dir(&base)).unwrap();
+            assert_eq!(win::secure_top(&base).unwrap(), top);
+            assert!(update_dir(&base).is_dir());
+
             let install = base.join("install");
             std::fs::create_dir_all(install.join("data")).unwrap();
             std::fs::write(install.join("SenseRemote.exe"), b"v3").unwrap();
             std::fs::write(install.join("data").join("a.dll"), b"v3").unwrap();
-
             let prev = prev_dir(&base);
-            win::secure_in(&base, &[prev.clone()]).unwrap();
-            let acl = std::process::Command::new("icacls")
-                .arg(sense_data_dir(&base))
-                .output()
-                .unwrap();
-            let acl = String::from_utf8_lossy(&acl.stdout).to_string();
-            for broad in ["BUILTIN\\Users", "Authenticated Users", "Everyone", "CREATOR OWNER"] {
-                assert!(!acl.contains(broad), "{broad}: {acl}");
-            }
-            assert!(!acl.contains("(I)"), "inheritance cut: {acl}");
-
+            win::fresh_dir(&prev).unwrap();
+            std::fs::write(prev.join("stale.dll"), b"old").unwrap();
+            win::fresh_dir(&prev).unwrap();
+            assert!(!prev.join("stale.dll").exists(), "prev is created anew");
             win::mirror(&install, &prev).unwrap();
             std::fs::write(install.join("SenseRemote.exe"), b"broken v4").unwrap();
             std::fs::write(install.join("extra.dll"), b"v4").unwrap();
@@ -1058,6 +1351,7 @@ mod tests {
             // A junction in place of a folder is refused, the target is untouched.
             let target = base.join("elsewhere");
             std::fs::create_dir_all(&target).unwrap();
+            std::fs::write(target.join("keep.txt"), b"k").unwrap();
             let dl = dl_dir(&base);
             let status = std::process::Command::new("cmd")
                 .args(["/C", "mklink", "/J"])
@@ -1066,13 +1360,10 @@ mod tests {
                 .status()
                 .unwrap();
             assert!(status.success());
-            assert!(win::secure_in(&base, &[dl.clone()]).is_err());
+            assert!(win::fresh_dir(&dl).is_err());
             assert!(win::mirror(&dl, &install).is_err());
+            assert!(target.join("keep.txt").exists());
         }));
-        let _ = std::process::Command::new("icacls")
-            .arg(&base)
-            .args(["/reset", "/T", "/Q"])
-            .status();
         let _ = std::fs::remove_dir_all(&base);
         result.unwrap();
     }
