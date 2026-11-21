@@ -30,9 +30,17 @@ use std::path::PathBuf;
 /// Label of the guard's launchd job.
 pub const GUARD_LABEL: &str = "com.sensedepartment.remote.update-guard";
 
-/// The privileged folder downloads go to (root 0700); `None` when it can not be made safe.
-/// U0: none.
-pub fn download_dir() -> Option<PathBuf> {
+/// Where downloads go (the privileged folder), path only: no file system work, no ACL, no
+/// process. Called on every engine step (disk space, file names). `None` on a platform without
+/// updates. U0: none.
+pub fn download_dir_path() -> Option<PathBuf> {
+    None
+}
+
+/// Makes `download_dir_path()` safe (creates it, owner and ACL / mode, refuses reparse points
+/// and symlinks) and returns it; called once per download, right before it starts. `None` when
+/// it can not be made safe (the download then fails). U0: none.
+pub fn prepare_download_dir() -> Option<PathBuf> {
     None
 }
 
