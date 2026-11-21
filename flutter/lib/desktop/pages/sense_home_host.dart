@@ -13,6 +13,7 @@ import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
+import 'sense_home_mac.dart';
 import 'sense_home_strings.dart';
 
 typedef _T = SenseCmTokens;
@@ -54,22 +55,38 @@ String senseHostStateText(SenseHostState state) {
 /// Binds the Host home to the app state. The status itself is refreshed by
 /// the home page (it keeps the stock status widget mounted but hidden).
 class SenseHostHome extends StatelessWidget {
-  const SenseHostHome({super.key});
+  const SenseHostHome({super.key, this.onMacPermissionsChanged});
+
+  /// Sense Remote (Mac M7): the permission notice changed the height of the
+  /// card (the Host window follows its content). Never called on Windows.
+  final VoidCallback? onMacPermissionsChanged;
 
   @override
   Widget build(BuildContext context) {
     final stopped = Get.find<RxBool>(tag: 'stop-service');
     final name = bind.mainGetBuildinOption(key: kSenseNameOption);
     final location = bind.mainGetBuildinOption(key: kSenseLocationOption);
-    return Obx(() => SenseHostHomeView(
-          name: name,
-          location: location,
-          deviceId: gFFI.serverModel.serverId.text,
-          state: senseHostStateFrom(
-              status: stateGlobal.svcStatus.value,
-              serviceStopped: stopped.value),
-          onStartService: () => start_service(true),
-        ));
+    Widget view(List<SenseMacPermission> macMissing,
+            void Function(SenseMacPermission)? openMacPermission) =>
+        Obx(() => SenseHostHomeView(
+              name: name,
+              location: location,
+              deviceId: gFFI.serverModel.serverId.text,
+              state: senseHostStateFrom(
+                  status: stateGlobal.svcStatus.value,
+                  serviceStopped: stopped.value),
+              onStartService: () => start_service(true),
+              macMissing: macMissing,
+              onOpenMacPermission: openMacPermission,
+            ));
+    // Sense Remote (Mac M7): macOS privacy permissions are part of "ready" on
+    // a Mac Host; Windows keeps the view as it was.
+    if (!isMacOS) return view(const [], null);
+    return SenseMacPermissionWatch(
+      role: SenseHomeRole.host,
+      onChanged: onMacPermissionsChanged,
+      builder: (_, missing, open) => view(missing, open),
+    );
   }
 }
 
@@ -83,6 +100,8 @@ class SenseHostHomeView extends StatelessWidget {
     required this.deviceId,
     required this.state,
     this.onStartService,
+    this.macMissing = const [],
+    this.onOpenMacPermission,
   });
 
   final String name;
@@ -91,12 +110,26 @@ class SenseHostHomeView extends StatelessWidget {
   final SenseHostState state;
   final VoidCallback? onStartService;
 
+  /// Sense Remote (Mac M7): macOS privacy permissions this Host still lacks
+  /// (always empty on Windows).
+  final List<SenseMacPermission> macMissing;
+  final void Function(SenseMacPermission)? onOpenMacPermission;
+
   @override
   Widget build(BuildContext context) {
     final title = name.trim().isNotEmpty
         ? name.trim()
         : senseHomeText('this_computer');
-    final ready = state == SenseHostState.ready;
+    // Sense Remote (Mac M7): a Mac Host without Screen Recording or
+    // Accessibility is online but can not be seen or used, so it is not
+    // "ready"; the status line names what is missing.
+    final macBlocked =
+        state == SenseHostState.ready && senseMacBlocksHost(macMissing);
+    final ready = state == SenseHostState.ready && !macBlocked;
+    final stateText = macBlocked
+        ? senseHomeText(
+            'mac_not_ready', {'missing': senseMacMissingText(macMissing)})
+        : senseHostStateText(state);
     return Container(
       color: _T.black,
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
@@ -167,7 +200,7 @@ class SenseHostHomeView extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(senseHostStateText(state),
+                      child: Text(stateText,
                           key: const Key('sense-host-state'),
                           style: _T.text(size: 12)),
                     ),
@@ -182,6 +215,14 @@ class SenseHostHomeView extends StatelessWidget {
                         label: senseHomeText('start_service'),
                         strong: true,
                         onTap: onStartService!),
+                  ),
+                if (macMissing.isNotEmpty && onOpenMacPermission != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, left: 16),
+                    child: SenseMacPermissionNotice(
+                        missing: macMissing,
+                        onOpen: onOpenMacPermission!,
+                        showTitle: !macBlocked),
                   ),
               ],
             ),

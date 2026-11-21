@@ -330,8 +330,16 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
       } else if (result == 'cancelled') {
         _error = _t('error-cancelled');
       } else {
-        final known = kSenseInstallTr['error-$result'];
-        _error = known ?? '${_t('error-failed')}\n$result';
+        // Sense Remote (code review K4-9): an unknown result is an internal detail; the
+        // screen shows the general text and the code goes to the log.
+        final key = 'error-$result';
+        final known = _t(key);
+        if (known == key) {
+          debugPrint('Sense Remote: install failed: $result');
+          _error = _t('error-failed');
+        } else {
+          _error = known;
+        }
       }
     });
     if (result.isEmpty) await _enroll();

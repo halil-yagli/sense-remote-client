@@ -687,10 +687,9 @@ void main() {
 
     backend.installResult = 'install failed with elevated exit code 1';
     await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(
-        find.text(
-            '${t('error-failed')}\ninstall failed with elevated exit code 1'),
-        findsOneWidget);
+    // Code review K4-9: the general text only; the result code is not on screen.
+    expect(find.text(t('error-failed')), findsOneWidget);
+    expect(find.textContaining('elevated exit code'), findsNothing);
     expect(backend.enrolls, isEmpty);
   });
 
@@ -938,6 +937,8 @@ void main() {
     expect(backend.agentRestarts, 1);
 
     await tapAndSettle(tester, find.byKey(const Key('sense-perm-next')));
+    // Code review K4-4: leaving the step restarts the agent of a Host once more.
+    expect(backend.agentRestarts, 2);
     final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
     expect(done, contains(t('done-lead')));
     expect(done, isNot(contains(t('done-permissions-missing'))));
@@ -949,8 +950,9 @@ void main() {
     expect(backend.finishes, [false]);
   });
 
-  testWidgets('macOS: a permission that was already there restarts nothing',
-      (tester) async {
+  testWidgets(
+      'macOS: a permission that was already there restarts nothing until the '
+      'Host leaves the step', (tester) async {
     final backend = FakeBackend()
       ..permissions = const SenseMacPermissions(
           screenRecording: true, accessibility: true, inputMonitoring: true);
@@ -960,6 +962,7 @@ void main() {
     expect(find.text(t('perm-all-granted')), findsOneWidget);
     expect(backend.agentRestarts, 0);
     await tapAndSettle(tester, find.byKey(const Key('sense-perm-next')));
+    expect(backend.agentRestarts, 1);
     expect(find.byKey(const Key('sense-finish-open')), findsOneWidget);
   });
 
@@ -1002,6 +1005,8 @@ void main() {
     final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
     expect(done, contains(t('done-permissions-missing')));
     expect(find.byKey(const Key('sense-finish-open')), findsOneWidget);
+    // A Controller has no agent that captures the screen.
+    expect(backend.agentRestarts, 0);
   });
 
   testWidgets('macOS Host: later shows the Host warning', (tester) async {
@@ -1012,6 +1017,12 @@ void main() {
     await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
     expect(find.text(t('perm-later-warning')), findsOneWidget);
     expect(find.byKey(const Key('sense-done')), findsNothing);
+    // Code review K4-4: leaving with "Daha sonra" restarts the agent too, although no
+    // permission was seen as granted (macOS may still give this process the old answer).
+    expect(backend.agentRestarts, 0);
+    await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
+    expect(find.byKey(const Key('sense-done')), findsOneWidget);
+    expect(backend.agentRestarts, 1);
   });
 
   testWidgets('macOS: skipped registration still asks for the permissions',
@@ -1040,7 +1051,8 @@ void main() {
     }
     backend.installResult = 'unsupported';
     await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.text('${t('error-failed')}\nunsupported'), findsOneWidget);
+    expect(find.text(t('error-failed')), findsOneWidget);
+    expect(find.textContaining('unsupported'), findsNothing);
     expect(backend.enrolls, isEmpty);
     expect(backend.permissionReads, 0);
   });

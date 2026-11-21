@@ -27,6 +27,7 @@ import '../widgets/button.dart';
 // Sense Remote: Sense home screens (Controller project cards, small Host home).
 import 'sense_home_controller.dart';
 import 'sense_home_host.dart';
+import 'sense_home_mac.dart';
 import 'sense_home_strings.dart';
 
 /// Sense Remote: role of this computer for the home screen (from the role
@@ -94,7 +95,16 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     final senseHost = senseHomeRole() == SenseHomeRole.host;
     final children = <Widget>[
       if (!isOutgoingOnly) buildPresetPasswordWarning(),
-      if (senseHost) const SenseHostHome(),
+      if (senseHost)
+        // Sense Remote (Mac M7): the macOS permission notice changes the card
+        // height; the Host window follows it (never called on Windows).
+        SenseHostHome(onMacPermissionsChanged: () {
+          if (isInHomePage()) {
+            Future.delayed(Duration(milliseconds: 300), () {
+              _updateWindowSize();
+            });
+          }
+        }),
       if (!senseHost) ...[
       if (bind.isCustomClient())
         Align(
@@ -506,6 +516,18 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         });
       }
     } else if (isMacOS) {
+      // Sense Remote (Mac M7, code review K4-3): the stock English permission
+      // / daemon cards never show on macOS. The Host card carries the
+      // permission state in its status line; Controller and Host + Controller
+      // get one Sense card; without a role the app opens the setup wizard
+      // instead of this page. The stock code below stays, unreachable, to keep
+      // upstream merges small.
+      final senseRole = senseHomeRole();
+      return senseRole == SenseHomeRole.controller ||
+              senseRole == SenseHomeRole.both
+          ? SenseMacPermissionCard(role: senseRole)
+          : const SizedBox.shrink();
+      // ignore: dead_code
       final isOutgoingOnly = bind.isOutgoingOnly();
       if (!(isOutgoingOnly || bind.mainIsCanScreenRecording(prompt: false))) {
         return buildInstallCard("Permissions", "config_screen", "Configure",

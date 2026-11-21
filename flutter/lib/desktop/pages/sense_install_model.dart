@@ -6,6 +6,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'sense_install_strings.dart';
+import 'sense_mac_permissions.dart';
+
+export 'sense_mac_permissions.dart';
 
 String _t(String key) => senseInstallText(key);
 
@@ -62,61 +65,8 @@ enum SenseInstallStep {
 bool senseMacNeedsSetup({required bool isMac, required bool roleInstalled}) =>
     isMac && !roleInstalled;
 
-/// The macOS privacy permissions Sense Remote asks for, in the order they are asked.
-enum SenseMacPermission {
-  screenRecording('screen', 'Privacy_ScreenCapture'),
-  accessibility('accessibility', 'Privacy_Accessibility'),
-  inputMonitoring('input', 'Privacy_ListenEvent');
-
-  const SenseMacPermission(this.textKey, this.pane);
-
-  /// Text keys `perm-<textKey>` / `perm-<textKey>-desc`.
-  final String textKey;
-  final String pane;
-
-  /// The pane of System Settings > Privacy & Security for this permission.
-  String get settingsUrl =>
-      'x-apple.systempreferences:com.apple.preference.security?$pane';
-}
-
-/// What a role needs: a Host is watched and controlled (all three); a Controller only sends
-/// its own keyboard input (Input Monitoring).
-List<SenseMacPermission> senseMacPermissionsFor(
-        {required bool host, required bool controller}) =>
-    host
-        ? SenseMacPermission.values
-        : controller
-            ? const [SenseMacPermission.inputMonitoring]
-            : const [];
-
-/// State of the three permissions, read without a system prompt.
-class SenseMacPermissions {
-  const SenseMacPermissions({
-    this.screenRecording = false,
-    this.accessibility = false,
-    this.inputMonitoring = false,
-  });
-
-  final bool screenRecording;
-  final bool accessibility;
-  final bool inputMonitoring;
-
-  bool granted(SenseMacPermission permission) {
-    switch (permission) {
-      case SenseMacPermission.screenRecording:
-        return screenRecording;
-      case SenseMacPermission.accessibility:
-        return accessibility;
-      case SenseMacPermission.inputMonitoring:
-        return inputMonitoring;
-    }
-  }
-
-  bool sameAs(SenseMacPermissions other) =>
-      screenRecording == other.screenRecording &&
-      accessibility == other.accessibility &&
-      inputMonitoring == other.inputMonitoring;
-}
+// Sense Remote (code review K4-5): the permission model is shared with the home screens
+// (sense_mac_permissions.dart, exported above).
 
 /// What the employee can do about a refused registration (panel `EnrollErrorCode`).
 enum SenseEnrollAction { retry, relogin, edit, wait, none }
