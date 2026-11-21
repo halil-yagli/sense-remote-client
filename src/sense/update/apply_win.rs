@@ -340,13 +340,17 @@ pub fn installing_state(
     }
 }
 
-/// `failed` + `install_failed` on top of `before` (the engine's state or `installing`).
+/// `failed` + `install_failed` on top of `before` (the engine's state or `installing`), without
+/// `started_at` / `healthy_at`.
 pub fn failed_state(before: Option<&Persisted>, job: &InstallJob) -> Persisted {
     let mut state = before.cloned().unwrap_or_else(|| installing_state(None, job, 0, None, None, 0));
     state.state = StoredState::Failed;
     state.target = Some(job.version);
     state.source = Some(job.source);
     state.last_error = Some(UpdateError::InstallFailed);
+    // Nothing was installed: no start time for the guard or the engine to act on (U2).
+    state.started_at = None;
+    state.healthy_at = None;
     state
 }
 
@@ -1286,6 +1290,9 @@ mod tests {
         assert_eq!(failed.state, StoredState::Failed);
         assert_eq!((failed.target, failed.attempts), (Some(5), 2));
         assert_eq!(failed.last_error, Some(UpdateError::InstallFailed));
+        let after_installing = failed_state(Some(&installing(5)), &job(5));
+        assert_eq!((after_installing.started_at, after_installing.healthy_at), (None, None));
+        assert_eq!(after_installing.from_id.as_deref(), Some("123456789"));
         assert_eq!(failed_state(None, &job(5)).state, StoredState::Failed);
         let back = rolled_back_state(&installing(4));
         assert_eq!(back.state, StoredState::RolledBack);
