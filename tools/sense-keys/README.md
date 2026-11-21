@@ -7,8 +7,10 @@ klasöre bırakır. Gizli değer ekrana, komut satırına ya da kabuk geçmişin
 | Betik | Ne üretir | Zorunlu mu |
 | --- | --- | --- |
 | `yapi-anahtari-uret.sh` | **Yapı anahtarı** (Ed25519). Her sürümde kurulum dosyalarının "yapı beyanı" bununla imzalanır; bilgisayarlar bu imza olmadan güncelleme kurmaz. | Evet (güncelleme için) |
+| `yapi-anahtari-uret.sh --deneme` | **Deneme yapı anahtarı** (ayrı Ed25519). Yalnız `deneme_surumu` (900–999) derlemeleri için. | Deneme düzeni için |
 | `mac-sertifika-uret.sh` | **Mac imza sertifikası** (kendinden imzalı, 20 yıl, ücretsiz). Mac paketleri hep aynı kimlikle imzalanır; amaç güncellemede Ekran Kaydı / Erişilebilirlik izinlerinin düşmemesi. | Ekip kararı (K-MAC-İMZA) |
 | `test.sh` | Betiklerin testi: sahte `gh`, geçici deneme anahtarı. Gerçek hiçbir şeye dokunmaz. | — |
+| `ortam-denetimi.sh` | Ortak işlev (betikler kaynak olarak alır): ortamın dal/etiket kuralını doğrular. | — |
 
 ## Gerekenler
 
@@ -25,9 +27,17 @@ klasöre bırakır. Gizli değer ekrana, komut satırına ya da kabuk geçmişin
 | --- | --- |
 | `surum` | Ref type **Tag**, ad deseni `v*` |
 | `imza` | Ref type **Branch**, ad `master` — ve ayrıca Ref type **Tag**, ad deseni `v*` |
+| `deneme` | Ref type **Branch**, ad `master` (yalnız deneme düzeni kurulacaksa) |
 
-Ortam yoksa betik durur ve bu adımı hatırlatır. (Ortam önce açılmazsa GitHub onu korumasız
-oluştururdu; sır her daldan okunabilirdi.)
+Betik sırrı yazmadan önce ortamı denetler ve şu durumlarda durur: ortam yok; *Selected branches
+and tags* seçili değil (ör. *All branches*); kural listesi tablodakinden farklı (fazladan ya da
+eksik kural). (Ortam önce açılmazsa GitHub onu korumasız oluştururdu; sır her daldan
+okunabilirdi.)
+
+**Öneri — `surum` ortamına onay:** aynı sayfada *Required reviewers* işaretleyin ve kendinizi
+(ya da ikinci bir yöneticiyi) ekleyin. Etiket derlemesinin imza işi, biri **Approve** demeden
+yapı anahtarına erişemez; ele geçirilmiş bir hesapla atılan etiket tek başına imzalı sürüm
+üretemez. (Ücretsiz: herkese açık depoda ortam onayı ücretsizdir.)
 
 ## 2. Yapı anahtarı
 
@@ -48,6 +58,20 @@ bash tools/sense-keys/yapi-anahtari-uret.sh
 
 GitHub'da oluşanlar: ortam `surum` sırrı `SENSE_RELEASE_SIGNING_KEY`, depo değişkeni
 `SENSE_RELEASE_KEYS`.
+
+## 2a. Deneme yapı anahtarı (deneme düzeni için, isteğe bağlı)
+
+Önce `deneme` ortamını açın (tablo: yalnız `master` dalı). Sonra:
+
+```bash
+bash tools/sense-keys/yapi-anahtari-uret.sh --deneme
+```
+
+Aynı düzen; yedek dosyası `sense-remote-deneme-yapi-anahtari.pem` (şifre yöneticisinde ad:
+`Sense Remote — deneme yapı anahtarı`). GitHub'da oluşanlar: ortam `deneme` sırrı
+`SENSE_TRIAL_RELEASE_SIGNING_KEY`, depo değişkeni `SENSE_TRIAL_RELEASE_KEYS`. Açık anahtarı
+**yalnız deneme düzenindeki yerel panelde** `SR_RELEASE_KEYS` olarak kullanın; gerçek panele
+girmeyin.
 
 ## 3. Mac imza sertifikası (ekip "evet" dediyse)
 
@@ -81,10 +105,11 @@ Bilinmesi gerekenler:
 | `SENSE_MAC_SIGN=cert`, sırlar yok | uyarı, ad-hoc imza | **düşer** |
 | `SENSE_MAC_SIGN=cert`, sırlar var | sertifika imzası (yalnız `master`; başka dal `imza` ortamına erişemez → uyarı, ad-hoc) | sertifika imzası + DR denetimi |
 
-Derleme ayrıca şunlarda durur (etikette her zaman; `SENSE_RELEASE_KEYS` tanımlıysa her
+Derleme ayrıca şunlarda durur (etikette her zaman; anahtar listelerinden biri tanımlıysa her
 derlemede): yapı anahtarı ile panel anahtarı (`SENSE_ENVELOPE_KEYS`) aynıysa — iki imza kuralı
-tek imzaya düşerdi — ya da listelerden birinde ortak test vektörünün deneme anahtar kimliği
-varsa. Yapı beyanının yükü JCS (RFC 8785) kanonik JSON'dur; test, imzalayıcının çıktısını ortak
+tek imzaya düşerdi —; deneme listesi (`SENSE_TRIAL_RELEASE_KEYS`) üretim yapı listesiyle ya da
+panel listesiyle kesişiyorsa; listelerden birinde ortak test vektörünün deneme anahtar kimliği
+varsa; bir listede satır sonu, CR, sekme ya da `[0-9A-Za-z_=, -]` dışı karakter varsa. Yapı beyanının yükü JCS (RFC 8785) kanonik JSON'dur; test, imzalayıcının çıktısını ortak
 vektördeki `build_ok` vakasıyla bayt bayt karşılaştırır.
 
 Etiket derlemesi taslak sürüme iki kurulum dosyası, `SHA256SUMS.txt` ve iki yapı beyanı ekler:
@@ -92,8 +117,17 @@ Etiket derlemesi taslak sürüme iki kurulum dosyası, `SHA256SUMS.txt` ve iki y
 (`.github/scripts/sense-sign-build.sh` başındaki açıklama). İş, imzayı gizli anahtar olmadan,
 `SENSE_RELEASE_KEYS` ile yeniden doğrular.
 
-Deneme derlemesi: Actions › *Sense Remote build* › Run workflow › `deneme_surumu` = 900–999.
-Etikette kullanılamaz; yapı beyanı **imzalanmaz** (yapı anahtarı yalnız `v*` etiketine açıktır).
+Mac imzası ayrı bir işte atılır (`macos-sign`): derleme işi (`macos`) sırsız çalışır ve imzasız
+uygulamayı yükler; imza işi yalnız depodaki betikleri ve sistem araçlarını kullanır, sırlar
+yalnız imza adımına verilir, dmg ve doğrulama (uygulamanın `--version` ile çalıştırılması dahil)
+sırsız sonraki adımdadır.
+
+Deneme derlemesi: Actions › *Sense Remote build* › Run workflow › dal **master** ›
+`deneme_surumu` = 900–999. Yalnız `master`'da ve `SENSE_TRIAL_RELEASE_KEYS` tanımlıyken çalışır.
+İstemciye **yalnız deneme listesi** gömülür (üretim listesi girmez); `trial-sign` işi (`deneme`
+ortamı) beyanları deneme anahtarıyla imzalar, doğrular ve `sense-remote-trial-statements`
+artifact'ı olarak ekler. Sonuç: deneme sürümü kurulan cihaz gerçek sürümleri (ör. v3)
+**doğrulayamaz**; gerçek sürüme elle yeniden kurulumla geçer.
 
 ## Anahtar değiştirme ve kayıp
 
@@ -119,8 +153,9 @@ bash tools/sense-keys/test.sh
 
 GitHub yerine geçici bir sahte `gh` kullanır; her koşuda yeni deneme anahtarı üretir ve siler.
 Linux / Git Bash'te üretim betikleri + yapı beyanı imzası; macOS'ta ek olarak sertifika imza yolu
-(geçici anahtar zinciri, deneme paketi, DR denetimi). CI her derlemede çalıştırır
-(`sense-build.yml`: `signing scripts and inputs` işi ve macOS işi).
+(geçici anahtar zinciri, deneme paketi, DR denetimi). CI çalıştırır: her derlemede
+(`sense-build.yml`: `signing scripts and inputs` ve `macos-sign`) ve bu betikleri değiştiren
+her PR'da (`sense-pr.yml`: `signing scripts (linux)`; shellcheck + test, sırsız).
 
 Windows notu: NTFS'te `chmod 600` etkisizdir; yedek dosyası klasörün Windows izinlerini alır.
 Yedeği kullanıcı profilinizin içindeki bir klasöre yazın ve şifre yöneticisine ekler eklemez silin.

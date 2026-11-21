@@ -81,9 +81,21 @@ option() { # option <ad> <bağımsız değişkenler...>: --ad'ın değeri
 case "${1:-} ${2:-}" in
   "auth status") exit 0 ;;
   "repo view") echo "deneme/sense-remote-client" ;;
+  # Ortam: env.<ad> = custom_branch_policies (true/false); policies.<ad> = "tür:ad" satırları
+  # (gerçek gh'ın --jq çıktısının aynısı).
   "api "*)
-    name=${2##*/environments/}
-    [[ -e "$store/env.$name" ]] || exit 1
+    path=${2##*/environments/}
+    case "$path" in
+      */deployment-branch-policies)
+        name=${path%/deployment-branch-policies}
+        [[ -e "$store/env.$name" ]] || exit 1
+        cat "$store/policies.$name" 2>/dev/null || true
+        ;;
+      *)
+        [[ -e "$store/env.$path" ]] || exit 1
+        cat "$store/env.$path"
+        ;;
+    esac
     ;;
   "secret set")
     [[ "$(option --repo "$@")" == "deneme/sense-remote-client" ]] || exit 1
@@ -138,6 +150,13 @@ new_store() {
   export TMPDIR="$root/tmp.$1"
   rm -rf "$TMPDIR"
   mkdir -p "$TMPDIR"
+}
+# make_env <ortam> <kural...>: sahte GitHub'da "Selected branches and tags" kurallı ortam.
+make_env() {
+  local name=$1
+  shift
+  echo true > "$FAKE_GH_STORE/env.$name"
+  printf '%s\n' "$@" > "$FAKE_GH_STORE/policies.$name"
 }
 # Betik çıkışında geçici klasöründe hiçbir şey bırakmamalı.
 tmp_is_empty() {
@@ -194,8 +213,42 @@ else
   check "ortam yokken sır yazılmadı" test ! -e "$FAKE_GH_STORE/secret.SENSE_RELEASE_SIGNING_KEY"
   check "ortam yokken yedek yazılmadı" test -z "$(ls -A "$backup")"
 
+  # Ortam var ama dal/etiket kuralı yanlış: sır yazılmaz.
+  new_store yapi-policy
+  make_env surum "tag:v*"
+  echo false > "$FAKE_GH_STORE/env.surum"
+  refuse "ortam 'All branches' iken durur" bash "$yapi" --yedek "$backup" --repo "$TEST_REPO"
+  make_env surum "tag:v*" "branch:*"
+  refuse "ortamda fazladan kural varken durur" bash "$yapi" --yedek "$backup" --repo "$TEST_REPO"
+  make_env surum "branch:master"
+  refuse "ortam kuralı v* etiketi değilken durur" bash "$yapi" --yedek "$backup" --repo "$TEST_REPO"
+  check "kural yanlışken sır yazılmadı" test ! -e "$FAKE_GH_STORE/secret.SENSE_RELEASE_SIGNING_KEY"
+  check "kural yanlışken yedek yazılmadı" test -z "$(ls -A "$backup")"
+
+  # --deneme: ayrı ortam (yalnız master), ayrı sır ve değişken.
+  new_store yapi-deneme
+  backup_trial="$root/yedek-d"
+  mkdir -p "$backup_trial"
+  make_env deneme "tag:v*"
+  refuse "--deneme: ortam kuralı master değilken durur" bash "$yapi" --deneme --yedek "$backup_trial" --repo "$TEST_REPO"
+  make_env deneme "branch:master"
+  trial_out="$root/yapi-deneme.out"
+  if bash "$yapi" --deneme --yedek "$backup_trial" --repo "$TEST_REPO" > "$trial_out" 2>&1; then ok "--deneme çalıştı"; else
+    bad "--deneme çalıştı"
+    cat "$trial_out"
+  fi
+  trial_secret="$FAKE_GH_STORE/secret.SENSE_TRIAL_RELEASE_SIGNING_KEY"
+  check "--deneme: sır 'deneme' ortamına yazıldı" test "$(cat "$trial_secret.env" 2>/dev/null)" = deneme
+  check "--deneme: üretim sırrı yazılmadı" test ! -e "$FAKE_GH_STORE/secret.SENSE_RELEASE_SIGNING_KEY"
+  check "--deneme: üretim değişkeni yazılmadı" test ! -e "$FAKE_GH_STORE/var.SENSE_RELEASE_KEYS"
+  trial_keys=$(cat "$FAKE_GH_STORE/var.SENSE_TRIAL_RELEASE_KEYS" 2>/dev/null || true)
+  check "--deneme: SENSE_TRIAL_RELEASE_KEYS = k=pub" grep -Eqx '[0-9a-f]{16}=[A-Za-z0-9_-]{43}' <<<"$trial_keys"
+  check "--deneme: yedek sırla aynı" cmp -s "$trial_secret" "$backup_trial/sense-remote-deneme-yapi-anahtari.pem"
+  refuse "--deneme: gizli anahtar ekranda yok" leaks "$trial_secret" "$trial_out"
+  check "--deneme: geçici klasör temiz" tmp_is_empty
+
   new_store yapi
-  touch "$FAKE_GH_STORE/env.surum"
+  make_env surum "tag:v*"
   out="$root/yapi.out"
   if bash "$yapi" --yedek "$backup" --repo "$TEST_REPO" > "$out" 2>&1; then ok "çalıştı"; else
     bad "çalıştı"
@@ -230,14 +283,15 @@ else
   check "ikinci yedek yazılmadı" test -z "$(ls -A "$backup2")"
 
   new_store yapi-fail
-  touch "$FAKE_GH_STORE/env.surum" "$FAKE_GH_STORE/fail.secret"
+  make_env surum "tag:v*"
+  touch "$FAKE_GH_STORE/fail.secret"
   refuse "sır yazılamazsa düşer" bash "$yapi" --yedek "$backup2" --repo "$TEST_REPO"
   check "yarıda kalınca yedek silindi" test -z "$(ls -A "$backup2")"
   check "yarıda kalınca değişken yazılmadı" test ! -e "$FAKE_GH_STORE/var.SENSE_RELEASE_KEYS"
   check "yarıda kalınca geçici klasör temiz" tmp_is_empty
 
   new_store yapi-synced
-  touch "$FAKE_GH_STORE/env.surum"
+  make_env surum "tag:v*"
   mkdir -p "$root/OneDrive/yedek"
   refuse "eşitlenen klasöre yedek yazmaz" bash "$yapi" --yedek "$root/OneDrive/yedek" --repo "$TEST_REPO"
   refuse "depo içine yedek yazmaz" bash "$yapi" --yedek "$here" --repo "$TEST_REPO"
@@ -323,6 +377,39 @@ else
   refuse "check-keys bozuk panel listesini reddeder" \
     env SENSE_RELEASE_KEYS="$release_keys" SENSE_ENVELOPE_KEYS="${panel_keys%????}" bash "$sign_build" check-keys
 
+  # --- satır sonlu listeler: `read` yalnız ilk satırı okur; ikinci satır denetimden kaçmamalı.
+  newline_out="$root/newline.out"
+  env SENSE_RELEASE_KEYS="$release_keys,"$'\n'"04d80c49ccad4b4c=AAAA" bash "$sign_build" check-keys > "$newline_out" 2>&1 || true
+  check "check-keys satır sonlu listede deneme kimliğini kaçırmaz (yapı listesi)" \
+    grep -q "SENSE_RELEASE_KEYS izin verilmeyen karakter" "$newline_out"
+  env SENSE_RELEASE_KEYS="$release_keys" SENSE_ENVELOPE_KEYS="$panel_keys,"$'\n'"$release_keys" bash "$sign_build" check-keys > "$newline_out" 2>&1 || true
+  check "check-keys satır sonlu listede kesişimi kaçırmaz (panel listesi)" \
+    grep -q "SENSE_ENVELOPE_KEYS izin verilmeyen karakter" "$newline_out"
+  refuse "check-keys CR içeren listeyi reddeder" env SENSE_RELEASE_KEYS="$release_keys"$'\r' bash "$sign_build" check-keys
+  refuse "check-keys sekme içeren listeyi reddeder" env SENSE_RELEASE_KEYS="$release_keys"$'\t' bash "$sign_build" check-keys
+  refuse "verify satır sonlu listeyi reddeder" env SENSE_RELEASE_KEYS="$release_keys"$'\n' \
+    bash "$sign_build" verify-statement "$root/vector-build-ok.json"
+
+  # --- deneme yapı anahtarı listesi (SENSE_TRIAL_RELEASE_KEYS)
+  check "check-keys ayrı deneme listesini kabul eder" env SENSE_RELEASE_KEYS="$release_keys" \
+    SENSE_ENVELOPE_KEYS="$panel_keys" SENSE_TRIAL_RELEASE_KEYS="$trial_keys" bash "$sign_build" check-keys
+  check "check-keys yalnız deneme listesiyle çalışır (üretim listesi boş)" \
+    env SENSE_RELEASE_KEYS="" SENSE_TRIAL_RELEASE_KEYS="$trial_keys" bash "$sign_build" check-keys
+  trial_out="$root/trial-overlap.out"
+  env SENSE_RELEASE_KEYS="$release_keys" SENSE_TRIAL_RELEASE_KEYS="$trial_keys,$release_keys" bash "$sign_build" check-keys > "$trial_out" 2>&1 || true
+  check "check-keys deneme listesi üretim yapı listesiyle kesişince düşer" \
+    grep -q "SENSE_TRIAL_RELEASE_KEYS ile SENSE_RELEASE_KEYS kesisiyor" "$trial_out"
+  env SENSE_RELEASE_KEYS="$release_keys,$trial_keys" SENSE_TRIAL_RELEASE_KEYS="$trial_keys" bash "$sign_build" check-keys > "$trial_out" 2>&1 || true
+  check "check-keys deneme kimliği üretim listesinde görünürse düşer" \
+    grep -q "SENSE_TRIAL_RELEASE_KEYS ile SENSE_RELEASE_KEYS kesisiyor" "$trial_out"
+  env SENSE_RELEASE_KEYS="$release_keys" SENSE_ENVELOPE_KEYS="$panel_keys,$trial_keys" SENSE_TRIAL_RELEASE_KEYS="$trial_keys" bash "$sign_build" check-keys > "$trial_out" 2>&1 || true
+  check "check-keys deneme kimliği panel listesinde görünürse düşer" \
+    grep -q "SENSE_TRIAL_RELEASE_KEYS ile SENSE_ENVELOPE_KEYS kesisiyor" "$trial_out"
+  refuse "check-keys deneme listesinde test vektörü kimliğini reddeder" \
+    env SENSE_TRIAL_RELEASE_KEYS="$trial_keys,15797e90d15b0a59=AAAA" bash "$sign_build" check-keys
+  refuse "check-keys satır sonlu deneme listesini reddeder" \
+    env SENSE_RELEASE_KEYS="$release_keys" SENSE_TRIAL_RELEASE_KEYS="$trial_keys,"$'\n'"$release_keys" bash "$sign_build" check-keys
+
   if sign "$exe" 901 "$commit" 42 "$exe.yapi.json" > "$out" 2>&1; then ok "Windows beyanı imzalandı"; else
     bad "Windows beyanı imzalandı"
     cat "$out"
@@ -391,6 +478,20 @@ else
 
   refuse "sır yokken imzalamaz" env SENSE_RELEASE_KEYS="$release_keys" SENSE_RELEASE_SIGNING_KEY="" \
     bash "$sign_build" sign "$exe" 901 "$commit" 42 "$work/none.json"
+  refuse "açık anahtar listesi boşken imzalamaz" env SENSE_RELEASE_KEYS="" SENSE_RELEASE_SIGNING_KEY="$signing_key" \
+    bash "$sign_build" sign "$exe" 901 "$commit" 42 "$work/nolist.json"
+  check "liste boşken beyan yazılmadı" test ! -e "$work/nolist.json"
+
+  # Deneme imzası (trial-sign işinin aynısı): deneme sırrı + deneme listesi. Üretim listesiyle
+  # derlenen istemci bu beyanı tanımaz (build_unknown_key), deneme listesiyle derlenen tanır.
+  check "deneme anahtarıyla beyan imzalanır" env SENSE_RELEASE_KEYS="$trial_keys" \
+    SENSE_RELEASE_SIGNING_KEY="$(cat "$trial_secret")" bash "$sign_build" sign "$exe" 901 "$commit" 42 "$work/trial.json"
+  check "deneme beyanı deneme listesiyle doğrulanır" \
+    env SENSE_RELEASE_KEYS="$trial_keys" bash "$sign_build" verify "$exe" "$work/trial.json"
+  refuse "deneme beyanı üretim listesiyle reddedilir (build_unknown_key)" \
+    env SENSE_RELEASE_KEYS="$release_keys" bash "$sign_build" verify "$exe" "$work/trial.json"
+  refuse "deneme sırrı üretim listesiyle imzalamaz" env SENSE_RELEASE_KEYS="$release_keys" \
+    SENSE_RELEASE_SIGNING_KEY="$(cat "$trial_secret")" bash "$sign_build" sign "$exe" 901 "$commit" 42 "$work/trial2.json"
   refuse "sürüm dosya adıyla uyuşmazsa imzalamaz" sign "$exe" 902 "$commit" 42 "$work/v.json"
   cp "$exe" "$work/SenseRemote-Kurulum.exe"
   refuse "kural dışı dosya adını imzalamaz" sign "$work/SenseRemote-Kurulum.exe" 901 "$commit" 42 "$work/n.json"
@@ -409,9 +510,14 @@ backup="$root/yedek-m"
 mkdir -p "$backup"
 refuse "ortam 'imza' yokken durur" bash "$mac" --yedek "$backup" --repo "$TEST_REPO"
 check "ortam yokken sır yazılmadı" test ! -e "$FAKE_GH_STORE/secret.SENSE_MAC_CERT_P12"
+make_env imza "tag:v*"
+refuse "ortam 'imza' master kuralı yokken durur" bash "$mac" --yedek "$backup" --repo "$TEST_REPO"
+make_env imza "branch:master" "tag:v*" "branch:dev"
+refuse "ortam 'imza' fazladan kuralla durur" bash "$mac" --yedek "$backup" --repo "$TEST_REPO"
+check "kural yanlışken sır yazılmadı" test ! -e "$FAKE_GH_STORE/secret.SENSE_MAC_CERT_P12"
 
 new_store mac
-touch "$FAKE_GH_STORE/env.imza"
+make_env imza "branch:master" "tag:v*"
 out="$root/mac.out"
 if bash "$mac" --yedek "$backup" --repo "$TEST_REPO" > "$out" 2>&1; then ok "çalıştı"; else
   bad "çalıştı"

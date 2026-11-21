@@ -7,15 +7,22 @@
 #   cert (SENSE_MAC_SIGN=cert): kalici, kendinden imzali kod imzalama sertifikasi. DR = paket
 #     kimligi + sertifika ozeti, surumden surume ayni kalir (Apple TN3127, TN2206).
 #
-#   sense-macos-package.sh <SenseRemote.app> <entitlements.plist> <sense surumu> <cikti klasoru>
+# Iki adim, iki ayri cagri: sirlar YALNIZ imza adiminin ortamindadir. Paket adimi derlenen
+# uygulamayi calistirir (--version) ve create-dmg'yi kullanir; o adimda sir yoktur, gecici anahtar
+# zinciri de imzadan sonra silinmistir.
 #
-# Ortam (hepsi istege bagli; yoksa adhoc):
-#   SENSE_MAC_SIGN            cert | adhoc
-#   SENSE_MAC_CERT_SHA1       sertifikanin SHA-1 parmak izi, 40 hex (acik bilgi)
-#   SENSE_MAC_CERT_P12        p12, base64 (SIR; GitHub ortami "imza")
-#   SENSE_MAC_CERT_PASSWORD   p12 parolasi (SIR; GitHub ortami "imza")
-# cert istenip sirlar yoksa: etiket (yayin) derlemesi DUSER; diger derlemeler uyariyla adhoc
-# surer (dal derlemeleri "imza" ortamina erisemez).
+#   sense-macos-package.sh sign <SenseRemote.app> <entitlements.plist> <sense surumu>
+#       marka denetimi, Info.plist (ad, SenseRemoteVersion), imza. Ortam:
+#         SENSE_MAC_SIGN            cert | adhoc (yoksa adhoc)
+#         SENSE_MAC_CERT_SHA1       sertifikanin SHA-1 parmak izi, 40 hex (acik bilgi)
+#         SENSE_MAC_CERT_P12        p12, base64 (SIR; GitHub ortami "imza")
+#         SENSE_MAC_CERT_PASSWORD   p12 parolasi (SIR; GitHub ortami "imza")
+#       cert istenip sirlar yoksa: etiket (yayin) derlemesi DUSER; diger derlemeler uyariyla
+#       adhoc surer (dal derlemeleri "imza" ortamina erisemez).
+#   sense-macos-package.sh package <SenseRemote.app> <sense surumu> <cikti klasoru>
+#       dmg + dmg iceriginin dogrulanmasi. Imza yolu uygulamanin imzasindan okunur; sertifikaliysa
+#       DR, SENSE_MAC_CERT_SHA1 (acik bilgi) ile denetlenir. Ortam: SENSE_MAC_SIGN,
+#       SENSE_MAC_CERT_SHA1, EXPECTED_BASE_VERSION. Bu adima SIR VERILMEZ.
 #
 # Uretir: <cikti>/SenseRemote-<n>.dmg (icinde uygulama + Applications kisayolu), sonra dmg'yi
 # baglayip icerigi dogrular. Uygulama klasoru SenseRemote.app kalir: kurulum, servis ve
@@ -156,6 +163,9 @@ check_designated_requirement() {
     || fail "DR paket kimligini icermiyor: identifier \"$bundle_id\""
   lower "$requirement" | grep -Fq "certificate leaf = H\"$sha1\"" \
     || fail "DR sertifika ozetini icermiyor: certificate leaf = H\"$sha1\""
+  # Metin yetmez: imza bu gereksinimi kriptografik olarak da saglamali (codesign -R).
+  codesign --verify --strict -R="=identifier \"$bundle_id\" and certificate leaf = H\"$sha1\"" "$app" \
+    || fail "Imza gereksinimi saglamiyor: identifier \"$bundle_id\" and certificate leaf = H\"$sha1\""
 }
 
 # Icten disa imza: once cerceveler ve yardimci ikililer, en son entitlements ile uygulama.
@@ -194,38 +204,48 @@ sign_bundle() {
     --entitlements "$signing_entitlements" "$app"
 }
 
-# codesign --verify. Kendinden imzali sertifika sistemde "guvenilir" kok olmadigi icin codesign
-# zinciri CSSMERR_TP_NOT_TRUSTED diye bildirebilir; bu beklenen durumdur (butunluk denetimi
-# DR, bayraklar ve ikilinin calismasiyla surer). Baska her hata durdurur.
+# codesign --verify; her hata durdurur. Kendinden imzali sertifikada da cikis 0 (olculdu: kosu
+# 44928861832, macos-26: "valid on disk" + "satisfies its Designated Requirement"); bu yuzden
+# CSSMERR_TP_NOT_TRUSTED icin istisna YOK.
 verify_code() {
   local app=$1 output status=0
   output=$(codesign --verify --deep --strict --verbose=2 "$app" 2>&1) || status=$?
   echo "$output"
-  if [[ "$status" -eq 0 ]]; then
-    return 0
-  fi
-  if [[ "$sign_mode" == "cert" ]] && grep -q 'CSSMERR_TP_NOT_TRUSTED' <<<"$output" \
-    && ! grep -Eqi 'invalid signature|modified|not signed|sealed resource' <<<"$output"; then
-    echo "::notice title=codesign::Sertifika zinciri guvenilir kok degil (kendinden imzali; beklenen)."
-    return 0
-  fi
-  fail "codesign --verify dustu (cikis $status)"
+  [[ "$status" -eq 0 ]] || fail "codesign --verify dustu (cikis $status)"
 }
 
-main() {
+# Ortak giris denetimi: uygulama klasoru ve surum.
+check_inputs() {
+  [[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] || fail "Surum duz sayi olmali, gelen: '$2'"
+  [[ -d "$1" ]] || fail "Uygulama bulunamadi: $1"
+  [[ "$(basename "$1")" == "$BUNDLE_NAME.app" ]] \
+    || fail "Uygulama klasoru $BUNDLE_NAME.app olmali, gelen: $(basename "$1")"
+}
+
+# Paket adimi: imza yolu uygulamanin kendi imzasindan okunur (sir gerekmez).
+detect_sign_mode() {
+  local app=$1 signature
+  signature=$(codesign -dv --verbose=4 "$app" 2>&1) || fail "Uygulama imzali degil"
+  if grep -q '^Signature=adhoc$' <<<"$signature"; then
+    sign_mode="adhoc"
+    if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${SENSE_MAC_SIGN:-adhoc}" != "adhoc" ]]; then
+      fail "SENSE_MAC_SIGN=${SENSE_MAC_SIGN:-} ama uygulama ad-hoc imzali; yayin (etiket) derlemesi sertifikasiz cikmaz"
+    fi
+  else
+    sign_mode="cert"
+    [[ "${SENSE_MAC_CERT_SHA1:-}" =~ ^[0-9A-Fa-f]{40}$ ]] \
+      || fail "Uygulama sertifikayla imzali ama SENSE_MAC_CERT_SHA1 40 hex degil"
+  fi
+}
+
+cmd_sign() {
 local app_path=${1:?uygulama yolu}
 local entitlements=${2:?entitlements dosyasi}
 local sense_version=${3:?Sense surum numarasi}
-local out_dir=${4:?cikti klasoru}
-local executable bundle_id locale signing_entitlements dmg_path create_dmg mounted_app
-local key finder_name signature nested actual_entitlements audio_input library_validation
-local spctl_status spctl_output reported_version dmg_size dmg_sha256 sign_label
+local executable bundle_id locale signing_entitlements
 
-[[ "$sense_version" =~ ^[1-9][0-9]{0,5}$ ]] || fail "Surum duz sayi olmali, gelen: '$sense_version'"
-[[ -d "$app_path" ]] || fail "Uygulama bulunamadi: $app_path"
+check_inputs "$app_path" "$sense_version"
 [[ -f "$entitlements" ]] || fail "Entitlements bulunamadi: $entitlements"
-[[ "$(basename "$app_path")" == "$BUNDLE_NAME.app" ]] \
-  || fail "Uygulama klasoru $BUNDLE_NAME.app olmali, gelen: $(basename "$app_path")"
 
 # --- 1. Marka denetimi -----------------------------------------------------------------------
 executable=$(plist_get "$app_path" CFBundleExecutable)
@@ -277,6 +297,24 @@ rm -f "$signing_entitlements"
 # Imza bitti: ozel anahtar bu noktadan sonra kosucuda durmaz.
 remove_signing_keychain
 trap - EXIT
+echo "Imza tamam ($sign_mode). Paket ve dogrulama ayri, sirsiz adimda (package)."
+}
+
+cmd_package() {
+local app_path=${1:?uygulama yolu}
+local sense_version=${2:?Sense surum numarasi}
+local out_dir=${3:?cikti klasoru}
+local executable bundle_id dmg_path create_dmg mounted_app
+local key finder_name signature nested actual_entitlements audio_input library_validation
+local spctl_status spctl_output reported_version dmg_size dmg_sha256 sign_label
+
+check_inputs "$app_path" "$sense_version"
+executable=$(plist_get "$app_path" CFBundleExecutable)
+bundle_id=$(plist_get "$app_path" CFBundleIdentifier)
+detect_sign_mode "$app_path"
+echo "== imza yolu (imzadan okundu): $sign_mode"
+[[ "$(plist_get "$app_path" SenseRemoteVersion)" == "$sense_version" ]] \
+  || fail "Info.plist SenseRemoteVersion '$sense_version' degil (imza adimi baska surumle calismis)"
 
 # --- 4. dmg ----------------------------------------------------------------------------------
 mkdir -p "$out_dir"
@@ -418,8 +456,21 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 fi
 }
 
-# Dogrudan calistirilinca paketler; kaynak olarak alininca (tools/sense-keys/test.sh) yalniz
-# islevleri tanimlar.
+# Dogrudan calistirilinca alt komutu calistirir; kaynak olarak alininca (tools/sense-keys/test.sh)
+# yalniz islevleri tanimlar.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  main "$@"
+  case "${1:-}" in
+    sign)
+      shift
+      cmd_sign "$@"
+      ;;
+    package)
+      shift
+      cmd_package "$@"
+      ;;
+    *)
+      echo "Kullanim: $0 sign <app> <entitlements> <surum> | package <app> <surum> <cikti>" >&2
+      exit 2
+      ;;
+  esac
 fi

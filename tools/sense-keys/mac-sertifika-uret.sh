@@ -14,6 +14,9 @@ set -euo pipefail
 set +x
 umask 077
 
+# shellcheck source=tools/sense-keys/ortam-denetimi.sh
+source "$(dirname "${BASH_SOURCE[0]}")/ortam-denetimi.sh"
+
 readonly ENVIRONMENT="imza"
 readonly P12_SECRET="SENSE_MAC_CERT_P12"
 readonly PASSWORD_SECRET="SENSE_MAC_CERT_PASSWORD"
@@ -80,11 +83,8 @@ if [[ -z "$repo" ]]; then
 fi
 [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "Depo adı sahip/depo biçiminde olmalı: $repo"
 
-# Ortam yoksa GitHub sırrı yazarken ortamı KORUMASIZ oluşturur; bu yüzden önce elle açılmalı.
-gh api "repos/$repo/environments/$ENVIRONMENT" --silent >/dev/null 2>&1 || die "GitHub ortamı '$ENVIRONMENT' yok.
-  Açmak için: github.com/$repo › Settings › Environments › New environment › ad: $ENVIRONMENT
-  Sonra: Deployment branches and tags › Selected branches and tags ›
-         Add rule › Ref type: Branch › master   ve   Add rule › Ref type: Tag › v*"
+# Ortam önce elle açılmış ve yalnız master dalı + v* etiketiyle sınırlı olmalı.
+check_environment "$repo" "$ENVIRONMENT" "branch:master" "tag:v*"
 
 existing=$(gh variable list --repo "$repo" --json name --jq '.[].name') \
   || die "Depo değişkenleri okunamadı (gh yetkisi?)"

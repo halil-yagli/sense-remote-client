@@ -16,9 +16,14 @@
 #       imzalanacak yuk baytlarini yazar (sign ayni islevi kullanir; test vektoruyle
 #       bayt bayt karsilastirma icin).
 #   sense-sign-build.sh check-keys
-#       SENSE_RELEASE_KEYS (ve varsa SENSE_ENVELOPE_KEYS) bicimini denetler, k kimliklerini
-#       yazar. Iki liste kesisiyorsa (ayni k ya da ayni acik anahtar) ya da listelerde ortak
-#       test vektorunun DENEME anahtar kimliklerinden biri varsa duser.
+#       SENSE_RELEASE_KEYS, SENSE_ENVELOPE_KEYS ve SENSE_TRIAL_RELEASE_KEYS (deneme yapi
+#       anahtari) listelerinden tanimli olanlarin bicimini denetler, k kimliklerini yazar.
+#       Listelerden ikisi kesisiyorsa (ayni k ya da ayni acik anahtar) ya da birinde ortak test
+#       vektorunun DENEME anahtar kimliklerinden biri varsa duser. SENSE_RELEASE_KEYS ile
+#       SENSE_TRIAL_RELEASE_KEYS'ten en az biri dolu olmali.
+# Listeler bolunmeden once karakter kumesiyle sinirlanir (yalniz [0-9A-Za-z_=, -]): satir sonu,
+# CR ya da sekme iceren liste reddedilir (yoksa "A,<LF>B" gibi bir listenin ikinci satiri
+# denetimden kacardi).
 #
 # Tasima bicimi zarfla ayni: {"k","p","s"}. k = SHA-256(ham acik anahtar) ilk 8 bayt, hex.
 # p = yuk baytlari, dolgusuz base64url. s = 64 baytlik imza, base64url. Imzalanan veri =
@@ -40,6 +45,8 @@ readonly MAX_SAFE_INTEGER=9007199254740991
 readonly TEST_VECTOR_KEY_IDS=(94d01a580be13482 b0d12b9f71aebc1f 04d80c49ccad4b4c 15797e90d15b0a59)
 # Ed25519 SubjectPublicKeyInfo basligi (RFC 8410); ardindan 32 baytlik ham anahtar gelir.
 readonly SPKI_PREFIX_HEX="302a300506032b6570032100"
+# Anahtar listesinde izinli karakterler (k hex, base64url, '=', ',', bosluk).
+readonly KEY_LIST_PATTERN='^[0-9A-Za-z_=, -]*$'
 
 fail() {
   echo "::error title=Yapi beyani::$*" >&2
@@ -119,6 +126,7 @@ installer_name() {
 load_key_list() {
   local list=$1 label=$2 dir=$3 entry k encoded index=0
   local -a entries
+  check_list_chars "$list" "$label"
   [[ -n "${list// /}" ]] || fail "$label bos"
   mkdir -p "$dir"
   IFS=',' read -r -a entries <<<"$list"
@@ -140,6 +148,14 @@ load_key_list() {
   done
 }
 
+# Liste yalniz izinli karakterlerden olusmali (satir sonu / CR / sekme yok). `read` yalniz ilk
+# satiri okudugu icin bu denetim her bolmeden ONCE yapilir.
+check_list_chars() {
+  local list=$1 label=$2
+  [[ "$list" =~ $KEY_LIST_PATTERN ]] \
+    || fail "$label izin verilmeyen karakter iceriyor (satir sonu, CR, sekme ya da [0-9A-Za-z_=, -] disi)"
+}
+
 load_keys() {
   load_key_list "${SENSE_RELEASE_KEYS:-}" SENSE_RELEASE_KEYS "$work/keys"
 }
@@ -148,6 +164,7 @@ load_keys() {
 reject_test_vector_keys() {
   local list=$1 label=$2 entry k forbidden
   local -a entries
+  check_list_chars "$list" "$label"
   IFS=',' read -r -a entries <<<"$list"
   for entry in "${entries[@]}"; do
     entry=${entry// /}
@@ -194,32 +211,70 @@ verify_signature() {
     -sigfile "$signature" >/dev/null 2>&1
 }
 
-cmd_check_keys() {
-  local release_list=${SENSE_RELEASE_KEYS:-} envelope_list=${SENSE_ENVELOPE_KEYS:-}
-  local path other k ids=()
-  reject_test_vector_keys "$release_list" SENSE_RELEASE_KEYS
-  reject_test_vector_keys "$envelope_list" SENSE_ENVELOPE_KEYS
-  load_keys
-  for path in "$work"/keys/*; do
+# Iki yuklu liste ayni k'yi ya da ayni acik anahtari iceriyorsa duser.
+#   check_disjoint <klasor a> <ad a> <klasor b> <ad b> <neden>
+check_disjoint() {
+  local dir_a=$1 label_a=$2 dir_b=$3 label_b=$4 reason=$5 path other k
+  for path in "$dir_a"/*; do
+    k=$(basename "$path")
+    [[ ! -e "$dir_b/$k" ]] || fail "$label_a ile $label_b kesisiyor (ayni k: $k); $reason"
+    for other in "$dir_b"/*; do
+      if cmp -s "$path" "$other"; then
+        fail "$label_a ile $label_b kesisiyor (ayni acik anahtar: $k); $reason"
+      fi
+    done
+  done
+  echo "$label_a ile $label_b kesisim yok"
+}
+
+# Yuklu listenin ozeti: anahtar sayisi ve k kimlikleri (acik bilgi).
+print_key_ids() {
+  local dir=$1 label=$2 path ids=()
+  for path in "$dir"/*; do
     ids+=("$(basename "$path")")
   done
-  echo "SENSE_RELEASE_KEYS: ${#ids[@]} anahtar"
+  echo "$label: ${#ids[@]} anahtar"
   echo "k: ${ids[*]}"
+}
+
+cmd_check_keys() {
+  local release_list=${SENSE_RELEASE_KEYS:-} envelope_list=${SENSE_ENVELOPE_KEYS:-}
+  local trial_list=${SENSE_TRIAL_RELEASE_KEYS:-}
+  local has_release=false has_envelope=false has_trial=false
+  reject_test_vector_keys "$release_list" SENSE_RELEASE_KEYS
+  reject_test_vector_keys "$envelope_list" SENSE_ENVELOPE_KEYS
+  reject_test_vector_keys "$trial_list" SENSE_TRIAL_RELEASE_KEYS
+  if [[ -n "${release_list// /}" ]]; then has_release=true; fi
+  if [[ -n "${envelope_list// /}" ]]; then has_envelope=true; fi
+  if [[ -n "${trial_list// /}" ]]; then has_trial=true; fi
+  $has_release || $has_trial || fail "SENSE_RELEASE_KEYS bos"
+
+  if $has_release; then
+    load_keys
+    print_key_ids "$work/keys" SENSE_RELEASE_KEYS
+  fi
+  if $has_envelope; then
+    load_key_list "$envelope_list" SENSE_ENVELOPE_KEYS "$work/envelope-keys"
+  fi
+  if $has_trial; then
+    load_key_list "$trial_list" SENSE_TRIAL_RELEASE_KEYS "$work/trial-keys"
+    print_key_ids "$work/trial-keys" SENSE_TRIAL_RELEASE_KEYS
+  fi
   # Iki imza kurali: panel anahtari ile yapi anahtari ayni olursa tek imzaya duser (panel
   # sunucusunu ele geciren, yapi beyanini da imzalayabilirdi). Istemci: keys_overlap.
-  if [[ -n "${envelope_list// /}" ]]; then
-    load_key_list "$envelope_list" SENSE_ENVELOPE_KEYS "$work/envelope-keys"
-    for path in "$work"/keys/*; do
-      k=$(basename "$path")
-      [[ ! -e "$work/envelope-keys/$k" ]] \
-        || fail "SENSE_RELEASE_KEYS ile SENSE_ENVELOPE_KEYS kesisiyor (ayni k: $k); yapi anahtari panel anahtarindan AYRI olmali"
-      for other in "$work"/envelope-keys/*; do
-        if cmp -s "$path" "$other"; then
-          fail "SENSE_RELEASE_KEYS ile SENSE_ENVELOPE_KEYS kesisiyor (ayni acik anahtar: $k); yapi anahtari panel anahtarindan AYRI olmali"
-        fi
-      done
-    done
-    echo "SENSE_ENVELOPE_KEYS ile kesisim yok"
+  if $has_release && $has_envelope; then
+    check_disjoint "$work/keys" SENSE_RELEASE_KEYS "$work/envelope-keys" SENSE_ENVELOPE_KEYS \
+      "yapi anahtari panel anahtarindan AYRI olmali"
+  fi
+  # Deneme yapi anahtari (deneme ortami, yalniz master) hicbir uretim listesinde olamaz: aksi
+  # halde deneme sirrina erisen, uretim istemcilerinin kabul edecegi bir beyan imzalayabilirdi.
+  if $has_trial && $has_release; then
+    check_disjoint "$work/trial-keys" SENSE_TRIAL_RELEASE_KEYS "$work/keys" SENSE_RELEASE_KEYS \
+      "deneme anahtari uretim yapi anahtarindan AYRI olmali"
+  fi
+  if $has_trial && $has_envelope; then
+    check_disjoint "$work/trial-keys" SENSE_TRIAL_RELEASE_KEYS "$work/envelope-keys" SENSE_ENVELOPE_KEYS \
+      "deneme anahtari panel anahtarindan AYRI olmali"
   fi
 }
 
@@ -254,12 +309,12 @@ cmd_sign() {
     [[ "$k" != "$forbidden" ]] || fail "Gizli anahtar bir DENEME anahtari ($k); imzalanmaz"
   done
 
-  # Sir ile degisken ayni anahtari gostermeli; yoksa istemciler bu imzayi tanimaz.
-  if [[ -n "${SENSE_RELEASE_KEYS:-}" ]]; then
-    load_keys
-    if [[ ! -f "$work/keys/$k" ]] || ! cmp -s "$work/keys/$k" "$work/public.raw"; then
-      fail "Gizli anahtarin k degeri ($k) SENSE_RELEASE_KEYS icinde yok"
-    fi
+  # Sir ile degisken ayni anahtari gostermeli; yoksa istemciler bu imzayi tanimaz. Liste bossa
+  # imzalanmaz: dogrulanamayan bir beyan yayina girmesin.
+  [[ -n "${SENSE_RELEASE_KEYS:-}" ]] || fail "SENSE_RELEASE_KEYS bos; imza acik anahtar listesiyle eslestirilemez"
+  load_keys
+  if [[ ! -f "$work/keys/$k" ]] || ! cmp -s "$work/keys/$k" "$work/public.raw"; then
+    fail "Gizli anahtarin k degeri ($k) SENSE_RELEASE_KEYS icinde yok"
   fi
 
   write_signed_message "$work/payload" "$work/message"

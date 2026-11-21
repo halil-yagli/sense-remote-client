@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 # Sense Remote: YAPI ANAHTARI (Ed25519) üretir ve GitHub'a yazar. Bir kez, yerelde çalıştırılır.
 #
-#   bash tools/sense-keys/yapi-anahtari-uret.sh [--yedek <klasör>] [--repo <sahip/depo>]
+#   bash tools/sense-keys/yapi-anahtari-uret.sh [--deneme] [--yedek <klasör>] [--repo <sahip/depo>]
 #
 # Ne yapar:
 #   1. Gizli anahtarı geçici klasörde üretir (çıkışta silinir).
 #   2. Yedeğini verdiğiniz yerel klasöre yazar (şirket şifre yöneticisine eklemeniz için).
 #   3. Gizli anahtarı GitHub "surum" ortamına SENSE_RELEASE_SIGNING_KEY sırrı olarak yazar.
 #   4. Açık anahtarı SENSE_RELEASE_KEYS depo değişkenine yazar ve ekranda gösterir.
+# --deneme: AYRI bir deneme yapı anahtarı (deneme_surumu 900-999 derlemeleri için): ortam
+#   "deneme" (yalnız master), sır SENSE_TRIAL_RELEASE_SIGNING_KEY, değişken
+#   SENSE_TRIAL_RELEASE_KEYS. Üretim anahtarıyla hiçbir ilgisi yoktur.
 # Gizli anahtar ekrana, komut satırına ya da kabuk geçmişine yazılmaz. Ayrıntı: README.md.
 set -euo pipefail
 set +x
 umask 077
 
-readonly ENVIRONMENT="surum"
-readonly SECRET_NAME="SENSE_RELEASE_SIGNING_KEY"
-readonly VARIABLE_NAME="SENSE_RELEASE_KEYS"
-readonly BACKUP_NAME="sense-remote-yapi-anahtari.pem"
+# shellcheck source=tools/sense-keys/ortam-denetimi.sh
+source "$(dirname "${BASH_SOURCE[0]}")/ortam-denetimi.sh"
 
 die() {
   echo "HATA: $*" >&2
@@ -24,13 +25,18 @@ die() {
 }
 
 usage() {
-  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 backup_dir=""
 repo=""
+trial=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --deneme)
+      trial=true
+      shift
+      ;;
     --yedek)
       backup_dir=${2:-}
       shift 2 || die "--yedek bir klasör ister"
@@ -46,6 +52,22 @@ while [[ $# -gt 0 ]]; do
     *) die "Bilinmeyen seçenek: $1" ;;
   esac
 done
+
+if $trial; then
+  readonly ENVIRONMENT="deneme"
+  readonly ENVIRONMENT_RULES=("branch:master")
+  readonly SECRET_NAME="SENSE_TRIAL_RELEASE_SIGNING_KEY"
+  readonly VARIABLE_NAME="SENSE_TRIAL_RELEASE_KEYS"
+  readonly BACKUP_NAME="sense-remote-deneme-yapi-anahtari.pem"
+  readonly KEY_LABEL="deneme yapı anahtarı"
+else
+  readonly ENVIRONMENT="surum"
+  readonly ENVIRONMENT_RULES=("tag:v*")
+  readonly SECRET_NAME="SENSE_RELEASE_SIGNING_KEY"
+  readonly VARIABLE_NAME="SENSE_RELEASE_KEYS"
+  readonly BACKUP_NAME="sense-remote-yapi-anahtari.pem"
+  readonly KEY_LABEL="yapı anahtarı"
+fi
 
 # Ed25519 üretebilen openssl (macOS'un kendi openssl'i LibreSSL olabilir; Homebrew'unki denenir).
 find_openssl() {
@@ -87,15 +109,13 @@ if [[ -z "$repo" ]]; then
 fi
 [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "Depo adı sahip/depo biçiminde olmalı: $repo"
 
-# Ortam yoksa GitHub sırrı yazarken ortamı KORUMASIZ oluşturur; bu yüzden önce elle açılmalı.
-gh api "repos/$repo/environments/$ENVIRONMENT" --silent >/dev/null 2>&1 || die "GitHub ortamı '$ENVIRONMENT' yok.
-  Açmak için: github.com/$repo › Settings › Environments › New environment › ad: $ENVIRONMENT
-  Sonra: Deployment branches and tags › Selected branches and tags › Add rule › Ref type: Tag › v*"
+# Ortam önce elle açılmış ve yalnız beklenen dal/etiket kuralıyla sınırlı olmalı.
+check_environment "$repo" "$ENVIRONMENT" "${ENVIRONMENT_RULES[@]}"
 
 existing=$(gh variable list --repo "$repo" --json name --jq '.[].name') \
   || die "Depo değişkenleri okunamadı (gh yetkisi?)"
 if grep -qx "$VARIABLE_NAME" <<<"$existing" && [[ "${SENSE_KEYS_FORCE:-}" != "1" ]]; then
-  die "$VARIABLE_NAME zaten tanımlı: yapı anahtarı daha önce üretilmiş.
+  die "$VARIABLE_NAME zaten tanımlı: $KEY_LABEL daha önce üretilmiş.
   Yeni anahtar, kurulu bilgisayarların tanımadığı bir anahtardır (güncelleme alamazlar).
   Anahtar değiştirme adımları README.md'de; bilerek sıfırlamak için SENSE_KEYS_FORCE=1."
 fi
@@ -146,6 +166,27 @@ gh secret set "$SECRET_NAME" --env "$ENVIRONMENT" --repo "$repo" < key.pem >/dev
 gh variable set "$VARIABLE_NAME" --repo "$repo" --body "$key_id=$public_key" >/dev/null \
   || die "Değişken yazılamadı ($VARIABLE_NAME)"
 finished=true
+
+if $trial; then
+  cat <<EOF
+
+Tamam. DENEME yapı anahtarı üretildi ve GitHub'a yazıldı ($repo, ortam $ENVIRONMENT).
+
+  Açık anahtar (gizli değil):
+    $VARIABLE_NAME = $key_id=$public_key
+
+Şimdi siz:
+  1. Yedek dosyasını şirket şifre yöneticisine ekleyin (ad: "Sense Remote — deneme yapı anahtarı"):
+       $backup_file
+  2. Ekledikten sonra yerel kopyayı silin.
+  3. Bu değeri YALNIZ deneme düzenindeki yerel panelde SR_RELEASE_KEYS olarak kullanın;
+     gerçek panele (cPanel) GİRMEYİN.
+
+deneme_surumu ile derlenen istemci yalnız bu anahtarı tanır: deneme sürümü kurulan cihaz gerçek
+sürüme (v3) elle yeniden kurulumla geçer.
+EOF
+  exit 0
+fi
 
 cat <<EOF
 
