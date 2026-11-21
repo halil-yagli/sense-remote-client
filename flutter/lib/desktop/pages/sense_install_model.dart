@@ -42,7 +42,81 @@ class SenseTokens {
       colors: [accent1, accent2]);
 }
 
-enum SenseInstallStep { account, role, info, summary, register, done }
+// Sense Remote (Mac M3): `applications` and `permissions` are macOS only; Windows never
+// enters them. The order is the order of the wizard (the sidebar compares indexes).
+enum SenseInstallStep {
+  applications,
+  account,
+  role,
+  info,
+  summary,
+  register,
+  permissions,
+  done
+}
+
+// ---- macOS (Mac M3, plan 2026-11-21 §4.1) ----
+
+/// Pure: on macOS the app itself is the setup file, so a launch without an installed role
+/// opens the wizard (Windows gets there with the `--install` argument of the setup exe).
+bool senseMacNeedsSetup({required bool isMac, required bool roleInstalled}) =>
+    isMac && !roleInstalled;
+
+/// The macOS privacy permissions Sense Remote asks for, in the order they are asked.
+enum SenseMacPermission {
+  screenRecording('screen', 'Privacy_ScreenCapture'),
+  accessibility('accessibility', 'Privacy_Accessibility'),
+  inputMonitoring('input', 'Privacy_ListenEvent');
+
+  const SenseMacPermission(this.textKey, this.pane);
+
+  /// Text keys `perm-<textKey>` / `perm-<textKey>-desc`.
+  final String textKey;
+  final String pane;
+
+  /// The pane of System Settings > Privacy & Security for this permission.
+  String get settingsUrl =>
+      'x-apple.systempreferences:com.apple.preference.security?$pane';
+}
+
+/// What a role needs: a Host is watched and controlled (all three); a Controller only sends
+/// its own keyboard input (Input Monitoring).
+List<SenseMacPermission> senseMacPermissionsFor(
+        {required bool host, required bool controller}) =>
+    host
+        ? SenseMacPermission.values
+        : controller
+            ? const [SenseMacPermission.inputMonitoring]
+            : const [];
+
+/// State of the three permissions, read without a system prompt.
+class SenseMacPermissions {
+  const SenseMacPermissions({
+    this.screenRecording = false,
+    this.accessibility = false,
+    this.inputMonitoring = false,
+  });
+
+  final bool screenRecording;
+  final bool accessibility;
+  final bool inputMonitoring;
+
+  bool granted(SenseMacPermission permission) {
+    switch (permission) {
+      case SenseMacPermission.screenRecording:
+        return screenRecording;
+      case SenseMacPermission.accessibility:
+        return accessibility;
+      case SenseMacPermission.inputMonitoring:
+        return inputMonitoring;
+    }
+  }
+
+  bool sameAs(SenseMacPermissions other) =>
+      screenRecording == other.screenRecording &&
+      accessibility == other.accessibility &&
+      inputMonitoring == other.inputMonitoring;
+}
 
 /// What the employee can do about a refused registration (panel `EnrollErrorCode`).
 enum SenseEnrollAction { retry, relogin, edit, wait, none }
@@ -287,6 +361,20 @@ abstract class SenseInstallBackend {
 
   /// Leaves the setup screen; `true` opens the installed app.
   void finish(bool openApp);
+
+  // Sense Remote (Mac M3): macOS only; the wizard calls these only when it runs as `mac`.
+
+  /// Whether the app runs from the Applications folder (not from the disk image).
+  Future<bool> inApplications();
+
+  /// Current state of the privacy permissions (no system prompt).
+  Future<SenseMacPermissions> macPermissions();
+
+  /// Asks macOS for the permission and opens its pane in System Settings.
+  Future<void> openMacPermission(SenseMacPermission permission);
+
+  /// Restarts the background agent after Screen Recording was granted; "" on success.
+  Future<String> restartAgent();
 }
 
 String senseRoleLabel(bool host, bool controller) => host && controller

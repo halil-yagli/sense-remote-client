@@ -59,7 +59,8 @@ extension _SenseInstallFinishSteps on _SenseInstallWizardState {
         ),
       ),
       const SizedBox(height: 10),
-      if (!_installed)
+      // Sense Remote (Mac M3): folder and shortcut options are Windows only.
+      if (!_installed && !widget.mac)
       Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
@@ -72,11 +73,11 @@ extension _SenseInstallFinishSteps on _SenseInstallWizardState {
           label: Text(_t('advanced'), style: const TextStyle(fontSize: 12)),
         ),
       ),
-      if (_advanced && !_installed) _advancedOptions(),
+      if (_advanced && !_installed && !widget.mac) _advancedOptions(),
       if (_installing)
         Padding(
           padding: const EdgeInsets.only(top: 12),
-          child: _progress(_t('installing')),
+          child: _progress(_t(widget.mac ? 'installing-mac' : 'installing')),
         ),
       if (_error != null)
         Padding(
@@ -234,6 +235,8 @@ extension _SenseInstallFinishSteps on _SenseInstallWizardState {
     }
     if (_host) lines.add(_t('done-lead-locked'));
     if (_host && !_controller) lines.add(_t('done-host-background'));
+    // Sense Remote (Mac M3): left the permissions step with "Daha sonra".
+    if (_permissionsSkipped) lines.add(_t('done-permissions-missing'));
     return lines.join(' ');
   }
 

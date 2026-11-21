@@ -155,6 +155,52 @@ const Map<String, String> kSenseInstallTr = {
   'done-pending':
       'Panele kayıt yapılmadı: bilgisayar panelde onay bekleyen olarak görünecek; bir Sense çalışanı onaylayabilir.',
   'open-app': 'Sense Remote\'u aç',
+  // Sense Remote (Mac M3): macOS steps and install results (plan 2026-11-21 §3.2).
+  'installing-mac': 'Kuruluyor… macOS yönetici parolasını isteyecek.',
+  'error-not-in-applications':
+      'Sense Remote Uygulamalar klasöründen çalışmıyor. Uygulamayı Uygulamalar klasörüne sürükle, oradan yeniden aç.',
+  'error-daemon-timeout':
+      'Arka plan hizmeti başlatılamadı. Kurulumu yeniden dene; sorun sürerse Sense ekibine bildir.',
+  'apps-title-a': 'Uygulamalar',
+  'apps-title-b': ' klasörüne taşı',
+  'apps-lead': 'Sense Remote\'u Uygulamalar klasörüne sürükle ve oradan aç.',
+  'apps-detail':
+      'Kurulum, uygulama indirilen disk görüntüsünün içinden çalışırken yapılamaz. Bu pencereyi kapat, Sense Remote\'u Uygulamalar klasörüne sürükle ve oradan yeniden aç.',
+  'apps-checking': 'Uygulamanın yeri denetleniyor…',
+  'apps-recheck': 'Yeniden denetle',
+  'apps-still-outside':
+      'Uygulama hâlâ Uygulamalar klasörünün dışında çalışıyor.',
+  'step-permissions': 'macOS izinleri',
+  'perm-title-a': 'macOS ',
+  'perm-title-b': 'izinleri',
+  'perm-lead':
+      'macOS bu izinleri yalnızca bilgisayarın başında, bir kez onaylatır. Sırayla aç; durum burada kendiliğinden güncellenir.',
+  'perm-lead-controller':
+      'macOS bu izni yalnızca bilgisayarın başında, bir kez onaylatır. Durum burada kendiliğinden güncellenir.',
+  'perm-screen': 'Ekran Kaydı',
+  'perm-screen-desc': 'Ekip bu bilgisayarın ekranını görebilsin.',
+  'perm-accessibility': 'Erişilebilirlik',
+  'perm-accessibility-desc':
+      'Ekip bu bilgisayarın faresini ve klavyesini kullanabilsin.',
+  'perm-input': 'Giriş İzleme',
+  'perm-input-desc': 'Klavye kısayolları bağlantı sırasında doğru iletilsin.',
+  'perm-granted': 'Verildi',
+  'perm-missing': 'Bekleniyor',
+  'perm-reading': 'Durum okunuyor…',
+  'perm-open': 'Sistem Ayarları\'nı aç',
+  'perm-open-hint':
+      'Açılan listede Sense Remote\'un anahtarını aç. Sense Remote listede yoksa + ile Uygulamalar klasöründen ekle.',
+  'perm-all-granted': 'Bütün izinler verildi.',
+  'perm-later': 'Daha sonra',
+  'perm-later-confirm': 'Yine de devam et',
+  'perm-later-warning':
+      'İzinler verilmeden ekip bu bilgisayarın ekranını göremez ya da kullanamaz; panelde izin eksik görünür. İzinler daha sonra yine bu bilgisayarın başında verilmek zorunda.',
+  'perm-later-warning-controller':
+      'Giriş İzleme izni olmadan bazı klavye kısayolları karşı bilgisayara iletilmez. İzin daha sonra Sistem Ayarları\'ndan verilebilir.',
+  'perm-agent-error':
+      'Ekran Kaydı izni verildi ama arka plan hizmeti yeniden başlatılamadı. Görüntü gelmezse bilgisayarı yeniden başlat.',
+  'done-permissions-missing':
+      'macOS izinleri eksik: Sistem Ayarları › Gizlilik ve Güvenlik bölümünden verilmeden bağlantı tam çalışmaz.',
 };
 
 const Map<String, String> kSenseInstallEn = {
@@ -310,6 +356,53 @@ const Map<String, String> kSenseInstallEn = {
   'done-pending':
       'Not registered: the computer shows up in the panel as waiting for approval; any Sense employee can approve it.',
   'open-app': 'Open Sense Remote',
+  'installing-mac': 'Installing… macOS will ask for the administrator password.',
+  'error-not-in-applications':
+      'Sense Remote is not running from the Applications folder. Drag the app to Applications and open it from there.',
+  'error-daemon-timeout':
+      'The background service could not be started. Try again; if it keeps failing, tell the Sense team.',
+  'apps-title-a': 'Move to ',
+  'apps-title-b': 'Applications',
+  'apps-lead':
+      'Drag Sense Remote to the Applications folder and open it from there.',
+  'apps-detail':
+      'Sense Remote can not be installed while it runs from the downloaded disk image. Close this window, drag Sense Remote to the Applications folder and open it from there.',
+  'apps-checking': 'Checking where the app runs from…',
+  'apps-recheck': 'Check again',
+  'apps-still-outside':
+      'The app still runs from outside the Applications folder.',
+  'step-permissions': 'macOS permissions',
+  'perm-title-a': 'macOS ',
+  'perm-title-b': 'permissions',
+  'perm-lead':
+      'macOS asks for these permissions once, at the computer itself. Turn them on in order; the state updates here by itself.',
+  'perm-lead-controller':
+      'macOS asks for this permission once, at the computer itself. The state updates here by itself.',
+  'perm-screen': 'Screen Recording',
+  'perm-screen-desc': 'So the team can see the screen of this computer.',
+  'perm-accessibility': 'Accessibility',
+  'perm-accessibility-desc':
+      'So the team can use the mouse and keyboard of this computer.',
+  'perm-input': 'Input Monitoring',
+  'perm-input-desc':
+      'So keyboard shortcuts are passed on correctly during a connection.',
+  'perm-granted': 'Granted',
+  'perm-missing': 'Waiting',
+  'perm-reading': 'Reading the state…',
+  'perm-open': 'Open System Settings',
+  'perm-open-hint':
+      'Turn on the switch of Sense Remote in the list. If Sense Remote is not listed, add it with + from the Applications folder.',
+  'perm-all-granted': 'All permissions are granted.',
+  'perm-later': 'Later',
+  'perm-later-confirm': 'Continue anyway',
+  'perm-later-warning':
+      'Without the permissions the team can not see or use this computer; the panel shows them as missing. They still have to be granted at this computer later.',
+  'perm-later-warning-controller':
+      'Without Input Monitoring some keyboard shortcuts are not passed on to the other computer. It can be granted later in System Settings.',
+  'perm-agent-error':
+      'Screen Recording was granted but the background service could not be restarted. If no picture arrives, restart the computer.',
+  'done-permissions-missing':
+      'macOS permissions are missing: until they are granted in System Settings › Privacy & Security the connection does not fully work.',
 };
 
 String senseInstallText(String key) =>
