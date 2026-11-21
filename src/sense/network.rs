@@ -10,8 +10,13 @@
 //! Order: Ethernet -> Wi-Fi -> other, then by interface index (the crate does not expose the
 //! route metric, so the index stands in for "interface order").
 //!
-//! MAC-SONRA: compiles on macOS but is not checked on a Mac yet (adapter names en0/en1, Wi-Fi
-//! detection through the crate's `networksetup` map).
+//! Sense Remote (Mac M4): on macOS the BSD name says nothing about the kind (`en0` is Wi-Fi on a
+//! laptop and Ethernet on a Mac mini), so the kind and the shown name ("Ethernet", "Wi-Fi",
+//! "USB 10/100/1000 LAN") come from SystemConfiguration (`SCNetworkInterfaceCopyAll`,
+//! `SCNetworkInterfaceGetInterfaceType`, `...GetLocalizedDisplayName`; module `mac`). Helper
+//! interfaces (utun, awdl, llw, bridge ...) are recognised by their BSD name. The mapping is in
+//! pure functions (`mac_kind`, `apply_mac_service`, `is_mac_helper`) tested on every platform;
+//! the values on a real Mac are checked on a device (plan §8).
 //!
 //! Sense Remote (wave 2 review):
 //! - K2-5: `collect` tells "no adapter left" (`Some([])`, sent as `network: []` so the panel
@@ -75,6 +80,50 @@ pub(super) struct RawAdapter {
     pub up: bool,
     pub ipv4: Vec<Ipv4Addr>,
     pub ipv6: Vec<Ipv6Addr>,
+    /// Sense Remote (Mac M4): BSD name on macOS (`en0`, `utun3`), where `name` is the name
+    /// shown in the system's network settings; `None` elsewhere. Only used to recognise helper
+    /// interfaces; never sent.
+    pub bsd_name: Option<String>,
+}
+
+/// Sense Remote (Mac M4): what SystemConfiguration says about one interface on macOS.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct MacService {
+    /// `SCNetworkInterfaceGetInterfaceType`: "Ethernet", "IEEE80211", "Bridge", "PPP" ...
+    pub interface_type: Option<String>,
+    /// `SCNetworkInterfaceGetLocalizedDisplayName`: "Wi-Fi", "Ethernet", "USB 10/100/1000 LAN".
+    pub display_name: Option<String>,
+}
+
+/// SystemConfiguration interface type -> (kind, is a tunnel). The type strings are the values
+/// of the `kSCNetworkInterfaceType...` constants.
+fn mac_kind(interface_type: &str) -> (Kind, bool) {
+    match interface_type {
+        "Ethernet" => (Kind::Ethernet, false),
+        "IEEE80211" => (Kind::Wifi, false),
+        "PPP" | "IPSec" | "L2TP" | "PPTP" | "6to4" => (Kind::Other, true),
+        _ => (Kind::Other, false),
+    }
+}
+
+/// Sense Remote (Mac M4): fills the macOS-only knowledge into an adapter read by `default-net`:
+/// the BSD name (for the helper filter), and from SystemConfiguration the kind and the shown
+/// name. An interface SystemConfiguration does not list keeps what `default-net` reported.
+fn apply_mac_service(adapter: &mut RawAdapter, bsd_name: &str, service: Option<&MacService>) {
+    adapter.bsd_name = Some(bsd_name.to_owned());
+    let Some(service) = service else {
+        return;
+    };
+    if let Some(interface_type) = service.interface_type.as_deref() {
+        let (kind, tunnel) = mac_kind(interface_type);
+        adapter.kind = kind;
+        adapter.tunnel |= tunnel;
+    }
+    if let Some(name) = service.display_name.as_deref().map(str::trim) {
+        if !name.is_empty() {
+            adapter.name = name.to_owned();
+        }
+    }
 }
 
 /// Adapters of this computer, filtered and ordered for the panel. `None` when the OS reported
@@ -91,6 +140,9 @@ fn from_raw(adapters: Vec<RawAdapter>) -> Option<Vec<SenseNetwork>> {
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn read_adapters() -> Vec<RawAdapter> {
     use default_net::interface::InterfaceType;
+    // Sense Remote (Mac M4): kind and shown name per BSD name.
+    #[cfg(target_os = "macos")]
+    let services = mac::services();
     default_net::get_interfaces()
         .into_iter()
         .map(|i| {
@@ -102,7 +154,8 @@ fn read_adapters() -> Vec<RawAdapter> {
                 InterfaceType::Wireless80211 => Kind::Wifi,
                 _ => Kind::Other,
             };
-            RawAdapter {
+            #[allow(unused_mut)]
+            let mut adapter = RawAdapter {
                 index: i.index,
                 loopback: i.is_loopback() || i.if_type == InterfaceType::Loopback,
                 tunnel: i.is_tun()
@@ -114,9 +167,76 @@ fn read_adapters() -> Vec<RawAdapter> {
                 kind,
                 ipv4: i.ipv4.iter().map(|n| n.addr).collect(),
                 ipv6: i.ipv6.iter().map(|n| n.addr).collect(),
-            }
+                bsd_name: None,
+            };
+            #[cfg(target_os = "macos")]
+            apply_mac_service(&mut adapter, &i.name, services.get(&i.name));
+            adapter
         })
         .collect()
+}
+
+/// Sense Remote (Mac M4): SystemConfiguration's interface list. Declared here (the crate
+/// `system-configuration` is only an indirect dependency through `default-net`).
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::MacService;
+    use core_foundation::{
+        array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef},
+        base::{CFRelease, CFTypeRef, TCFType},
+        string::{CFString, CFStringRef},
+    };
+    use std::{collections::HashMap, ffi::c_void};
+
+    // Sense Remote: only C's own types in these signatures (`*const c_void`, not `CFArrayRef` /
+    // `CFStringRef`): the bridge generator copies `extern "C"` declarations into
+    // `bridge_generated.h`, where the CoreFoundation names are unknown. The pointers are cast
+    // on the Rust side.
+    #[link(name = "SystemConfiguration", kind = "framework")]
+    extern "C" {
+        fn SCNetworkInterfaceCopyAll() -> *const c_void;
+        fn SCNetworkInterfaceGetBSDName(interface: *const c_void) -> *const c_void;
+        fn SCNetworkInterfaceGetInterfaceType(interface: *const c_void) -> *const c_void;
+        fn SCNetworkInterfaceGetLocalizedDisplayName(interface: *const c_void) -> *const c_void;
+    }
+
+    /// "Get" rule: the string belongs to the interface object and is not released here.
+    unsafe fn string(value: *const c_void) -> Option<String> {
+        if value.is_null() {
+            return None;
+        }
+        Some(CFString::wrap_under_get_rule(value as CFStringRef).to_string())
+    }
+
+    /// By BSD name. Empty when the list can not be read (the adapters then keep the kind
+    /// `default-net` found and their BSD name).
+    pub fn services() -> HashMap<String, MacService> {
+        let mut out = HashMap::new();
+        unsafe {
+            let all = SCNetworkInterfaceCopyAll() as CFArrayRef;
+            if all.is_null() {
+                return out;
+            }
+            for i in 0..CFArrayGetCount(all) {
+                let interface = CFArrayGetValueAtIndex(all, i);
+                if interface.is_null() {
+                    continue;
+                }
+                let Some(bsd_name) = string(SCNetworkInterfaceGetBSDName(interface)) else {
+                    continue;
+                };
+                out.insert(
+                    bsd_name,
+                    MacService {
+                        interface_type: string(SCNetworkInterfaceGetInterfaceType(interface)),
+                        display_name: string(SCNetworkInterfaceGetLocalizedDisplayName(interface)),
+                    },
+                );
+            }
+            CFRelease(all as CFTypeRef);
+        }
+        out
+    }
 }
 
 #[cfg(any(target_os = "ios", target_os = "android"))]
@@ -145,7 +265,14 @@ fn is_virtual(adapter: &RawAdapter) -> bool {
     {
         return true;
     }
-    cfg!(target_os = "macos") && MAC_HELPER_PREFIXES.iter().any(|p| name.starts_with(p))
+    // Sense Remote (Mac M4): by BSD name, not by the shown name ("Apple USB Ethernet Adapter"
+    // starts with "ap" too).
+    adapter.bsd_name.as_deref().is_some_and(is_mac_helper)
+}
+
+fn is_mac_helper(bsd_name: &str) -> bool {
+    let name = bsd_name.to_ascii_lowercase();
+    MAC_HELPER_PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
 fn keep_ipv4(ip: &Ipv4Addr) -> bool {
@@ -256,7 +383,104 @@ mod tests {
             up: true,
             ipv4: ipv4.iter().map(|s| s.parse().unwrap()).collect(),
             ipv6: Vec::new(),
+            bsd_name: None,
         }
+    }
+
+    /// An adapter as `read_adapters` builds it on macOS: read by BSD name, then completed from
+    /// SystemConfiguration.
+    fn mac_adapter(
+        index: u32,
+        bsd_name: &str,
+        service: Option<(&str, &str)>,
+        ipv4: &[&str],
+    ) -> RawAdapter {
+        let mut a = adapter(index, bsd_name, Kind::Other, ipv4);
+        let service = service.map(|(interface_type, display_name)| MacService {
+            interface_type: Some(interface_type.into()),
+            display_name: Some(display_name.into()),
+        });
+        apply_mac_service(&mut a, bsd_name, service.as_ref());
+        a
+    }
+
+    #[test]
+    fn mac_kinds() {
+        assert_eq!(mac_kind("Ethernet"), (Kind::Ethernet, false));
+        assert_eq!(mac_kind("IEEE80211"), (Kind::Wifi, false));
+        for tunnel in ["PPP", "IPSec", "L2TP", "PPTP", "6to4"] {
+            assert_eq!(mac_kind(tunnel), (Kind::Other, true), "{tunnel}");
+        }
+        for other in ["Bridge", "Bond", "VLAN", "FireWire", "WWAN", "Bluetooth", ""] {
+            assert_eq!(mac_kind(other), (Kind::Other, false), "{other}");
+        }
+        for helper in ["lo0", "utun3", "awdl0", "llw0", "bridge0", "gif0", "stf0", "anpi1", "ap1"] {
+            assert!(is_mac_helper(helper), "{helper}");
+        }
+        for real in ["en0", "en7", "fw0", "pdp_ip0"] {
+            assert!(!is_mac_helper(real), "{real}");
+        }
+    }
+
+    /// MacBook: `en0` is the Wi-Fi, the USB adapter is `en7` -> Ethernet still comes first.
+    #[test]
+    fn mac_laptop_ethernet_first_and_helpers_dropped() {
+        let out = build(vec![
+            mac_adapter(1, "lo0", None, &["127.0.0.1"]),
+            mac_adapter(11, "en0", Some(("IEEE80211", "Wi-Fi")), &["192.168.1.31"]),
+            mac_adapter(12, "awdl0", None, &["10.99.0.1"]),
+            mac_adapter(13, "llw0", None, &["10.99.0.2"]),
+            mac_adapter(14, "utun3", None, &["100.64.0.2"]),
+            mac_adapter(15, "bridge0", Some(("Bridge", "Thunderbolt Bridge")), &["10.1.0.1"]),
+            mac_adapter(16, "en5", Some(("Ethernet", "Bluetooth PAN")), &["10.2.0.1"]),
+            mac_adapter(17, "ppp0", Some(("PPP", "Office VPN")), &["10.8.0.2"]),
+            mac_adapter(20, "en7", Some(("Ethernet", "USB 10/100/1000 LAN")), &["192.168.1.30"]),
+            // Starts with "ap" but is a real adapter: the helper filter looks at the BSD name.
+            mac_adapter(21, "en8", Some(("Ethernet", "Apple USB Ethernet Adapter")), &["10.0.0.9"]),
+            // Thunderbolt port without a cable: no address.
+            mac_adapter(5, "en1", Some(("Ethernet", "Thunderbolt 1")), &[]),
+        ]);
+        let got: Vec<(&str, &str, &str)> = out
+            .iter()
+            .map(|n| (n.name.as_str(), n.kind.as_str(), n.ipv4[0].as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("USB 10/100/1000 LAN", "ethernet", "192.168.1.30"),
+                ("Apple USB Ethernet Adapter", "ethernet", "10.0.0.9"),
+                ("Wi-Fi", "wifi", "192.168.1.31"),
+            ]
+        );
+        // The BSD name is not part of what is sent.
+        let json = serde_json::to_string(&out).unwrap();
+        assert!(!json.contains("en7") && !json.contains("bsd"));
+    }
+
+    /// Mac mini: `en0` is the built-in Ethernet, `en1` the Wi-Fi.
+    #[test]
+    fn mac_mini_and_interfaces_unknown_to_system_configuration() {
+        let out = build(vec![
+            mac_adapter(7, "en1", Some(("IEEE80211", "Wi-Fi")), &["192.168.1.21"]),
+            mac_adapter(6, "en0", Some(("Ethernet", "Ethernet")), &["192.168.1.20", "10.0.0.5"]),
+        ]);
+        assert_eq!(out[0].name, "Ethernet");
+        assert_eq!(out[0].ipv4, ["192.168.1.20", "10.0.0.5"]);
+        assert_eq!(out[1].kind, "wifi");
+        // SystemConfiguration could not be read: BSD name, kind as `default-net` found it.
+        let mut plain = adapter(6, "en0", Kind::Ethernet, &["192.168.1.20"]);
+        apply_mac_service(&mut plain, "en0", None);
+        assert_eq!(plain.bsd_name.as_deref(), Some("en0"));
+        let out = build(vec![plain]);
+        assert_eq!((out[0].name.as_str(), out[0].kind.as_str()), ("en0", "ethernet"));
+        // An empty display name keeps the BSD name.
+        let mut unnamed = adapter(6, "en0", Kind::Other, &["192.168.1.20"]);
+        let service = MacService {
+            interface_type: Some("Ethernet".into()),
+            display_name: Some("  ".into()),
+        };
+        apply_mac_service(&mut unnamed, "en0", Some(&service));
+        assert_eq!((unnamed.name.as_str(), unnamed.kind), ("en0", Kind::Ethernet));
     }
 
     #[test]

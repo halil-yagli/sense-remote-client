@@ -26,8 +26,11 @@
 //! value, and the temperature query (WMI on Windows) can take a moment; a display read creates
 //! DXGI objects. Call from a blocking context (e.g. `spawn_blocking`) if the caller is async.
 //!
-//! MAC-SONRA: macOS sends no displays yet (CGDisplay / IOKit, plan MAC-SONRA-10); health comes
-//! from `sysinfo` (temperature may be unavailable on Apple Silicon, MAC-SONRA-11).
+//! Sense Remote (Mac M4): macOS sends its displays (`displays_mac`: size, backing scale, refresh
+//! rate, monitor name; no connection type), the adapters with their kind from SystemConfiguration
+//! (`network.rs`) and, in the heartbeat only, `mac_permissions` (`mac_perm`; not part of the
+//! signed report). Health comes from `sysinfo` (the temperature may be unavailable on Apple
+//! Silicon; then it is not sent). `caps` carries `apply` where this build applies envelopes.
 
 // Sense Remote: `health()`, `displays()` and `network()` are only used by tests so far.
 #![allow(dead_code)]
@@ -54,6 +57,10 @@ pub const CAPS: [&str; 1] = ["role_all"];
 /// Sense Remote (wave 3, I10): added to `caps` only where the maintenance curtain can be shown
 /// (`curtain::is_supported`: Windows 10 2004+; not on macOS or older Windows).
 pub const CAP_CURTAIN: &str = "curtain";
+/// Sense Remote (Mac M4, plan §3.4): added to `caps` only where this build applies a signed
+/// envelope (`envelope_apply::APPLIES`). The panel looks at it on macOS: a Mac without it gets
+/// no policy.
+pub const CAP_APPLY: &str = "apply";
 /// Health goes into the heartbeat at most this often (contract: "en çok 60 sn'de bir").
 pub const HEALTH_INTERVAL: Duration = Duration::from_secs(60);
 /// The heartbeat's `displays_hash` is recomputed at most this often (the heartbeat runs every
@@ -135,6 +142,16 @@ pub struct SenseHealth {
     pub uptime_s: Option<u64>,
 }
 
+/// Sense Remote (Mac M4): `SenseMacPermissions`, the heartbeat's `mac_permissions` (`mac_perm`
+/// reads the values).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacPermissions {
+    pub screen_recording: bool,
+    pub accessibility: bool,
+    pub input_monitoring: bool,
+}
+
 /// `SenseSysinfoExt`
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -169,6 +186,10 @@ pub struct HeartbeatBase {
     /// e.g. on macOS). Signed like `caps`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maintenance_curtain: Option<bool>,
+    /// Sense Remote (Mac M4): only macOS sends it; information only, NOT in the signed report
+    /// (`report_sig::SIGNED_FIELDS`), so no policy decision may rest on it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mac_permissions: Option<MacPermissions>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -211,19 +232,37 @@ pub fn heartbeat_base() -> Option<Value> {
         app_version,
         displays_hash: cached_displays_hash(),
         health,
-        caps: Some(caps(curtain_supported)),
+        caps: Some(caps(curtain_supported, super::envelope_apply::APPLIES)),
         maintenance_curtain: curtain_state(curtain_supported, crate::sense::curtain::is_shown()),
+        mac_permissions: mac_permissions(),
     };
     to_json(&base)
 }
 
-/// Sense Remote: `caps` of this computer: `CAPS`, plus `curtain` where it can be shown.
-fn caps(curtain_supported: bool) -> Vec<String> {
+/// Sense Remote: `caps` of this computer: `CAPS`, plus `curtain` where it can be shown and
+/// (Mac M4) `apply` where envelopes are applied.
+fn caps(curtain_supported: bool, applies: bool) -> Vec<String> {
     let mut caps: Vec<String> = CAPS.iter().map(|cap| (*cap).to_owned()).collect();
     if curtain_supported {
         caps.push(CAP_CURTAIN.to_owned());
     }
+    if applies {
+        caps.push(CAP_APPLY.to_owned());
+    }
     caps
+}
+
+/// Sense Remote (Mac M4): the three macOS privacy permissions of this process, read without a
+/// prompt.
+#[cfg(target_os = "macos")]
+fn mac_permissions() -> Option<MacPermissions> {
+    Some(super::mac_perm::current())
+}
+
+/// Sense Remote (Mac M4): the field does not exist outside macOS.
+#[cfg(not(target_os = "macos"))]
+fn mac_permissions() -> Option<MacPermissions> {
+    None
 }
 
 /// Sense Remote: `maintenance_curtain`, sent only next to the `curtain` capability.
@@ -238,7 +277,7 @@ pub fn health() -> Value {
 }
 
 /// (`SenseDisplay` list, `displays_hash`). Both empty / `None` when nothing could be read
-/// (macOS for now, Session 0, lock screen): then the fields are not sent and the panel keeps
+/// (Session 0, lock screen, no window server session): then the fields are not sent and the panel keeps
 /// the last known displays.
 pub fn displays() -> (Vec<Value>, Option<String>) {
     let displays = collect_displays();
@@ -517,11 +556,16 @@ fn pick_cpu_temp<'a>(readings: impl Iterator<Item = (&'a str, f32)>) -> Option<f
 // Displays
 // ---------------------------------------------------------------------------------------------
 
-/// Raw per-display values from the OS (Windows: `displays_win`), mapped by the pure
-/// functions below.
+/// Raw per-display values from the OS (Windows: `displays_win`, macOS: `displays_mac`), mapped
+/// by the pure functions below.
 #[derive(Debug, Clone, Default)]
 pub(super) struct DisplayDetails {
     pub name: Option<String>,
+    /// Sense Remote (Mac M4): backing scale factor (2 on a Retina display); macOS only.
+    pub scale: Option<f64>,
+    /// Sense Remote (Mac M4): size in pixels at the backing scale; macOS only (see
+    /// `mac_geometry`).
+    pub pixel_size: Option<(u32, u32)>,
     /// DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY
     pub output_technology: Option<u32>,
     /// Target refresh rate (numerator, denominator).
@@ -568,10 +612,94 @@ fn collect_displays() -> Vec<SenseDisplay> {
     merge_displays(&geometry, &super::displays_win::query())
 }
 
-// MAC-SONRA: CGDisplayBounds / CGDisplayCopyDisplayMode (plan MAC-SONRA-10).
-#[cfg(not(windows))]
+/// Sense Remote (Mac M4): order, index, position and "primary" come from the list the
+/// controller sees (`scrap::Display::all()`); size, scale, refresh rate and name from
+/// `displays_mac`, merged by display id.
+#[cfg(target_os = "macos")]
+fn collect_displays() -> Vec<SenseDisplay> {
+    let list = match scrap::Display::all() {
+        Ok(list) => list,
+        Err(err) => {
+            log::debug!("Sense Remote: display list unavailable: {err}");
+            return Vec::new();
+        }
+    };
+    let details = super::displays_mac::query();
+    let geometry: Vec<Geometry> = list
+        .iter()
+        .map(|d| {
+            let name = d.name();
+            let found = details.get(&name);
+            mac_geometry(name, d.origin(), (d.width(), d.height()), d.is_primary(), found)
+        })
+        .collect();
+    merge_displays(&geometry, &details)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn collect_displays() -> Vec<SenseDisplay> {
     Vec::new()
+}
+
+/// Sense Remote (Mac M4): one entry of the controller's list on macOS. `DisplayInfo` there is
+/// the size in pixels at the backing scale plus `scale` (x / y in points), but only while
+/// scrap's Retina switch is on, and the server turns that off while more than one display is
+/// captured (`server.rs`, `ENABLE_RETINA`). The report must not change with a running
+/// connection, so the pixel size comes from `displays_mac` (the value `DisplayInfo` has with
+/// the switch on); scrap's own size is only the fallback when the mode could not be read.
+fn mac_geometry(
+    name: String,
+    origin: (i32, i32),
+    scrap_size: (usize, usize),
+    primary: bool,
+    details: Option<&DisplayDetails>,
+) -> Geometry {
+    let (width, height) = details
+        .and_then(|d| d.pixel_size)
+        .map(|(w, h)| (w as usize, h as usize))
+        .unwrap_or(scrap_size);
+    Geometry {
+        name,
+        x: origin.0,
+        y: origin.1,
+        width,
+        height,
+        primary,
+    }
+}
+
+/// Sense Remote (Mac M4): backing scale of a display mode (`CGDisplayModeGetPixelWidth` /
+/// `CGDisplayModeGetWidth`): 1 on a normal display, 2 on a Retina one. Anything else than a
+/// plausible value is not sent.
+pub(super) fn mac_scale(mode_pixel_width: usize, mode_width: usize) -> Option<f64> {
+    if mode_pixel_width == 0 || mode_width == 0 {
+        return None;
+    }
+    let scale = round_to(mode_pixel_width as f64 / mode_width as f64, 2);
+    (1.0..=4.0).contains(&scale).then_some(scale)
+}
+
+/// Sense Remote (Mac M4): size in points (`CGDisplayPixelsWide` / `High`, rotation applied)
+/// times the backing scale. `None` without a scale (the caller then keeps scrap's size).
+pub(super) fn mac_pixel_size(points: (usize, usize), scale: Option<f64>) -> Option<(u32, u32)> {
+    let scale = scale?;
+    let to_pixels = |points: usize| {
+        let pixels = (points as f64 * scale).round();
+        (pixels >= 1.0 && pixels <= u32::MAX as f64).then_some(pixels as u32)
+    };
+    Some((to_pixels(points.0)?, to_pixels(points.1)?))
+}
+
+/// Sense Remote (Mac M4): refresh rate as the rational `DisplayDetails::refresh` carries.
+/// `CGDisplayModeGetRefreshRate` is 0 for some built-in panels; then the screen's
+/// `maximumFramesPerSecond` stands in. Neither readable -> not sent.
+pub(super) fn mac_refresh(mode_hz: f64, max_fps: Option<i64>) -> Option<(u32, u32)> {
+    let hz = if mode_hz.is_finite() && mode_hz >= 1.0 {
+        mode_hz
+    } else {
+        max_fps.filter(|fps| *fps >= 1)? as f64
+    };
+    (hz <= 1000.0).then(|| ((hz * 1000.0).round() as u32, 1000))
 }
 
 fn merge_displays(
@@ -603,6 +731,8 @@ fn merge_displays(
 
 fn apply_details(display: &mut SenseDisplay, d: &DisplayDetails) {
     display.name = d.name.as_deref().and_then(display_name);
+    // Sense Remote (Mac M4): only macOS reads a scale (`DisplayInfo.scale` is 1 on Windows).
+    display.scale = d.scale.filter(|s| s.is_finite() && *s > 0.0);
     display.connection = d.output_technology.map(|t| connection_name(t).to_owned());
     display.refresh_hz = d.refresh.and_then(|(num, den)| refresh_hz(num, den));
     if let Some((flags, encoding, bits)) = d.advanced_color {
@@ -751,10 +881,14 @@ mod tests {
         ["v", "role", "app_version", "platform", "displays", "displays_hash", "network"];
     // SenseHeartbeatExt (+ wave 2 envelope fields filled by I4, + wave 3 `caps` and the signed
     // `report`, contract v3).
-    const SCHEMA_HEARTBEAT_KEYS: [&str; 11] = [
+    // Sense Remote (Mac M4): + `mac_permissions` (panel PR #41, Mac plan §3.4).
+    const SCHEMA_HEARTBEAT_KEYS: [&str; 12] = [
         "v", "role", "app_version", "displays_hash", "health", "applied_seq",
         "maintenance_curtain", "envelope_error", "clock_skew_s", "caps", "report",
+        "mac_permissions",
     ];
+    const SCHEMA_MAC_PERMISSION_KEYS: [&str; 3] =
+        ["screen_recording", "accessibility", "input_monitoring"];
     // Contract v3: `caps` is at most 16 strings of at most 32 characters.
     const SCHEMA_CAPS_MAX: usize = 16;
     const SCHEMA_CAP_MAX_CHARS: usize = 32;
@@ -853,18 +987,21 @@ mod tests {
             app_version: 1,
             displays_hash: Some("0".repeat(64)),
             health: Some(full_health()),
-            caps: Some(caps(true)),
+            caps: Some(caps(true, true)),
             maintenance_curtain: Some(false),
+            mac_permissions: Some(MacPermissions::default()),
         })
         .unwrap();
         assert!(keys(&heartbeat).is_subset(&set(&SCHEMA_HEARTBEAT_KEYS)));
         assert!(keys(&heartbeat).contains("maintenance_curtain"));
+        assert_eq!(keys(&heartbeat["mac_permissions"]), set(&SCHEMA_MAC_PERMISSION_KEYS));
         // K-ROL-2: the capabilities fit the contract and say `role_all`.
         assert!(CAPS.len() <= SCHEMA_CAPS_MAX);
         assert!(CAPS.iter().all(|cap| !cap.is_empty() && cap.len() <= SCHEMA_CAP_MAX_CHARS));
         assert!(CAPS.contains(&"role_all"));
-        assert!(caps(true).len() <= SCHEMA_CAPS_MAX);
+        assert!(caps(true, true).len() <= SCHEMA_CAPS_MAX);
         assert!(CAP_CURTAIN.len() <= SCHEMA_CAP_MAX_CHARS);
+        assert!(!CAP_APPLY.is_empty() && CAP_APPLY.len() <= SCHEMA_CAP_MAX_CHARS);
         // Nothing unread is sent: an empty display has only the required fields.
         let minimal = serde_json::to_value(SenseDisplay {
             width: 1,
@@ -910,6 +1047,34 @@ mod tests {
             canonical_json(&serde_json::to_value(&heartbeat).unwrap()),
             canonical_json(&samples["heartbeat"])
         );
+        // Sense Remote (Mac M4): the macOS bodies (panel PR #41) as well.
+        let sysinfo: SysinfoExt =
+            serde_json::from_value(samples["sysinfo_macos"].clone()).unwrap();
+        assert_eq!(sysinfo.platform, "macos-arm64");
+        assert_eq!(
+            canonical_json(&serde_json::to_value(&sysinfo).unwrap()),
+            canonical_json(&samples["sysinfo_macos"])
+        );
+        let heartbeat: HeartbeatBase =
+            serde_json::from_value(samples["heartbeat_macos"].clone()).unwrap();
+        assert_eq!(heartbeat.caps, Some(caps(false, true)));
+        assert_eq!(
+            heartbeat.mac_permissions,
+            Some(MacPermissions {
+                screen_recording: true,
+                accessibility: true,
+                input_monitoring: false,
+            })
+        );
+        assert_eq!(
+            canonical_json(&serde_json::to_value(&heartbeat).unwrap()),
+            canonical_json(&samples["heartbeat_macos"])
+        );
+        // The Windows heartbeat has no `mac_permissions`.
+        assert!(samples["heartbeat"].get("mac_permissions").is_none());
+        let mut bad = samples["heartbeat_macos"]["mac_permissions"].clone();
+        bad["camera"] = Value::from(true);
+        assert!(serde_json::from_value::<MacPermissions>(bad).is_err());
         let mut bad = samples["sysinfo"]["displays"][0].clone();
         bad["serial"] = Value::from("X");
         assert!(serde_json::from_value::<SenseDisplay>(bad).is_err());
@@ -1029,6 +1194,7 @@ mod tests {
                 refresh: Some((59_940, 1000)),
                 advanced_color: Some((0b011, 0, 10)),
                 native: Some((3840, 2160)),
+                ..Default::default()
             },
         );
         details.insert(
@@ -1039,6 +1205,7 @@ mod tests {
                 refresh: Some((60, 1)),
                 advanced_color: Some((0, 99, 0)),
                 native: Some((0, 0)),
+                ..Default::default()
             },
         );
         let displays = merge_displays(&geometry, &details);
@@ -1153,8 +1320,16 @@ mod tests {
     /// byte for byte the panel's.
     #[test]
     fn caps_and_curtain_state() {
-        assert_eq!(caps(false), vec!["role_all".to_owned()]);
-        assert_eq!(caps(true), vec!["role_all".to_owned(), "curtain".to_owned()]);
+        assert_eq!(caps(false, false), vec!["role_all".to_owned()]);
+        assert_eq!(caps(true, false), vec!["role_all".to_owned(), "curtain".to_owned()]);
+        // Mac M4: `apply` only where envelopes are applied; a Mac (no curtain) then sends the
+        // list of the panel's macOS sample.
+        assert_eq!(caps(false, true), vec!["role_all".to_owned(), "apply".to_owned()]);
+        assert_eq!(caps(true, true), ["role_all", "curtain", "apply"]);
+        for curtain in [false, true] {
+            assert!(!caps(curtain, false).contains(&CAP_APPLY.to_owned()));
+            assert!(caps(curtain, true).contains(&CAP_APPLY.to_owned()));
+        }
         assert_eq!(curtain_state(false, true), None);
         assert_eq!(curtain_state(true, false), Some(false));
         assert_eq!(curtain_state(true, true), Some(true));
@@ -1168,7 +1343,7 @@ mod tests {
             .find(|case| case["name"] == "ok_full")
             .unwrap();
         let sense = &ok_full["heartbeat"]["sense"];
-        assert_eq!(sense["caps"], serde_json::json!(caps(true)));
+        assert_eq!(sense["caps"], serde_json::json!(caps(true, false)));
         assert_eq!(sense["maintenance_curtain"], serde_json::json!(true));
 
         // Unsupported (macOS, Windows before 2004): neither field leaves the computer.
@@ -1179,8 +1354,9 @@ mod tests {
                 app_version: 1,
                 displays_hash: None,
                 health: None,
-                caps: Some(caps(supported)),
+                caps: Some(caps(supported, false)),
                 maintenance_curtain: curtain_state(supported, false),
+                mac_permissions: None,
             })
             .unwrap()
         };
@@ -1190,6 +1366,172 @@ mod tests {
         // Outside Windows there is no curtain, so no `curtain` capability (MAC-SONRA-15).
         #[cfg(not(windows))]
         assert!(!crate::sense::curtain::is_supported());
+    }
+
+    /// Mac M4: what `displays_mac` reads, mapped to the contract.
+    #[test]
+    fn mac_display_values() {
+        assert_eq!(mac_scale(3024, 1512), Some(2.0));
+        assert_eq!(mac_scale(1920, 1920), Some(1.0));
+        assert_eq!(mac_scale(0, 1512), None);
+        assert_eq!(mac_scale(3024, 0), None);
+        assert_eq!(mac_scale(100, 1000), None); // below 1: not a real mode
+        assert_eq!(mac_scale(10_000, 100), None);
+        assert_eq!(mac_pixel_size((1512, 982), Some(2.0)), Some((3024, 1964)));
+        assert_eq!(mac_pixel_size((1080, 1920), Some(1.0)), Some((1080, 1920))); // rotated
+        assert_eq!(mac_pixel_size((1512, 982), None), None);
+        assert_eq!(mac_pixel_size((0, 982), Some(2.0)), None);
+        assert_eq!(mac_refresh(120.0, Some(120)), Some((120_000, 1000)));
+        assert_eq!(mac_refresh(59.94, None), Some((59_940, 1000)));
+        assert_eq!(mac_refresh(0.0, Some(60)), Some((60_000, 1000))); // built-in panel
+        assert_eq!(mac_refresh(0.0, None), None);
+        assert_eq!(mac_refresh(0.0, Some(0)), None);
+        assert_eq!(mac_refresh(f64::NAN, None), None);
+        assert_eq!(mac_refresh(5000.0, None), None);
+        let (num, den) = mac_refresh(59.94, None).unwrap();
+        assert_eq!(refresh_hz(num, den), Some(59.94));
+    }
+
+    /// Mac M4: a Retina laptop with an external display, as `collect_displays` builds it on
+    /// macOS. The result does not depend on scrap's Retina switch (its size is only used
+    /// when the mode could not be read).
+    #[test]
+    fn mac_displays_keep_controller_order_and_send_only_what_was_read() {
+        let mut details = HashMap::new();
+        details.insert(
+            "1".to_owned(),
+            DisplayDetails {
+                name: Some("Built-in Retina Display".into()),
+                scale: mac_scale(3024, 1512),
+                pixel_size: mac_pixel_size((1512, 982), Some(2.0)),
+                refresh: mac_refresh(120.0, Some(120)),
+                ..Default::default()
+            },
+        );
+        details.insert(
+            "5".to_owned(),
+            DisplayDetails {
+                scale: mac_scale(1920, 1920),
+                pixel_size: mac_pixel_size((1920, 1080), Some(1.0)),
+                refresh: mac_refresh(60.0, None),
+                ..Default::default()
+            },
+        );
+        // scrap's order: the external display first; with the Retina switch off scrap
+        // reports the built-in panel in points.
+        let geometry = vec![
+            mac_geometry("5".into(), (1512, 0), (1920, 1080), false, details.get("5")),
+            mac_geometry("1".into(), (0, 0), (1512, 982), true, details.get("1")),
+            mac_geometry("9".into(), (-800, 0), (800, 600), false, details.get("9")),
+        ];
+        let displays = merge_displays(&geometry, &details);
+        assert_eq!(
+            displays,
+            vec![
+                SenseDisplay {
+                    index: 0,
+                    x: 1512,
+                    y: 0,
+                    width: 1920,
+                    height: 1080,
+                    scale: Some(1.0),
+                    primary: Some(false),
+                    refresh_hz: Some(60.0),
+                    ..Default::default()
+                },
+                SenseDisplay {
+                    index: 1,
+                    name: Some("Built-in Retina Display".into()),
+                    x: 0,
+                    y: 0,
+                    width: 3024,
+                    height: 1964,
+                    scale: Some(2.0),
+                    primary: Some(true),
+                    refresh_hz: Some(120.0),
+                    ..Default::default()
+                },
+                // Not in the details: scrap's geometry only.
+                SenseDisplay {
+                    index: 2,
+                    x: -800,
+                    y: 0,
+                    width: 800,
+                    height: 600,
+                    primary: Some(false),
+                    ..Default::default()
+                },
+            ]
+        );
+        // No connection type, bit depth, color format, HDR or native size on macOS.
+        for d in &displays {
+            let value = serde_json::to_value(d).unwrap();
+            assert!(keys(&value).is_subset(&set(&[
+                "index", "name", "x", "y", "width", "height", "scale", "primary", "refresh_hz",
+            ])));
+        }
+        // Windows details never carry a scale: the field stays out there.
+        let windows = merge_displays(
+            &geometry[..1],
+            &HashMap::from([("5".to_owned(), DisplayDetails::default())]),
+        );
+        assert_eq!(windows[0].scale, None);
+    }
+
+    /// Mac M4 (plan §3.4): `mac_permissions` is sent by macOS only and is not signed.
+    #[test]
+    fn mac_permissions_only_on_macos_and_outside_the_signed_report() {
+        assert_eq!(mac_permissions().is_some(), cfg!(target_os = "macos"));
+        let base = |mac_permissions| {
+            serde_json::to_value(HeartbeatBase {
+                v: EXT_VERSION,
+                role: "host".into(),
+                app_version: 2,
+                displays_hash: None,
+                health: None,
+                caps: Some(caps(false, true)),
+                maintenance_curtain: None,
+                mac_permissions,
+            })
+            .unwrap()
+        };
+        // Windows: the field is not in the body at all.
+        let mut windows = base(None);
+        assert!(windows.get("mac_permissions").is_none());
+        let mut mac = base(Some(MacPermissions {
+            screen_recording: true,
+            accessibility: false,
+            input_monitoring: true,
+        }));
+        assert_eq!(
+            mac["mac_permissions"],
+            serde_json::json!({
+                "screen_recording": true, "accessibility": false, "input_monitoring": true
+            })
+        );
+        // Same signed bytes with and without it, whatever its value.
+        windows["applied_seq"] = Value::from(4);
+        mac["applied_seq"] = Value::from(4);
+        let signed = |sense: &Value| {
+            crate::sense::report_sig::signed_bytes("123456789", "uuid", 1_800_000_000, sense)
+        };
+        assert!(signed(&windows).is_some());
+        assert_eq!(signed(&windows), signed(&mac));
+        mac["mac_permissions"]["accessibility"] = Value::from(true);
+        assert_eq!(signed(&windows), signed(&mac));
+        // `caps` is signed: changing it changes the bytes.
+        mac["caps"] = serde_json::json!(["role_all"]);
+        assert_ne!(signed(&windows), signed(&mac));
+    }
+
+    /// Mac M4: the root daemon's update check never starts an update from a test process: not
+    /// root -> it stops at the root-owned lock; root -> at the option, which Sense pins to "N"
+    /// (`sense.rs`, test `hide_cm_remote_config_and_auto_update_are_pinned_off`) and which is off
+    /// by default.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn root_update_check_does_not_start_an_update() {
+        assert!(!matches!(crate::updater::check_update_as_root(), Ok(true)));
     }
 
     #[test]
@@ -1236,9 +1578,12 @@ mod tests {
             }
             assert!(keys(d).is_subset(&set(&SCHEMA_DISPLAY_KEYS)));
         }
-        if cfg!(not(windows)) {
-            assert!(displays.is_empty()); // MAC-SONRA
+        if cfg!(not(any(windows, target_os = "macos"))) {
+            assert!(displays.is_empty());
         }
+        // Mac M4: index and order are those of the controller's list.
+        let indexes: Vec<u64> = displays.iter().filter_map(|d| d["index"].as_u64()).collect();
+        assert!(indexes.windows(2).all(|pair| pair[0] < pair[1]));
         for n in network() {
             assert!(keys(&n).is_subset(&set(&SCHEMA_NETWORK_KEYS)));
             assert!(SCHEMA_NETWORK_KINDS.contains(&n["kind"].as_str().unwrap()));
