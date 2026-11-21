@@ -5,8 +5,10 @@
 //! The `--server` process runs as SYSTEM and can write it. The uninstaller deletes the whole key,
 //! so a reinstall starts from 0 and the panel re-signs its last set with a new seq.
 //!
-//! MAC-SONRA-9: root-owned file under `/Library/Application Support/SenseRemote/`. Until then
-//! macOS reads 0 and refuses to store (envelopes are verified there but not applied).
+//! macOS (Mac M0, plan 2026-11-21 §3.1): `envelope_seq` in the root-owned state file
+//! (`mac_state`); only root (the daemon) can store it. M0 is the skeleton: `mac_state` reads
+//! nothing and writes nothing yet, so macOS still reads 0 and refuses to store (envelopes are
+//! verified there but not applied) until M1 / M5.
 //!
 //! Sense Remote (G2-5, G2-6): a value that exists but cannot be read is an error, not 0, and
 //! `check_writable` runs before an envelope changes anything.
@@ -53,7 +55,14 @@ pub fn read_last_seq() -> Result<u64, String> {
     )
 }
 
-#[cfg(not(windows))]
+/// Sense Remote (Mac M0): no state file is a fresh install (0); a file that cannot be used is an
+/// error (G2-5), never 0.
+#[cfg(target_os = "macos")]
+pub fn read_last_seq() -> Result<u64, String> {
+    Ok(super::mac_state::read()?.map_or(0, |state| state.envelope_seq))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn read_last_seq() -> Result<u64, String> {
     Ok(0)
 }
@@ -76,7 +85,13 @@ pub fn check_writable() -> Result<(), StoreError> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+/// Sense Remote (Mac M0): rewrites the state unchanged; fails for every process but root.
+#[cfg(target_os = "macos")]
+pub fn check_writable() -> Result<(), StoreError> {
+    super::mac_state::update(|_| {}).map_err(StoreError::Io)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn check_writable() -> Result<(), StoreError> {
     Err(StoreError::UnsupportedPlatform)
 }
@@ -93,7 +108,22 @@ pub fn store_last_seq(seq: u64) -> Result<(), StoreError> {
         .map_err(|err| StoreError::Io(err.to_string()))
 }
 
-#[cfg(not(windows))]
+/// Sense Remote (Mac M0): the comparison and the write happen inside one `mac_state::update`
+/// (under its lock), so two writers can not move the counter back.
+#[cfg(target_os = "macos")]
+pub fn store_last_seq(seq: u64) -> Result<(), StoreError> {
+    let mut checked = Ok(());
+    super::mac_state::update(|state| {
+        checked = may_store(state.envelope_seq, seq);
+        if checked.is_ok() {
+            state.envelope_seq = seq;
+        }
+    })
+    .map_err(StoreError::Io)?;
+    checked
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn store_last_seq(_seq: u64) -> Result<(), StoreError> {
     Err(StoreError::UnsupportedPlatform)
 }
@@ -114,6 +144,15 @@ mod tests {
             may_store(42, 7),
             Err(StoreError::NotIncreasing { stored: 42, seq: 7 })
         );
+    }
+
+    // Sense Remote (Mac M0): skeleton behaviour, unchanged for the caller (0, nothing stored).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_skeleton_reads_zero_and_stores_nothing() {
+        assert_eq!(read_last_seq(), Ok(0));
+        assert!(matches!(check_writable(), Err(StoreError::Io(_))));
+        assert!(matches!(store_last_seq(1), Err(StoreError::Io(_))));
     }
 
     #[test]
