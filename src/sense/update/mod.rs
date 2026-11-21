@@ -195,7 +195,8 @@ pub struct UpdateStatus {
     pub progress_pct: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<UpdateError>,
-    /// A §3.3 reason name (`manifest::Reason::as_str`), `^[a-z_]{1,32}$`.
+    /// A §3.3 reason name (`manifest::Reason::as_str`) or a platform detail such as
+    /// `app_management`; must pass `is_error_detail`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_detail: Option<String>,
     /// 0–10.
@@ -292,6 +293,9 @@ pub enum SenseUpdateIpc {
     },
     /// macOS only, agent → daemon: the user's install request. Only handled against the valid
     /// release the daemon itself holds.
+    /// The daemon limits the three `_service` calls to one per second per peer PROCESS
+    /// (`peer_pid`, as for envelopes, G4-4), not per connection: a new connection must not
+    /// reset the limit.
     Install { version: u32 },
     /// macOS only, daemon → agent: the daemon's status JSON.
     DaemonStatus(String),
@@ -325,6 +329,13 @@ impl Hint {
         };
         Some(Self { release, oid })
     }
+}
+
+/// `error_detail` of the contract: `^[a-z_]{1,32}$`. Anything else is not reported (the panel's
+/// strict schema would refuse the whole heartbeat extension).
+pub fn is_error_detail(value: &str) -> bool {
+    (1..=32).contains(&value.len())
+        && value.bytes().all(|b| b == b'_' || b.is_ascii_lowercase())
 }
 
 /// A contract `Version`: integer 1..=999_999.
@@ -396,6 +407,9 @@ pub fn extend_heartbeat(sense: &mut Value) {
 /// Main IPC channel, `--server` side: answers `StatusQuery` with `Status` and takes
 /// `InstallRequest`; every other variant is ignored here (`None` = no answer). U2 implements;
 /// the future must stay `Send`.
+/// The main channel's handler also runs in other processes that listen on it; this function
+/// must only act in the `--server` process (the one that holds the engine, or on macOS talks
+/// to the daemon) and answer `None` everywhere else.
 pub async fn on_ipc(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
     let _ = message;
     None
@@ -468,6 +482,18 @@ mod tests {
         assert_eq!(sources.join(" "), "panel local manual");
         let signs: Vec<_> = SignKind::ALL.iter().map(|s| s.as_str()).collect();
         assert_eq!(signs.join(" "), "adhoc cert none unknown");
+        // §3.3: the panel's `ReleaseRejectReason`, then the names only orders have.
+        let reasons: Vec<_> = manifest::Reason::ALL.iter().map(|r| r.as_str()).collect();
+        assert_eq!(
+            reasons.join(" "),
+            "keys_overlap malformed unknown_key bad_signature bad_payload wrong_issuer \
+             not_yet_valid expired wrong_platform bad_url build_unknown_key \
+             build_bad_signature build_bad_payload build_mismatch wrong_device \
+             version_mismatch release_mismatch downgrade"
+        );
+        assert!(reasons.iter().all(|name| is_error_detail(name)));
+        let windows: Vec<_> = order::Window::ALL.iter().map(|w| w.as_str()).collect();
+        assert_eq!(windows.join(" "), "idle night");
         assert_eq!(UpdateState::parse("rolled_back"), Some(UpdateState::RolledBack));
         assert_eq!(UpdateState::parse("Idle"), None);
         assert_eq!(json!(UpdateError::HashMismatch), json!("hash_mismatch"));
@@ -536,6 +562,16 @@ mod tests {
         let parsed: GuiStatus = serde_json::from_value(example.clone()).unwrap();
         assert_eq!(parsed.blocked, Some(Blocked::SessionActive));
         assert_eq!(serde_json::to_value(&parsed).unwrap(), example);
+    }
+
+    #[test]
+    fn error_detail_shape() {
+        assert!(is_error_detail("app_management"));
+        assert!(is_error_detail(&"a".repeat(32)));
+        for bad in ["", "App", "bad-url", "bad url", "x1", "ğ"] {
+            assert!(!is_error_detail(bad), "{bad}");
+        }
+        assert!(!is_error_detail(&"a".repeat(33)));
     }
 
     #[test]

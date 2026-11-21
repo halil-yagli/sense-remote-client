@@ -1330,9 +1330,6 @@ mod tests {
         assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&moved[..])));
     }
 
-    /// I10: `curtain` and `maintenance_curtain` only where the curtain can be shown; the order
-    /// matches the shared vector (`hb-report-v1.json`, case `ok_full`), so the signed text is
-    /// byte for byte the panel's.
     // Update plan 2026-11-21 §3.5: `update` follows the one switch and comes last.
     #[test]
     fn update_cap_follows_the_switch() {
@@ -1347,6 +1344,9 @@ mod tests {
         assert!(update::CAP_UPDATE.len() <= SCHEMA_CAP_MAX_CHARS);
     }
 
+    /// I10: `curtain` and `maintenance_curtain` only where the curtain can be shown; the order
+    /// matches the shared vector (`hb-report-v1.json`, case `ok_full`), so the signed text is
+    /// byte for byte the panel's.
     #[test]
     fn caps_and_curtain_state() {
         assert_eq!(caps(false, false), vec!["role_all".to_owned()]);

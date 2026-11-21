@@ -57,7 +57,9 @@ pub struct State {
     pub source: Option<UpdateSource>,
     pub attempts: u8,
     pub error: Option<UpdateError>,
-    pub error_detail: Option<Reason>,
+    /// What `update.error_detail` reports: a `manifest::Reason` name, or a platform detail
+    /// such as `app_management` (§7.4). Always passes `super::is_error_detail`.
+    pub error_detail: Option<String>,
     pub progress_pct: Option<u8>,
     /// Successful answers in a row whose hint had `release == null`.
     pub null_hints: u8,

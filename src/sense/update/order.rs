@@ -2,14 +2,20 @@
 //! "install this version on this computer". Package U1 implements `verify`; pure.
 //!
 //! An order does not use the envelope `seq` counter. Replay protection: it is bound to this
-//! computer (`did`, `duuid`), lives at most `ORDER_TTL_S`, and its version must be above the
-//! installed one.
+//! computer (`did`, `duuid`) and to one file (`platform`, `sha256`: when a version number is
+//! published again with another file, an old order can not make the new file install), lives
+//! at most `ORDER_TTL_S` (48 hours; a cancel is an unsigned hint, so a suppressed cancel lasts
+//! at most that long), and its version must be above the installed one.
 //!
-//! Order of the checks: steps 1–5 of `manifest` with `UPDATE_ORDER_SIGNING_PREFIX` and the
-//! panel keys → `iss` (`wrong_issuer`) → `did` / `duuid` (`wrong_device`) → time as step 7
-//! (`not_yet_valid` / `expired`) → a valid release is held and `order.version` equals its
-//! version (`version_mismatch`, also when no release is held) → `version > installed`
-//! (`downgrade`).
+//! Order of the checks (plan §3.3; names are the panel's `UpdateOrderRejectReason`): steps 1–5
+//! of `manifest` with `UPDATE_ORDER_SIGNING_PREFIX` and the panel keys (`malformed`,
+//! `unknown_key`, `bad_signature`, `bad_payload`: JCS canonical JSON + schema, including
+//! `iat ≤ exp ≤ iat + ORDER_TTL_S`) → `iss` (`wrong_issuer`) → `did` / `duuid`
+//! (`wrong_device`) → time as step 7 (`not_yet_valid` / `expired`) → a valid (not expired)
+//! release is held and `order.version` equals its version (`version_mismatch`, also when no
+//! release is held) → `order.platform` and `order.sha256` equal the held release's
+//! (`release_mismatch`) → `version > installed` (`downgrade`). When one heartbeat answer
+//! carries both, the release is handled first.
 //!
 //! A rejected order changes nothing; the reason goes to the heartbeat as
 //! `update.error = order_invalid` + `error_detail = <reason>`.
@@ -20,8 +26,9 @@ use serde_json::Value;
 
 /// Domain separation (§3.1).
 pub const UPDATE_ORDER_SIGNING_PREFIX: &[u8] = b"sense-remote/update-order/v1\n";
-/// `ORDER_TTL_S`: `exp = iat + 7 days`; an order is never signed again.
-pub const ORDER_TTL_S: i64 = 7 * 86_400;
+/// `ORDER_TTL_S`: `exp = iat + 48 hours`; an order is never signed again, an expired one is
+/// `expired`.
+pub const ORDER_TTL_S: i64 = 2 * 86_400;
 
 wire_enum!(
     /// `UpdateWindow`: `idle` = as soon as no connection is active; `night` = 03:00–05:00 local
@@ -40,6 +47,10 @@ pub struct Order {
     /// `UpdateOrderId`.
     pub oid: String,
     pub version: u32,
+    /// File binding: the published file at the time the order was given.
+    pub platform: String,
+    /// Lowercase hex.
+    pub sha256: String,
     pub window: Window,
     pub iat: i64,
     pub exp: i64,
@@ -101,6 +112,13 @@ mod tests {
             assert!(!is_order_id(bad), "{bad}");
         }
         assert!(!is_order_id(&format!("upd_{}", "a".repeat(33))));
+    }
+
+    // Same numbers as the panel's `release.ts`.
+    #[test]
+    fn lifetimes_match_the_contract() {
+        assert_eq!(ORDER_TTL_S, 172_800);
+        assert_eq!(crate::sense::update::manifest::RELEASE_TTL_S, 604_800);
     }
 
     #[test]

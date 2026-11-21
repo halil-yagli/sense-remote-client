@@ -65,8 +65,13 @@ pub fn self_check() -> Result<(), UpdateError> {
 /// `--sense-upgrade-local` (§8): the elevated step of the manual move from version 2, started
 /// by `manual::upgrade_in_place` from the new setup file. Same backup + guard + `update_me`
 /// path with `source = manual`; no sign-in, no registration. `args` are the arguments after
-/// the flag. Returns the exit code (0 = started). U0: 1, nothing is done.
+/// the flag. Returns the exit code (0 = started). Outside Windows it returns 1 at once,
+/// whatever the arguments (`core_main` routes the flag here on every platform).
+/// U0: 1 on Windows too, nothing is done.
 pub fn upgrade_local(args: &[String]) -> i32 {
+    if !cfg!(windows) {
+        return 1;
+    }
     let _ = args;
     1
 }
@@ -74,6 +79,17 @@ pub fn upgrade_local(args: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Outside Windows the flag never does anything (U3 keeps this when it fills in Windows).
+    #[cfg(not(windows))]
+    #[test]
+    fn upgrade_local_is_windows_only() {
+        let args = |list: &[&str]| list.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>();
+        assert_eq!(upgrade_local(&[]), 1);
+        assert_eq!(upgrade_local(&args(&["SenseRemote-Kurulum-3.exe"])), 1);
+        let cli = args(&[crate::sense::update::ARG_UPGRADE_LOCAL, "x"]);
+        assert_eq!(crate::sense::update::run_cli(&cli), Some(1));
+    }
 
     // U0: the platform side does nothing.
     #[test]

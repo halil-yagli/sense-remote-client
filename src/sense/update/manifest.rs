@@ -3,22 +3,30 @@
 //!
 //! Transport is the envelope's `{k, p, s}`: `k` = first 8 bytes of SHA-256(raw public key) as
 //! hex, `p` = payload bytes as unpadded base64url (at most `MAX_SIGNED_P_CHARS`), `s` = 64-byte
-//! Ed25519 signature as base64url. Signed data = prefix ‖ the bytes of `p`; the payload is never
-//! canonicalised again. Payloads are strict (`deny_unknown_fields` at every level).
+//! Ed25519 signature as base64url. Signed data = prefix ‖ the bytes of `p`. The payload is not
+//! canonicalised again, but the bytes of `p` MUST be JCS (RFC 8785) canonical JSON (bytes =
+//! canonical(decoded value)): a BOM, a duplicate or unsorted key, whitespace, `3.0` / `1e7`
+//! forms, a needless escape or a lone surrogate is `bad_payload`. Payloads are strict
+//! (`deny_unknown_fields` at every level); every limit is the panel's
+//! (`packages/shared/src/release.ts`).
 //!
-//! Order of the checks (the panel's `verifyRelease` follows steps 1–11 too):
-//!  1. shape `{k,p,s}` → `malformed`
+//! Order of the checks (plan §3.3; the panel's `verifyRelease` follows steps 0–11 too):
+//!  0. the panel and build key lists overlap (same `k` or same public key) → `keys_overlap`
+//!     (the two-signature rule must not collapse into one)
+//!  1. shape `{k,p,s}`, `p` ≤ 8192 characters → `malformed`
 //!  2. `k` is a panel key → `unknown_key`
 //!  3. strict base64url, 64-byte signature → `malformed`
 //!  4. Ed25519 with `RELEASE_SIGNING_PREFIX` → `bad_signature`
-//!  5. schema → `bad_payload`
+//!  5. JCS canonical JSON + schema (including `iat ≤ exp ≤ iat + RELEASE_TTL_S`) → `bad_payload`
 //!  6. `iss` → `wrong_issuer`
 //!  7. `iat - 300 ≤ now ≤ exp + 300` (local clock) → `not_yet_valid` / `expired`
 //!  8. `platform` is this build's → `wrong_platform`
-//!  9. `file == installer_file_name(version, platform)`, `url == api_server + "/indir/" + file`
-//!     (whole string), `notes_url` (if any) starts with `api_server` → `bad_url`
+//!  9. `file == installer_file_name(version, platform)` and
+//!     `url == api_server + "/indir/" + file`; `notes_url`, when given,
+//!     `== api_server + "/#surum-" + version` (all compared as raw strings, whole string; no
+//!     URL parser, no normalising) → `bad_url`
 //! 10. `build`: `k` is a build key (`build_unknown_key`), signature with `BUILD_SIGNING_PREFIX`
-//!     (`build_bad_signature`), `BuildStatement` schema (`build_bad_payload`)
+//!     (`build_bad_signature`), canonical JSON + `BuildStatement` schema (`build_bad_payload`)
 //! 11. `build` equals the notice in `version`, `platform`, `file`, `sha256`, `size`
 //!     → `build_mismatch`
 //! 12. not newer than the installed version: ignored silently, not an error. This step is
@@ -39,17 +47,31 @@ pub const RELEASE_TTL_S: i64 = 7 * 86_400;
 pub const MAX_INSTALLER_BYTES: u64 = 536_870_912;
 /// `MAX_SIGNED_P_CHARS`: limit of `p` for all three signed kinds.
 pub const MAX_SIGNED_P_CHARS: usize = 8_192;
-/// Allowed clock difference for `iat` / `exp`, seconds (as for envelopes).
+/// `MAX_URL_CHARS`: `url` / `notes_url` start with `http://` or `https://`, are printable ASCII
+/// (0x21–0x7E) only and at most this long.
+pub const MAX_URL_CHARS: usize = 2_048;
+/// `MAX_UNIX_SECONDS`: time fields are 0..=this (a time written in milliseconds fails the schema).
+pub const MAX_UNIX_SECONDS: i64 = 9_999_999_999;
+/// `MAX_RUN_ID`: 2^53 − 1.
+pub const MAX_RUN_ID: u64 = 9_007_199_254_740_991;
+/// `RELEASE_CLOCK_SKEW_S`: allowed clock difference for `iat` / `exp`, seconds (as for envelopes).
 pub const CLOCK_SKEW_S: i64 = 300;
 /// The only place installers are downloaded from: `api_server + DOWNLOAD_PATH + file`.
 pub const DOWNLOAD_PATH: &str = "/indir/";
+/// The only form of `notes_url`: `api_server + NOTES_ANCHOR + version`.
+pub const NOTES_ANCHOR: &str = "/#surum-";
 pub const PLATFORM_WINDOWS: &str = "windows-x64";
 pub const PLATFORM_MACOS: &str = "macos-arm64";
 
 wire_enum!(
-    /// Why a release notice or an order was refused (§3.3). The names are reported as
-    /// `error_detail` (`^[a-z_]{1,32}$`); the last three are only produced for orders.
+    /// Why a release notice or an order was refused (§3.3), in the order of the checks: the
+    /// panel's `ReleaseRejectReason`, then the names only `UpdateOrderRejectReason` has. The
+    /// names are reported as `error_detail` (`^[a-z_]{1,32}$`). `keys_overlap`,
+    /// `wrong_platform`, `bad_url` and the four `build_*` are only produced for notices; the
+    /// last four (`wrong_device`, `version_mismatch`, `release_mismatch`, `downgrade`) only for
+    /// orders.
     Reason {
+        KeysOverlap => "keys_overlap",
         Malformed => "malformed",
         UnknownKey => "unknown_key",
         BadSignature => "bad_signature",
@@ -65,6 +87,7 @@ wire_enum!(
         BuildMismatch => "build_mismatch",
         WrongDevice => "wrong_device",
         VersionMismatch => "version_mismatch",
+        ReleaseMismatch => "release_mismatch",
         Downgrade => "downgrade",
     }
 );
@@ -86,7 +109,7 @@ pub struct BuildStatement {
     pub iat: i64,
 }
 
-/// A verified `ReleasePayload` (§3.2), steps 1–11 passed.
+/// A verified `ReleasePayload` (§3.2), steps 0–11 passed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
     /// Key id of the panel key that signed it.
@@ -125,7 +148,7 @@ pub struct Expect<'a> {
     pub now_s: i64,
 }
 
-/// Steps 1–11. `panel_keys` = `keys::panel_keys()`, `build_keys` = `keys::release_keys()`.
+/// Steps 0–11. `panel_keys` = `keys::panel_keys()`, `build_keys` = `keys::release_keys()`.
 /// U0: nothing is trusted yet, every notice is refused.
 pub fn verify(
     release: &Value,

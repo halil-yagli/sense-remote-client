@@ -14,11 +14,14 @@
 //! - `Install { version }`: only against the valid release the daemon holds; a local process
 //!   can at most make a signed newer version install earlier.
 //! - `StatusQuery` → `DaemonStatus(json)`.
-//! - At most one call per `MIN_CALL_INTERVAL_MS` per peer process (`peer_pid`, like G4-4).
+//! - At most one call per `MIN_CALL_INTERVAL_MS` per peer PROCESS (`peer_pid`, like G4-4),
+//!   not per connection: opening a new connection must not reset the limit.
 //!
 //! Nothing of a release or order is logged, only reasons and version numbers.
 //!
-//! Compiled on every platform; elsewhere and in U0 nothing is answered.
+//! Compiled on every platform. Outside macOS `on_service_ipc` and `request_daemon` always
+//! answer `None` and `start` does nothing (Linux has the `_service` channel too, but no Sense
+//! daemon); U4 keeps that when it fills in the macOS side. In U0 that is so on macOS as well.
 //! MAC-SONRA: checked on a device with the rest of the Mac update (plan §14).
 
 use super::SenseUpdateIpc;
