@@ -6,8 +6,9 @@
 //! below and lists the rest as ignored (logged, nothing else).
 //!
 //! For every envelope: `envelope::verify` (signature, issuer, device, time, seq, allow list) →
-//! platform gate (only Windows applies; macOS verifies and reports `unsupported_platform`,
-//! MAC-SONRA-9) → the sync loop applies it (role, settings, disconnect, then `EnvelopeSeq`) →
+//! platform gate (Windows and macOS apply; elsewhere `unsupported_platform`) → the sync loop
+//! applies it (role, settings, disconnect, then `EnvelopeSeq`; on macOS through the root daemon,
+//! `mac_apply`, which verifies it again) →
 //! `Report` remembers the last rejection and the clock skew for the next heartbeat's `sense`
 //! (`applied_seq`, `envelope_error`, `clock_skew_s`).
 //!
@@ -31,8 +32,10 @@ use std::collections::BTreeMap;
 pub const MAX_ENVELOPES: usize = 8;
 /// A larger difference between panel and local clock is reported (`clock_skew_s`).
 pub const SKEW_REPORT_S: i64 = 300;
-/// Windows applies verified envelopes; other platforms only verify them (MAC-SONRA-9).
-pub const APPLIES: bool = cfg!(windows);
+/// Windows applies verified envelopes in the `--server` process (SYSTEM). Sense Remote (Mac M5,
+/// plan 2026-11-21 §3.3): macOS applies them too, in the root daemon (`mac_apply`); MAC-SONRA-9
+/// is closed. Other platforms only verify them.
+pub const APPLIES: bool = cfg!(any(windows, target_os = "macos"));
 
 const KEY_SYSINFO: &str = "sysinfo";
 const KEY_ENVELOPES: &str = "sense_envelopes";
@@ -208,6 +211,18 @@ pub fn role_change(
 /// Host + Controller keeps listening and is applied in-process.
 pub fn restart_needed(old: Option<SenseRole>, new: SenseRole) -> bool {
     old.map_or(true, |old| (old == SenseRole::Controller) != (new == SenseRole::Controller))
+}
+
+/// Sense Remote (Mac M5): exit code of the `--server` process when it ends for such a restart.
+/// Windows: the service starts it again whatever the code (0, as before). macOS: the LaunchAgent
+/// has `KeepAlive` → `SuccessfulExit = false` (`agent.plist`), launchd starts it again only
+/// after an exit that is not 0.
+pub fn restart_exit_code(macos: bool) -> i32 {
+    if macos {
+        1
+    } else {
+        0
+    }
 }
 
 /// Sense Remote (wave 3, K-CTRL): an outgoing-only (Controller) computer still installs the
@@ -431,7 +446,8 @@ mod tests {
                 seq: Some(5),
             })
         );
-        assert_eq!(APPLIES, cfg!(windows));
+        // Mac M5: macOS applies too (through the root daemon).
+        assert_eq!(APPLIES, cfg!(any(windows, target_os = "macos")));
     }
 
     #[test]
@@ -545,6 +561,9 @@ mod tests {
         assert!(!restart_needed(Some(host), both));
         assert!(!restart_needed(Some(both), host));
         assert!(restart_needed(None, host));
+        // Mac M5: launchd restarts the agent only after a failing exit; Windows keeps 0.
+        assert_eq!(restart_exit_code(false), 0);
+        assert_ne!(restart_exit_code(true), 0);
     }
 
     #[test]
