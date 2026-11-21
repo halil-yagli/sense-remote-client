@@ -2206,7 +2206,8 @@ pub async fn get_key(sync: bool) -> String {
         options.remove("key").unwrap_or_default()
     };
     if key.is_empty() {
-        key = config::RS_PUB_KEY.to_owned();
+        // Sense Remote: our hbbs key, never RustDesk's (`sense::server`).
+        key = crate::sense::server::RS_PUB_KEY.to_owned();
     }
     key
 }
