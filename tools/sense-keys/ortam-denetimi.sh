@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sense Remote: anahtar betiklerinin ortak GitHub ortamı denetimi (kaynak olarak alınır).
 #
 #   check_environment <sahip/depo> <ortam> <izinli kural...>
