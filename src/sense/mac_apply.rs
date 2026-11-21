@@ -14,6 +14,18 @@
 //! used (validity is checked against the daemon's clock, plan R8). Nothing of an envelope is
 //! logged: only the reason of a rejection and, once the signature is valid, its seq.
 //!
+//! Security review 2026-11-21:
+//! - G4-2: the user process reports the seq it has *followed* (`Followed`), not the daemon's.
+//!   When the daemon applied an envelope but its answer was lost, the panel therefore sends the
+//!   envelope again; the daemon recognises the envelope it applied last (fully verified, seq
+//!   equal to the stored one) and answers `Applied` again without writing, so the user process
+//!   can catch up (settings, disconnect, role) and only then reports the seq.
+//! - G4-3: with an installed role the daemon keeps its own values for the permission settings,
+//!   the access settings and the identity when a user process syncs its config to root
+//!   (`keep_root_options`, `keep_root_fields`).
+//! - G4-4: the call limit is per peer process (`CallLimiter`); a call that came too soon is
+//!   answered with `busy` and does not take anything from other peers.
+//!
 //! Layout: the decision logic (`apply_call`, `apply_one`, `settle`, the limits) is pure and
 //! takes its surroundings as `DaemonContext` + `DaemonStore`, so it is tested on every platform;
 //! the macOS-only part (`RootStore`, `apply_in_daemon`, `request_daemon`) only wires it to the
@@ -34,8 +46,13 @@ use std::collections::{BTreeMap, HashMap};
 /// Limits of one `Apply` call; a call above them is ignored as a whole and logged.
 pub const MAX_ENVELOPES: usize = 8;
 pub const MAX_TOTAL_BYTES: usize = 64 * 1024;
-/// At most one `Apply` call per this many milliseconds.
+/// At most one `Apply` call per peer process per this many milliseconds.
 pub const MIN_CALL_INTERVAL_MS: u64 = 1000;
+/// Peers the limiter remembers at once; more than that within one interval are `busy`.
+pub const MAX_LIMITED_PEERS: usize = 64;
+/// `Rejected.reason` of a call that came too soon (G4-4). Not an `envelope::Reason`: the user
+/// process reports it as `apply_failed` and tries again with the next heartbeat.
+pub const REASON_BUSY: &str = "busy";
 /// How long the user process waits for the daemon's answer.
 pub const DAEMON_TIMEOUT_MS: u64 = 5000;
 
@@ -79,10 +96,32 @@ pub fn within_limits(envelopes: &[String]) -> bool {
         && envelopes.iter().map(String::len).sum::<usize>() <= MAX_TOTAL_BYTES
 }
 
-/// Pure part of the rate limit. `since_last_ms` = time since the previous accepted call,
-/// `None` for the first one.
+/// Pure part of the rate limit. `since_last_ms` = time since the previous accepted call of the
+/// same peer, `None` for its first one.
 pub fn call_allowed(since_last_ms: Option<u64>) -> bool {
     since_last_ms.map_or(true, |ms| ms >= MIN_CALL_INTERVAL_MS)
+}
+
+/// Sense Remote (G4-4): the call limit per peer process (pid of the IPC peer), so one local
+/// process sending calls every second can not starve the agent's own call. Time is a
+/// monotonic millisecond counter supplied by the caller.
+#[derive(Debug, Default)]
+pub struct CallLimiter {
+    last_call_ms: HashMap<u32, u64>,
+}
+
+impl CallLimiter {
+    /// True when `peer` may call now (and remembers the call).
+    pub fn allow(&mut self, peer: u32, now_ms: u64) -> bool {
+        // Entries older than the interval no longer limit anything.
+        self.last_call_ms
+            .retain(|_, at| now_ms.saturating_sub(*at) < MIN_CALL_INTERVAL_MS);
+        if self.last_call_ms.contains_key(&peer) || self.last_call_ms.len() >= MAX_LIMITED_PEERS {
+            return false;
+        }
+        self.last_call_ms.insert(peer, now_ms);
+        true
+    }
 }
 
 /// The settings of an envelope that are written on this platform.
@@ -166,8 +205,53 @@ fn rejected(reason: Reason, seq: Option<u64>) -> SenseApplyOutcome {
     }
 }
 
+fn disconnect_ids(verified: &super::envelope::Verified) -> Vec<i32> {
+    verified
+        .body
+        .disconnect
+        .iter()
+        .flatten()
+        .filter_map(|id| i32::try_from(*id).ok())
+        .collect()
+}
+
+/// Sense Remote (G4-2): the envelope the daemon applied last, sent again because the user
+/// process never got the answer. It must pass the whole verification as it did the first time
+/// (checked against the seq before it) and carry exactly the stored seq; then the daemon
+/// answers `Applied` again and writes nothing. `role` = the role this envelope set, when it is
+/// the installed one.
+fn already_applied(
+    item: &Value,
+    ctx: &DaemonContext,
+    installed: Option<SenseRole>,
+    last_seq: u64,
+) -> Option<SenseApplyOutcome> {
+    let expect = Expect {
+        iss: ctx.iss,
+        did: ctx.did,
+        duuid: ctx.duuid,
+        now_s: ctx.now_s,
+        last_seq: last_seq.checked_sub(1)?,
+    };
+    let verified = envelope_apply::check(item, ctx.keys, &expect, ctx.applies).ok()?;
+    if verified.seq != last_seq {
+        return None;
+    }
+    let role = verified
+        .body
+        .sense_role
+        .map(|role| role.sense_role())
+        .filter(|role| Some(*role) == installed);
+    Some(SenseApplyOutcome::Applied {
+        seq: last_seq,
+        role: role.map(|role| role.as_str().to_owned()),
+        disconnect: disconnect_ids(&verified),
+    })
+}
+
 /// Daemon side, one envelope: full verification with the daemon's data, then the writes.
-/// Either everything is stored (`Applied`) or nothing changed (`Rejected`).
+/// Either everything is stored (`Applied`) or nothing changed (`Rejected`; or `Applied` again
+/// for the envelope applied last, see `already_applied`).
 pub fn apply_one<S: DaemonStore>(
     raw: &str,
     ctx: &DaemonContext,
@@ -193,7 +277,17 @@ pub fn apply_one<S: DaemonStore>(
     let verified =
         match envelope_apply::check_stored(&item, ctx.keys, &expect, ctx.applies, readable) {
             Ok(verified) => verified,
-            Err(Rejection { reason, seq, .. }) => return rejected(reason, seq),
+            Err(Rejection { reason, seq, .. }) => {
+                if readable && reason == Reason::Replayed && seq == Some(last_seq) {
+                    if let Some(outcome) = already_applied(&item, ctx, installed, last_seq) {
+                        log::info!(
+                            "Sense Remote: daemon was asked again for applied envelope {last_seq}"
+                        );
+                        return outcome;
+                    }
+                }
+                return rejected(reason, seq);
+            }
         };
     let seq = verified.seq;
     let new_role = match envelope_apply::role_change(installed, verified.body.sense_role) {
@@ -212,41 +306,121 @@ pub fn apply_one<S: DaemonStore>(
     SenseApplyOutcome::Applied {
         seq,
         role: new_role.map(|role| role.as_str().to_owned()),
-        disconnect: verified
-            .body
-            .disconnect
-            .iter()
-            .flatten()
-            .filter_map(|id| i32::try_from(*id).ok())
-            .collect(),
+        disconnect: disconnect_ids(&verified),
     }
 }
 
-/// Daemon side, one `Apply` call. `since_last_ms` as in `call_allowed`. `None` = the call was
-/// ignored (too soon, too many, too large): nothing was read, verified or written.
+/// Daemon side, one `Apply` call. `allowed` = the peer's call limit (`CallLimiter::allow`).
+/// A call over the size limits is ignored (empty answer); a call that came too soon is answered
+/// with `busy` for every envelope (G4-4). In both cases nothing was read, verified or written.
 pub fn apply_call<S: DaemonStore>(
     envelopes: &[String],
-    since_last_ms: Option<u64>,
+    allowed: bool,
     ctx: &DaemonContext,
     store: &mut S,
-) -> Option<Vec<SenseApplyOutcome>> {
-    if !call_allowed(since_last_ms) {
-        log::warn!("Sense Remote: daemon ignored an envelope call (rate limit)");
-        return None;
-    }
+) -> Vec<SenseApplyOutcome> {
     if !within_limits(envelopes) {
         log::warn!(
             "Sense Remote: daemon ignored an envelope call (limits: {} envelopes)",
             envelopes.len()
         );
-        return None;
+        return Vec::new();
     }
-    Some(
-        envelopes
+    if !allowed {
+        log::warn!("Sense Remote: daemon ignored an envelope call (rate limit)");
+        return envelopes
             .iter()
-            .map(|raw| apply_one(raw, ctx, store))
-            .collect(),
-    )
+            .map(|_| SenseApplyOutcome::Rejected {
+                reason: REASON_BUSY.to_owned(),
+            })
+            .collect();
+    }
+    envelopes
+        .iter()
+        .map(|raw| apply_one(raw, ctx, store))
+        .collect()
+}
+
+/// Sense Remote (G4-2): how far the user process has followed the daemon: the seq of the last
+/// envelope whose settings, disconnects and role it carried out itself, and the role it runs
+/// with. Starts at the root state when the process starts (its config was just synced from
+/// root); from then on only `follow` moves it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Followed {
+    pub seq: u64,
+    pub role: Option<SenseRole>,
+}
+
+impl Followed {
+    /// The seq this process checks envelopes against and reports as `applied_seq`: never ahead
+    /// of the daemon's stored seq, and behind it while an applied envelope was not followed.
+    pub fn reported(&self, root_seq: u64) -> u64 {
+        self.seq.min(root_seq)
+    }
+
+    /// After this process carried out an envelope the daemon applied. Returns the role it ran
+    /// with before (for the restart decision).
+    pub fn follow(&mut self, applied: &AppliedByDaemon) -> Option<SenseRole> {
+        let before = self.role;
+        self.seq = self.seq.max(applied.seq);
+        if applied.role.is_some() {
+            self.role = applied.role;
+        }
+        before
+    }
+}
+
+/// Sense Remote (G4-3): `Config` fields (serde names) the daemon does not take from a user
+/// process once a role is installed: identity, key pair and the permanent password.
+pub const PROTECTED_CONFIG_FIELDS: [&str; 5] = ["id", "enc_id", "password", "salt", "key_pair"];
+/// Sense Remote (G4-3): options besides the envelope's allow list that decide who gets in.
+pub const PROTECTED_ACCESS_OPTIONS: [&str; 3] = ["verification-method", "approve-mode", "whitelist"];
+
+/// Options the daemon keeps its own value for: everything an envelope sets, plus the access
+/// settings.
+pub fn is_protected_option(key: &str) -> bool {
+    PROTECTED_ACCESS_OPTIONS.contains(&key)
+        || super::envelope::ALLOWED_OPTIONS
+            .iter()
+            .any(|(allowed, _)| *allowed == key)
+}
+
+/// Sense Remote (G4-3): the daemon protects its config when a Sense role that takes incoming
+/// connections is installed, and also when the state can not be read (never less strict on an
+/// error). `state` = the state file read: `Ok(None)` no Sense install, `Ok(Some(role))`.
+pub fn sync_protected(state: Result<Option<Option<SenseRole>>, String>) -> bool {
+    match state {
+        Ok(None) => false,
+        Ok(Some(role)) => role != Some(SenseRole::Controller),
+        Err(_) => true,
+    }
+}
+
+/// Sense Remote (G4-3): protected options of `incoming` (from a user process) are replaced by
+/// root's own: its value, or no value when root has none. Other options pass.
+pub fn keep_root_options(incoming: &mut HashMap<String, String>, root: &HashMap<String, String>) {
+    incoming.retain(|key, _| !is_protected_option(key));
+    for (key, value) in root {
+        if is_protected_option(key) {
+            incoming.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+/// Sense Remote (G4-3): the same for the named fields of a serialized `Config` (its
+/// identity fields are private to `hbb_common`, so the daemon merges the serde form the IPC
+/// already carries). False when either side is not an object; the caller then keeps root's.
+pub fn keep_root_fields(incoming: &mut Value, root: &Value, fields: &[&str]) -> bool {
+    let (Some(incoming), Some(root)) = (incoming.as_object_mut(), root.as_object()) else {
+        return false;
+    };
+    for field in fields {
+        match root.get(*field) {
+            Some(value) => incoming.insert((*field).to_owned(), value.clone()),
+            None => incoming.remove(*field),
+        };
+    }
+    true
 }
 
 /// User process: what the daemon did with one forwarded envelope.
@@ -297,13 +471,26 @@ pub fn settle(
 }
 
 /// Daemon side of one `Apply` call on macOS: the daemon's own identity, keys, clock and state.
-/// One call at a time (the lock also carries the rate limit).
+/// One call at a time (the lock also carries the per-peer rate limit). `peer_pid` = pid of the
+/// IPC peer, only for the rate limit.
 #[cfg(target_os = "macos")]
-pub fn apply_in_daemon(envelopes: &[String], _server_time: Option<i64>) -> Vec<SenseApplyOutcome> {
-    use std::{sync::Mutex, time::Instant};
-    static LAST_CALL: Mutex<Option<Instant>> = Mutex::new(None);
-    let mut last_call = LAST_CALL.lock().unwrap_or_else(|err| err.into_inner());
-    let since_last_ms = (*last_call).map(|at| at.elapsed().as_millis().min(u64::MAX as u128) as u64);
+pub fn apply_in_daemon(
+    envelopes: &[String],
+    _server_time: Option<i64>,
+    peer_pid: Option<u32>,
+) -> Vec<SenseApplyOutcome> {
+    use std::{
+        sync::{Mutex, OnceLock},
+        time::Instant,
+    };
+    static LIMITER: OnceLock<Mutex<(Instant, CallLimiter)>> = OnceLock::new();
+    let mut limiter = LIMITER
+        .get_or_init(|| Mutex::new((Instant::now(), CallLimiter::default())))
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let now_ms = limiter.0.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    // A peer without a readable pid shares one slot.
+    let allowed = limiter.1.allow(peer_pid.unwrap_or(0), now_ms);
     let iss = super::envelope::expected_issuer();
     let did = hbb_common::config::Config::get_id();
     let duuid = crate::encode64(hbb_common::get_uuid());
@@ -316,17 +503,17 @@ pub fn apply_in_daemon(envelopes: &[String], _server_time: Option<i64>) -> Vec<S
         applies: envelope_apply::APPLIES,
         macos: true,
     };
-    let outcomes = apply_call(envelopes, since_last_ms, &ctx, &mut RootStore);
-    if outcomes.is_some() {
-        *last_call = Some(Instant::now());
-    }
-    outcomes.unwrap_or_default()
+    apply_call(envelopes, allowed, &ctx, &mut RootStore)
 }
 
 /// Other platforms have no root daemon that applies envelopes: every envelope is rejected and
 /// nothing changes.
 #[cfg(not(target_os = "macos"))]
-pub fn apply_in_daemon(envelopes: &[String], _server_time: Option<i64>) -> Vec<SenseApplyOutcome> {
+pub fn apply_in_daemon(
+    envelopes: &[String],
+    _server_time: Option<i64>,
+    _peer_pid: Option<u32>,
+) -> Vec<SenseApplyOutcome> {
     envelopes
         .iter()
         .take(MAX_ENVELOPES)

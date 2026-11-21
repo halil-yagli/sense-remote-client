@@ -668,6 +668,11 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
                                     #[cfg(any(target_os = "linux", target_os = "macos"))]
                                     if postfix == crate::POSTFIX_SERVICE {
                                         if matches!(&data, Data::SyncConfig(_)) {
+                                            // Sense Remote (G4-3): with an installed role the
+                                            // daemon keeps its own permission, access and
+                                            // identity values.
+                                            #[cfg(target_os = "macos")]
+                                            let data = sense_keep_root_config(data);
                                             handle(data, &mut stream).await;
                                         // Sense Remote (Mac M5): the one other message this
                                         // channel takes; everything else is still rejected.
@@ -736,8 +741,10 @@ async fn sense_service_envelope(data: Data, stream: &mut Connection) {
     else {
         return;
     };
+    // G4-4: the call limit is per peer process.
+    let peer_pid = stream.peer_pid();
     let outcomes =
-        tokio::task::spawn_blocking(move || apply_in_daemon(&envelopes, server_time))
+        tokio::task::spawn_blocking(move || apply_in_daemon(&envelopes, server_time, peer_pid))
             .await
             .unwrap_or_default();
     allow_err!(
@@ -745,6 +752,48 @@ async fn sense_service_envelope(data: Data, stream: &mut Connection) {
             .send(&Data::SenseEnvelope(SenseEnvelopeIpc::Result(outcomes)))
             .await
     );
+}
+
+// Sense Remote (security review G4-3): on macOS the user process syncs its whole config to the
+// root daemon (`SyncConfig(Some)`, upstream). The session user must not be able to change what
+// the panel decides that way: with an installed Host / Host + Controller role the daemon keeps
+// its own values for the envelope's permission settings, the access settings
+// (`verification-method`, `approve-mode`, `whitelist`), the permanent password (+ salt), the id
+// and the key pair; everything else is taken as before. Those values only change through a
+// signed envelope (`mac_apply`) or the installer (root). A root config that is still empty is
+// not protected (first sync after an install).
+#[cfg(target_os = "macos")]
+fn sense_keep_root_config(data: Data) -> Data {
+    use crate::sense::{mac_apply, mac_state};
+    match data {
+        Data::SyncConfig(Some(configs)) => {
+            let root = Config::get();
+            let state = mac_state::read().map(|state| state.map(|state| state.role));
+            if root.is_empty() || !mac_apply::sync_protected(state) {
+                return Data::SyncConfig(Some(configs));
+            }
+            let (config, mut config2) = *configs;
+            // The identity fields are private to `hbb_common`: merge the serde form (the one
+            // this IPC carries). Anything unexpected keeps root's config as it is.
+            let config = match (serde_json::to_value(&config), serde_json::to_value(&root)) {
+                (Ok(mut incoming), Ok(own)) => {
+                    let merged = mac_apply::keep_root_fields(
+                        &mut incoming,
+                        &own,
+                        &mac_apply::PROTECTED_CONFIG_FIELDS,
+                    );
+                    match serde_json::from_value(incoming) {
+                        Ok(config) if merged => config,
+                        _ => root,
+                    }
+                }
+                _ => root,
+            };
+            mac_apply::keep_root_options(&mut config2.options, &Config2::get().options);
+            Data::SyncConfig(Some(Box::new((config, config2))))
+        }
+        other => other,
+    }
 }
 
 pub async fn new_listener(postfix: &str) -> ResultType<Incoming> {
@@ -2503,6 +2552,37 @@ mod test {
         assert!(sync < sense && sense < reject, "{branch}");
         assert_eq!(branch.matches("else if").count(), 1, "{branch}");
         assert!(branch[reject..].contains("break;"), "{branch}");
+
+        // G4-3, code path: on macOS a `SyncConfig` on this channel passes
+        // `sense_keep_root_config` before `handle` writes it into the root config ...
+        let sync_arm = &branch[sync..sense];
+        let keep = sync_arm
+            .find("let data = sense_keep_root_config(data);")
+            .unwrap();
+        assert!(sync_arm[..keep].trim_end().ends_with("#[cfg(target_os = \"macos\")]"));
+        assert!(keep < sync_arm.find("handle(data, &mut stream).await;").unwrap());
+        // ... which keeps root's identity, password, permission and access values whenever the
+        // state says so and root has a config.
+        let start = source.find("fn sense_keep_root_config(data: Data) -> Data {").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        for needed in [
+            "mac_state::read()",
+            "if root.is_empty() || !mac_apply::sync_protected(state) {",
+            "&mac_apply::PROTECTED_CONFIG_FIELDS,",
+            "Ok(config) if merged => config,",
+            "_ => root,",
+            "mac_apply::keep_root_options(&mut config2.options, &Config2::get().options);",
+        ] {
+            assert!(body.contains(needed), "{needed}");
+        }
+        // The protected fields are the serde names of `Config`'s identity and password fields.
+        let fields = crate::sense::mac_apply::PROTECTED_CONFIG_FIELDS;
+        assert_eq!(fields, ["id", "enc_id", "password", "salt", "key_pair"]);
+        let config = serde_json::to_value(super::Config::default()).unwrap();
+        for field in fields.iter().copied().filter(|field| *field != "id") {
+            assert!(config.get(field).is_some(), "Config has no field {field}");
+        }
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -221,6 +221,29 @@ fn one_call_per_second() {
     assert!(call_allowed(Some(MIN_CALL_INTERVAL_MS)));
 }
 
+// G4-4: the limit is per peer process; a flooding process does not take the agent's call.
+#[test]
+fn call_limit_is_per_peer() {
+    let mut limiter = CallLimiter::default();
+    let (agent, flooder) = (501, 777);
+    assert!(limiter.allow(flooder, 0));
+    for now_ms in [1, 300, 999] {
+        assert!(!limiter.allow(flooder, now_ms), "{now_ms}");
+    }
+    // The agent's first call in the same second goes through.
+    assert!(limiter.allow(agent, 500));
+    assert!(!limiter.allow(agent, 1_499));
+    assert!(limiter.allow(flooder, 1_000));
+    assert!(limiter.allow(agent, 1_500));
+    // Many peers at once: the table is bounded, the rest is busy until the interval passed.
+    let mut limiter = CallLimiter::default();
+    for peer in 0..MAX_LIMITED_PEERS as u32 {
+        assert!(limiter.allow(peer, 0));
+    }
+    assert!(!limiter.allow(9_999, 1));
+    assert!(limiter.allow(9_999, MIN_CALL_INTERVAL_MS));
+}
+
 #[test]
 fn valid_envelope_is_applied_and_its_seq_stored() {
     let s = signer();
@@ -317,7 +340,6 @@ fn forged_envelopes_from_the_user_process_change_nothing() {
         ("for another computer (uuid)", s.sign(&other_uuid), "wrong_device"),
         ("from another panel", s.sign(&other_panel), "wrong_issuer"),
         ("old seq", s.sign(&strategy(3, json!({}))), "replayed"),
-        ("the seq already applied", s.sign(&strategy(4, json!({}))), "replayed"),
         ("expired", s.sign(&expired), "expired"),
         ("not valid yet", s.sign(&future), "not_yet_valid"),
         ("partial set", s.sign(&partial), "not_allowed"),
@@ -424,31 +446,37 @@ fn calls_over_the_limits_are_ignored_whole() {
 
     // Nine valid envelopes: none is verified, none applied.
     let mut store = before.clone();
-    assert_eq!(apply_call(&valid, None, &ctx(&keys), &mut store), None);
+    assert!(apply_call(&valid, true, &ctx(&keys), &mut store).is_empty());
     assert_eq!(store, before);
 
     // More than 64 KB in total, even with a valid envelope first.
     let mut store = before.clone();
     let large = vec![valid[0].clone(), "x".repeat(MAX_TOTAL_BYTES)];
-    assert_eq!(apply_call(&large, None, &ctx(&keys), &mut store), None);
+    assert!(apply_call(&large, true, &ctx(&keys), &mut store).is_empty());
     assert_eq!(store, before);
 
-    // A second call within the second.
+    // G4-4: a call that came too soon is answered `busy` for every envelope; nothing is read.
     let mut store = before.clone();
-    let one = &valid[..1];
-    assert_eq!(apply_call(one, Some(MIN_CALL_INTERVAL_MS - 1), &ctx(&keys), &mut store), None);
+    let busy = SenseApplyOutcome::Rejected {
+        reason: "busy".to_owned(),
+    };
+    assert_eq!(
+        apply_call(&valid[..2], false, &ctx(&keys), &mut store),
+        vec![busy.clone(), busy]
+    );
     assert_eq!(store, before);
+    // The user process reports `busy` as `apply_failed` (and tries again next heartbeat).
+    assert_eq!(Reason::parse(REASON_BUSY), None);
 
     // Eight are taken in order; each sees the seq the previous one stored.
     let mut store = before.clone();
-    let outcomes = apply_call(&valid[..MAX_ENVELOPES], Some(MIN_CALL_INTERVAL_MS), &ctx(&keys), &mut store)
-        .unwrap();
+    let outcomes = apply_call(&valid[..MAX_ENVELOPES], true, &ctx(&keys), &mut store);
     assert_eq!(outcomes.len(), MAX_ENVELOPES);
     assert!(outcomes.iter().all(|outcome| reason_of(outcome) == "ok"));
     assert_eq!(store.seq, MAX_ENVELOPES as u64);
 
     // An empty call is answered with an empty result.
-    assert_eq!(apply_call(&[], None, &ctx(&keys), &mut store), Some(vec![]));
+    assert!(apply_call(&[], true, &ctx(&keys), &mut store).is_empty());
 }
 
 #[test]
@@ -457,12 +485,251 @@ fn replay_inside_one_call_is_rejected() {
     let keys = vec![s.trusted.clone()];
     let raw = s.sign(&strategy(5, json!({})));
     let forged = "{}".to_owned();
+    let old = s.sign(&strategy(4, json!({})));
     let mut store = FakeStore::new(4);
-    let outcomes =
-        apply_call(&[raw.clone(), forged, raw], None, &ctx(&keys), &mut store).unwrap();
+    let outcomes = apply_call(&[raw.clone(), forged, old, raw], true, &ctx(&keys), &mut store);
     let reasons: Vec<&str> = outcomes.iter().map(reason_of).collect();
-    assert_eq!(reasons, ["ok", "malformed", "replayed"]);
+    // The envelope before the last one is a replay. The last one itself, sent again, is
+    // answered "applied" (G4-2) but written only once.
+    assert_eq!(reasons, ["ok", "malformed", "replayed", "ok"]);
     assert_eq!(store.seq, 5);
+    assert_eq!(
+        store.log,
+        ["read", "check", "options", "seq", "read", "read", "read"]
+    );
+}
+
+// G4-2: the daemon applied, its answer was lost. The user process has not carried the envelope
+// out, so it must not report it; the panel sends it again and the user process catches up.
+#[test]
+fn lost_daemon_answer_is_caught_up_before_the_seq_is_reported() {
+    let s = signer();
+    let keys = vec![s.trusted.clone()];
+    let payload = strategy(
+        5,
+        json!({ "sense_role": "host_controller", "disconnect": [3] }),
+    );
+    let raw = s.sign(&payload);
+    let item: Value = serde_json::from_str(&raw).unwrap();
+    let mut daemon = FakeStore::new(4);
+    // The user process: followed seq and role as at its start, its own settings copy.
+    let mut followed = Followed {
+        seq: 4,
+        role: Some(SenseRole::Host),
+    };
+    let mut user_options: BTreeMap<String, String> = BTreeMap::new();
+    let user_check = |followed: &Followed, daemon_seq: u64| {
+        let expect = Expect {
+            iss: ISS,
+            did: DID,
+            duuid: DUUID,
+            now_s: NOW,
+            last_seq: followed.reported(daemon_seq),
+        };
+        envelope_apply::check(&item, &keys, &expect, true)
+    };
+
+    // Heartbeat 1: forwarded, the daemon applies, the answer never arrives.
+    let verified = user_check(&followed, daemon.seq).unwrap();
+    let forwarded = vec![(verified.k.clone(), verified.seq)];
+    let outcomes = apply_call(&[raw.clone()], true, &ctx(&keys), &mut daemon);
+    assert_eq!(reason_of(&outcomes[0]), "ok");
+    assert_eq!((daemon.role, daemon.seq), (Some(SenseRole::Both), 5));
+    let results = settle(&forwarded, None);
+    assert_eq!(results[0].as_ref().unwrap_err().reason, Reason::ApplyFailed);
+    // Nothing happened in the user process, and it does not claim otherwise.
+    assert!(user_options.is_empty());
+    assert_eq!(followed.reported(daemon.seq), 4);
+    assert_eq!(followed.role, Some(SenseRole::Host));
+
+    // Heartbeat 2: `applied_seq` was 4, so the panel sent the envelope again. The user
+    // process's own check still passes (against 4, not the daemon's 5) ...
+    let verified = user_check(&followed, daemon.seq).unwrap();
+    let writes_before = daemon.log.len();
+    let outcomes = apply_call(&[raw.clone()], true, &ctx(&keys), &mut daemon);
+    // ... the daemon recognises the envelope it applied last and writes nothing again ...
+    assert_eq!(
+        outcomes,
+        vec![SenseApplyOutcome::Applied {
+            seq: 5,
+            role: Some("both".to_owned()),
+            disconnect: vec![3],
+        }]
+    );
+    assert_eq!(daemon.log[writes_before..], ["read"]);
+    // ... and now the user process carries it out: settings, disconnect, role.
+    let applied = settle(&forwarded, Some(outcomes.as_slice()))
+        .remove(0)
+        .unwrap();
+    user_options.extend(applicable_options(&verified.body.config_options, true));
+    assert_eq!(user_options["enable-terminal"], "Y");
+    assert_eq!(applied.disconnect, vec![3]);
+    let before = followed.follow(&applied);
+    assert_eq!(
+        (before, followed.role),
+        (Some(SenseRole::Host), Some(SenseRole::Both))
+    );
+    // Only now the seq is reported.
+    assert_eq!(followed.reported(daemon.seq), 5);
+
+    // Heartbeat 3: a late resend of the same envelope is a plain replay for the user process.
+    assert_eq!(
+        user_check(&followed, daemon.seq).unwrap_err().reason,
+        Reason::Replayed
+    );
+}
+
+#[test]
+fn only_the_genuine_last_envelope_is_answered_again() {
+    let s = signer();
+    let stranger = signer();
+    let keys = vec![s.trusted.clone()];
+    let last = strategy(5, json!({ "sense_role": "controller", "disconnect": [8] }));
+    let mut store = FakeStore::new(4);
+    assert_eq!(reason_of(&apply_one(&s.sign(&last), &ctx(&keys), &mut store)), "ok");
+    let before = FakeStore {
+        log: Vec::new(),
+        ..store.clone()
+    };
+
+    // The same seq, but not what the panel signed / not for this computer / expired by now.
+    let mut other_device = last.clone();
+    other_device["did"] = json!("987654321");
+    let mut partial = last.clone();
+    partial["body"]["config_options"] = json!({ "enable-terminal": "N" });
+    let late = DaemonContext {
+        now_s: NOW + 30 * 86_400,
+        ..ctx(&keys)
+    };
+    let cases = [
+        (stranger.sign(&last), ctx(&keys), "unknown_key"),
+        (s.sign(&other_device), ctx(&keys), "wrong_device"),
+        (s.sign(&partial), ctx(&keys), "replayed"),
+        (s.sign(&last), late, "expired"),
+        (s.sign(&strategy(4, json!({}))), ctx(&keys), "replayed"),
+    ];
+    for (raw, ctx, wanted) in cases {
+        let mut store = before.clone();
+        assert_eq!(reason_of(&apply_one(&raw, &ctx, &mut store)), wanted);
+        assert!(store.untouched_since(&before), "{wanted}: {:?}", store.log);
+    }
+
+    // The genuine one: answered again, with its role and disconnect ids, nothing written.
+    let mut store = before.clone();
+    assert_eq!(
+        apply_one(&s.sign(&last), &ctx(&keys), &mut store),
+        SenseApplyOutcome::Applied {
+            seq: 5,
+            role: Some("controller".to_owned()),
+            disconnect: vec![8],
+        }
+    );
+    assert!(store.untouched_since(&before), "{:?}", store.log);
+}
+
+#[test]
+fn followed_seq_never_runs_ahead_of_the_daemon() {
+    let mut followed = Followed {
+        seq: 7,
+        role: None,
+    };
+    assert_eq!(followed.reported(7), 7);
+    assert_eq!(followed.reported(9), 7);
+    // A reinstall reset the daemon's seq: the daemon's value wins.
+    assert_eq!(followed.reported(0), 0);
+    let applied = AppliedByDaemon {
+        seq: 9,
+        role: None,
+        disconnect: vec![],
+    };
+    assert_eq!(followed.follow(&applied), None);
+    assert_eq!((followed.seq, followed.role), (9, None));
+    // Following an older answer never moves it back.
+    let older = AppliedByDaemon {
+        seq: 8,
+        role: Some(SenseRole::Host),
+        disconnect: vec![],
+    };
+    assert_eq!(followed.follow(&older), None);
+    assert_eq!((followed.seq, followed.role), (9, Some(SenseRole::Host)));
+}
+
+// G4-3: what a user process syncs to root can not change permissions, access settings,
+// password or identity once a role is installed.
+#[test]
+fn root_keeps_its_protected_values_in_a_config_sync() {
+    // When: installed Host / Host + Controller, a state file without role, an unreadable one.
+    assert!(!sync_protected(Ok(None)));
+    assert!(sync_protected(Ok(Some(Some(SenseRole::Host)))));
+    assert!(sync_protected(Ok(Some(Some(SenseRole::Both)))));
+    assert!(!sync_protected(Ok(Some(Some(SenseRole::Controller)))));
+    assert!(sync_protected(Ok(Some(None))));
+    assert!(sync_protected(Err("unsafe mode".to_owned())));
+
+    // Every key an envelope sets is protected, plus the access settings.
+    for (key, _) in ALLOWED_OPTIONS {
+        assert!(is_protected_option(key), "{key}");
+    }
+    for key in ["verification-method", "approve-mode", "whitelist"] {
+        assert!(is_protected_option(key), "{key}");
+    }
+    assert!(!is_protected_option("theme"));
+
+    let map = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    };
+    let root = map(&[
+        ("enable-terminal", "N"),
+        ("enable-file-transfer", "N"),
+        ("approve-mode", "password"),
+        ("custom-rendezvous-server", "root.example.test"),
+    ]);
+    // The user side opens everything up and clears what root had set.
+    let mut incoming = map(&[
+        ("enable-terminal", "Y"),
+        ("access-mode", "full"),
+        ("whitelist", ""),
+        ("verification-method", "use-temporary-password"),
+        ("approve-mode", "click"),
+        ("theme", "dark"),
+        ("custom-rendezvous-server", "user.example.test"),
+    ]);
+    keep_root_options(&mut incoming, &root);
+    assert_eq!(
+        incoming,
+        map(&[
+            ("enable-terminal", "N"),
+            ("enable-file-transfer", "N"),
+            ("approve-mode", "password"),
+            // Not protected here (the hard settings pin the servers): passes as before.
+            ("theme", "dark"),
+            ("custom-rendezvous-server", "user.example.test"),
+        ])
+    );
+
+    // Identity and password fields of the serialized `Config`.
+    let own = json!({
+        "enc_id": "root-id", "password": "root-pw", "salt": "root-salt",
+        "key_pair": [[1, 2], [3, 4]], "key_confirmed": true,
+    });
+    let mut theirs = json!({
+        "id": "999999999", "enc_id": "user-id", "password": "", "salt": "user-salt",
+        "key_pair": [[9], [9]], "key_confirmed": false,
+    });
+    assert!(keep_root_fields(&mut theirs, &own, &PROTECTED_CONFIG_FIELDS));
+    assert_eq!(
+        theirs,
+        json!({
+            "enc_id": "root-id", "password": "root-pw", "salt": "root-salt",
+            "key_pair": [[1, 2], [3, 4]], "key_confirmed": false,
+        })
+    );
+    // Not an object: the caller keeps root's config.
+    assert!(!keep_root_fields(&mut json!("x"), &own, &PROTECTED_CONFIG_FIELDS));
+    assert!(!keep_root_fields(&mut theirs, &json!(null), &PROTECTED_CONFIG_FIELDS));
 }
 
 // The panel's shared vector: the daemon gives the same verdict as the client check for every
@@ -509,6 +776,16 @@ fn shared_vector_cases_through_the_daemon() {
         });
         // G2-7: a verified but partial set is refused by the applier.
         let wanted = if client == "ok" && !full { "not_allowed" } else { client };
+        // G4-2: the vector's "seq equal to the last one" case is, for the daemon, the envelope
+        // it applied last: answered "applied" again when it is a full set, nothing written.
+        if name == "replayed_equal_seq" {
+            assert!(
+                matches!(reason_of(&outcome), "ok" | "replayed"),
+                "{name}: {outcome:?}"
+            );
+            assert!(store.untouched_since(&before), "{name}: {:?}", store.log);
+            continue;
+        }
         assert_eq!(reason_of(&outcome), wanted, "{name}");
         if wanted == "ok" {
             applied += 1;
@@ -597,7 +874,7 @@ fn user_process_reads_the_daemon_answer() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn other_platforms_reject_in_the_daemon_entry() {
-    let out = apply_in_daemon(&["{}".to_owned(), "{}".to_owned()], None);
+    let out = apply_in_daemon(&["{}".to_owned(), "{}".to_owned()], None, Some(1));
     let rejected = SenseApplyOutcome::Rejected {
         reason: "unsupported_platform".to_owned(),
     };
