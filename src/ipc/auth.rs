@@ -26,7 +26,10 @@ use std::{
     path::{Path, PathBuf},
 };
 #[cfg(windows)]
-use windows::Win32::{Foundation::HANDLE, System::Pipes::GetNamedPipeClientProcessId};
+use windows::Win32::{
+    Foundation::HANDLE,
+    System::Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId},
+};
 
 #[cfg(windows)]
 #[inline]
@@ -726,6 +729,27 @@ where
 
     pub(super) fn peer_pid(&self) -> Option<u32> {
         peer_pid_from_fd(self.inner.get_ref().as_raw_fd())
+    }
+}
+
+// Sense Remote (permanent password plan §3.7, U11): the client end can ask who serves the main
+// pipe, so the UI sends a new permanent password only to the SYSTEM `--server`, not to a user
+// process that took the pipe over while the service restarted.
+#[cfg(windows)]
+impl ConnectionTmpl<parity_tokio_ipc::ConnectionClient> {
+    pub(crate) fn server_pid(&self) -> Option<u32> {
+        let pipe_handle = self.inner.get_ref().as_raw_handle();
+        if pipe_handle.is_null() {
+            return None;
+        }
+        let mut pid = 0u32;
+        let ok = unsafe { GetNamedPipeServerProcessId(HANDLE(pipe_handle), &mut pid as *mut u32) }
+            .is_ok();
+        if ok && pid != 0 {
+            Some(pid)
+        } else {
+            None
+        }
     }
 }
 
