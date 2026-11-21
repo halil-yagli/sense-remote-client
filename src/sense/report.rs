@@ -142,8 +142,8 @@ pub struct SenseHealth {
     pub uptime_s: Option<u64>,
 }
 
-/// Sense Remote (Mac M4): `SenseMacPermissions`, the heartbeat's `mac_permissions` and the JSON
-/// of the FFI `main_sense_mac_permissions` (`mac_perm` reads the values).
+/// Sense Remote (Mac M4): `SenseMacPermissions`, the heartbeat's `mac_permissions` (`mac_perm`
+/// reads the values).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MacPermissions {

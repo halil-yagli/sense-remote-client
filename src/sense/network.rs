@@ -188,20 +188,24 @@ mod mac {
     };
     use std::{collections::HashMap, ffi::c_void};
 
+    // Sense Remote: only C's own types in these signatures (`*const c_void`, not `CFArrayRef` /
+    // `CFStringRef`): the bridge generator copies `extern "C"` declarations into
+    // `bridge_generated.h`, where the CoreFoundation names are unknown. The pointers are cast
+    // on the Rust side.
     #[link(name = "SystemConfiguration", kind = "framework")]
     extern "C" {
-        fn SCNetworkInterfaceCopyAll() -> CFArrayRef;
-        fn SCNetworkInterfaceGetBSDName(interface: *const c_void) -> CFStringRef;
-        fn SCNetworkInterfaceGetInterfaceType(interface: *const c_void) -> CFStringRef;
-        fn SCNetworkInterfaceGetLocalizedDisplayName(interface: *const c_void) -> CFStringRef;
+        fn SCNetworkInterfaceCopyAll() -> *const c_void;
+        fn SCNetworkInterfaceGetBSDName(interface: *const c_void) -> *const c_void;
+        fn SCNetworkInterfaceGetInterfaceType(interface: *const c_void) -> *const c_void;
+        fn SCNetworkInterfaceGetLocalizedDisplayName(interface: *const c_void) -> *const c_void;
     }
 
     /// "Get" rule: the string belongs to the interface object and is not released here.
-    unsafe fn string(value: CFStringRef) -> Option<String> {
+    unsafe fn string(value: *const c_void) -> Option<String> {
         if value.is_null() {
             return None;
         }
-        Some(CFString::wrap_under_get_rule(value).to_string())
+        Some(CFString::wrap_under_get_rule(value as CFStringRef).to_string())
     }
 
     /// By BSD name. Empty when the list can not be read (the adapters then keep the kind
@@ -209,7 +213,7 @@ mod mac {
     pub fn services() -> HashMap<String, MacService> {
         let mut out = HashMap::new();
         unsafe {
-            let all = SCNetworkInterfaceCopyAll();
+            let all = SCNetworkInterfaceCopyAll() as CFArrayRef;
             if all.is_null() {
                 return out;
             }

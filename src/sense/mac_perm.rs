@@ -1,6 +1,6 @@
 //! Sense Remote (Mac M0 + M4, plan §3.2 / §3.4): state of the three macOS privacy permissions
-//! (Screen Recording, Accessibility, Input Monitoring) for the setup wizard (M3), the home
-//! screen (M7) and the heartbeat extension `mac_permissions` (M4, `report::heartbeat_base`).
+//! (Screen Recording, Accessibility, Input Monitoring) for the heartbeat extension
+//! `mac_permissions` (M4, `report::heartbeat_base`) and, as JSON, for the user interface.
 //!
 //! Read with RustDesk's existing checks and never with a prompt (`prompt = false`), so asking
 //! every heartbeat shows nothing on the computer. macOS answers for the calling process: the
@@ -11,9 +11,8 @@
 //! running process can stay at its old value until the process restarts; that is why the wizard
 //! restarts the agent after the permission is given (`install_sense_restart_agent`).
 
-/// Sense Remote: one definition for the panel contract (`SenseHeartbeatExt.mac_permissions`)
-/// and the JSON of the FFI `main_sense_mac_permissions`; it lives in `report.rs` because that
-/// file is compiled (and its contract tests run) on every platform.
+/// Sense Remote: the panel contract's `SenseHeartbeatExt.mac_permissions`; it lives in
+/// `report.rs` because that file is compiled (and its contract tests run) on every platform.
 pub use super::report::MacPermissions;
 
 /// Permissions of the calling process, read without showing a system prompt.
@@ -31,7 +30,7 @@ pub fn to_json(permissions: &MacPermissions) -> String {
     serde_json::to_string(permissions).unwrap_or_else(|_| "{}".to_owned())
 }
 
-/// FFI `main_sense_mac_permissions` on macOS.
+/// The current permissions as JSON, for a caller outside Rust.
 pub fn current_json() -> String {
     to_json(&current())
 }
