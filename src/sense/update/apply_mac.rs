@@ -49,8 +49,20 @@ pub const DOWNLOAD_DIR_NAME: &str = "dl";
 /// Suffix of the bundle that failed (upstream's name for the same thing).
 pub const FAILED_SUFFIX: &str = ".failed-update";
 
-/// The privileged folder downloads go to (root 0700); `None` when it can not be made safe.
-pub fn download_dir() -> Option<PathBuf> {
+/// Where downloads go (the privileged folder), path only: no file system work. `None` outside
+/// macOS.
+pub fn download_dir_path() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        Some(Path::new(UPDATE_DIR).join(DOWNLOAD_DIR_NAME))
+    } else {
+        None
+    }
+}
+
+/// Makes `download_dir_path()` safe (root 0755 `update`, root 0700 `dl`, no symlink, checked
+/// with `folder_ok`) and returns it; called once per download. `None` when it can not be made
+/// safe.
+pub fn prepare_download_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let update = Path::new(UPDATE_DIR);

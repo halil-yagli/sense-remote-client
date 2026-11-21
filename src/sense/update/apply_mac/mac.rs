@@ -84,6 +84,8 @@ pub fn install(job: &InstallJob) -> Result<(), UpdateError> {
         let mut failed = record;
         failed.state = StoredState::Failed;
         failed.last_error = Some(error);
+        // The installation never started: no `started_at` (it belongs to the guard).
+        failed.started_at = None;
         if let Err(err) = store::write(&failed) {
             log::error!("Sense Remote: update state not written: {err}");
         }

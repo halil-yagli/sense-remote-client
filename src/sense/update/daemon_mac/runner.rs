@@ -148,7 +148,7 @@ impl Daemon {
     fn ctx(&self, with_disk: bool) -> Ctx {
         let now = now_s();
         let free_bytes = if with_disk {
-            apply::download_dir().and_then(|dir| download::free_bytes(&dir))
+            apply::download_dir_path().and_then(|dir| download::free_bytes(&dir))
         } else {
             None
         };
@@ -186,7 +186,7 @@ impl Daemon {
         if let Action::Persist = action {
             return Some(Job::Persist(self.state.clone()));
         }
-        let Some(dir) = apply::download_dir() else {
+        let Some(dir) = apply::download_dir_path() else {
             return match action {
                 Action::DropFile { .. } => None,
                 _ => Some(Job::Fail(UpdateError::Unsupported)),
@@ -247,7 +247,16 @@ fn perform(job: Job) {
                 }
             }
         }
-        Job::Download(request) => spawn("sense-update-dl", move || {
+        Job::Download(mut request) => spawn("sense-update-dl", move || {
+            // The folder is made safe (root 0700, no symlink) once per download.
+            match apply::prepare_download_dir() {
+                Some(dir) => request.dir = dir,
+                None => {
+                    log::error!("Sense Remote: update download folder not safe");
+                    step(Event::Failed(UpdateError::DownloadFailed));
+                    return;
+                }
+            }
             let progress = |pct: u8| step(Event::DownloadProgress(pct));
             let result = hbb_common::tokio::runtime::Builder::new_current_thread()
                 .enable_all()

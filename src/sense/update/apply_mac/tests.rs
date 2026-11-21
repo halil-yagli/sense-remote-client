@@ -139,7 +139,8 @@ fn other_platforms_install_nothing() {
     assert_eq!(roll_back(), Err(UpdateError::Unsupported));
     assert_eq!(remove_guard(), Err(UpdateError::Unsupported));
     assert_eq!(self_check(), Ok(()));
-    assert_eq!(download_dir(), None);
+    assert_eq!(download_dir_path(), None);
+    assert_eq!(prepare_download_dir(), None);
 }
 
 // Plan §11.1 U4: rollback with temporary paths (macOS CI, `ditto`).
