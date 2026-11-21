@@ -414,6 +414,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Sense Remote: Windows isindeki Rust testlerinin aynisi (ayni komut, Mac ozellikleriyle);
+      # cfg(target_os = "macos") kodu yalniz burada sinanir. Paket yuklendikten sonra calisir:
+      # test duserse is (ve etikette taslak surum) yine durur, ama dmg incelenebilir kalir.
+      - name: Run the Rust tests
+        shell: bash
+        run: |
+          FEATURES=$(./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }} --print-features)
+          cargo test --locked --release --lib --features "$FEATURES"
+
   # Etiket: SHA-256 uret, herkese ACIK OLMAYAN taslak GitHub surumu olustur (yayinlamak insan adimi).
   release-draft:
     name: draft release
