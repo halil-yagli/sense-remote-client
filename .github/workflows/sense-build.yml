@@ -120,7 +120,9 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       # Etiket derlemesi yapi anahtarsiz cikmaz: istemci hicbir guncellemeyi dogrulayamazdi.
-      # Bicim de denetlenir (k = SHA-256(acik anahtar) ilk 8 bayt); bozuk liste derlemeyi durdurur.
+      # check-keys: bicim (k = SHA-256(acik anahtar) ilk 8 bayt); SENSE_ENVELOPE_KEYS ile kesisim
+      # (ayni k ya da ayni acik anahtar: iki imza kurali tek imzaya duserdi); iki listede ortak
+      # test vektorunun DENEME anahtar kimlikleri. Herhangi biri derlemeyi durdurur.
       - name: Check release keys
         shell: bash
         run: |
@@ -190,6 +192,13 @@ jobs:
           fi
           echo "::notice title=Deneme derlemesi::Surum numarasi $TRIAL (deneme). Bu kosu yayin surumu uretmez, yapi beyani imzalamaz."
           echo "version=$TRIAL" >> "$GITHUB_OUTPUT"
+
+      # Yapi anahtari tanimliysa (etiket disinda da) liste denetlenir: bozuk bicim, panel
+      # anahtarlariyla kesisim ya da deneme anahtar kimligi derlemeyi baslatmadan durdurur.
+      - name: Check the release key list
+        if: ${{ vars.SENSE_RELEASE_KEYS != '' }}
+        shell: bash
+        run: bash .github/scripts/sense-sign-build.sh check-keys
 
       - name: Shellcheck the signing scripts
         shell: bash

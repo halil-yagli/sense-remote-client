@@ -9,20 +9,35 @@
 #       gizli anahtar: SENSE_RELEASE_SIGNING_KEY ortam degiskeni (PKCS#8 PEM). Gecici dosyada
 #       (umask 077) durur, cikista silinir, hicbir yere yazdirilmaz.
 #   sense-sign-build.sh verify <kurulum dosyasi> <beyan.yapi.json>
-#       acik anahtar(lar): SENSE_RELEASE_KEYS (k=pub[,k=pub]).
+#       acik anahtar(lar): SENSE_RELEASE_KEYS (k=pub[,k=pub]). Imza + kanonik yuk + dosya.
+#   sense-sign-build.sh verify-statement <beyan.yapi.json>
+#       yalniz imza + kanonik yuk (dosya olmadan; ortak test vektoru icin).
+#   sense-sign-build.sh payload <dosya adi> <surum> <sha256> <boyut> <commit> <run_id> <iat>
+#       imzalanacak yuk baytlarini yazar (sign ayni islevi kullanir; test vektoruyle
+#       bayt bayt karsilastirma icin).
 #   sense-sign-build.sh check-keys
-#       SENSE_RELEASE_KEYS bicimini denetler, k kimliklerini yazar.
+#       SENSE_RELEASE_KEYS (ve varsa SENSE_ENVELOPE_KEYS) bicimini denetler, k kimliklerini
+#       yazar. Iki liste kesisiyorsa (ayni k ya da ayni acik anahtar) ya da listelerde ortak
+#       test vektorunun DENEME anahtar kimliklerinden biri varsa duser.
 #
 # Tasima bicimi zarfla ayni: {"k","p","s"}. k = SHA-256(ham acik anahtar) ilk 8 bayt, hex.
 # p = yuk baytlari, dolgusuz base64url. s = 64 baytlik imza, base64url. Imzalanan veri =
-# "sense-remote/build/v1\n" + yuk baytlari. Yuk semasi: packages/shared/src/release.ts
-# (panel deposu) BuildStatement; alan sirasi sabit, dogrulama birebir karsilastirir.
+# "sense-remote/build/v1\n" + yuk baytlari.
+# Yuk (BuildStatement; panel deposu packages/shared/src/release.ts) JCS (RFC 8785) KANONIK
+# JSON olmali: anahtarlar sirali (commit, file, iat, platform, run_id, sha256, size, typ, v,
+# version), bosluk yok, sayilar yalin tamsayi, dizelerde kacis yok (hepsi duz ASCII). Panel
+# ve istemci kanonik olmayan yuku bad_payload ile reddeder. Ortak vektor:
+# packages/shared/test-vectors/release-v1.json (istemcide src/sense/testdata/).
 set -euo pipefail
 set +x
 umask 077
 
 readonly MAX_INSTALLER_BYTES=536870912
 readonly MAX_SIGNED_P_CHARS=8192
+readonly MAX_SAFE_INTEGER=9007199254740991
+# Ortak test vektorunun deneme anahtarlari (panel release.ts TEST_VECTOR_KEY_IDS): gizli
+# anahtarlari herkese acik oldugu icin hicbir derlemenin guvendigi listede olamazlar.
+readonly TEST_VECTOR_KEY_IDS=(94d01a580be13482 b0d12b9f71aebc1f 04d80c49ccad4b4c 15797e90d15b0a59)
 # Ed25519 SubjectPublicKeyInfo basligi (RFC 8410); ardindan 32 baytlik ham anahtar gelir.
 readonly SPKI_PREFIX_HEX="302a300506032b6570032100"
 
@@ -98,13 +113,14 @@ installer_name() {
   esac
 }
 
-# SENSE_RELEASE_KEYS -> "$work/keys/<k>" (ham acik anahtar). Bozuk tek giris tum listeyi dusurur
-# (istemcideki parse_keys ile ayni kural).
-load_keys() {
-  local list=${SENSE_RELEASE_KEYS:-} entry k encoded index=0
+# Anahtar listesi (k=pub[,k=pub]) -> "<klasor>/<k>" (ham acik anahtar). Bozuk tek giris tum
+# listeyi dusurur (istemcideki parse_keys ile ayni kural).
+#   load_key_list <liste> <degisken adi (iletiler icin)> <klasor>
+load_key_list() {
+  local list=$1 label=$2 dir=$3 entry k encoded index=0
   local -a entries
-  [[ -n "${list// /}" ]] || fail "SENSE_RELEASE_KEYS bos"
-  mkdir -p "$work/keys"
+  [[ -n "${list// /}" ]] || fail "$label bos"
+  mkdir -p "$dir"
   IFS=',' read -r -a entries <<<"$list"
   for entry in "${entries[@]}"; do
     index=$((index + 1))
@@ -112,16 +128,56 @@ load_keys() {
     k=${entry%%=*}
     encoded=${entry#*=}
     [[ "$entry" == *=* && "$k" =~ ^[0-9a-f]{16}$ ]] \
-      || fail "SENSE_RELEASE_KEYS giris $index: <k>=<acik anahtar> bekleniyor (k 16 kucuk hex)"
-    b64url_decode "$encoded" "$work/keys/$k.tmp" \
-      || fail "SENSE_RELEASE_KEYS giris $index: acik anahtar dolgusuz base64url degil"
-    [[ "$(byte_count "$work/keys/$k.tmp")" == 32 ]] \
-      || fail "SENSE_RELEASE_KEYS giris $index: acik anahtar 32 bayt olmali"
-    [[ "$(key_id "$work/keys/$k.tmp")" == "$k" ]] \
-      || fail "SENSE_RELEASE_KEYS giris $index: k acik anahtarla uyusmuyor"
-    [[ ! -e "$work/keys/$k" ]] || fail "SENSE_RELEASE_KEYS giris $index: yinelenen k"
-    mv "$work/keys/$k.tmp" "$work/keys/$k"
+      || fail "$label giris $index: <k>=<acik anahtar> bekleniyor (k 16 kucuk hex)"
+    b64url_decode "$encoded" "$dir/$k.tmp" \
+      || fail "$label giris $index: acik anahtar dolgusuz base64url degil"
+    [[ "$(byte_count "$dir/$k.tmp")" == 32 ]] \
+      || fail "$label giris $index: acik anahtar 32 bayt olmali"
+    [[ "$(key_id "$dir/$k.tmp")" == "$k" ]] \
+      || fail "$label giris $index: k acik anahtarla uyusmuyor"
+    [[ ! -e "$dir/$k" ]] || fail "$label giris $index: yinelenen k"
+    mv "$dir/$k.tmp" "$dir/$k"
   done
+}
+
+load_keys() {
+  load_key_list "${SENSE_RELEASE_KEYS:-}" SENSE_RELEASE_KEYS "$work/keys"
+}
+
+# Listede deneme anahtar kimligi var mi (bicim denetiminden ONCE, yalniz k'ye bakar).
+reject_test_vector_keys() {
+  local list=$1 label=$2 entry k forbidden
+  local -a entries
+  IFS=',' read -r -a entries <<<"$list"
+  for entry in "${entries[@]}"; do
+    entry=${entry// /}
+    k=${entry%%=*}
+    for forbidden in "${TEST_VECTOR_KEY_IDS[@]}"; do
+      if [[ "$k" == "$forbidden" ]]; then
+        fail "$label icinde DENEME anahtar kimligi var ($k): test vektoru anahtarlari hicbir derlemede kullanilmaz"
+      fi
+    done
+  done
+}
+
+# BuildStatement yuku, JCS kanonik. Her alan burada denetlenir: degerler duz ASCII ve yalin
+# tamsayi oldugu icin sabit sirali printf kanonik bicimi verir.
+#   canonical_payload <dosya adi> <surum> <sha256> <boyut> <commit> <run_id> <iat>
+canonical_payload() {
+  local name=$1 version=$2 sha256=$3 size=$4 commit=$5 run_id=$6 iat=$7 platform
+  [[ "$version" =~ ^[1-9][0-9]{0,5}$ ]] || fail "Surum duz sayi olmali (1-999999), gelen: '$version'"
+  platform=$(platform_of "$name") || fail "Dosya adi kurala uymuyor: $name"
+  [[ "$name" == "$(installer_name "$version" "$platform")" ]] \
+    || fail "Dosya adi '$name' surum $version ile uyusmuyor"
+  [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || fail "sha256 64 kucuk hex olmali"
+  [[ "$size" =~ ^[1-9][0-9]{0,8}$ && "$size" -le "$MAX_INSTALLER_BYTES" ]] \
+    || fail "Dosya boyutu sinir disi: $size"
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || fail "commit 40 kucuk hex olmali"
+  [[ "$run_id" =~ ^[1-9][0-9]{0,15}$ && "$run_id" -le "$MAX_SAFE_INTEGER" ]] \
+    || fail "run_id 1..2^53-1 arasinda tam sayi olmali"
+  [[ "$iat" =~ ^(0|[1-9][0-9]{0,9})$ ]] || fail "iat 0..9999999999 arasinda tam sayi olmali"
+  printf '{"commit":"%s","file":"%s","iat":%s,"platform":"%s","run_id":%s,"sha256":"%s","size":%s,"typ":"build","v":1,"version":%s}' \
+    "$commit" "$name" "$iat" "$platform" "$run_id" "$sha256" "$size" "$version"
 }
 
 # Imzalanan veri: onek + yuk baytlari.
@@ -139,32 +195,50 @@ verify_signature() {
 }
 
 cmd_check_keys() {
+  local release_list=${SENSE_RELEASE_KEYS:-} envelope_list=${SENSE_ENVELOPE_KEYS:-}
+  local path other k ids=()
+  reject_test_vector_keys "$release_list" SENSE_RELEASE_KEYS
+  reject_test_vector_keys "$envelope_list" SENSE_ENVELOPE_KEYS
   load_keys
-  local ids=()
-  local path
   for path in "$work"/keys/*; do
     ids+=("$(basename "$path")")
   done
   echo "SENSE_RELEASE_KEYS: ${#ids[@]} anahtar"
   echo "k: ${ids[*]}"
+  # Iki imza kurali: panel anahtari ile yapi anahtari ayni olursa tek imzaya duser (panel
+  # sunucusunu ele geciren, yapi beyanini da imzalayabilirdi). Istemci: keys_overlap.
+  if [[ -n "${envelope_list// /}" ]]; then
+    load_key_list "$envelope_list" SENSE_ENVELOPE_KEYS "$work/envelope-keys"
+    for path in "$work"/keys/*; do
+      k=$(basename "$path")
+      [[ ! -e "$work/envelope-keys/$k" ]] \
+        || fail "SENSE_RELEASE_KEYS ile SENSE_ENVELOPE_KEYS kesisiyor (ayni k: $k); yapi anahtari panel anahtarindan AYRI olmali"
+      for other in "$work"/envelope-keys/*; do
+        if cmp -s "$path" "$other"; then
+          fail "SENSE_RELEASE_KEYS ile SENSE_ENVELOPE_KEYS kesisiyor (ayni acik anahtar: $k); yapi anahtari panel anahtarindan AYRI olmali"
+        fi
+      done
+    done
+    echo "SENSE_ENVELOPE_KEYS ile kesisim yok"
+  fi
+}
+
+cmd_payload() {
+  [[ $# -eq 7 ]] || fail "payload: <dosya adi> <surum> <sha256> <boyut> <commit> <run_id> <iat>"
+  canonical_payload "$@"
 }
 
 cmd_sign() {
   local installer=${1:?kurulum dosyasi} version=${2:?surum} commit=${3:?commit} run_id=${4:?run_id}
   local out=${5:?cikti dosyasi}
-  local name platform size sha256 payload k
+  local name size sha256 k forbidden
 
   [[ -f "$installer" ]] || fail "Kurulum dosyasi yok: $installer"
-  [[ "$version" =~ ^[1-9][0-9]{0,5}$ ]] || fail "Surum duz sayi olmali, gelen: '$version'"
-  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || fail "commit 40 hex olmali"
-  [[ "$run_id" =~ ^[1-9][0-9]*$ ]] || fail "run_id pozitif tam sayi olmali"
   name=$(basename "$installer")
-  platform=$(platform_of "$name") || fail "Dosya adi kurala uymuyor: $name"
-  [[ "$name" == "$(installer_name "$version" "$platform")" ]] \
-    || fail "Dosya adi '$name' surum $version ile uyusmuyor"
   size=$(byte_count "$installer")
-  [[ "$size" -gt 0 && "$size" -le "$MAX_INSTALLER_BYTES" ]] || fail "Dosya boyutu sinir disi: $size"
   sha256=$(sha256_hex "$installer")
+  canonical_payload "$name" "$version" "$sha256" "$size" "$commit" "$run_id" "$(date +%s)" \
+    > "$work/payload"
 
   [[ -n "${SENSE_RELEASE_SIGNING_KEY:-}" ]] || fail "SENSE_RELEASE_SIGNING_KEY bos (ortam 'surum' sirri)"
   printf '%s\n' "$SENSE_RELEASE_SIGNING_KEY" > "$work/key.pem"
@@ -176,6 +250,9 @@ cmd_sign() {
     || fail "SENSE_RELEASE_SIGNING_KEY Ed25519 degil"
   tail -c 32 "$work/public.der" > "$work/public.raw"
   k=$(key_id "$work/public.raw")
+  for forbidden in "${TEST_VECTOR_KEY_IDS[@]}"; do
+    [[ "$k" != "$forbidden" ]] || fail "Gizli anahtar bir DENEME anahtari ($k); imzalanmaz"
+  done
 
   # Sir ile degisken ayni anahtari gostermeli; yoksa istemciler bu imzayi tanimaz.
   if [[ -n "${SENSE_RELEASE_KEYS:-}" ]]; then
@@ -185,9 +262,6 @@ cmd_sign() {
     fi
   fi
 
-  payload=$(printf '{"v":1,"typ":"build","version":%s,"platform":"%s","file":"%s","sha256":"%s","size":%s,"commit":"%s","run_id":%s,"iat":%s}' \
-    "$version" "$platform" "$name" "$sha256" "$size" "$commit" "$run_id" "$(date +%s)")
-  printf '%s' "$payload" > "$work/payload"
   write_signed_message "$work/payload" "$work/message"
   openssl pkeyutl -sign -inkey "$work/key.pem" -rawin -in "$work/message" -out "$work/signature" \
     2>/dev/null || fail "Imzalama basarisiz (openssl pkeyutl)"
@@ -198,44 +272,66 @@ cmd_sign() {
     "$(b64url_encode < "$work/signature")" > "$work/statement"
   mkdir -p "$(dirname "$out")"
   (umask 022 && cat "$work/statement" > "$out")
-  echo "Yapi beyani yazildi: $(basename "$out") (k=$k, $platform, surum $version, $size bayt)"
+  echo "Yapi beyani yazildi: $(basename "$out") (k=$k, surum $version, $size bayt)"
   echo "sha256: $sha256"
 }
 
-cmd_verify() {
-  local installer=${1:?kurulum dosyasi} statement=${2:?beyan dosyasi}
-  local content k p s name platform version size sha256 payload expected
-
-  [[ -f "$installer" ]] || fail "Kurulum dosyasi yok: $installer"
+# Beyani okur: bicim, anahtar, imza, kanonik yuk. Basarida statement_k ve "$work/payload" dolu.
+statement_k=""
+read_statement() {
+  local statement=$1 content p s payload
   [[ -f "$statement" ]] || fail "Beyan dosyasi yok: $statement"
   load_keys
   content=$(cat "$statement")
   [[ "$content" =~ ^\{\"k\":\"([0-9a-f]{16})\",\"p\":\"([A-Za-z0-9_-]+)\",\"s\":\"([A-Za-z0-9_-]{86})\"\}$ ]] \
     || fail "Beyan bicimi {k,p,s} degil (malformed)"
-  k=${BASH_REMATCH[1]}
+  statement_k=${BASH_REMATCH[1]}
   p=${BASH_REMATCH[2]}
   s=${BASH_REMATCH[3]}
   [[ "${#p}" -le "$MAX_SIGNED_P_CHARS" ]] || fail "p $MAX_SIGNED_P_CHARS karakteri asiyor (malformed)"
-  [[ -f "$work/keys/$k" ]] || fail "k=$k SENSE_RELEASE_KEYS icinde yok (build_unknown_key)"
+  [[ -f "$work/keys/$statement_k" ]] || fail "k=$statement_k SENSE_RELEASE_KEYS icinde yok (build_unknown_key)"
   b64url_decode "$p" "$work/payload" || fail "p cozulemedi (malformed)"
   b64url_decode "$s" "$work/signature" || fail "s cozulemedi (malformed)"
   [[ "$(byte_count "$work/signature")" == 64 ]] || fail "Imza 64 bayt degil (malformed)"
 
-  raw_public_to_pem "$work/keys/$k" "$work/public.pem" || fail "Acik anahtar okunamadi"
+  raw_public_to_pem "$work/keys/$statement_k" "$work/public.pem" || fail "Acik anahtar okunamadi"
   write_signed_message "$work/payload" "$work/message"
   verify_signature "$work/public.pem" "$work/message" "$work/signature" \
     || fail "Imza tutmuyor (build_bad_signature)"
 
+  # Kanonik bicim: alanlar ayristirilir, ayni islevle yeniden uretilir, baytlar ayni olmali.
+  payload=$(cat "$work/payload")
+  [[ "$payload" =~ ^\{\"commit\":\"([0-9a-f]+)\",\"file\":\"([A-Za-z0-9.-]+)\",\"iat\":([0-9]+),\"platform\":\"([a-z0-9-]+)\",\"run_id\":([0-9]+),\"sha256\":\"([0-9a-f]+)\",\"size\":([0-9]+),\"typ\":\"build\",\"v\":1,\"version\":([0-9]+)\}$ ]] \
+    || fail "Yuk kanonik BuildStatement degil (build_bad_payload)"
+  local commit=${BASH_REMATCH[1]} name=${BASH_REMATCH[2]} iat=${BASH_REMATCH[3]}
+  local platform=${BASH_REMATCH[4]} run_id=${BASH_REMATCH[5]} sha256=${BASH_REMATCH[6]}
+  local size=${BASH_REMATCH[7]} version=${BASH_REMATCH[8]}
+  # Alt kabukta: icerideki fail yalniz alt kabugu bitirir, neden burada yazilir.
+  (canonical_payload "$name" "$version" "$sha256" "$size" "$commit" "$run_id" "$iat") \
+    > "$work/payload.again" 2>/dev/null || fail "Yuk semaya uymuyor (build_bad_payload)"
+  cmp -s "$work/payload" "$work/payload.again" || fail "Yuk kanonik degil (build_bad_payload)"
+  [[ "$(platform_of "$name")" == "$platform" ]] || fail "platform dosya adiyla uyusmuyor (build_bad_payload)"
+}
+
+cmd_verify_statement() {
+  read_statement "${1:?beyan dosyasi}"
+  echo "Yapi beyani dogrulandi (imza + kanonik yuk): k=$statement_k"
+}
+
+cmd_verify() {
+  local installer=${1:?kurulum dosyasi} statement=${2:?beyan dosyasi}
+  local name size sha256 payload expected
+
+  [[ -f "$installer" ]] || fail "Kurulum dosyasi yok: $installer"
+  read_statement "$statement"
   name=$(basename "$installer")
-  platform=$(platform_of "$name") || fail "Dosya adi kurala uymuyor: $name"
-  version=${name//[!0-9]/}
   size=$(byte_count "$installer")
   sha256=$(sha256_hex "$installer")
   payload=$(cat "$work/payload")
-  expected="^\{\"v\":1,\"typ\":\"build\",\"version\":$version,\"platform\":\"$platform\",\"file\":\"${name//./\\.}\",\"sha256\":\"$sha256\",\"size\":$size,\"commit\":\"[0-9a-f]{40}\",\"run_id\":[1-9][0-9]*,\"iat\":[0-9]+\}$"
+  expected="^\{\"commit\":\"[0-9a-f]{40}\",\"file\":\"${name//./\\.}\",\"iat\":[0-9]+,\"platform\":\"[a-z0-9-]+\",\"run_id\":[0-9]+,\"sha256\":\"$sha256\",\"size\":$size,"
   [[ "$payload" =~ $expected ]] \
     || fail "Beyan dosyayla uyusmuyor (build_mismatch): $name sha256=$sha256 boyut=$size"
-  echo "Yapi beyani dogrulandi: $name (k=$k, $platform, surum $version, $size bayt)"
+  echo "Yapi beyani dogrulandi: $name (k=$statement_k, $size bayt)"
 }
 
 command=${1:-}
@@ -243,9 +339,11 @@ command=${1:-}
 case "$command" in
   sign) cmd_sign "$@" ;;
   verify) cmd_verify "$@" ;;
+  verify-statement) cmd_verify_statement "$@" ;;
+  payload) cmd_payload "$@" ;;
   check-keys) cmd_check_keys ;;
   *)
-    echo "Kullanim: $0 sign|verify|check-keys ..." >&2
+    echo "Kullanim: $0 sign|verify|verify-statement|payload|check-keys ..." >&2
     exit 2
     ;;
 esac

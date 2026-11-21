@@ -81,6 +81,12 @@ Bilinmesi gerekenler:
 | `SENSE_MAC_SIGN=cert`, sırlar yok | uyarı, ad-hoc imza | **düşer** |
 | `SENSE_MAC_SIGN=cert`, sırlar var | sertifika imzası (yalnız `master`; başka dal `imza` ortamına erişemez → uyarı, ad-hoc) | sertifika imzası + DR denetimi |
 
+Derleme ayrıca şunlarda durur (etikette her zaman; `SENSE_RELEASE_KEYS` tanımlıysa her
+derlemede): yapı anahtarı ile panel anahtarı (`SENSE_ENVELOPE_KEYS`) aynıysa — iki imza kuralı
+tek imzaya düşerdi — ya da listelerden birinde ortak test vektörünün deneme anahtar kimliği
+varsa. Yapı beyanının yükü JCS (RFC 8785) kanonik JSON'dur; test, imzalayıcının çıktısını ortak
+vektördeki `build_ok` vakasıyla bayt bayt karşılaştırır.
+
 Etiket derlemesi taslak sürüme iki kurulum dosyası, `SHA256SUMS.txt` ve iki yapı beyanı ekler:
 `SenseRemote-Kurulum-<n>.exe.yapi.json`, `SenseRemote-<n>.dmg.yapi.json`. Beyan biçimi `{k,p,s}`
 (`.github/scripts/sense-sign-build.sh` başındaki açıklama). İş, imzayı gizli anahtar olmadan,

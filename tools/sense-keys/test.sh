@@ -268,6 +268,61 @@ else
   refuse "check-keys k uyuşmazlığını reddeder" env SENSE_RELEASE_KEYS="0000000000000000=${release_keys#*=}" bash "$sign_build" check-keys
   refuse "check-keys bozuk anahtarı reddeder" env SENSE_RELEASE_KEYS="${release_keys%????}" bash "$sign_build" check-keys
 
+  # --- ortak test vektörü (panel packages/shared/test-vectors/release-v1.json, SHA-256
+  # e75c01decc81a7ff14f137296eb3ee7f1d03b30bc300508b46aafb72840f5e4c), vaka "build_ok".
+  # Yük JCS kanonik olmalı; imzalayıcının ürettiği baytlar vektördekiyle AYNI olmalı.
+  vector_keys="04d80c49ccad4b4c=NB52UaELl_a7bsngxMn3kE9w7-os1zIlo2hLdyvLgTM"
+  vector_p="eyJjb21taXQiOiJjMGZmZWUwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwiZmlsZSI6IlNlbnNlUmVtb3RlLUt1cnVsdW0tMy5leGUiLCJpYXQiOjE3OTk5OTY0MDAsInBsYXRmb3JtIjoid2luZG93cy14NjQiLCJydW5faWQiOjQ0OTA2ODQ4MjQ0LCJzaGEyNTYiOiJhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExIiwic2l6ZSI6MjYxNDY4MTYsInR5cCI6ImJ1aWxkIiwidiI6MSwidmVyc2lvbiI6M30"
+  vector_s="fW_cCugtii3jLNGBWO_de2fiiy1Kmmg4h0EdAxTfqgE47_kI64pLPvFLGrxaaE39_UCapR7oLF7CZ_1x32IoDw"
+  vector_payload='{"commit":"c0ffee0000000000000000000000000000000000","file":"SenseRemote-Kurulum-3.exe","iat":1799996400,"platform":"windows-x64","run_id":44906848244,"sha256":"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1","size":26146816,"typ":"build","v":1,"version":3}'
+  made_payload=$(bash "$sign_build" payload SenseRemote-Kurulum-3.exe 3 \
+    a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1 26146816 \
+    c0ffee0000000000000000000000000000000000 44906848244 1799996400 2>/dev/null || true)
+  check "vektör build_ok: imzalayıcının yükü bayt bayt aynı (JCS)" test "$made_payload" = "$vector_payload"
+  made_p=$(printf '%s' "$made_payload" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  check "vektör build_ok: p (base64url) aynı" test "$made_p" = "$vector_p"
+  printf '{"k":"04d80c49ccad4b4c","p":"%s","s":"%s"}\n' "$vector_p" "$vector_s" > "$root/vector-build-ok.json"
+  check "vektör build_ok: panelin imzası bu doğrulayıcıdan geçiyor (önek + Ed25519)" \
+    env SENSE_RELEASE_KEYS="$vector_keys" bash "$sign_build" verify-statement "$root/vector-build-ok.json"
+  printf '{"k":"04d80c49ccad4b4c","p":"%s","s":"%s"}\n' "${vector_p}A" "$vector_s" > "$root/vector-bad.json"
+  refuse "vektör: değişen yük reddedilir" \
+    env SENSE_RELEASE_KEYS="$vector_keys" bash "$sign_build" verify-statement "$root/vector-bad.json"
+  refuse "payload: sürüm 0 reddedilir" bash "$sign_build" payload SenseRemote-Kurulum-0.exe 0 \
+    a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1 1 c0ffee0000000000000000000000000000000000 1 0
+  refuse "payload: run_id 2^53 reddedilir" bash "$sign_build" payload SenseRemote-Kurulum-3.exe 3 \
+    a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1 1 c0ffee0000000000000000000000000000000000 9007199254740992 0
+  refuse "payload: büyük harfli sha256 reddedilir" bash "$sign_build" payload SenseRemote-Kurulum-3.exe 3 \
+    A1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1 1 c0ffee0000000000000000000000000000000000 1 0
+  # İstemci kopyası (U1 ile gelir) varsa gömülü vaka onunla aynı olmalı.
+  client_vector="$repo_root/src/sense/testdata/release-v1.json"
+  if [[ -f "$client_vector" ]]; then
+    check "gömülü vaka istemcideki vektörle aynı (p)" grep -Fq "\"p\": \"$vector_p\"" "$client_vector"
+    check "gömülü vaka istemcideki vektörle aynı (s)" grep -Fq "\"s\": \"$vector_s\"" "$client_vector"
+  else
+    echo "  atlandı: istemcide src/sense/testdata/release-v1.json henüz yok (U1); gömülü vaka kullanıldı"
+  fi
+
+  # --- deneme anahtar kimlikleri ve liste kesişimi
+  for forbidden_id in 94d01a580be13482 b0d12b9f71aebc1f 04d80c49ccad4b4c 15797e90d15b0a59; do
+    forbidden_out="$root/forbidden.out"
+    env SENSE_RELEASE_KEYS="$release_keys,$forbidden_id=AAAA" bash "$sign_build" check-keys > "$forbidden_out" 2>&1 || true
+    check "check-keys deneme kimliğini reddeder (yapı listesi): $forbidden_id" grep -q "DENEME anahtar kimligi var ($forbidden_id)" "$forbidden_out"
+    env SENSE_RELEASE_KEYS="$release_keys" SENSE_ENVELOPE_KEYS="$forbidden_id=AAAA" bash "$sign_build" check-keys > "$forbidden_out" 2>&1 || true
+    check "check-keys deneme kimliğini reddeder (panel listesi): $forbidden_id" grep -q "SENSE_ENVELOPE_KEYS icinde DENEME anahtar kimligi var ($forbidden_id)" "$forbidden_out"
+  done
+  openssl genpkey -algorithm ed25519 -out "$root/panel.pem" 2>/dev/null
+  openssl pkey -in "$root/panel.pem" -pubout -outform DER 2>/dev/null | tail -c 32 > "$root/panel.raw"
+  panel_keys="$(openssl dgst -sha256 -r "$root/panel.raw" | cut -c1-16)=$(openssl base64 -A -in "$root/panel.raw" | tr '+/' '-_' | tr -d '=')"
+  check "check-keys ayrı panel anahtarını kabul eder" \
+    env SENSE_RELEASE_KEYS="$release_keys" SENSE_ENVELOPE_KEYS="$panel_keys" bash "$sign_build" check-keys
+  overlap_out="$root/overlap.out"
+  env SENSE_RELEASE_KEYS="$release_keys" SENSE_ENVELOPE_KEYS="$panel_keys,$release_keys" bash "$sign_build" check-keys > "$overlap_out" 2>&1 || true
+  check "check-keys kesişen listeleri reddeder" grep -q "SENSE_ENVELOPE_KEYS kesisiyor" "$overlap_out"
+  refuse "check-keys kesişen listelerde düşer" \
+    env SENSE_RELEASE_KEYS="$panel_keys,$release_keys" SENSE_ENVELOPE_KEYS="$panel_keys" bash "$sign_build" check-keys
+  refuse "check-keys bozuk panel listesini reddeder" \
+    env SENSE_RELEASE_KEYS="$release_keys" SENSE_ENVELOPE_KEYS="${panel_keys%????}" bash "$sign_build" check-keys
+
   if sign "$exe" 901 "$commit" 42 "$exe.yapi.json" > "$out" 2>&1; then ok "Windows beyanı imzalandı"; else
     bad "Windows beyanı imzalandı"
     cat "$out"
@@ -281,10 +336,15 @@ else
   statement=$(cat "$exe.yapi.json")
   payload=$(payload_of "$exe.yapi.json")
   mac_payload=$(payload_of "$dmg.yapi.json")
-  expected_payload="{\"v\":1,\"typ\":\"build\",\"version\":901,\"platform\":\"windows-x64\",\"file\":\"SenseRemote-Kurulum-901.exe\",\"sha256\":\"$(openssl dgst -sha256 -r "$exe" | cut -c1-64)\",\"size\":4096,\"commit\":\"$commit\",\"run_id\":42,\"iat\":"
-  check "yük BuildStatement alanlarını sırayla taşıyor" test "${payload%%\"iat\":*}\"iat\":" = "$expected_payload"
+  payload_iat_mac=${mac_payload#*\"iat\":}
+  payload_iat_mac=${payload_iat_mac%%,*}
+  payload_iat=${payload#*\"iat\":}
+  payload_iat=${payload_iat%%,*}
+  expected_payload="{\"commit\":\"$commit\",\"file\":\"SenseRemote-Kurulum-901.exe\",\"iat\":$payload_iat,\"platform\":\"windows-x64\",\"run_id\":42,\"sha256\":\"$(openssl dgst -sha256 -r "$exe" | cut -c1-64)\",\"size\":4096,\"typ\":\"build\",\"v\":1,\"version\":901}"
+  check "yük kanonik BuildStatement (JCS alan sırası)" test "$payload" = "$expected_payload"
+  check "iat şimdiye yakın" test "$(($(date +%s) - payload_iat))" -lt 600
   check "beyanda k doğru" grep -Fq "{\"k\":\"${release_keys%%=*}\"," "$exe.yapi.json"
-  check "Mac yükünde platform macos-arm64" grep -Fq '"platform":"macos-arm64","file":"SenseRemote-901.dmg"' <<<"$mac_payload"
+  check "Mac yükünde platform macos-arm64" grep -Fq '"file":"SenseRemote-901.dmg","iat":'"$payload_iat_mac"',"platform":"macos-arm64"' <<<"$mac_payload"
 
   refuse "başka dosyanın beyanı reddedilir (build_mismatch)" verify "$exe" "$dmg.yapi.json"
   cp "$exe" "$work/keep.exe"
@@ -302,6 +362,20 @@ else
   refuse "bozuk imza reddedilir (build_bad_signature)" verify "$exe" "$work/tampered.json"
   printf '%s\n' "${statement/\"k\":\"/\"x\":1,\"k\":\"}" > "$work/extra.json"
   refuse "fazladan alan reddedilir (malformed)" verify "$exe" "$work/extra.json"
+
+  # Kanonik OLMAYAN yük (alan sırası farklı), GEÇERLİ imzayla bile reddedilmeli (bad_payload).
+  loose='{"v":1,"typ":"build","version":901,"platform":"windows-x64","file":"SenseRemote-Kurulum-901.exe","sha256":"'"$(openssl dgst -sha256 -r "$exe" | cut -c1-64)"'","size":4096,"commit":"'"$commit"'","run_id":42,"iat":1800000000}'
+  {
+    printf 'sense-remote/build/v1\n'
+    printf '%s' "$loose"
+  } > "$work/loose.message"
+  openssl pkeyutl -sign -inkey "$secret" -rawin -in "$work/loose.message" -out "$work/loose.signature" 2>/dev/null
+  printf '{"k":"%s","p":"%s","s":"%s"}\n' "${release_keys%%=*}" \
+    "$(printf '%s' "$loose" | openssl base64 -A | tr '+/' '-_' | tr -d '=')" \
+    "$(openssl base64 -A -in "$work/loose.signature" | tr '+/' '-_' | tr -d '=')" > "$work/loose.json"
+  loose_out="$root/loose.out"
+  verify "$exe" "$work/loose.json" > "$loose_out" 2>&1 || true
+  check "kanonik olmayan yük, geçerli imzayla da reddedilir (build_bad_payload)" grep -q 'build_bad_payload' "$loose_out"
 
   # İkinci (yabancı) deneme anahtarı: listede olmayan anahtar ve yanlış sır.
   openssl genpkey -algorithm ed25519 -out "$work/other.pem" 2>/dev/null
