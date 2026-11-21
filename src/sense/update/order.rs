@@ -1,5 +1,6 @@
 //! Sense Remote (update plan 2026-11-21, §3.2–§3.3): the signed update order, the panel's
-//! "install this version on this computer". Package U1 implements `verify`; pure.
+//! "install this version on this computer". Pure: keys, time and the held release come from the
+//! caller.
 //!
 //! An order does not use the envelope `seq` counter. Replay protection: it is bound to this
 //! computer (`did`, `duuid`) and to one file (`platform`, `sha256`: when a version number is
@@ -20,8 +21,12 @@
 //! A rejected order changes nothing; the reason goes to the heartbeat as
 //! `update.error = order_invalid` + `error_detail = <reason>`.
 
-use super::manifest::{Reason, Release};
+use super::manifest::{
+    check_time, is_platform, is_sha256_hex, is_unix_seconds, is_version, open_signed, within_ttl,
+    Reason, Release, CLOCK_SKEW_S,
+};
 use crate::sense::envelope_keys::TrustedKey;
+use serde_derive::Deserialize;
 use serde_json::Value;
 
 /// Domain separation (§3.1).
@@ -45,6 +50,111 @@ pub struct Order {
     /// Key id of the panel key that signed it.
     pub k: String,
     /// `UpdateOrderId`.
+    pub oid: String,
+    pub version: u32,
+    /// File binding: the published file at the time the order was given.
+    pub platform: String,
+    /// Lowercase hex.
+    pub sha256: String,
+    pub window: Window,
+    pub iat: i64,
+    pub exp: i64,
+}
+
+/// What this computer expects; all supplied by the caller.
+#[derive(Debug, Clone, Copy)]
+pub struct Expect<'a> {
+    /// Panel host, `envelope::expected_issuer()`.
+    pub iss: &'a str,
+    /// Own RustDesk ID.
+    pub did: &'a str,
+    /// Own uuid, in the form the heartbeat sends.
+    pub duuid: &'a str,
+    /// Local clock, Unix seconds.
+    pub now_s: i64,
+    /// The valid release this computer holds, if any.
+    pub release: Option<&'a Release>,
+    /// Installed Sense version.
+    pub installed: u32,
+}
+
+/// Verifies an order in the order of §3.3. `panel_keys` = `keys::panel_keys()`.
+pub fn verify(order: &Value, panel_keys: &[TrustedKey], expect: &Expect) -> Result<Order, Reason> {
+    let (k, value) = open_signed(order, panel_keys, UPDATE_ORDER_SIGNING_PREFIX)?;
+    let w: OrderWire = serde_json::from_value(value)
+        .ok()
+        .filter(OrderWire::is_valid)
+        .ok_or(Reason::BadPayload)?;
+    if w.iss != expect.iss {
+        return Err(Reason::WrongIssuer);
+    }
+    if w.did != expect.did || w.duuid != expect.duuid {
+        return Err(Reason::WrongDevice);
+    }
+    check_time(w.iat, w.exp, expect.now_s)?;
+    let version = w.version as u32; // 1..=MAX_VERSION, checked by the schema
+    // A held release that has expired since is no release (the caller should drop it anyway).
+    let held = expect
+        .release
+        .filter(|release| expect.now_s <= release.exp + CLOCK_SKEW_S);
+    let Some(held) = held.filter(|release| release.version == version) else {
+        return Err(Reason::VersionMismatch);
+    };
+    if w.platform != held.platform || w.sha256 != held.sha256 {
+        return Err(Reason::ReleaseMismatch);
+    }
+    if version <= expect.installed {
+        return Err(Reason::Downgrade);
+    }
+    Ok(Order {
+        k,
+        oid: w.oid,
+        version,
+        platform: w.platform,
+        sha256: w.sha256,
+        window: Window::parse(&w.window).ok_or(Reason::BadPayload)?,
+        iat: w.iat,
+        exp: w.exp,
+    })
+}
+
+/// `UpdateOrderPayload` (§3.2), every limit written out.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OrderWire {
+    v: i64,
+    typ: String,
+    iss: String,
+    did: String,
+    duuid: String,
+    oid: String,
+    version: i64,
+    platform: String,
+    sha256: String,
+    window: String,
+    iat: i64,
+    exp: i64,
+}
+
+impl OrderWire {
+    fn is_valid(&self) -> bool {
+        self.v == 1
+            && self.typ == "update_order"
+            && !self.iss.is_empty()
+            && !self.did.is_empty()
+            && !self.duuid.is_empty()
+            && is_order_id(&self.oid)
+            && is_version(self.version)
+            && is_platform(&self.platform)
+            && is_sha256_hex(&self.sha256)
+            && Window::parse(&self.window).is_some()
+            && is_unix_seconds(self.iat)
+            && is_unix_seconds(self.exp)
+            && within_ttl(self.iat, self.exp, ORDER_TTL_S)
+    }
+}
+
+/// `UpdateOrderId`.
     pub oid: String,
     pub version: u32,
     /// File binding: the published file at the time the order was given.
@@ -126,20 +236,5 @@ mod tests {
         assert_eq!(Window::parse("idle"), Some(Window::Idle));
         assert_eq!(Window::Night.as_str(), "night");
         assert_eq!(Window::parse("now"), None);
-    }
-
-    // U0: fail closed until U1 verifies.
-    #[test]
-    fn skeleton_refuses_every_order() {
-        let expect = Expect {
-            iss: "panel.example",
-            did: "123456789",
-            duuid: "dXVpZA==",
-            now_s: 1_795_000_000,
-            release: None,
-            installed: 3,
-        };
-        let order = serde_json::json!({ "k": "0000000000000000", "p": "e30", "s": "x" });
-        assert_eq!(verify(&order, &[], &expect), Err(Reason::UnknownKey));
     }
 }
