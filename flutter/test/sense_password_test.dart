@@ -5,7 +5,6 @@
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -109,30 +108,6 @@ Future<void> _unlock(SensePasswordController c) async {
   await c.unlockPressed();
   await c.tick(); // waiting: code + QR
   await c.tick(); // done → unlock
-}
-
-/// Golden comparator that writes a missing image and prints it (base64) to
-/// the log, so goldens can be produced on the Linux CI runner the first time
-/// (no local Flutter; U6 did the same). Removed once the images are in the
-/// repository.
-class _FirstRunComparator extends LocalFileComparator {
-  _FirstRunComparator(super.testFile);
-
-  @override
-  Future<bool> compare(Uint8List imageBytes, Uri golden) async {
-    final file = File.fromUri(basedir.resolveUri(golden));
-    if (!file.existsSync()) {
-      await update(golden, imageBytes);
-      final b64 = base64Encode(imageBytes);
-      for (var i = 0; i < b64.length; i += 3000) {
-        // ignore: avoid_print
-        print('SENSE_GOLDEN ${golden.path} '
-            '${b64.substring(i, math.min(i + 3000, b64.length))}');
-      }
-      return true;
-    }
-    return super.compare(imageBytes, golden);
-  }
 }
 
 Future<void> _loadFonts() async {
@@ -563,12 +538,7 @@ void main() {
 
   group('golden images (Windows + macOS)', () {
     // Rendered on the Linux CI runner (`PR kontrolu`) with the bundled Poppins.
-    setUpAll(() async {
-      await _loadFonts();
-      final base = goldenFileComparator as LocalFileComparator;
-      goldenFileComparator =
-          _FirstRunComparator(base.basedir.resolve('sense_password_test.dart'));
-    });
+    setUpAll(_loadFonts);
 
     SensePasswordController panel(SensePasswordStage stage,
         {Map<String, Object?> status = const {},
