@@ -302,6 +302,7 @@ mod tests {
     #[cfg(unix)]
     mod file_rules {
         use super::super::{files::*, *};
+        use serde_json::json;
         use std::{
             fs,
             os::unix::fs::{symlink, PermissionsExt},
