@@ -143,7 +143,7 @@ mod tests {
             format!("{good}\r\n"),
             format!("\t{good}"),
             format!("{good},\n{}", entry(&key(2))),
-            format!("{good}\u{0}"),
+            format!("{good}{}", char::from(0_u8)),
         ] {
             assert!(parse_release_keys(&bad).is_err(), "{bad:?}");
         }

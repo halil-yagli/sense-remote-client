@@ -585,35 +585,44 @@ mod tests {
         assert_eq!(installer_file_name(3, "linux-x64"), None);
     }
 
-
     #[test]
     fn canonical_json_is_jcs() {
-        for ok in [
-            r#"{"a":1,"b":[true,null,"x"]}"#,
-            r#"{"b":{"c":-5,"d":"\n\u001f\"\\"},"é":0}"#,
-            // UTF-16 order: U+1F600 (surrogates D83D…) sorts before U+FB01.
-            "{\"\u{1F600}\":1,\"\u{FB01}\":2}",
-            "\"\u{7f}\u{2028}\"",
-        ] {
+        // Escapes are built at run time so that this source holds no JSON escape sequences.
+        let bs = '\\';
+        // U+1F600 is D83D DE00 in UTF-16 and sorts before U+FB01 there, but after it in UTF-8.
+        let smile = char::from_u32(0x1F600).unwrap();
+        let ligature = char::from_u32(0xFB01).unwrap();
+        let e_acute = char::from_u32(0xE9).unwrap();
+        let ok = [
+            r#"{"a":1,"b":[true,null,"x"]}"#.to_owned(),
+            format!(r#"{{"b":{{"c":-5,"d":"{bs}n{bs}u001f{bs}"{bs}{bs}"}},"{e_acute}":0}}"#),
+            format!(r#"{{"{smile}":1,"{ligature}":2}}"#),
+            format!(r#""{}{}""#, char::from(0x7f_u8), char::from_u32(0x2028).unwrap()),
+        ];
+        for ok in &ok {
             assert!(parse_canonical(ok.as_bytes()).is_some(), "{ok}");
         }
-        for bad in [
-            r#"{"b":1,"a":2}"#,
-            r#"{"a":1,"a":1}"#,
-            r#"{"a": 1}"#,
-            r#"{"a":3.0}"#,
-            r#"{"a":1e7}"#,
-            r#"{"a":1.5}"#,
-            r#"{"a":-0}"#,
-            r#"{"a":"a"}"#,
-            r#"{"a":"\/"}"#,
-            r#"{"a":"\ud800"}"#,
-            "\u{feff}{\"a\":1}",
-            "{\"\u{FB01}\":2,\"\u{1F600}\":1}",
-        ] {
+        let bad = [
+            r#"{"b":1,"a":2}"#.to_owned(),
+            r#"{"a":1,"a":1}"#.to_owned(),
+            r#"{"a": 1}"#.to_owned(),
+            r#"{"a":3.0}"#.to_owned(),
+            r#"{"a":1e7}"#.to_owned(),
+            r#"{"a":1.5}"#.to_owned(),
+            r#"{"a":-0}"#.to_owned(),
+            format!(r#"{{"a":"{bs}u0061"}}"#),
+            format!(r#"{{"a":"{bs}/"}}"#),
+            format!(r#"{{"a":"{bs}ud800"}}"#),
+            format!(r#"{}{{"a":1}}"#, char::from_u32(0xFEFF).unwrap()),
+            format!(r#"{{"{ligature}":2,"{smile}":1}}"#),
+        ];
+        for bad in &bad {
             assert!(parse_canonical(bad.as_bytes()).is_none(), "{bad}");
         }
-        assert!(parse_canonical(b"{\"a\":\"\xff\"}").is_none());
+        let mut invalid_utf8 = br#"{"a":""#.to_vec();
+        invalid_utf8.push(0xff);
+        invalid_utf8.extend_from_slice(br#""}"#);
+        assert!(parse_canonical(&invalid_utf8).is_none());
     }
 
     #[test]

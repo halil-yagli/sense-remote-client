@@ -154,41 +154,6 @@ impl OrderWire {
     }
 }
 
-/// `UpdateOrderId`.
-    pub oid: String,
-    pub version: u32,
-    /// File binding: the published file at the time the order was given.
-    pub platform: String,
-    /// Lowercase hex.
-    pub sha256: String,
-    pub window: Window,
-    pub iat: i64,
-    pub exp: i64,
-}
-
-/// What this computer expects; all supplied by the caller.
-#[derive(Debug, Clone, Copy)]
-pub struct Expect<'a> {
-    /// Panel host, `envelope::expected_issuer()`.
-    pub iss: &'a str,
-    /// Own RustDesk ID.
-    pub did: &'a str,
-    /// Own uuid, in the form the heartbeat sends.
-    pub duuid: &'a str,
-    /// Local clock, Unix seconds.
-    pub now_s: i64,
-    /// The valid release this computer holds, if any.
-    pub release: Option<&'a Release>,
-    /// Installed Sense version.
-    pub installed: u32,
-}
-
-/// U0: every order is refused.
-pub fn verify(order: &Value, panel_keys: &[TrustedKey], expect: &Expect) -> Result<Order, Reason> {
-    let _ = (order, panel_keys, expect);
-    Err(Reason::UnknownKey)
-}
-
 /// `UpdateOrderId`: `^upd_[A-Za-z0-9_-]{16,32}$`.
 pub fn is_order_id(value: &str) -> bool {
     match value.strip_prefix("upd_") {
