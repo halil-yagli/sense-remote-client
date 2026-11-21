@@ -135,7 +135,8 @@ mod tests {
         );
     }
 
-    // U0: no store yet.
+    // U0: no store yet. Sense Remote (U3): Windows has its registry store now (`store_win`).
+    #[cfg(not(windows))]
     #[test]
     fn skeleton_has_no_store() {
         assert_eq!(read(), Err("unsupported".to_owned()));
