@@ -46,6 +46,10 @@ pub mod identity;
 // yet (`update::SUPPORTED` is false), so most of it is unused for now.
 #[allow(dead_code)]
 pub mod update;
+// Sense Remote (permanent password plan 2026-11-21): the password is set in the app after a Sense
+// sign-in. U9 is the skeleton plus the locks (`password::guard`); `password::SUPPORTED` is false.
+#[allow(dead_code)]
+pub mod password;
 
 /// Registry key (under HKLM) that holds the installed role and setup info.
 pub const REG_SUBKEY: &str = "SOFTWARE\\SenseRemote";
@@ -93,17 +97,13 @@ type Settings = Vec<(&'static str, &'static str)>;
 
 /// (hard settings, builtin settings) for a role. Hard settings are what RustDesk reads for
 /// custom clients (`config::is_incoming_only`, `is_outgoing_only`, `is_disable_settings`...).
-/// Host keeps the elevated command line allowed so the team can set the permanent password
-/// with `SenseRemote.exe --password ...` even though the settings page is locked.
+// Sense Remote (permanent password plan 2026-11-21, §6.3): no role allows the elevated command
+// line any more (`--password`, `--option`, `--set-id` answer "Settings are disabled!"). The
+// permanent password is changed only inside the app after a Sense sign-in. The key stays in
+// `ROLE_BUILTIN_KEYS` so a value left by an older build is still cleared.
 pub fn role_settings(role: Option<SenseRole>) -> (Settings, Settings) {
     let locks = || -> (Settings, Settings) {
-        (
-            vec![("disable-settings", "Y"), ("disable-ab", "Y")],
-            vec![(
-                keys::OPTION_ALLOW_COMMAND_LINE_SETTINGS_WHEN_SETTINGS_DISABLED,
-                "Y",
-            )],
-        )
+        (vec![("disable-settings", "Y"), ("disable-ab", "Y")], vec![])
     };
     match role {
         Some(SenseRole::Host) => {
@@ -969,13 +969,13 @@ mod tests {
     }
 
     #[test]
-    fn host_is_incoming_and_locked_with_cli_password() {
+    fn host_is_incoming_and_locked_without_cli() {
         let (hard, builtin) = role_settings(Some(SenseRole::Host));
         assert!(hard.contains(&("conn-type", "incoming")));
         assert!(hard.contains(&("disable-settings", "Y")));
         assert!(hard.contains(&("disable-ab", "Y")));
-        assert_eq!(builtin, vec![(CLI, "Y")]);
-        assert!(config::option2bool(CLI, "Y"));
+        // Sense Remote (password plan §6.3): the command line is closed for Host too.
+        assert!(builtin.iter().all(|(k, _)| *k != CLI));
     }
 
     #[test]
@@ -991,7 +991,7 @@ mod tests {
         assert!(hard.iter().all(|(k, _)| *k != "conn-type"));
         assert!(hard.contains(&("disable-settings", "Y")));
         assert!(hard.contains(&("disable-ab", "Y")));
-        assert_eq!(builtin, vec![(CLI, "Y")]);
+        assert!(builtin.iter().all(|(k, _)| *k != CLI));
     }
 
     #[test]
@@ -1011,8 +1011,13 @@ mod tests {
     #[test]
     fn switching_role_clears_stale_locks_and_keeps_other_keys() {
         let mut hard = HashMap::from([("disable-account".to_owned(), "Y".to_owned())]);
-        let mut builtin = HashMap::from([("hide-tray".to_owned(), "Y".to_owned())]);
+        let mut builtin = HashMap::from([
+            ("hide-tray".to_owned(), "Y".to_owned()),
+            // Sense Remote: a value left by a Sense Remote 1-2 build is cleared.
+            (CLI.to_owned(), "Y".to_owned()),
+        ]);
         apply_role_to(Some(SenseRole::Host), &mut hard, &mut builtin);
+        assert_eq!(builtin.get(CLI), None);
         assert_eq!(hard.get("conn-type").map(String::as_str), Some("incoming"));
         apply_role_to(Some(SenseRole::Both), &mut hard, &mut builtin);
         assert_eq!(hard.get("conn-type"), None);

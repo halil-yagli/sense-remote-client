@@ -33,6 +33,8 @@ use crate::{
 use bytes::Bytes;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use clipboard::ClipboardFile;
+// Sense Remote (permanent password plan §3.7): the payload of `Data::SensePassword`.
+pub use crate::sense::password::{SensePasswordIpc, SensePasswordSecret};
 #[cfg(target_os = "linux")]
 use hbb_common::anyhow;
 use hbb_common::{
@@ -395,6 +397,10 @@ pub enum Data {
     // and the `--server` process and, on macOS, between that process and the root daemon
     // (`_service` channel, `Offer` / `Install` / `StatusQuery` only).
     SenseUpdate(crate::sense::update::SenseUpdateIpc),
+    // Sense Remote (permanent password plan 2026-11-21, §3.7): unlock and set the permanent
+    // password, UI -> `--server` and, on macOS, `--server` -> root daemon (`_service` channel,
+    // `Begin` / `Set` / `Cancel` / `StatusQuery` only).
+    SensePassword(SensePasswordIpc),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -738,6 +744,13 @@ fn sense_service_accepts(data: &Data) -> bool {
                     | SenseUpdateIpc::Install { .. }
                     | SenseUpdateIpc::StatusQuery
             )
+            // Sense Remote (permanent password plan §3.7): the four requests, never an answer.
+            | Data::SensePassword(
+                SensePasswordIpc::Begin
+                    | SensePasswordIpc::Set { .. }
+                    | SensePasswordIpc::Cancel
+                    | SensePasswordIpc::StatusQuery
+            )
     )
 }
 
@@ -747,7 +760,26 @@ fn sense_service_accepts(data: &Data) -> bool {
 async fn sense_service_message(data: Data, stream: &mut Connection) {
     match data {
         Data::SenseUpdate(message) => sense_service_update(message, stream).await,
+        Data::SensePassword(message) => sense_service_password(message, stream).await,
         data => sense_service_envelope(data, stream).await,
+    }
+}
+
+// Sense Remote (permanent password plan §3.7): the root daemon checks the request itself
+// (`password::ipc_mac`, own nonce, keys and identity; off the async loop) and answers. Nothing
+// of the message is logged.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn sense_service_password(message: SensePasswordIpc, stream: &mut Connection) {
+    // The call limit is per peer process, as for envelopes (G4-4).
+    let peer_pid = stream.peer_pid();
+    let reply = tokio::task::spawn_blocking(move || {
+        crate::sense::password::ipc_mac::on_service_ipc(message, peer_pid)
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some(reply) = reply {
+        allow_err!(stream.send(&Data::SensePassword(reply)).await);
     }
 }
 
@@ -1134,6 +1166,23 @@ async fn handle(data: Data, stream: &mut Connection) {
                 allow_err!(stream.send(&Data::Config((name, value))).await);
             }
             Some(value) => {
+                // Sense Remote (permanent password plan §3.7): with a role installed the
+                // permanent password and its salt change only through the app's signed grant
+                // (`Data::SensePassword`), not this older way in (command line, UI process).
+                if crate::sense::password::guard::refuses_config_write(
+                    &name,
+                    crate::sense::installed_role(),
+                ) {
+                    log::warn!("Sense Remote: IPC write of {name} refused, role installed");
+                    if name == "permanent-password" {
+                        allow_err!(
+                            stream
+                                .send(&Data::Config((name, Some("N".to_owned()))))
+                                .await
+                        );
+                    }
+                    return;
+                }
                 let mut updated = true;
                 if name == "id" {
                     // An empty id would wipe the local id and unconfirm the key (cf. #15626).
@@ -1227,12 +1276,28 @@ async fn handle(data: Data, stream: &mut Connection) {
                 allow_err!(stream.send(&Data::SenseUpdate(reply)).await);
             }
         }
+        // Sense Remote (permanent password plan §3.7): Windows decides in the SYSTEM `--server`,
+        // macOS forwards to the root daemon (`password::on_main_ipc`).
+        Data::SensePassword(message) => {
+            if let Some(reply) = crate::sense::password::on_main_ipc(message).await {
+                allow_err!(stream.send(&Data::SensePassword(reply)).await);
+            }
+        }
         Data::NatType(_) => {
             let t = Config::get_nat_type();
             allow_err!(stream.send(&Data::NatType(Some(t))).await);
         }
         Data::SyncConfig(Some(configs)) => {
             let (config, config2) = *configs;
+            // Sense Remote (permanent password plan §3.7): on Windows no Sense flow sends this;
+            // with a role installed a UI process must not replace SYSTEM's identity, key pair,
+            // password or salt this way (macOS: `sense_keep_root_config`, G4-3).
+            #[cfg(windows)]
+            let config = crate::sense::password::guard::sync_config_for(
+                crate::sense::installed_role(),
+                config,
+                Config::get,
+            );
             let _chk = CheckIfRestart::new();
             if let Err(error) = crate::trusted_devices::config::update(move || {
                 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -2584,6 +2649,78 @@ mod test {
         let body = &body[..body.find("\n}\n").unwrap()];
         assert!(body.contains("crate::sense::update::daemon_mac::on_service_ipc(message, peer_pid)"));
         assert!(!body.contains("on_ipc(message)"));
+    }
+
+    // Sense Remote (permanent password plan §3.7): of the password messages the `_service`
+    // channel takes exactly the four requests; the daemon's answers are not something a client
+    // may send.
+    #[test]
+    fn sense_service_channel_takes_only_four_password_requests() {
+        use super::{sense_service_accepts, Data, SensePasswordIpc, SensePasswordSecret};
+        for accepted in [
+            SensePasswordIpc::Begin,
+            SensePasswordIpc::Set {
+                grant: "{}".to_owned(),
+                password: SensePasswordSecret::new("x".to_owned()),
+            },
+            SensePasswordIpc::Cancel,
+            SensePasswordIpc::StatusQuery,
+        ] {
+            assert!(sense_service_accepts(&Data::SensePassword(accepted.clone())), "{accepted:?}");
+        }
+        for rejected in [
+            SensePasswordIpc::Request(Ok("{}".to_owned())),
+            SensePasswordIpc::Request(Err("busy".to_owned())),
+            SensePasswordIpc::SetResult {
+                code: String::new(),
+                storage: Some(SensePasswordSecret::new("s".to_owned())),
+                salt: Some("salt".to_owned()),
+            },
+            SensePasswordIpc::Status("{}".to_owned()),
+        ] {
+            assert!(!sense_service_accepts(&Data::SensePassword(rejected.clone())), "{rejected:?}");
+        }
+        // Code path: the request reaches the daemon's own check, not the main channel's handler.
+        let source = include_str!("ipc.rs").replace("\r\n", "\n");
+        let start = source.find("async fn sense_service_message(").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains(
+            "Data::SensePassword(message) => sense_service_password(message, stream).await"
+        ));
+        let start = source.find("async fn sense_service_password(").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains("crate::sense::password::ipc_mac::on_service_ipc(message, peer_pid)"));
+        assert!(!body.contains("on_main_ipc(message)"));
+    }
+
+    // Sense Remote (permanent password plan §3.7): the locks sit on the main IPC write paths.
+    // `Config("permanent-password" | "salt", Some)` is checked before any write, and on Windows
+    // `SyncConfig(Some)` passes `guard::sync_config_for` before it is written.
+    #[test]
+    fn main_ipc_write_paths_pass_the_password_guard() {
+        let source = include_str!("ipc.rs").replace("\r\n", "\n");
+        let start = source.find("        Data::Config((name, value)) => match value {").unwrap();
+        let arm = &source[start..];
+        let some = arm.find("            Some(value) => {").unwrap();
+        let arm = &arm[some..];
+        let guard = arm
+            .find("crate::sense::password::guard::refuses_config_write(")
+            .unwrap();
+        let first_write = arm.find("Config::set_id(&value)").unwrap();
+        assert!(guard < first_write);
+        assert!(guard < arm.find("set_password(&value)").unwrap());
+        assert!(guard < arm.find("set_salt(&value)").unwrap());
+
+        let start = source.find("        Data::SyncConfig(Some(configs)) => {").unwrap();
+        let arm = &source[start..];
+        let arm = &arm[..arm.find("        Data::SyncConfig(None) => {").unwrap()];
+        let filter = arm
+            .find("let config = crate::sense::password::guard::sync_config_for(")
+            .unwrap();
+        assert!(arm[..filter].trim_end().ends_with("#[cfg(windows)]"), "{arm}");
+        assert!(filter < arm.find("set_config(config)").unwrap());
     }
 
     // Sense Remote (Mac M5): the `_service` allow list grew by exactly one message.
