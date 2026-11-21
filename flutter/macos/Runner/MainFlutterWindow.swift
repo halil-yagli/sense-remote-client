@@ -308,6 +308,16 @@ class MainFlutterWindow: NSWindow {
                     }
                     result([Double(size.width), Double(size.height)])
 
+                case "senseCmClearBackground":
+                    // Sense Remote: the Host-side icon is a small rounded shape in a
+                    // transparent window; Flutter's default black backing would show
+                    // as a square around it. Only the connection icon window asks.
+                    if let controller = registrar.view?.window?.contentViewController
+                        as? FlutterViewController {
+                        controller.backgroundColor = .clear
+                    }
+                    result(nil)
+
                 default:
                     result(FlutterMethodNotImplemented)
                 }
