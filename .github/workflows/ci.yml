@@ -9,10 +9,8 @@ env:
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
+  # Sense Remote: PR'larda calismaz; PR'daki Rust testleri sense-pr.yml'de (yalniz degisen
+  # alan). Bu is master'a gonderimde tum calisma alanini (--workspace) sinamaya devam eder.
   push:
     branches:
       - master
