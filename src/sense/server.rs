@@ -399,8 +399,41 @@ mod tests {
         assert!(unsecured_decision(false, "test").is_err());
     }
 
+    /// Set only in the child process that runs `pinned_settings_in_own_process`.
+    const PINNED_CHILD: &str = "SENSE_PINNED_SETTINGS_CHILD";
+
     #[tokio::test]
     async fn pinned_settings_read_back_as_ours() {
+        // UI-side readers take the constants directly (no IPC to the service).
+        assert_eq!(crate::common::get_key(false).await, RS_PUB_KEY);
+        let (server, others, _) = crate::common::get_rendezvous_server(10).await;
+        assert_eq!(server, rendezvous_server_with_port());
+        assert!(others.is_empty());
+        // Sense Remote: the upstream readers need `apply_security_settings`, which writes the
+        // process-wide OVERWRITE_SETTINGS. Other tests compare `Config::get_options()` with the
+        // saved file (trusted_devices recovery failed on Windows so, 2026-11-21), so that part
+        // runs in a test process of its own.
+        let name = "sense::server::tests::pinned_settings_in_own_process";
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--ignored", "--test-threads=1"])
+            .env(PINNED_CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "run in its own process by pinned_settings_read_back_as_ours"]
+    fn pinned_settings_in_own_process() {
+        // Never writes the global settings in a shared test process (e.g. --include-ignored).
+        if std::env::var_os(PINNED_CHILD).is_none() {
+            return;
+        }
         // Every process calls `apply_security_settings` at start; after it the upstream readers
         // return our values whatever the stored settings say.
         crate::sense::apply_security_settings();
@@ -418,10 +451,5 @@ mod tests {
             config::Config::get_option("custom-rendezvous-server"),
             RENDEZVOUS_SERVER
         );
-        // UI-side readers take the constants directly (no IPC to the service).
-        assert_eq!(crate::common::get_key(false).await, RS_PUB_KEY);
-        let (server, others, _) = crate::common::get_rendezvous_server(10).await;
-        assert_eq!(server, rendezvous_server_with_port());
-        assert!(others.is_empty());
     }
 }
