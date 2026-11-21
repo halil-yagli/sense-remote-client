@@ -391,6 +391,10 @@ pub enum Data {
     // (`Apply`) and the daemon's outcomes back (`Result`). Only acted on in the `_service`
     // channel of the macOS daemon, which verifies every envelope itself.
     SenseEnvelope(crate::sense::mac_apply::SenseEnvelopeIpc),
+    // Sense Remote (update plan 2026-11-21, §3.7): update status and requests between the UI
+    // and the `--server` process and, on macOS, between that process and the root daemon
+    // (`_service` channel, `Offer` / `Install` / `StatusQuery` only).
+    SenseUpdate(crate::sense::update::SenseUpdateIpc),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -677,7 +681,7 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
                                         // Sense Remote (Mac M5): the one other message this
                                         // channel takes; everything else is still rejected.
                                         } else if sense_service_accepts(&data) {
-                                            sense_service_envelope(data, &mut stream).await;
+                                            sense_service_message(data, &mut stream).await;
                                         } else {
                                             log::warn!(
                                                 "Rejected non-sync data on protected _service IPC channel: postfix={}, data_kind={:?}, peer_uid={:?}",
@@ -718,14 +722,54 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
 }
 
 // Sense Remote (Mac M5, plan §3.3): besides `SyncConfig`, the protected `_service` channel takes
-// exactly one message: an envelope `Apply` call. A `Result` (the daemon's own answer) or any other
-// `Data` coming from a client is rejected and the connection closed, as before.
+// an envelope `Apply` call. A `Result` (the daemon's own answer) or any other `Data` coming from
+// a client is rejected and the connection closed, as before.
+// Sense Remote (update plan 2026-11-21, §3.7): and exactly three update messages: `Offer`,
+// `Install` and `StatusQuery`. The answers (`Status`, `DaemonStatus`) and the UI's
+// `InstallRequest` are not something a client may send here.
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn sense_service_accepts(data: &Data) -> bool {
+    use crate::sense::update::SenseUpdateIpc;
     matches!(
         data,
         Data::SenseEnvelope(crate::sense::mac_apply::SenseEnvelopeIpc::Apply { .. })
+            | Data::SenseUpdate(
+                SenseUpdateIpc::Offer { .. }
+                    | SenseUpdateIpc::Install { .. }
+                    | SenseUpdateIpc::StatusQuery
+            )
     )
+}
+
+// Sense Remote (update plan 2026-11-21, §3.7): the two kinds of message `sense_service_accepts`
+// lets through.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn sense_service_message(data: Data, stream: &mut Connection) {
+    match data {
+        Data::SenseUpdate(message) => sense_service_update(message, stream).await,
+        data => sense_service_envelope(data, stream).await,
+    }
+}
+
+// Sense Remote (update plan 2026-11-21, §3.7): the root daemon checks everything in an update
+// message itself (`update::daemon_mac`; file and config work, so off the async loop) and answers
+// when there is something to answer. Nothing of the message is logged.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn sense_service_update(
+    message: crate::sense::update::SenseUpdateIpc,
+    stream: &mut Connection,
+) {
+    // The call limit is per peer process, as for envelopes (G4-4).
+    let peer_pid = stream.peer_pid();
+    let reply = tokio::task::spawn_blocking(move || {
+        crate::sense::update::daemon_mac::on_service_ipc(message, peer_pid)
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some(reply) = reply {
+        allow_err!(stream.send(&Data::SenseUpdate(reply)).await);
+    }
 }
 
 // Sense Remote (Mac M5): the root daemon verifies and applies the envelopes with its own data
@@ -1176,6 +1220,13 @@ async fn handle(data: Data, stream: &mut Connection) {
                 allow_err!(stream.send(&Data::Options(None)).await);
             }
         },
+        // Sense Remote (update plan 2026-11-21, §3.7): the UI asks the `--server` process for the
+        // update status or to install; `update::on_ipc` decides and answers (U0: no answer).
+        Data::SenseUpdate(message) => {
+            if let Some(reply) = crate::sense::update::on_ipc(message).await {
+                allow_err!(stream.send(&Data::SenseUpdate(reply)).await);
+            }
+        }
         Data::NatType(_) => {
             let t = Config::get_nat_type();
             allow_err!(stream.send(&Data::NatType(Some(t))).await);
@@ -2493,6 +2544,46 @@ pub async fn set_install_option(k: String, v: String) -> ResultType<()> {
 
 #[cfg(test)]
 mod test {
+    // Sense Remote (update plan 2026-11-21, §3.7): of the update messages the `_service` channel
+    // takes exactly `Offer`, `Install` and `StatusQuery`.
+    #[test]
+    fn sense_service_channel_takes_only_three_update_messages() {
+        use super::{sense_service_accepts, Data};
+        use crate::sense::update::SenseUpdateIpc;
+        for accepted in [
+            SenseUpdateIpc::Offer {
+                release: "{}".to_owned(),
+                order: None,
+                hint_release: None,
+                hint_oid: None,
+            },
+            SenseUpdateIpc::Install { version: 4 },
+            SenseUpdateIpc::StatusQuery,
+        ] {
+            assert!(sense_service_accepts(&Data::SenseUpdate(accepted.clone())), "{accepted:?}");
+        }
+        for rejected in [
+            SenseUpdateIpc::Status("{}".to_owned()),
+            SenseUpdateIpc::InstallRequest { version: 4 },
+            SenseUpdateIpc::DaemonStatus("{}".to_owned()),
+        ] {
+            assert!(!sense_service_accepts(&Data::SenseUpdate(rejected.clone())), "{rejected:?}");
+        }
+        // Code path: both kinds go through the one accepted branch, and the update message
+        // reaches the daemon's own check, not the main channel's handler.
+        let source = include_str!("ipc.rs").replace("\r\n", "\n");
+        let start = source.find("async fn sense_service_message(").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains("Data::SenseUpdate(message) => sense_service_update(message, stream).await"));
+        assert!(body.contains("data => sense_service_envelope(data, stream).await"));
+        let start = source.find("async fn sense_service_update(").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains("crate::sense::update::daemon_mac::on_service_ipc(message, peer_pid)"));
+        assert!(!body.contains("on_ipc(message)"));
+    }
+
     // Sense Remote (Mac M5): the `_service` allow list grew by exactly one message.
     #[test]
     fn sense_service_channel_takes_only_an_envelope_apply() {

@@ -182,6 +182,14 @@ pub fn core_main() -> Option<CoreMainAction> {
     }
     hbb_common::init_log(false, &log_name);
 
+    // Sense Remote (update plan 2026-11-21, §5.2, §8): `--sense-update-guard` (the old version's
+    // copy watching a new installation) and `--sense-upgrade-local` (elevated step of the manual
+    // move from version 2) never start the UI or the server; `update` runs them and gives the
+    // exit code. Every other command line goes on as before.
+    if let Some(code) = crate::sense::update::run_cli(&args) {
+        std::process::exit(code);
+    }
+
     // linux uni (url) go here.
     #[cfg(all(target_os = "linux", feature = "flutter"))]
     if args.len() > 0 && args[0].starts_with(&crate::get_uri_prefix()) {
