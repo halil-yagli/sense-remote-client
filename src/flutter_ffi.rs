@@ -2524,6 +2524,30 @@ pub fn install_sense_restart_agent() -> String {
     return "unsupported".to_owned();
 }
 
+// Sense Remote (update plan 2026-11-21, §3.7): update status for the home screens and About, as
+// GuiStatus JSON; the UI asks every 5 seconds.
+pub fn main_sense_update_status() -> String {
+    crate::sense::update::gui_status_json()
+}
+
+// Sense Remote (update plan 2026-11-21, §3.7): the user pressed "Güncelle". "" when the request
+// was taken, otherwise `no_release`, `not_newer`, `busy`, `ipc_failed` or `unsupported`.
+pub fn main_sense_update_install(version: i32) -> String {
+    crate::sense::update::request_install(version)
+}
+
+// Sense Remote (update plan 2026-11-21, §3.7): Sense version installed on this computer; 0 when
+// there is none (not installed, or version 2 and older).
+pub fn main_sense_installed_version() -> i32 {
+    crate::sense::update::installed_version()
+}
+
+// Sense Remote (update plan 2026-11-21, §8): the one-time manual move from version 2, from the
+// setup screen. "" on success, otherwise `cancelled`, `not_installed`, `not_newer` or `failed`.
+pub fn install_sense_upgrade_in_place() -> String {
+    crate::sense::update::manual::upgrade_in_place()
+}
+
 pub fn main_account_auth(op: String, remember_me: bool) {
     let id = get_id();
     let uuid = get_uuid();

@@ -42,12 +42,18 @@ pub mod envelope_seq;
 pub mod enroll;
 // Sense Remote (K3-2): the service imports the ID + key pair the panel registers.
 pub mod identity;
+// Sense Remote (update plan 2026-11-21, §3): signed self-update. U0 is the skeleton: nothing acts
+// yet (`update::SUPPORTED` is false), so most of it is unused for now.
+#[allow(dead_code)]
+pub mod update;
 
 /// Registry key (under HKLM) that holds the installed role and setup info.
 pub const REG_SUBKEY: &str = "SOFTWARE\\SenseRemote";
 const REG_KEY_FOR_CMD: &str = "HKEY_LOCAL_MACHINE\\SOFTWARE\\SenseRemote";
 const REG_VALUE_ROLE: &str = "Role";
 const REG_VALUE_SETUP: &str = "Setup";
+// Sense Remote (update plan 2026-11-21, §3.6): Sense version number of the installed build.
+const REG_VALUE_VERSION: &str = "Version";
 
 /// Publisher shown in Windows "Installed apps".
 pub const PUBLISHER: &str = "Sense Department";
@@ -286,7 +292,35 @@ pub fn install_commands(role: SenseRole, encoded_info: &str) -> String {
         "reg add \"{REG_KEY_FOR_CMD}\" /f /v {REG_VALUE_ROLE} /t REG_SZ /d {role}\r\n\
          reg add \"{REG_KEY_FOR_CMD}\" /f /v {REG_VALUE_SETUP} /t REG_SZ /d {encoded_info}\r\n",
         role = role.as_str(),
-    )
+    ) + &version_command(REG_KEY_FOR_CMD, report::app_version())
+}
+
+/// Sense Remote (update plan 2026-11-21, §3.6): line for the elevated install script that stores
+/// this build's Sense version number (`Version`, REG_SZ like the values next to it). The updater
+/// and the manual move from version 2 read it as the installed version; a missing value means
+/// version 2 or older. Empty without `SENSE_VERSION` (local builds), so no wrong number is stored.
+fn version_command(reg_key: &str, version: Option<u32>) -> String {
+    match version {
+        Some(version) => format!(
+            "reg add \"{reg_key}\" /f /v {REG_VALUE_VERSION} /t REG_SZ /d {version}\r\n"
+        ),
+        None => String::new(),
+    }
+}
+
+/// Sense Remote (update plan 2026-11-21, §3.6): the installed Sense version as the installer
+/// stored it (Windows, HKLM `Version`). `None` when it is missing or not a version number; macOS
+/// keeps it in the app bundle instead (`update::store_mac`).
+pub fn installed_version() -> Option<u32> {
+    parse_installed_version(&read_reg_value(REG_VALUE_VERSION)?)
+}
+
+fn parse_installed_version(value: &str) -> Option<u32> {
+    value
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|version| (1..=update::MAX_VERSION).contains(version))
 }
 
 /// Line for the elevated uninstall script.
@@ -326,9 +360,15 @@ pub fn uninstall_shortcut_name() -> String {
 
 #[cfg(windows)]
 fn read_reg_value(name: &str) -> Option<String> {
+    read_reg_value_in(REG_SUBKEY, name)
+}
+
+// Sense Remote: the subkey is a parameter so a test can read back what an installer line wrote.
+#[cfg(windows)]
+fn read_reg_value_in(subkey: &str, name: &str) -> Option<String> {
     use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
     RegKey::predef(HKEY_LOCAL_MACHINE)
-        .open_subkey(REG_SUBKEY)
+        .open_subkey(subkey)
         .ok()?
         .get_value::<String, _>(name)
         .ok()
@@ -1083,6 +1123,60 @@ mod tests {
         assert!(commands.contains("/v Setup /t REG_SZ /d 7b7d"));
         assert!(uninstall_commands()
             .starts_with("reg delete \"HKEY_LOCAL_MACHINE\\SOFTWARE\\SenseRemote\" /f"));
+    }
+
+    // Update plan 2026-11-21 §3.6: the installer stores the Sense version next to the role.
+    #[test]
+    fn install_commands_write_the_sense_version() {
+        assert_eq!(
+            version_command("HKEY_LOCAL_MACHINE\\SOFTWARE\\SenseRemote", Some(3)),
+            "reg add \"HKEY_LOCAL_MACHINE\\SOFTWARE\\SenseRemote\" /f /v Version /t REG_SZ /d 3\r\n"
+        );
+        assert_eq!(version_command(REG_KEY_FOR_CMD, None), "");
+        // The install script carries the line exactly when the build has a version, after the
+        // role and the setup info.
+        let commands = install_commands(SenseRole::Host, "7b7d");
+        let line = version_command(REG_KEY_FOR_CMD, report::app_version());
+        assert!(commands.ends_with(&format!("/d 7b7d\r\n{line}")), "{commands}");
+        assert_eq!(commands.contains("/v Version "), report::app_version().is_some());
+        // The uninstall script removes the whole key, so the version goes with the role.
+        assert!(uninstall_commands().contains(REG_KEY_FOR_CMD));
+    }
+
+    #[test]
+    fn installed_version_is_a_plain_number() {
+        assert_eq!(parse_installed_version("3"), Some(3));
+        assert_eq!(parse_installed_version(" 12 "), Some(12));
+        assert_eq!(parse_installed_version("999999"), Some(999_999));
+        for bad in ["", "0", "1000000", "3.0", "v3", "-1", "1.4.9"] {
+            assert_eq!(parse_installed_version(bad), None, "{bad}");
+        }
+    }
+
+    // Windows CI (elevated runner): the line of the install script really writes HKLM, and the
+    // reader gets the number back. A test key, never the product's own.
+    #[cfg(windows)]
+    #[test]
+    fn installer_line_writes_the_version_to_hklm() {
+        use std::os::windows::process::CommandExt;
+        use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+        if !crate::platform::is_elevated(None).unwrap_or(false) {
+            // Writing HKLM needs an administrator; only a local, not elevated run may skip.
+            assert!(std::env::var_os("GITHUB_ACTIONS").is_none(), "CI runs elevated");
+            return;
+        }
+        let subkey = format!("SOFTWARE\\SenseRemoteTest-{}", std::process::id());
+        let line = version_command(&format!("HKEY_LOCAL_MACHINE\\{subkey}"), Some(7));
+        let status = std::process::Command::new("cmd")
+            .raw_arg("/C")
+            .raw_arg(line.trim())
+            .status()
+            .unwrap();
+        let stored = read_reg_value_in(&subkey, REG_VALUE_VERSION);
+        let _ = RegKey::predef(HKEY_LOCAL_MACHINE).delete_subkey_all(&subkey);
+        assert!(status.success());
+        assert_eq!(stored.as_deref().and_then(parse_installed_version), Some(7));
+        assert_eq!(read_reg_value_in(&subkey, REG_VALUE_VERSION), None);
     }
 
     #[test]
