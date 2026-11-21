@@ -234,7 +234,12 @@ void main() {
 
       // No Applications check first: the role is installed, the app runs from there.
       expect(backend.inAppsCalls, 0);
-      expect(find.text(t('upgrade-mac-start')), findsOneWidget);
+      // The title and the button both read "Geçişi tamamla".
+      expect(find.descendant(
+              of: find.byKey(const Key('sense-upgrade-start')),
+              matching: find.text(t('upgrade-mac-start'))),
+          findsOneWidget);
+      expect(find.textContaining('Uygulamalar klasörüne kopyalandı'), findsOneWidget);
       await tester.tap(find.byKey(const Key('sense-upgrade-start')));
       await tester.pumpAndSettle();
       expect(upgrade.runs, 1);
