@@ -8,14 +8,19 @@ const Map<String, String> kSenseHomeTr = {
   'brand_light': ' Remote',
   // Controller home
   'computers': 'Bilgisayarlarım',
-  'search_hint': 'Proje, bilgisayar, konum',
+  'search_hint': 'Proje, bilgisayar, konum ya da kimlik',
   'connect': 'Bağlan',
   'offline': 'Kapalı',
   'offline_tip': 'Çevrimdışı görünüyor — yine de bağlanmayı dener',
   'connect_id': 'Kimlikle bağlan',
+  'connect_id_hint': 'Kimlik — örn. 123 456 789',
+  'connect_id_note':
+      'Sense kurulu olmayan bir bilgisayar için. Şifre bağlantı penceresinde sorulur.',
+  'cancel': 'Vazgeç',
   'refresh': 'Yenile',
   'loading': 'Bilgisayarlar yükleniyor…',
-  'empty': 'Hesabına atanmış bilgisayar yok. Projeler panelden yönetilir.',
+  'empty':
+      'Hesabına atanmış bilgisayar yok. Projeler panelden yönetilir. Sense kurulu olmayan bir bilgisayar için “Kimlikle bağlan”.',
   'no_match': 'Aramaya uyan bilgisayar yok.',
   'load_error': 'Liste panelden alınamadı.',
   'no_project': 'Projesi olmayan',
