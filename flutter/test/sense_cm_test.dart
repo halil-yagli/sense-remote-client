@@ -139,6 +139,130 @@ void main() {
     });
   });
 
+  // Sense Remote (plan 2026-11-21, M6): the icon on macOS. `window_size`
+  // reports points there, flipped against the highest screen edge.
+  group('macOS geometry', () {
+    const icon = Size(52, 52);
+
+    test('icon mode is on for macOS and Windows, not for Win7 or Linux', () {
+      expect(
+          senseCmEnabledOn(windows: false, macOS: true, compatibleUi: false),
+          isTrue);
+      expect(
+          senseCmEnabledOn(windows: true, macOS: false, compatibleUi: false),
+          isTrue);
+      expect(
+          senseCmEnabledOn(windows: true, macOS: false, compatibleUi: true),
+          isFalse);
+      expect(
+          senseCmEnabledOn(windows: false, macOS: false, compatibleUi: false),
+          isFalse);
+    });
+
+    test('a Retina screen does not double the 52 pt icon', () {
+      expect(senseCmUnitScale(pointUnits: true, scaleFactor: 2), 1);
+      expect(senseCmUnitScale(pointUnits: false, scaleFactor: 1.5), 1.5);
+      // 14" MacBook: 1512x982 pt at scale 2, menu bar 38 pt, Dock 70 pt.
+      final areas = senseCmWorkAreas(const [
+        (
+          Rect.fromLTWH(0, 0, 1512, 982),
+          Rect.fromLTWH(0, 38, 1512, 874),
+          2.0
+        ),
+      ], macOS: true);
+      expect(areas, [(const Rect.fromLTWH(0, 38, 1512, 874), 1.0)]);
+      final (work, scale) = areas.first;
+      final rect = senseCmDefaultIconRect(work, icon * scale, 16 * scale);
+      // 16 pt above the Dock, 16 pt from the right edge, still 52 pt.
+      expect(rect, const Rect.fromLTWH(1444, 844, 52, 52));
+    });
+
+    test('with the Dock on the left the icon is still bottom right', () {
+      // 1440x900, menu bar 25 pt, Dock 64 pt on the left.
+      const visible = Rect.fromLTWH(64, 25, 1376, 875);
+      final (work, _) = senseCmWorkAreas(const [
+        (Rect.fromLTWH(0, 0, 1440, 900), visible, 2.0),
+      ], macOS: true)
+          .first;
+      expect(senseCmDefaultIconRect(work, icon, 16),
+          const Rect.fromLTWH(1372, 832, 52, 52));
+      // A remembered place under the Dock or the menu bar is pulled back in.
+      expect(clampSenseCmRect(const Rect.fromLTWH(0, 0, 52, 52), work),
+          const Rect.fromLTWH(64, 25, 52, 52));
+    });
+
+    test('with the Dock on the right the icon stays clear of it', () {
+      const visible = Rect.fromLTWH(0, 25, 1376, 875);
+      final (work, _) = senseCmWorkAreas(const [
+        (Rect.fromLTWH(0, 0, 1440, 900), visible, 2.0),
+      ], macOS: true)
+          .first;
+      expect(senseCmDefaultIconRect(work, icon, 16).right, 1376 - 16);
+    });
+
+    test('a screen above the primary one shifts y to window coordinates', () {
+      // Primary 1440x900 (menu bar 25, Dock 70 at the bottom), an external
+      // 1920x1080 arranged above it. window_size puts y = 0 at the top of
+      // the external screen, so the primary screen starts at y = 1080.
+      const primary = (
+        Rect.fromLTWH(0, 1080, 1440, 900),
+        Rect.fromLTWH(0, 1105, 1440, 805),
+        2.0
+      );
+      const external = (
+        Rect.fromLTWH(-240, 0, 1920, 1080),
+        Rect.fromLTWH(-240, 25, 1920, 1055),
+        1.0
+      );
+      expect(senseCmMacTopOffset([primary.$1, external.$1]), 1080);
+      final areas = senseCmWorkAreas(const [primary, external], macOS: true);
+      // window_manager measures from the top of the primary screen.
+      expect(areas, [
+        (const Rect.fromLTWH(0, 25, 1440, 805), 1.0),
+        (const Rect.fromLTWH(-240, -1055, 1920, 1055), 1.0),
+      ]);
+      // First start: bottom right of the primary screen, above the Dock.
+      final start = senseCmDefaultIconRect(areas.first.$1, icon, 16);
+      expect(start, const Rect.fromLTWH(1372, 762, 52, 52));
+      // An icon left on the external screen is found there again.
+      expect(
+          senseCmWorkAreaFor(
+              const Offset(1500, -200), areas.map((a) => a.$1).toList()),
+          areas[1].$1);
+      // The window frame goes through the same shift.
+      expect(senseCmMacRect(const Rect.fromLTWH(1372, 1842, 52, 52), 1080),
+          start);
+    });
+
+    test('one screen, or a screen beside the primary one, needs no shift', () {
+      expect(senseCmMacTopOffset(const []), 0);
+      expect(
+          senseCmMacTopOffset(const [
+            Rect.fromLTWH(0, 0, 1440, 900),
+            Rect.fromLTWH(1440, 0, 1920, 900),
+          ]),
+          0);
+    });
+
+    test('Windows keeps physical pixels, the scale and its own primary rule',
+        () {
+      const second = (
+        Rect.fromLTWH(-2880, 0, 2880, 1620),
+        Rect.fromLTWH(-2880, 0, 2880, 1560),
+        1.5
+      );
+      const first = (
+        Rect.fromLTWH(0, 0, 1920, 1080),
+        Rect.fromLTWH(0, 0, 1920, 1040),
+        1.0
+      );
+      expect(senseCmWorkAreas(const [second, first], macOS: false), [
+        (first.$2, 1.0),
+        (second.$2, 1.5),
+      ]);
+    });
+  });
+
   group('content', () {
     test('only the permissions that are on are listed', () {
       final c = client(1, 'Halil', clipboard: false)..privacyMode = true;

@@ -1,17 +1,19 @@
 // Sense Remote: window side of the Host-side connection icon.
 //
 // RustDesk shows a 300x490 connection manager window on the controlled
-// computer. Sense Remote replaces it (Windows first) with a small, draggable,
-// always-on-top icon; clicking it opens a card in the same window. The window
-// is only resized and moved here, never hidden while a connection is active:
-// the connection must stay visible on the controlled side (workshop
-// CLAUDE.md, Security).
+// computer. Sense Remote replaces it (Windows and macOS) with a small,
+// draggable, always-on-top icon; clicking it opens a card in the same window.
+// The window is only resized and moved here, never hidden while a connection
+// is active: the connection must stay visible on the controlled side
+// (workshop CLAUDE.md, Security).
 //
-// MAC-SONRA: macOS keeps the RustDesk window until the icon is tried on a Mac
-// (window level, Stage Manager and Spaces behave differently there).
+// macOS (plan 2026-11-21, M6): the icon is placed in points inside
+// `NSScreen.visibleFrame` (no menu bar, no Dock), follows the user to every
+// Space and stays above full screen apps. Stage Manager is checked on a Mac.
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
@@ -23,10 +25,13 @@ import 'sense_cm_geometry.dart';
 class SenseCm {
   SenseCm._();
 
-  /// Icon mode on this platform. Win7 compatible mode keeps a normal title
-  /// bar, where a 52 px window would not fit, so it keeps the old window.
+  /// Icon mode on this platform (see [senseCmEnabledOn]).
   static bool get enabled =>
-      _enabledOverride ?? (isWindows && !kUseCompatibleUiMode);
+      _enabledOverride ??
+      senseCmEnabledOn(
+          windows: isWindows,
+          macOS: isMacOS,
+          compatibleUi: kUseCompatibleUiMode);
   static bool? _enabledOverride;
 
   @visibleForTesting
@@ -51,6 +56,7 @@ class SenseCm {
   /// Shows the collapsed icon at its remembered place (bottom right first).
   static Future<void> showIcon() async {
     open.value = false;
+    await _prepareMacWindow();
     final screens = await _workAreas();
     final remembered = parseSenseCmPosition(
         bind.mainGetLocalOption(key: kSenseCmPositionOption));
@@ -130,21 +136,48 @@ class SenseCm {
         key: kSenseCmPositionOption, value: formatSenseCmPosition(topLeft));
   }
 
+  static const _macHostChannel = MethodChannel('org.rustdesk.rustdesk/host');
+
+  /// Sense Remote (macOS): what makes the RustDesk window an icon there.
+  /// Runs every time the icon is shown; each call only sets a window flag.
+  static Future<void> _prepareMacWindow() async {
+    if (!isMacOS) return;
+    try {
+      // A 52 pt window has no room for the close/minimize/zoom buttons, and
+      // the icon must not be minimized away during a connection.
+      await windowManager.setTitleBarStyle(TitleBarStyle.hidden,
+          windowButtonVisibility: false);
+      await windowManager.setMinimizable(false);
+      // The system shadow would draw a frame around the transparent window.
+      await windowManager.setHasShadow(false);
+      // Every Space, and above full screen apps (the process is an accessory
+      // app by now: showCmWindow hides the Dock icon first).
+      await windowManager.setVisibleOnAllWorkspaces(true,
+          visibleOnFullScreen: true);
+      // Flutter paints black behind the widgets on macOS; clear it so no
+      // black square shows around the rounded icon (design review T3-4).
+      await _macHostChannel.invokeMethod('senseCmClearBackground');
+    } catch (e) {
+      debugPrint('Sense CM: macOS window setup failed: $e');
+    }
+  }
+
   static Future<void> _setBounds(Rect rect) async {
     // Window sizes below the system minimum track size get clamped by
-    // Windows; the window manager reports this minimum instead.
+    // Windows; the window manager reports this minimum instead. On macOS
+    // `rect` is in points and the pixel ratio is not used at all.
     await windowManager.setMinimumSize(kSenseCmIconSize);
     await windowManager.setBounds(rect, ignoreDevicePixelRatio: true);
   }
 
-  /// (work area, scale factor) of every monitor, physical pixels; the
-  /// primary monitor (the one at the origin on Windows) comes first.
+  /// (work area, unit scale) of every monitor in window units (physical
+  /// pixels on Windows, points on macOS); the primary monitor comes first.
   static Future<List<(Rect, double)>> _workAreas() async {
     try {
-      final list = [...await window_size.getScreenList()];
-      list.sort((a, b) => (a.frame.topLeft == Offset.zero ? 0 : 1)
-          .compareTo(b.frame.topLeft == Offset.zero ? 0 : 1));
-      return list.map((s) => (s.visibleFrame, s.scaleFactor)).toList();
+      final list = await window_size.getScreenList();
+      return senseCmWorkAreas(
+          list.map((s) => (s.frame, s.visibleFrame, s.scaleFactor)).toList(),
+          macOS: isMacOS);
     } catch (e) {
       debugPrint('Sense CM: screen list failed: $e');
       return [];
@@ -160,12 +193,22 @@ class SenseCm {
     return info == null ? null : (info.$2, info.$3);
   }
 
-  /// (window frame, work area of its monitor, scale), physical pixels.
+  /// (window frame, work area of its monitor, unit scale), window units.
   static Future<(Rect, Rect, double)?> _windowInfo() async {
     try {
       final window = await window_size.getWindowInfo();
       final screen = window.screen;
       if (screen == null) return null;
+      if (isMacOS) {
+        // Sense Remote: see senseCmMacTopOffset.
+        final offset = senseCmMacTopOffset(
+            (await window_size.getScreenList()).map((s) => s.frame).toList());
+        return (
+          senseCmMacRect(window.frame, offset),
+          senseCmMacRect(screen.visibleFrame, offset),
+          1.0
+        );
+      }
       return (window.frame, screen.visibleFrame, window.scaleFactor);
     } catch (e) {
       debugPrint('Sense CM: window info failed: $e');
