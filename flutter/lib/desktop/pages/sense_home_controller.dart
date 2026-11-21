@@ -16,6 +16,7 @@ import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
 import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
+import 'sense_home_connect_id.dart';
 import 'sense_home_strings.dart';
 
 typedef _T = SenseCmTokens;
@@ -267,9 +268,16 @@ class _SenseControllerHomeViewState extends State<SenseControllerHomeView> {
         children: [
           Text(senseHomeText('computers'),
               style: _T.text(size: 22, weight: FontWeight.w700)),
-          Row(mainAxisSize: MainAxisSize.min, children: [
+          // Sense Remote: a Wrap, so the header does not overflow in a
+          // narrow window now that it carries one more button.
+          Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
             SizedBox(
-              width: 260,
+              // Sense Remote: 300 so the longer hint (… ya da kimlik) fits.
+              width: 300,
               child: TextField(
                 key: const Key('sense-home-search'),
                 controller: _search,
@@ -297,14 +305,22 @@ class _SenseControllerHomeViewState extends State<SenseControllerHomeView> {
                 ),
               ),
             ),
+            // Sense Remote: always visible; connecting by ID was only
+            // reachable by typing an ID into the search box (user test
+            // 2026-11-21). The password is asked by the connection window.
+            SizedBox(
+              width: 136,
+              child: SenseCmButton(
+                  key: const Key('sense-home-connect-id-open'),
+                  label: senseHomeText('connect_id'),
+                  onTap: () =>
+                      showSenseConnectByIdDialog(context, widget.onConnect)),
+            ),
             if (widget.onRefresh != null)
-              Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: SenseCmTextButton(
-                    key: const Key('sense-home-refresh'),
-                    label: senseHomeText('refresh'),
-                    onTap: widget.onRefresh!),
-              ),
+              SenseCmTextButton(
+                  key: const Key('sense-home-refresh'),
+                  label: senseHomeText('refresh'),
+                  onTap: widget.onRefresh!),
           ]),
         ],
       ),
