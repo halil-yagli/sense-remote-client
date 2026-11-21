@@ -15,6 +15,8 @@ import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
 import 'sense_home_mac.dart';
 import 'sense_home_strings.dart';
+import 'sense_update_view.dart'; // Sense Remote: update strip (§6)
+import '../widgets/sense_version_chip.dart'; // Sense Remote: version label (§6)
 
 typedef _T = SenseCmTokens;
 
@@ -58,7 +60,8 @@ class SenseHostHome extends StatelessWidget {
   const SenseHostHome({super.key, this.onMacPermissionsChanged});
 
   /// Sense Remote (Mac M7): the permission notice changed the height of the
-  /// card (the Host window follows its content). Never called on Windows.
+  /// card (the Host window follows its content). Also called when the update
+  /// strip appears, goes or changes its text (update plan §6, all platforms).
   final VoidCallback? onMacPermissionsChanged;
 
   @override
@@ -66,9 +69,13 @@ class SenseHostHome extends StatelessWidget {
     final stopped = Get.find<RxBool>(tag: 'stop-service');
     final name = bind.mainGetBuildinOption(key: kSenseNameOption);
     final location = bind.mainGetBuildinOption(key: kSenseLocationOption);
+    // Sense Remote (update plan §6): version label and update strip.
+    final version = senseAppVersion();
     Widget view(List<SenseMacPermission> macMissing,
             void Function(SenseMacPermission)? openMacPermission) =>
-        Obx(() => SenseHostHomeView(
+        SenseUpdateWatch(
+          onLayoutChanged: onMacPermissionsChanged,
+          builder: (_, strip) => Obx(() => SenseHostHomeView(
               name: name,
               location: location,
               deviceId: gFFI.serverModel.serverId.text,
@@ -78,7 +85,10 @@ class SenseHostHome extends StatelessWidget {
               onStartService: () => start_service(true),
               macMissing: macMissing,
               onOpenMacPermission: openMacPermission,
-            ));
+              versionChip:
+                  SenseVersionChip(version: version, onTap: senseOpenAbout),
+              updateStrip: strip,
+            )));
     // Sense Remote (Mac M7): macOS privacy permissions are part of "ready" on
     // a Mac Host; Windows keeps the view as it was.
     if (!isMacOS) return view(const [], null);
@@ -102,6 +112,8 @@ class SenseHostHomeView extends StatelessWidget {
     this.onStartService,
     this.macMissing = const [],
     this.onOpenMacPermission,
+    this.versionChip,
+    this.updateStrip,
   });
 
   final String name;
@@ -114,6 +126,11 @@ class SenseHostHomeView extends StatelessWidget {
   /// (always empty on Windows).
   final List<SenseMacPermission> macMissing;
   final void Function(SenseMacPermission)? onOpenMacPermission;
+
+  /// Sense Remote (update plan §6): "Sürüm N" in the header, and the update
+  /// strip under it (null when there is nothing to say).
+  final Widget? versionChip;
+  final Widget? updateStrip;
 
   @override
   Widget build(BuildContext context) {
@@ -147,7 +164,12 @@ class SenseHostHomeView extends StatelessWidget {
                   text: senseHomeText('brand_light'),
                   style: _T.text(size: 15, weight: FontWeight.w200)),
             ])),
+            if (versionChip != null) ...[const Spacer(), versionChip!],
           ]),
+          if (updateStrip != null) ...[
+            const SizedBox(height: 14),
+            updateStrip!,
+          ],
           const SizedBox(height: 18),
           Container(
             width: double.infinity,
