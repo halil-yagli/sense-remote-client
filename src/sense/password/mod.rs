@@ -2,8 +2,10 @@
 //! app, after a Sense sign-in, and written only by the privileged process (Windows: SYSTEM
 //! `--server`; macOS: root daemon) against a short-lived grant signed by the panel.
 //!
-//! U9 is the skeleton: the IPC/FFI types, the locks (`guard`, complete) and safe defaults
-//! everywhere else. Nothing changes a password yet (`SUPPORTED` is false): every request is
+//! U9 is the skeleton: the IPC/FFI types and the locks (`guard`). U10 adds the pure core: the
+//! grant check (`grant`, §3.3), request and ack signing (`request`, `ack`), the pending nonce
+//! (`pending`), the password rule (`rule`) and the UI side of the unlock (`ui`). Nothing changes
+//! a password yet (`SUPPORTED` is false, the privileged side is U11/U12): every request is
 //! answered `unsupported` and `caps` does not carry `password`.
 
 use serde_derive::{Deserialize, Serialize};
@@ -22,6 +24,9 @@ pub mod store_win;
 // Only the Flutter UI has the sign-in (`hbbs_http::account`) and the password page.
 #[cfg(feature = "flutter")]
 pub mod ui;
+// The shared test vector (`testdata/password-v1.json`, made by the panel).
+#[cfg(test)]
+mod vector;
 
 /// Sense Remote (plan §8.1 U14): the one switch. True only once the grant check, the stores and
 /// the UI are in (U10–U13).
@@ -62,6 +67,26 @@ impl SensePasswordSecret {
     /// The value itself, for the one place that writes it.
     pub fn expose(&self) -> &str {
         &self.0
+    }
+}
+
+// Sense Remote (PR #50 note for U10): the bytes are overwritten before the memory is freed, so a
+// dropped password does not linger in the heap. Zeros keep the `String` valid UTF-8.
+impl SensePasswordSecret {
+    fn wipe(&mut self) {
+        // SAFETY: only zero bytes are written, which keeps the string valid UTF-8.
+        let bytes = unsafe { self.0.as_mut_vec() };
+        for byte in bytes.iter_mut() {
+            // SAFETY: `byte` is a valid, aligned `&mut u8`; volatile so it is not optimized away.
+            unsafe { std::ptr::write_volatile(byte, 0) };
+        }
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Drop for SensePasswordSecret {
+    fn drop(&mut self) {
+        self.wipe();
     }
 }
 
@@ -165,6 +190,13 @@ mod tests {
             assert!(!text.contains("Gizli"), "{text}");
         }
         assert_eq!(secret.expose(), "Gizli-Deneme-42!");
+    }
+
+    #[test]
+    fn secret_is_wiped_on_drop() {
+        let mut secret = SensePasswordSecret::new("Gizli".to_owned());
+        secret.wipe(); // what `Drop` runs
+        assert_eq!(secret.expose().as_bytes(), &[0u8; 5]);
     }
 
     #[test]
