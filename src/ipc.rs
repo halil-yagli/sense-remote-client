@@ -770,10 +770,12 @@ async fn sense_service_message(data: Data, stream: &mut Connection) {
 // of the message is logged.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn sense_service_password(message: SensePasswordIpc, stream: &mut Connection) {
-    // The call limit is per peer process, as for envelopes (G4-4).
+    // Sense Remote (U12): the limits count per peer process, per uid and in total, so a fresh
+    // process gets no fresh allowance (G4-4, U9 review).
     let peer_pid = stream.peer_pid();
+    let peer_uid = stream.peer_uid();
     let reply = tokio::task::spawn_blocking(move || {
-        crate::sense::password::ipc_mac::on_service_ipc(message, peer_pid)
+        crate::sense::password::ipc_mac::on_service_ipc(message, peer_pid, peer_uid)
     })
     .await
     .ok()
@@ -2723,7 +2725,9 @@ mod test {
         let start = source.find("async fn sense_service_password(").unwrap();
         let body = &source[start..];
         let body = &body[..body.find("\n}\n").unwrap()];
-        assert!(body.contains("crate::sense::password::ipc_mac::on_service_ipc(message, peer_pid)"));
+        assert!(body.contains(
+            "crate::sense::password::ipc_mac::on_service_ipc(message, peer_pid, peer_uid)"
+        ));
         assert!(!body.contains("on_main_ipc(message)"));
     }
 
