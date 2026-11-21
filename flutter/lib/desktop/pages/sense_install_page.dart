@@ -102,34 +102,18 @@ class _RustBackend implements SenseInstallBackend {
   @override
   Future<bool> inApplications() async => bind.mainIsInstalled();
 
-  // The existing checks, without a system prompt (the same ones the heartbeat reports).
-  @override
-  Future<SenseMacPermissions> macPermissions() async => SenseMacPermissions(
-        screenRecording: bind.mainIsCanScreenRecording(prompt: false),
-        accessibility: bind.mainIsProcessTrusted(prompt: false),
-        inputMonitoring: bind.mainIsCanInputMonitoring(prompt: false),
-      );
+  // Sense Remote (code review K4-5): the one binding shared with the home screens.
+  static const _mac = SenseMacPermissionBind();
 
   @override
-  Future<void> openMacPermission(SenseMacPermission permission) async {
-    // The request puts Sense Remote into the list of that pane; macOS shows its own prompt
-    // only once per app, so the pane is opened as well (later presses would do nothing).
-    switch (permission) {
-      case SenseMacPermission.screenRecording:
-        bind.mainIsCanScreenRecording(prompt: true);
-        break;
-      case SenseMacPermission.accessibility:
-        bind.mainIsProcessTrusted(prompt: true);
-        break;
-      case SenseMacPermission.inputMonitoring:
-        bind.mainIsCanInputMonitoring(prompt: true);
-        break;
-    }
-    await openUrl(permission.settingsUrl);
-  }
+  Future<SenseMacPermissions> macPermissions() async => _mac.read();
 
   @override
-  Future<String> restartAgent() => bind.installSenseRestartAgent();
+  Future<void> openMacPermission(SenseMacPermission permission) =>
+      _mac.open(permission);
+
+  @override
+  Future<String> restartAgent() => _mac.restartAgent();
 }
 
 class _SenseInstallPageState extends State<SenseInstallPage>

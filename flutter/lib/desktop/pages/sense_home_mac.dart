@@ -2,64 +2,32 @@
 // Sense home screens. Apple lets Screen Recording, Accessibility and Input
 // Monitoring be approved only at the computer itself, so a missing one is
 // shown in plain words with a button that opens its pane of System Settings.
-// These replace the stock English permission / daemon cards on a Sense
-// installation. A Host needs all three; a Controller only Input Monitoring.
-// Nothing here runs on Windows (callers mount it on macOS only).
+// These replace the stock English permission / daemon cards. The permission
+// model and the system calls are shared with the setup wizard
+// (sense_mac_permissions.dart). Nothing here runs on Windows (callers mount
+// it on macOS only).
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../../models/platform_model.dart';
 import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
 import 'sense_home_strings.dart';
+import 'sense_install_strings.dart';
+import 'sense_mac_permissions.dart';
+
+export 'sense_mac_permissions.dart';
 
 typedef _T = SenseCmTokens;
 
-enum SenseMacPermission { screenRecording, accessibility, inputMonitoring }
-
-class SenseMacPermissions {
-  const SenseMacPermissions({
-    required this.screenRecording,
-    required this.accessibility,
-    required this.inputMonitoring,
-  });
-
-  final bool screenRecording;
-  final bool accessibility;
-  final bool inputMonitoring;
-
-  bool granted(SenseMacPermission p) {
-    switch (p) {
-      case SenseMacPermission.screenRecording:
-        return screenRecording;
-      case SenseMacPermission.accessibility:
-        return accessibility;
-      case SenseMacPermission.inputMonitoring:
-        return inputMonitoring;
-    }
-  }
-
-  bool sameAs(SenseMacPermissions o) =>
-      screenRecording == o.screenRecording &&
-      accessibility == o.accessibility &&
-      inputMonitoring == o.inputMonitoring;
-}
+bool _hosts(SenseHomeRole role) =>
+    role == SenseHomeRole.host || role == SenseHomeRole.both;
 
 /// Pure: permissions a role needs, in the order they are asked for.
-List<SenseMacPermission> senseMacNeeded(SenseHomeRole role) {
-  switch (role) {
-    case SenseHomeRole.host:
-    case SenseHomeRole.both:
-      return SenseMacPermission.values;
-    case SenseHomeRole.controller:
-      return const [SenseMacPermission.inputMonitoring];
-    case SenseHomeRole.none:
-      return const [];
-  }
-}
+List<SenseMacPermission> senseMacNeeded(SenseHomeRole role) =>
+    senseMacPermissionsFor(
+        host: _hosts(role), controller: role == SenseHomeRole.controller);
 
 /// Pure: needed permissions that are not granted.
 List<SenseMacPermission> senseMacMissing(
@@ -75,20 +43,9 @@ bool senseMacBlocksHost(List<SenseMacPermission> missing) =>
     missing.contains(SenseMacPermission.screenRecording) ||
     missing.contains(SenseMacPermission.accessibility);
 
-String senseMacPermissionName(SenseMacPermission p) {
-  switch (p) {
-    case SenseMacPermission.screenRecording:
-      return senseHomeText('mac_perm_screen');
-    case SenseMacPermission.accessibility:
-      return senseHomeText('mac_perm_accessibility');
-    case SenseMacPermission.inputMonitoring:
-      return senseHomeText('mac_perm_input');
-  }
-}
-
 /// Pure: "Ekran Kaydı izni yok" / "Ekran Kaydı ve Erişilebilirlik izinleri yok".
 String senseMacMissingText(List<SenseMacPermission> missing) {
-  final names = missing.map(senseMacPermissionName).toList();
+  final names = [for (final p in missing) p.label];
   if (names.isEmpty) return '';
   if (names.length == 1) {
     return senseHomeText('mac_perm_missing_one', {'name': names.single});
@@ -104,64 +61,6 @@ String senseMacMissingNote(List<SenseMacPermission> missing) =>
         ? 'mac_perm_note_host'
         : 'mac_perm_note_input');
 
-/// Pane of System Settings › Privacy & Security for a permission.
-String senseMacSettingsUrl(SenseMacPermission p) {
-  const base = 'x-apple.systempreferences:com.apple.preference.security';
-  switch (p) {
-    case SenseMacPermission.screenRecording:
-      return '$base?Privacy_ScreenCapture';
-    case SenseMacPermission.accessibility:
-      return '$base?Privacy_Accessibility';
-    case SenseMacPermission.inputMonitoring:
-      return '$base?Privacy_ListenEvent';
-  }
-}
-
-/// System side of the permission notice; tests pass a fake.
-abstract class SenseMacPermissionBackend {
-  /// Current state, read without a system prompt.
-  SenseMacPermissions read();
-
-  /// Opens the pane of [permission] in System Settings.
-  Future<void> open(SenseMacPermission permission);
-
-  /// Restarts the background agent; "" on success.
-  Future<String> restartAgent();
-}
-
-class SenseMacPermissionBind implements SenseMacPermissionBackend {
-  const SenseMacPermissionBind();
-
-  @override
-  SenseMacPermissions read() => SenseMacPermissions(
-        screenRecording: bind.mainIsCanScreenRecording(prompt: false),
-        accessibility: bind.mainIsProcessTrusted(prompt: false),
-        inputMonitoring: bind.mainIsCanInputMonitoring(prompt: false),
-      );
-
-  @override
-  Future<void> open(SenseMacPermission permission) async {
-    // The request puts Sense Remote into the list of that pane (macOS shows
-    // its own prompt only once per app, so the pane is opened as well).
-    switch (permission) {
-      case SenseMacPermission.screenRecording:
-        bind.mainIsCanScreenRecording(prompt: true);
-        break;
-      case SenseMacPermission.accessibility:
-        bind.mainIsProcessTrusted(prompt: true);
-        break;
-      case SenseMacPermission.inputMonitoring:
-        bind.mainIsCanInputMonitoring(prompt: true);
-        break;
-    }
-    await launchUrl(Uri.parse(senseMacSettingsUrl(permission)),
-        mode: LaunchMode.externalApplication);
-  }
-
-  @override
-  Future<String> restartAgent() => bind.installSenseRestartAgent();
-}
-
 /// Keeps the missing permissions of [role] up to date (the state changes in
 /// System Settings, outside the app) and hands them to [builder].
 class SenseMacPermissionWatch extends StatefulWidget {
@@ -169,7 +68,7 @@ class SenseMacPermissionWatch extends StatefulWidget {
     super.key,
     required this.role,
     required this.builder,
-    this.backend = const SenseMacPermissionBind(),
+    this.system = const SenseMacPermissionBind(),
     this.interval = const Duration(seconds: 2),
     this.onChanged,
   });
@@ -177,7 +76,7 @@ class SenseMacPermissionWatch extends StatefulWidget {
   final SenseHomeRole role;
   final Widget Function(BuildContext context, List<SenseMacPermission> missing,
       void Function(SenseMacPermission) open) builder;
-  final SenseMacPermissionBackend backend;
+  final SenseMacPermissionSystem system;
   final Duration interval;
 
   /// The notice appeared, changed or went away (the Host window follows its
@@ -189,26 +88,50 @@ class SenseMacPermissionWatch extends StatefulWidget {
       _SenseMacPermissionWatchState();
 }
 
-class _SenseMacPermissionWatchState extends State<SenseMacPermissionWatch> {
+class _SenseMacPermissionWatchState extends State<SenseMacPermissionWatch>
+    with WidgetsBindingObserver {
   SenseMacPermissions? _permissions;
   Timer? _timer;
+
+  /// The Screen Recording pane was opened from here and the user has not come
+  /// back to the app yet.
+  bool _screenPaneOpened = false;
 
   @override
   void initState() {
     super.initState();
     _permissions = _read();
     _timer = Timer.periodic(widget.interval, (_) => _poll());
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     super.dispose();
   }
 
+  // Code review K4-4: macOS may keep answering "no Screen Recording" to the
+  // running process after the permission was given, so the restart does not
+  // wait for the answer to change: coming back from the Screen Recording pane
+  // restarts the agent of a Host unconditionally.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !_screenPaneOpened) return;
+    _screenPaneOpened = false;
+    _restartAgent();
+    _poll();
+  }
+
+  void _restartAgent() {
+    if (!_hosts(widget.role)) return;
+    unawaited(widget.system.restartAgent().catchError((_) => 'failed'));
+  }
+
   SenseMacPermissions? _read() {
     try {
-      return widget.backend.read();
+      return widget.system.read();
     } catch (_) {
       return null;
     }
@@ -221,21 +144,20 @@ class _SenseMacPermissionWatchState extends State<SenseMacPermissionWatch> {
     if (before != null && before.sameAs(now)) return;
     setState(() => _permissions = now);
     widget.onChanged?.call();
-    // The agent that captures the screen was started before the permission
-    // existed; macOS gives it the new permission only after a restart. Only on
-    // a change seen here: a permission that was already there needs none.
-    final hosts = widget.role == SenseHomeRole.host ||
-        widget.role == SenseHomeRole.both;
-    if (hosts &&
-        before != null &&
-        !before.screenRecording &&
-        now.screenRecording) {
-      unawaited(widget.backend.restartAgent().catchError((_) => 'failed'));
+    // Granted some other way (System Settings opened by hand): the agent that
+    // captures the screen was started before the permission existed and gets
+    // it only after a restart. A permission that was already there needs none.
+    if (before != null && !before.screenRecording && now.screenRecording) {
+      _screenPaneOpened = false;
+      _restartAgent();
     }
   }
 
   void _open(SenseMacPermission permission) {
-    unawaited(widget.backend.open(permission).catchError((_) {}));
+    if (permission == SenseMacPermission.screenRecording) {
+      _screenPaneOpened = true;
+    }
+    unawaited(widget.system.open(permission).catchError((_) {}));
   }
 
   @override
@@ -283,7 +205,8 @@ class SenseMacPermissionNotice extends StatelessWidget {
         const SizedBox(height: 4),
         SenseCmTextButton(
             key: const Key('sense-mac-perm-open'),
-            label: senseHomeText('mac_perm_open'),
+            // Same words as in the setup wizard.
+            label: senseInstallText('perm-open'),
             strong: true,
             // One pane at a time, in the order the permissions are needed;
             // the notice moves on to the next one once this is granted.

@@ -11,6 +11,7 @@ import 'package:flutter_hbb/desktop/pages/sense_home_controller.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_host.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_mac.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_strings.dart';
+import 'package:flutter_hbb/desktop/pages/sense_install_strings.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -90,7 +91,7 @@ Future<void> _pump(WidgetTester tester, Widget child,
 }
 
 /// Sense Remote (Mac M7): fake system side of the macOS permission notice.
-class _FakeMac implements SenseMacPermissionBackend {
+class _FakeMac implements SenseMacPermissionSystem {
   _FakeMac(this.now);
   SenseMacPermissions now;
   bool fail = false;
@@ -114,8 +115,8 @@ class _FakeMac implements SenseMacPermissionBackend {
   }
 }
 
-const _macNone = SenseMacPermissions(
-    screenRecording: false, accessibility: false, inputMonitoring: false);
+const _macNone = SenseMacPermissions();
+final _permOpen = kSenseInstallTr['perm-open']!;
 const _macAll = SenseMacPermissions(
     screenRecording: true, accessibility: true, inputMonitoring: true);
 const _screen = SenseMacPermission.screenRecording;
@@ -172,11 +173,12 @@ void main() {
       expect(senseMacMissingNote([_access, _input]), t('mac_perm_note_host'));
     });
 
-    test('each permission opens its own pane of System Settings', () {
-      const base = 'x-apple.systempreferences:com.apple.preference.security';
-      expect(senseMacSettingsUrl(_screen), '$base?Privacy_ScreenCapture');
-      expect(senseMacSettingsUrl(_access), '$base?Privacy_Accessibility');
-      expect(senseMacSettingsUrl(_input), '$base?Privacy_ListenEvent');
+    test('names and the button text are the setup wizard\'s', () {
+      expect(_screen.label, kSenseInstallTr['perm-screen']);
+      expect(_access.label, kSenseInstallTr['perm-accessibility']);
+      expect(_input.label, kSenseInstallTr['perm-input']);
+      expect(kSenseHomeTr.keys.where((k) => k.startsWith('mac_perm_open')),
+          isEmpty);
     });
 
     testWidgets('Host: missing permission is in the status line, with the way '
@@ -201,7 +203,7 @@ void main() {
       // The status line already names them: no second title.
       expect(find.byKey(const Key('sense-mac-perm-title')), findsNothing);
       expect(find.text(t('mac_perm_note_host')), findsOneWidget);
-      await tester.tap(find.text(t('mac_perm_open')));
+      await tester.tap(find.text(_permOpen));
       expect(opened, [_screen]);
       expect(tester.takeException(), isNull);
     });
@@ -297,7 +299,7 @@ void main() {
           tester,
           SenseMacPermissionWatch(
             role: SenseHomeRole.both,
-            backend: mac,
+            system: mac,
             interval: const Duration(seconds: 2),
             onChanged: () => changes++,
             builder: (_, missing, open) =>
@@ -343,7 +345,7 @@ void main() {
           SenseMacPermissionWatch(
             key: const ValueKey('host'),
             role: SenseHomeRole.host,
-            backend: mac,
+            system: mac,
             builder: (_, missing, open) =>
                 SenseMacPermissionCardView(missing: missing, onOpen: open),
           ));
@@ -357,7 +359,7 @@ void main() {
           SenseMacPermissionWatch(
             key: const ValueKey('controller'),
             role: SenseHomeRole.controller,
-            backend: controller,
+            system: controller,
             builder: (_, missing, open) =>
                 SenseMacPermissionCardView(missing: missing, onOpen: open),
           ));
@@ -370,6 +372,65 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('watch: back from the Screen Recording pane a Host restarts '
+        'the agent without waiting for the answer to change (K4-4)',
+        (tester) async {
+      Future<void> comeBack() async {
+        tester.binding
+            .handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding
+            .handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pump();
+      }
+
+      final mac = _FakeMac(_macNone);
+      await _pump(
+          tester,
+          SenseMacPermissionWatch(
+            key: const ValueKey('host'),
+            role: SenseHomeRole.host,
+            system: mac,
+            builder: (_, missing, open) =>
+                SenseMacPermissionCardView(missing: missing, onOpen: open),
+          ));
+      // Coming back without having opened the pane restarts nothing.
+      await comeBack();
+      expect(mac.restarts, 0);
+      await tester.tap(find.byKey(const Key('sense-mac-perm-open')));
+      expect(mac.opened, [_screen]);
+      // macOS still answers "no": the restart happens anyway, once.
+      await comeBack();
+      expect(mac.restarts, 1);
+      await comeBack();
+      expect(mac.restarts, 1);
+
+      // Another pane (Accessibility) needs no restart.
+      mac.now = const SenseMacPermissions(screenRecording: true);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+      expect(mac.restarts, 2); // the change itself was seen
+      await tester.tap(find.byKey(const Key('sense-mac-perm-open')));
+      expect(mac.opened, [_screen, _access]);
+      await comeBack();
+      expect(mac.restarts, 2);
+
+      // A Controller never restarts the agent.
+      final controller = _FakeMac(_macNone);
+      await _pump(
+          tester,
+          SenseMacPermissionWatch(
+            key: const ValueKey('controller'),
+            role: SenseHomeRole.controller,
+            system: controller,
+            builder: (_, missing, open) =>
+                SenseMacPermissionCardView(missing: missing, onOpen: open),
+          ));
+      await tester.tap(find.byKey(const Key('sense-mac-perm-open')));
+      await comeBack();
+      expect(controller.restarts, 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('watch: unreadable state at start shows no made-up warning',
         (tester) async {
       final mac = _FakeMac(_macNone)..fail = true;
@@ -377,7 +438,7 @@ void main() {
           tester,
           SenseMacPermissionWatch(
             role: SenseHomeRole.host,
-            backend: mac,
+            system: mac,
             builder: (_, missing, open) =>
                 SenseMacPermissionCardView(missing: missing, onOpen: open),
           ));

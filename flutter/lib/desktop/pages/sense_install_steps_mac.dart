@@ -115,6 +115,19 @@ extension _SenseInstallMacSteps on _SenseInstallWizardState {
   /// `skipped`: left with "Daha sonra" while something is missing (the done page says so).
   void _finishPermissions({required bool skipped}) {
     _permissionPoll?.cancel();
+    // Code review K4-4: macOS may keep answering "no Screen Recording" to this running
+    // process after the permission was given, so a Host does not wait to see the change:
+    // leaving the step (either button) restarts the agent unconditionally.
+    if (_host) {
+      unawaited(widget.backend
+          .restartAgent()
+          .then((error) {
+            if (error.isNotEmpty) {
+              debugPrint('Sense Remote: agent restart failed: $error');
+            }
+          })
+          .catchError((_) {}));
+    }
     _update(() {
       _permissionsSkipped = skipped;
       _step = SenseInstallStep.done;
@@ -224,7 +237,7 @@ extension _SenseInstallMacSteps on _SenseInstallWizardState {
                   spacing: 10,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text(_t('perm-${permission.textKey}'),
+                    Text(permission.label,
                         style: const TextStyle(
                             fontSize: 14, fontWeight: FontWeight.w600)),
                     Text(status,

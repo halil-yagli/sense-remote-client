@@ -516,16 +516,18 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         });
       }
     } else if (isMacOS) {
-      // Sense Remote (Mac M7): on a Sense installation the stock English
-      // permission / daemon cards are replaced: the Host card carries the
-      // permission state in its status line, Controller and Host + Controller
-      // get one Sense card. Without a role (not installed) the stock cards stay.
+      // Sense Remote (Mac M7, code review K4-3): the stock English permission
+      // / daemon cards never show on macOS. The Host card carries the
+      // permission state in its status line; Controller and Host + Controller
+      // get one Sense card; without a role the app opens the setup wizard
+      // instead of this page. The stock code below stays, unreachable, to keep
+      // upstream merges small.
       final senseRole = senseHomeRole();
-      if (senseRole == SenseHomeRole.host) {
-        return const SizedBox.shrink();
-      } else if (senseRole != SenseHomeRole.none) {
-        return SenseMacPermissionCard(role: senseRole);
-      }
+      return senseRole == SenseHomeRole.controller ||
+              senseRole == SenseHomeRole.both
+          ? SenseMacPermissionCard(role: senseRole)
+          : const SizedBox.shrink();
+      // ignore: dead_code
       final isOutgoingOnly = bind.isOutgoingOnly();
       if (!(isOutgoingOnly || bind.mainIsCanScreenRecording(prompt: false))) {
         return buildInstallCard("Permissions", "config_screen", "Configure",
