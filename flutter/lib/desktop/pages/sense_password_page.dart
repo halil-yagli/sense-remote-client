@@ -19,6 +19,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import '../../models/platform_model.dart';
 import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
+import 'sense_home_strings.dart' show senseHomeUpper;
 import 'sense_install_strings.dart'
     show formatSensePairingCode, spokenSensePairingCode;
 import 'sense_password_model.dart';
@@ -393,7 +394,7 @@ class SensePasswordAboutView extends StatelessWidget {
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_t('security').toUpperCase(),
+          Text(senseHomeUpper(_t('security')),
               style:
                   _T.text(size: 9, color: _T.muted).copyWith(letterSpacing: 1.6)),
           const SizedBox(height: 8),
