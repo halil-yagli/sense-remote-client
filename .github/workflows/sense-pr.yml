@@ -280,27 +280,6 @@ jobs:
         shell: bash
         run: bash tools/sense-keys/test.sh
 
-  # GECICI (U5 incelemesi): imza betiklerinin macOS'ta sinanmasi; birlestirmeden once kaldirilir.
-  scripts-macos-temp:
-    name: signing scripts (macos, gecici)
-    needs: [changes]
-    runs-on: macos-26
-    timeout-minutes: 15
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false
-      - name: Tools
-        shell: bash
-        run: |
-          command -v bash openssl
-          bash --version | head -1
-          openssl version
-      - name: Test the signing scripts
-        shell: bash
-        run: bash tools/sense-keys/test.sh
-
   # Tek zorunlu kontrol: koşan her iş başarılı (ya da alanı değişmediği için atlanmış) olmalı.
   pr-check:
     name: PR kontrolu

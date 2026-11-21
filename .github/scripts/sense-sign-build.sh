@@ -130,7 +130,7 @@ load_key_list() {
   [[ -n "${list// /}" ]] || fail "$label bos"
   mkdir -p "$dir"
   IFS=',' read -r -a entries <<<"$list"
-  for entry in "${entries[@]}"; do
+  for entry in ${entries[@]+"${entries[@]}"}; do
     index=$((index + 1))
     entry=${entry// /}
     k=${entry%%=*}
@@ -165,8 +165,11 @@ reject_test_vector_keys() {
   local list=$1 label=$2 entry k forbidden
   local -a entries
   check_list_chars "$list" "$label"
+  # Bos liste: denetlenecek giris yok. (macOS /bin/bash 3.2'de bos dizi set -u altinda
+  # "unbound variable" verir; bu yuzden erken donulur ve acilim korumalidir.)
+  [[ -n "${list// /}" ]] || return 0
   IFS=',' read -r -a entries <<<"$list"
-  for entry in "${entries[@]}"; do
+  for entry in ${entries[@]+"${entries[@]}"}; do
     entry=${entry// /}
     k=${entry%%=*}
     for forbidden in "${TEST_VECTOR_KEY_IDS[@]}"; do
