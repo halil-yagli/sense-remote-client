@@ -23,7 +23,7 @@ use hbb_common::log;
 use super::{
     envelope::{self, Expect, PanelRole, Reason, Rejection, Verified},
     envelope_keys::TrustedKey,
-    SenseRole,
+    update, SenseRole,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -40,6 +40,11 @@ pub const APPLIES: bool = cfg!(any(windows, target_os = "macos"));
 const KEY_SYSINFO: &str = "sysinfo";
 const KEY_ENVELOPES: &str = "sense_envelopes";
 const KEY_SERVER_TIME: &str = "sense_server_time";
+// Sense Remote (update plan 2026-11-21, §3.4): the unsigned hint and the two signed objects of an
+// update. Only split off here; `update` verifies them (`update::on_answer`).
+const KEY_UPDATE_HINT: &str = "sense_update";
+const KEY_RELEASE: &str = "sense_release";
+const KEY_UPDATE_ORDER: &str = "sense_update_order";
 
 /// What the sync loop takes from a heartbeat answer. There is deliberately no field for the
 /// upstream `strategy`, `disconnect` or `modified_at`.
@@ -49,6 +54,9 @@ pub struct HeartbeatAnswer {
     pub sysinfo: bool,
     pub envelopes: Vec<Value>,
     pub server_time: Option<i64>,
+    /// Sense Remote (update plan 2026-11-21, §3.4): `sense_update`, `sense_release` and
+    /// `sense_update_order`, unverified.
+    pub update: update::Answer,
     /// Keys that are not acted on (sorted), for the log.
     pub ignored: Vec<String>,
 }
@@ -70,6 +78,14 @@ pub fn parse_answer(body: &str) -> Option<HeartbeatAnswer> {
                 Some(t) => answer.server_time = Some(t),
                 None => answer.ignored.push(key),
             },
+            // Sense Remote (update plan 2026-11-21, §3.4): a value of the wrong shape is ignored
+            // like an unknown key.
+            KEY_UPDATE_HINT => match update::Hint::parse(&value) {
+                Some(hint) => answer.update.hint = Some(hint),
+                None => answer.ignored.push(key),
+            },
+            KEY_RELEASE if value.is_object() => answer.update.release = Some(value),
+            KEY_UPDATE_ORDER if value.is_object() => answer.update.order = Some(value),
             _ => answer.ignored.push(key),
         }
     }
@@ -414,6 +430,62 @@ mod tests {
         assert_eq!(answer.envelopes.len(), 1);
         assert_eq!(answer.server_time, Some(1_800_000_123));
         assert_eq!(answer.ignored, vec!["disconnect", "modified_at", "strategy"]);
+    }
+
+    // Update plan 2026-11-21 §3.4 (U0): the three update keys are split off, everything else is
+    // ignored as before.
+    #[test]
+    fn update_keys_are_split_off() {
+        let release = json!({ "k": "0000000000000000", "p": "e30", "s": "x" });
+        let order = json!({ "k": "0000000000000000", "p": "e30", "s": "y" });
+        let body = json!({
+            "sense_update": { "release": 4, "oid": "upd_0123456789abcdef" },
+            "sense_release": release,
+            "sense_update_order": order,
+            "strategy": { "config_options": {} },
+            "disconnect": [1],
+            "modified_at": 1,
+            "sense_update_now": true,
+        })
+        .to_string();
+        let answer = parse_answer(&body).unwrap();
+        assert_eq!(
+            answer.update,
+            update::Answer {
+                hint: Some(update::Hint {
+                    release: Some(4),
+                    oid: Some("upd_0123456789abcdef".to_owned()),
+                }),
+                release: Some(release),
+                order: Some(order),
+            }
+        );
+        assert_eq!(
+            answer.ignored,
+            vec!["disconnect", "modified_at", "sense_update_now", "strategy"]
+        );
+        assert!(!answer.sysinfo && answer.envelopes.is_empty() && answer.server_time.is_none());
+
+        // The usual answer: only the hint, both parts `null`.
+        let answer = parse_answer(r#"{"sense_update":{"release":null,"oid":null}}"#).unwrap();
+        assert_eq!(
+            answer.update.hint,
+            Some(update::Hint { release: None, oid: None })
+        );
+        assert!(answer.update.release.is_none() && answer.update.order.is_none());
+        assert!(answer.ignored.is_empty());
+
+        // Wrong shapes are ignored and logged, nothing is taken from them.
+        let answer = parse_answer(
+            r#"{"sense_update":{"release":4,"oid":null,"install":true},
+                "sense_release":"e30","sense_update_order":[{}]}"#,
+        )
+        .unwrap();
+        assert_eq!(answer.update, update::Answer::default());
+        assert_eq!(
+            answer.ignored,
+            vec!["sense_release", "sense_update", "sense_update_order"]
+        );
     }
 
     #[test]

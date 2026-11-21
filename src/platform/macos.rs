@@ -324,6 +324,19 @@ pub fn sense_install_state_exit_code(args: &[String]) -> Option<i32> {
     })
 }
 
+/// Sense Remote (update plan 2026-11-21, §5.2): `service --sense-update-guard`. `None` = another
+/// call, otherwise the exit code. `sense` is private to the library, so the `service` binary
+/// comes through here; `args` includes the program name.
+pub fn sense_update_cli_exit_code(args: &[String]) -> Option<i32> {
+    crate::sense::update::run_cli(args.get(1..)?)
+}
+
+/// Sense Remote (update plan 2026-11-21, §2.1-5): starts the updater inside the root daemon;
+/// returns at once.
+pub fn sense_update_daemon_start() {
+    crate::sense::update::daemon_mac::start();
+}
+
 enum UpdateSource {
     AppDir(String),
     VerifiedDmg {

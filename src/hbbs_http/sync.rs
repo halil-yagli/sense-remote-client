@@ -96,6 +96,9 @@ async fn start_hbbs_sync_async() {
     let mut sysinfo_ver = "".to_owned();
     // Sense Remote: envelope state reported in every heartbeat (`sense.envelope_error`, ...).
     let mut sense_report = crate::sense::envelope_apply::Report::default();
+    // Sense Remote (update plan 2026-11-21, §3.6): the updater starts with the heartbeat loop
+    // (U0: nothing starts yet).
+    crate::sense::update::on_server_start();
     // Sense Remote (wave 3, K-R2-3): `ts` of the last signed report, kept strictly increasing.
     let mut sense_report_ts: Option<i64> = None;
     // Panel A7: stored upper bound of every `ts` sent, so `ts` also increases across restarts.
@@ -286,6 +289,9 @@ async fn start_hbbs_sync_async() {
                         &mut sense_report_reserved,
                         sense_report.server_offset_s,
                     );
+                    // Sense Remote (update plan 2026-11-21, §3.5): `sense.update`, display only
+                    // and outside the signed report, so it is added after signing.
+                    crate::sense::update::extend_heartbeat(&mut sense);
                     v["sense"] = sense;
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
@@ -312,6 +318,9 @@ async fn start_hbbs_sync_async() {
                         }
                         sense_report.server_time(answer.server_time, now_s());
                         sense_handle_envelopes(&answer.envelopes, &id, &mut sense_report).await;
+                        // Sense Remote (update plan 2026-11-21, §3.4): hint, release notice and
+                        // order go to the updater, which verifies them itself.
+                        crate::sense::update::on_answer(answer.update).await;
                     }
                 }
             }
