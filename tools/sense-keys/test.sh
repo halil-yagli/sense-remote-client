@@ -294,7 +294,8 @@ else
   check "özgün dosya yeniden doğrulanır" verify "$exe" "$exe.yapi.json"
 
   # İmzanın ilk karakterini değiştir.
-  signature=$(sed 's/.*"s":"\([^"]*\)".*/\1/' <<<"$statement")
+  signature=${statement##*\"s\":\"}
+  signature=${signature%%\"*}
   flipped=A${signature:1}
   [[ "$flipped" != "$signature" ]] || flipped=B${signature:1}
   printf '%s\n' "${statement/$signature/$flipped}" > "$work/tampered.json"
