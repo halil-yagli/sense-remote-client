@@ -1,26 +1,29 @@
-//! Sense Remote (Mac M0, plan §3.2 / §3.4): state of the three macOS privacy permissions
+//! Sense Remote (Mac M0 + M4, plan §3.2 / §3.4): state of the three macOS privacy permissions
 //! (Screen Recording, Accessibility, Input Monitoring) for the setup wizard (M3), the home
-//! screen (M7) and the heartbeat extension `mac_permissions` (M4).
+//! screen (M7) and the heartbeat extension `mac_permissions` (M4, `report::heartbeat_base`).
 //!
-//! M0 is the skeleton only: `current` reports every permission as missing (the safe side: the
-//! UI never shows "granted" for something that was not checked). M4 fills it in with the
-//! existing checks, without prompting: `platform::macos::is_can_screen_recording(false)`,
-//! `is_process_trusted(false)`, `is_can_input_monitoring(false)`.
+//! Read with RustDesk's existing checks and never with a prompt (`prompt = false`), so asking
+//! every heartbeat shows nothing on the computer. macOS answers for the calling process: the
+//! heartbeat is sent by the `--server` agent, the process that captures the screen and injects
+//! input, so the panel sees the permissions that matter for a connection.
+//!
+//! Known macOS behaviour (to be checked on a device, plan §8): the Screen Recording answer of a
+//! running process can stay at its old value until the process restarts; that is why the wizard
+//! restarts the agent after the permission is given (`install_sense_restart_agent`).
 
-use serde_derive::{Deserialize, Serialize};
-
-/// Field names are the panel contract (`SenseHeartbeatExt.mac_permissions`) and the JSON of
-/// the FFI `main_sense_mac_permissions`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct MacPermissions {
-    pub screen_recording: bool,
-    pub accessibility: bool,
-    pub input_monitoring: bool,
-}
+/// Sense Remote: one definition for the panel contract (`SenseHeartbeatExt.mac_permissions`)
+/// and the JSON of the FFI `main_sense_mac_permissions`; it lives in `report.rs` because that
+/// file is compiled (and its contract tests run) on every platform.
+pub use super::report::MacPermissions;
 
 /// Permissions of the calling process, read without showing a system prompt.
 pub fn current() -> MacPermissions {
-    MacPermissions::default()
+    use crate::platform::macos;
+    MacPermissions {
+        screen_recording: macos::is_can_screen_recording(false),
+        accessibility: macos::is_process_trusted(false),
+        input_monitoring: macos::is_can_input_monitoring(false),
+    }
 }
 
 /// `{"screen_recording":bool,"accessibility":bool,"input_monitoring":bool}`.
@@ -52,8 +55,12 @@ mod tests {
         assert!(back.screen_recording && !back.accessibility && back.input_monitoring);
     }
 
+    /// Whatever this machine answers, reading does not prompt or panic and the JSON keeps the
+    /// contract shape.
     #[test]
-    fn skeleton_reports_nothing_as_granted() {
-        assert_eq!(current(), MacPermissions::default());
+    fn live_read_keeps_the_contract_shape() {
+        let json = current_json();
+        let back: MacPermissions = serde_json::from_str(&json).unwrap();
+        assert_eq!(to_json(&back), json);
     }
 }
