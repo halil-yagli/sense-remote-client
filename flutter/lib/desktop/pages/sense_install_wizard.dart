@@ -22,6 +22,8 @@ part 'sense_install_layout.dart';
 part 'sense_install_steps_account.dart';
 part 'sense_install_steps_info.dart';
 part 'sense_install_steps_finish.dart';
+// Sense Remote (Mac M3): the two macOS steps (Applications folder, privacy permissions).
+part 'sense_install_steps_mac.dart';
 
 String _t(String key) => senseInstallText(key);
 
@@ -39,6 +41,7 @@ class SenseInstallWizard extends StatefulWidget {
     this.version = '',
     this.icon,
     this.pollInterval = const Duration(seconds: 1),
+    this.mac = false,
   });
 
   final String initialPath;
@@ -55,15 +58,21 @@ class SenseInstallWizard extends StatefulWidget {
   final String version;
   final Widget? icon;
 
-  /// How often the sign-in state is read while waiting for the browser.
+  /// How often the sign-in state (and on macOS the permission state) is read.
   final Duration pollInterval;
+
+  /// Sense Remote (Mac M3): macOS flow. Adds the Applications folder check before the
+  /// sign-in and the privacy permissions after the registration; no Windows install options.
+  /// A parameter (not a platform check) so the wizard stays pure UI and testable anywhere.
+  final bool mac;
 
   @override
   State<SenseInstallWizard> createState() => _SenseInstallWizardState();
 }
 
 class _SenseInstallWizardState extends State<SenseInstallWizard> {
-  SenseInstallStep _step = SenseInstallStep.account;
+  late SenseInstallStep _step =
+      widget.mac ? SenseInstallStep.applications : SenseInstallStep.account;
 
   // Sign-in.
   SenseLoginStatus _login = SenseLoginStatus.idle;
@@ -107,16 +116,29 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
   int _waitLeft = 0;
   Timer? _waitTimer;
 
+  // Sense Remote (Mac M3): state of the macOS steps (sense_install_steps_mac.dart).
+  /// `null` until the first answer; `false` keeps the wizard on the Applications step.
+  bool? _inApplications;
+  bool _appsRechecked = false;
+  SenseMacPermissions? _permissions;
+  Timer? _permissionPoll;
+  bool _permissionPolling = false;
+  bool _laterWarned = false;
+  bool _permissionsSkipped = false;
+  bool _agentRestartFailed = false;
+
   @override
   void initState() {
     super.initState();
     _name.addListener(_refresh);
+    if (widget.mac) unawaited(_checkApplications());
   }
 
   @override
   void dispose() {
     _poll?.cancel();
     _waitTimer?.cancel();
+    _permissionPoll?.cancel();
     _name.dispose();
     _newProject.dispose();
     _location.dispose();
@@ -333,7 +355,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
       if (result.ok) {
         _registered = true;
         _enrolledProjects = result.projects;
-        _step = SenseInstallStep.done;
+        _step = _afterRegisterStep;
       } else {
         _enrollError = result.error;
         if (senseEnrollAction(result.error) == SenseEnrollAction.wait) {
@@ -341,6 +363,15 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
         }
       }
     });
+    if (result.ok) _enterAfterRegister();
+  }
+
+  /// Sense Remote (Mac M3): macOS asks for the privacy permissions before "Kuruldu".
+  SenseInstallStep get _afterRegisterStep =>
+      widget.mac ? SenseInstallStep.permissions : SenseInstallStep.done;
+
+  void _enterAfterRegister() {
+    if (widget.mac) _startPermissionPoll();
   }
 
   void _startWait() {
@@ -373,11 +404,14 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
   }
 
   /// The computer is installed; it shows up in the panel as waiting for approval.
-  void _skipRegister() => setState(() {
-        _registered = false;
-        _waitTimer?.cancel();
-        _step = SenseInstallStep.done;
-      });
+  void _skipRegister() {
+    setState(() {
+      _registered = false;
+      _waitTimer?.cancel();
+      _step = _afterRegisterStep;
+    });
+    _enterAfterRegister();
+  }
 
   void _close() {
     // After installing, leave through `finish` so a Host drops the sign-in (K-KAYIT-b).

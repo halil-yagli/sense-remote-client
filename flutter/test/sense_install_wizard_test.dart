@@ -76,9 +76,42 @@ class FakeBackend implements SenseInstallBackend {
 
   @override
   void finish(bool openApp) => finishes.add(openApp);
+
+  // Sense Remote (Mac M3): the macOS side.
+  bool inApps = true;
+  int inAppsCalls = 0;
+  SenseMacPermissions permissions = const SenseMacPermissions();
+  int permissionReads = 0;
+  final openedPermissions = <SenseMacPermission>[];
+  int agentRestarts = 0;
+  String restartResult = '';
+
+  @override
+  Future<bool> inApplications() async {
+    inAppsCalls++;
+    return inApps;
+  }
+
+  @override
+  Future<SenseMacPermissions> macPermissions() async {
+    permissionReads++;
+    return permissions;
+  }
+
+  @override
+  Future<void> openMacPermission(SenseMacPermission permission) async {
+    openedPermissions.add(permission);
+  }
+
+  @override
+  Future<String> restartAgent() async {
+    agentRestarts++;
+    return restartResult;
+  }
 }
 
-Future<void> pumpWizard(WidgetTester tester, FakeBackend backend) async {
+Future<void> pumpWizard(WidgetTester tester, FakeBackend backend,
+    {bool mac = false}) async {
   tester.view.physicalSize = const Size(860, 620);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -87,10 +120,28 @@ Future<void> pumpWizard(WidgetTester tester, FakeBackend backend) async {
       initialPath: r'C:\Program Files\SenseRemote',
       icon: const SizedBox(),
       backend: backend,
+      // Sense Remote (Mac M3): the macOS flow is a parameter, so it runs on any CI platform.
+      mac: mac,
     ),
   ));
   await tester.pumpAndSettle();
 }
+
+/// One read of the macOS permission state (the wizard reads it every second).
+Future<void> pollPermissions(WidgetTester tester, FakeBackend backend,
+    SenseMacPermissions permissions) async {
+  backend.permissions = permissions;
+  await tester.pump(const Duration(seconds: 1));
+  await tester.pumpAndSettle();
+}
+
+String permissionStatus(WidgetTester tester, SenseMacPermission permission) =>
+    tester
+        .widget<Text>(find.byKey(Key('sense-perm-status-${permission.name}')))
+        .data!;
+
+Finder permissionOpen(SenseMacPermission permission) =>
+    find.byKey(Key('sense-perm-open-${permission.name}'));
 
 Finder get next => find.byKey(const Key('sense-next'));
 
@@ -753,5 +804,262 @@ void main() {
     ]) {
       expect(kSenseInstallTr['enroll-$code'], isNotNull, reason: code);
     }
+  });
+
+  // ---- Sense Remote (Mac M3): macOS flow ----
+
+  test('macOS: setup opens without a role; permissions per role', () {
+    expect(senseMacNeedsSetup(isMac: true, roleInstalled: false), isTrue);
+    expect(senseMacNeedsSetup(isMac: true, roleInstalled: true), isFalse);
+    expect(senseMacNeedsSetup(isMac: false, roleInstalled: false), isFalse);
+
+    expect(senseMacPermissionsFor(host: true, controller: false),
+        SenseMacPermission.values);
+    expect(senseMacPermissionsFor(host: true, controller: true),
+        SenseMacPermission.values);
+    expect(senseMacPermissionsFor(host: false, controller: true),
+        [SenseMacPermission.inputMonitoring]);
+    expect(SenseMacPermission.values, [
+      SenseMacPermission.screenRecording,
+      SenseMacPermission.accessibility,
+      SenseMacPermission.inputMonitoring,
+    ]);
+    const base = 'x-apple.systempreferences:com.apple.preference.security?';
+    expect(SenseMacPermission.screenRecording.settingsUrl,
+        '${base}Privacy_ScreenCapture');
+    expect(SenseMacPermission.accessibility.settingsUrl,
+        '${base}Privacy_Accessibility');
+    expect(SenseMacPermission.inputMonitoring.settingsUrl,
+        '${base}Privacy_ListenEvent');
+    for (final p in SenseMacPermission.values) {
+      expect(kSenseInstallTr['perm-${p.textKey}'], isNotNull);
+      expect(kSenseInstallTr['perm-${p.textKey}-desc'], isNotNull);
+    }
+    const some = SenseMacPermissions(accessibility: true);
+    expect(some.granted(SenseMacPermission.accessibility), isTrue);
+    expect(some.granted(SenseMacPermission.screenRecording), isFalse);
+    expect(some.sameAs(const SenseMacPermissions(accessibility: true)), isTrue);
+    expect(some.sameAs(const SenseMacPermissions()), isFalse);
+  });
+
+  testWidgets('macOS: outside Applications the wizard waits at step 0',
+      (tester) async {
+    final backend = FakeBackend()..inApps = false;
+    await pumpWizard(tester, backend, mac: true);
+
+    expect(find.text(t('apps-lead')), findsOneWidget);
+    expect(find.byKey(const Key('sense-apps-detail')), findsOneWidget);
+    expect(find.byKey(const Key('sense-login')), findsNothing);
+    expect(find.byKey(const Key('sense-apps-outside')), findsNothing);
+    expect(find.textContaining('RustDesk'), findsNothing);
+    // macOS keeps its own window buttons.
+    expect(find.byKey(const Key('sense-window-close')), findsNothing);
+
+    await tapAndSettle(tester, find.byKey(const Key('sense-apps-recheck')));
+    expect(backend.inAppsCalls, 2);
+    expect(find.text(t('apps-still-outside')), findsOneWidget);
+
+    backend.inApps = true;
+    await tapAndSettle(tester, find.byKey(const Key('sense-apps-recheck')));
+    expect(find.text(t('google-sign-in')), findsOneWidget);
+    expect(find.text(t('apps-lead')), findsNothing);
+  });
+
+  testWidgets('macOS Host: install, register, then the three permissions',
+      (tester) async {
+    final backend = FakeBackend()..pendingInstall = Completer<String>();
+    await pumpWizard(tester, backend, mac: true);
+    expect(find.text(t('step-permissions')), findsOneWidget);
+    await goToSummary(tester, backend);
+
+    // No Windows folder / shortcut options on macOS.
+    expect(find.byKey(const Key('sense-advanced')), findsNothing);
+    await tester.tap(find.byKey(const Key('sense-install')));
+    await tester.pump();
+    expect(find.text(t('installing-mac')), findsOneWidget);
+    expect(find.text(t('installing')), findsNothing);
+    backend.pendingInstall!.complete('');
+    await tester.pumpAndSettle();
+
+    // Registered: the permissions come before "Kuruldu".
+    expect(backend.enrolls, hasLength(1));
+    expect(find.byKey(const Key('sense-done')), findsNothing);
+    for (final p in SenseMacPermission.values) {
+      expect(find.byKey(Key('sense-perm-${p.name}')), findsOneWidget);
+      expect(permissionStatus(tester, p), t('perm-missing'));
+      expect(permissionOpen(p), findsOneWidget);
+    }
+    expect(find.text(t('perm-screen')), findsOneWidget);
+    expect(find.text(t('perm-accessibility')), findsOneWidget);
+    expect(find.text(t('perm-input')), findsOneWidget);
+    expect(find.text(t('perm-open')), findsNWidgets(3));
+    expect(find.byKey(const Key('sense-perm-next')), findsNothing);
+    expect(find.textContaining('RustDesk'), findsNothing);
+    // In order: the first missing one is the primary button.
+    expect(
+        tester.widget(permissionOpen(SenseMacPermission.screenRecording)),
+        isA<FilledButton>());
+    expect(tester.widget(permissionOpen(SenseMacPermission.accessibility)),
+        isA<OutlinedButton>());
+
+    await tapAndSettle(
+        tester, permissionOpen(SenseMacPermission.screenRecording));
+    expect(backend.openedPermissions, [SenseMacPermission.screenRecording]);
+
+    // Screen Recording granted while the wizard watches: the agent restarts once.
+    await pollPermissions(
+        tester, backend, const SenseMacPermissions(screenRecording: true));
+    expect(permissionStatus(tester, SenseMacPermission.screenRecording),
+        t('perm-granted'));
+    expect(permissionOpen(SenseMacPermission.screenRecording), findsNothing);
+    expect(backend.agentRestarts, 1);
+    expect(find.byKey(const Key('sense-perm-agent-error')), findsNothing);
+    expect(tester.widget(permissionOpen(SenseMacPermission.accessibility)),
+        isA<FilledButton>());
+
+    await tapAndSettle(tester, permissionOpen(SenseMacPermission.accessibility));
+    await pollPermissions(
+        tester,
+        backend,
+        const SenseMacPermissions(screenRecording: true, accessibility: true));
+    await tapAndSettle(
+        tester, permissionOpen(SenseMacPermission.inputMonitoring));
+    expect(backend.openedPermissions, SenseMacPermission.values);
+    expect(find.byKey(const Key('sense-perm-next')), findsNothing);
+
+    await pollPermissions(
+        tester,
+        backend,
+        const SenseMacPermissions(
+            screenRecording: true, accessibility: true, inputMonitoring: true));
+    expect(find.text(t('perm-all-granted')), findsOneWidget);
+    expect(find.text(t('perm-open')), findsNothing);
+    expect(find.byKey(const Key('sense-perm-later')), findsNothing);
+    expect(backend.agentRestarts, 1);
+
+    await tapAndSettle(tester, find.byKey(const Key('sense-perm-next')));
+    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
+    expect(done, contains(t('done-lead')));
+    expect(done, isNot(contains(t('done-permissions-missing'))));
+    // The state is no longer read after the step.
+    final reads = backend.permissionReads;
+    await tester.pump(const Duration(seconds: 3));
+    expect(backend.permissionReads, reads);
+    await tapAndSettle(tester, find.byKey(const Key('sense-finish-close')));
+    expect(backend.finishes, [false]);
+  });
+
+  testWidgets('macOS: a permission that was already there restarts nothing',
+      (tester) async {
+    final backend = FakeBackend()
+      ..permissions = const SenseMacPermissions(
+          screenRecording: true, accessibility: true, inputMonitoring: true);
+    await pumpWizard(tester, backend, mac: true);
+    await goToSummary(tester, backend, host: true, controller: true);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    expect(find.text(t('perm-all-granted')), findsOneWidget);
+    expect(backend.agentRestarts, 0);
+    await tapAndSettle(tester, find.byKey(const Key('sense-perm-next')));
+    expect(find.byKey(const Key('sense-finish-open')), findsOneWidget);
+  });
+
+  testWidgets('macOS: a failed agent restart is said', (tester) async {
+    final backend = FakeBackend()..restartResult = 'unsupported';
+    await pumpWizard(tester, backend, mac: true);
+    await goToSummary(tester, backend);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    await pollPermissions(
+        tester, backend, const SenseMacPermissions(screenRecording: true));
+    expect(backend.agentRestarts, 1);
+    expect(find.text(t('perm-agent-error')), findsOneWidget);
+  });
+
+  testWidgets('macOS Controller: only Input Monitoring; later needs a warning',
+      (tester) async {
+    final backend = FakeBackend();
+    await pumpWizard(tester, backend, mac: true);
+    await goToSummary(tester, backend, host: false, controller: true);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+
+    expect(find.byKey(const Key('sense-perm-inputMonitoring')), findsOneWidget);
+    expect(find.byKey(const Key('sense-perm-screenRecording')), findsNothing);
+    expect(find.byKey(const Key('sense-perm-accessibility')), findsNothing);
+    expect(find.text(t('perm-lead-controller')), findsOneWidget);
+
+    // Screen Recording changes do not concern a Controller.
+    await pollPermissions(
+        tester, backend, const SenseMacPermissions(screenRecording: true));
+    expect(backend.agentRestarts, 0);
+    expect(find.byKey(const Key('sense-perm-next')), findsNothing);
+
+    // "Daha sonra": first the warning, then leaving.
+    expect(find.text(t('perm-later')), findsOneWidget);
+    await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
+    expect(find.byKey(const Key('sense-done')), findsNothing);
+    expect(find.text(t('perm-later-warning-controller')), findsOneWidget);
+    expect(find.text(t('perm-later-confirm')), findsOneWidget);
+    await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
+    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
+    expect(done, contains(t('done-permissions-missing')));
+    expect(find.byKey(const Key('sense-finish-open')), findsOneWidget);
+  });
+
+  testWidgets('macOS Host: later shows the Host warning', (tester) async {
+    final backend = FakeBackend();
+    await pumpWizard(tester, backend, mac: true);
+    await goToSummary(tester, backend);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
+    expect(find.text(t('perm-later-warning')), findsOneWidget);
+    expect(find.byKey(const Key('sense-done')), findsNothing);
+  });
+
+  testWidgets('macOS: skipped registration still asks for the permissions',
+      (tester) async {
+    final backend = FakeBackend()
+      ..enrollResult = const SenseEnrollResult.error('network');
+    await pumpWizard(tester, backend, mac: true);
+    await goToSummary(tester, backend);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    expect(find.byKey(const Key('sense-register-failed')), findsOneWidget);
+    expect(backend.permissionReads, 0);
+    await tapAndSettle(tester, find.byKey(const Key('sense-skip-register')));
+    expect(find.byKey(const Key('sense-perm-screenRecording')), findsOneWidget);
+    expect(backend.permissionReads, greaterThan(0));
+  });
+
+  testWidgets('macOS: install results are Turkish texts', (tester) async {
+    final backend = FakeBackend()..installResult = 'cancelled';
+    await pumpWizard(tester, backend, mac: true);
+    await goToSummary(tester, backend);
+    for (final code in ['cancelled', 'not-in-applications', 'daemon-timeout']) {
+      backend.installResult = code;
+      await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+      expect(find.text(t('error-$code')), findsOneWidget, reason: code);
+      expect(find.byKey(const Key('sense-summary')), findsOneWidget);
+    }
+    backend.installResult = 'unsupported';
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    expect(find.text('${t('error-failed')}\nunsupported'), findsOneWidget);
+    expect(backend.enrolls, isEmpty);
+    expect(backend.permissionReads, 0);
+  });
+
+  testWidgets('Windows: no Applications step, no permissions step',
+      (tester) async {
+    final backend = FakeBackend()..inApps = false;
+    await pumpWizard(tester, backend);
+    expect(find.text(t('google-sign-in')), findsOneWidget);
+    expect(find.text(t('step-permissions')), findsNothing);
+    expect(find.byKey(const Key('sense-window-close')), findsOneWidget);
+    await goToSummary(tester, backend);
+    expect(find.byKey(const Key('sense-advanced')), findsOneWidget);
+    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
+    expect(find.byKey(const Key('sense-done')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    expect(backend.inAppsCalls, 0);
+    expect(backend.permissionReads, 0);
+    expect(backend.openedPermissions, isEmpty);
+    expect(backend.agentRestarts, 0);
   });
 }
