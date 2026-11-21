@@ -982,7 +982,7 @@ fn user_process_reads_the_daemon_answer() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn other_platforms_reject_in_the_daemon_entry() {
-    let out = apply_in_daemon(&["{}".to_owned(), "{}".to_owned()], None, Some(1));
+    let out = apply_in_daemon(&["{}".to_owned(), "{}".to_owned()], Some(1));
     let rejected = SenseApplyOutcome::Rejected {
         reason: "unsupported_platform".to_owned(),
     };
