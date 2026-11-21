@@ -232,7 +232,12 @@ pub fn heartbeat_base() -> Option<Value> {
         app_version,
         displays_hash: cached_displays_hash(),
         health,
-        caps: Some(caps(curtain_supported, super::envelope_apply::APPLIES)),
+        // Sense Remote (update plan 2026-11-21, §3.5): `update` only where this build installs
+        // signed updates.
+        caps: Some(caps_with_update(
+            caps(curtain_supported, super::envelope_apply::APPLIES),
+            super::update::SUPPORTED,
+        )),
         maintenance_curtain: curtain_state(curtain_supported, crate::sense::curtain::is_shown()),
         mac_permissions: mac_permissions(),
     };
@@ -248,6 +253,16 @@ fn caps(curtain_supported: bool, applies: bool) -> Vec<String> {
     }
     if applies {
         caps.push(CAP_APPLY.to_owned());
+    }
+    caps
+}
+
+/// Sense Remote (update plan 2026-11-21, §3.5): `update` is the last capability, added only when
+/// this build installs signed updates (`update::SUPPORTED`). The panel sends releases and orders
+/// only to a computer that reports it in the signed report.
+fn caps_with_update(mut caps: Vec<String>, update_supported: bool) -> Vec<String> {
+    if update_supported {
+        caps.push(super::update::CAP_UPDATE.to_owned());
     }
     caps
 }
@@ -1313,6 +1328,20 @@ mod tests {
         let mut moved = two.clone();
         moved[1].ipv4 = vec!["192.168.1.21".into()];
         assert_ne!(network_hash(Some(&two[..])), network_hash(Some(&moved[..])));
+    }
+
+    // Update plan 2026-11-21 §3.5: `update` follows the one switch and comes last.
+    #[test]
+    fn update_cap_follows_the_switch() {
+        use crate::sense::update;
+        assert_eq!(caps_with_update(caps(true, true), false), caps(true, true));
+        assert_eq!(
+            caps_with_update(caps(true, true), true),
+            ["role_all", "curtain", "apply", "update"]
+        );
+        assert_eq!(caps_with_update(caps(false, false), true), ["role_all", "update"]);
+        assert!(caps_with_update(caps(true, true), true).len() <= SCHEMA_CAPS_MAX);
+        assert!(update::CAP_UPDATE.len() <= SCHEMA_CAP_MAX_CHARS);
     }
 
     /// I10: `curtain` and `maintenance_curtain` only where the curtain can be shown; the order
