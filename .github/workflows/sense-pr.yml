@@ -5,6 +5,7 @@
 #   flutter/** (ya da src/flutter_ffi.rs)          -> Dart testleri (+ değişen dosyalarda analyze)
 #   src/**, libs/**, Cargo.*, build.rs, vcpkg.json -> Rust birim testleri (Windows'taki komut)
 #   .github/workflows/sense-*.yml                  -> actionlint (iş akışı sözdizimi)
+#   .github/scripts/sense-*, tools/sense-keys/**   -> imza betikleri: shellcheck + test.sh (sırsız)
 #   bu dosya, bridge.yml ya da .github/patches/**  -> hepsi (iş akışının kendisi sınanır)
 # Tek sonuç işi: "PR kontrolu" (dal koruması yalnız bunu zorunlu tutabilir).
 name: Sense Remote PR
@@ -40,6 +41,7 @@ jobs:
       dart: ${{ steps.filter.outputs.dart }}
       rust: ${{ steps.filter.outputs.rust }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      scripts: ${{ steps.filter.outputs.scripts }}
     steps:
       # Üçüncü taraf eylem yok: değişen dosyalar GitHub API'sinden okunur. Dosya adları yalnız
       # dosyaya yazılıp grep ile okunur (komut satırına ya da ifadeye girmez).
@@ -62,11 +64,13 @@ jobs:
           dart=$(has '^flutter/|^src/flutter_ffi\.rs$')
           rust=$(has '^(src|libs)/|^Cargo\.(toml|lock)$|^build\.rs$|^vcpkg\.json$')
           workflows=$(has '^\.github/workflows/sense-[^/]*\.yml$')
-          if [ "$all" = true ]; then dart=true; rust=true; fi
+          scripts=$(has '^\.github/scripts/sense-|^tools/sense-keys/')
+          if [ "$all" = true ]; then dart=true; rust=true; scripts=true; fi
           {
             echo "dart=$dart"
             echo "rust=$rust"
             echo "workflows=$workflows"
+            echo "scripts=$scripts"
           } >> "$GITHUB_OUTPUT"
           {
             echo "| Alan | Koşar mı |"
@@ -74,6 +78,7 @@ jobs:
             echo "| Dart testleri | $dart |"
             echo "| Rust testleri | $rust |"
             echo "| İş akışı denetimi | $workflows |"
+            echo "| İmza betikleri | $scripts |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   generate-bridge:
@@ -250,10 +255,35 @@ jobs:
           go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
           "$(go env GOPATH)/bin/actionlint" -shellcheck= -pyflakes= .github/workflows/sense-*.yml
 
+  # İmza ve anahtar betikleri: shellcheck + birim testi (sahte gh, koşuda üretilen deneme
+  # anahtarları; sır kullanmaz). Linux'ta macOS sertifika bölümü atlanır.
+  scripts:
+    name: signing scripts (linux)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.scripts == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Shellcheck the signing scripts
+        shell: bash
+        run: |
+          shellcheck --version | sed -n 2p
+          shellcheck .github/scripts/sense-sign-build.sh .github/scripts/sense-macos-package.sh \
+            tools/sense-keys/*.sh
+
+      - name: Test the signing scripts (trial keys, fake gh)
+        shell: bash
+        run: bash tools/sense-keys/test.sh
+
   # Tek zorunlu kontrol: koşan her iş başarılı (ya da alanı değişmediği için atlanmış) olmalı.
   pr-check:
     name: PR kontrolu
-    needs: [changes, generate-bridge, dart, rust, workflows]
+    needs: [changes, generate-bridge, dart, rust, workflows, scripts]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -266,10 +296,11 @@ jobs:
           DART: ${{ needs.dart.result }}
           RUST: ${{ needs.rust.result }}
           WORKFLOWS: ${{ needs.workflows.result }}
+          SCRIPTS: ${{ needs.scripts.result }}
         run: |
-          echo "changes=$CHANGES bridge=$BRIDGE dart=$DART rust=$RUST workflows=$WORKFLOWS"
+          echo "changes=$CHANGES bridge=$BRIDGE dart=$DART rust=$RUST workflows=$WORKFLOWS scripts=$SCRIPTS"
           [ "$CHANGES" = success ] || { echo "::error::Değişen alanlar belirlenemedi."; exit 1; }
-          for r in "$BRIDGE" "$DART" "$RUST" "$WORKFLOWS"; do
+          for r in "$BRIDGE" "$DART" "$RUST" "$WORKFLOWS" "$SCRIPTS"; do
             case "$r" in
               success|skipped) ;;
               *) echo "::error::Bir kontrol başarısız ya da iptal: $r"; exit 1 ;;
