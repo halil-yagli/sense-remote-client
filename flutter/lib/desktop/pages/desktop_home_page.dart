@@ -27,6 +27,7 @@ import '../widgets/button.dart';
 // Sense Remote: Sense home screens (Controller project cards, small Host home).
 import 'sense_home_controller.dart';
 import 'sense_home_host.dart';
+import 'sense_home_mac.dart';
 import 'sense_home_strings.dart';
 
 /// Sense Remote: role of this computer for the home screen (from the role
@@ -94,7 +95,16 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     final senseHost = senseHomeRole() == SenseHomeRole.host;
     final children = <Widget>[
       if (!isOutgoingOnly) buildPresetPasswordWarning(),
-      if (senseHost) const SenseHostHome(),
+      if (senseHost)
+        // Sense Remote (Mac M7): the macOS permission notice changes the card
+        // height; the Host window follows it (never called on Windows).
+        SenseHostHome(onMacPermissionsChanged: () {
+          if (isInHomePage()) {
+            Future.delayed(Duration(milliseconds: 300), () {
+              _updateWindowSize();
+            });
+          }
+        }),
       if (!senseHost) ...[
       if (bind.isCustomClient())
         Align(
@@ -506,6 +516,16 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         });
       }
     } else if (isMacOS) {
+      // Sense Remote (Mac M7): on a Sense installation the stock English
+      // permission / daemon cards are replaced: the Host card carries the
+      // permission state in its status line, Controller and Host + Controller
+      // get one Sense card. Without a role (not installed) the stock cards stay.
+      final senseRole = senseHomeRole();
+      if (senseRole == SenseHomeRole.host) {
+        return const SizedBox.shrink();
+      } else if (senseRole != SenseHomeRole.none) {
+        return SenseMacPermissionCard(role: senseRole);
+      }
       final isOutgoingOnly = bind.isOutgoingOnly();
       if (!(isOutgoingOnly || bind.mainIsCanScreenRecording(prompt: false))) {
         return buildInstallCard("Permissions", "config_screen", "Configure",

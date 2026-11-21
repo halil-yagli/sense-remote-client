@@ -35,6 +35,19 @@ const Map<String, String> kSenseHomeTr = {
   'device_id': 'Kimlik',
   'locked_note':
       'Ayarlar bu bilgisayarda kilitli; Sense panelinden yönetilir. Erişim şifresi ekibin şifre yöneticisinde.',
+  // macOS privacy permissions (Host status line, Controller card)
+  'mac_perm_screen': 'Ekran Kaydı',
+  'mac_perm_accessibility': 'Erişilebilirlik',
+  'mac_perm_input': 'Giriş İzleme',
+  'mac_perm_missing_one': '{name} izni yok',
+  'mac_perm_missing_many': '{names} izinleri yok',
+  'mac_perm_and': ' ve ',
+  'mac_not_ready': 'Hazır değil — {missing}',
+  'mac_perm_note_host':
+      'Bu izin verilmeden Sense ekibi bu bilgisayarın ekranını göremez ya da kullanamaz. macOS izni yalnızca bilgisayarın başında onaylatır.',
+  'mac_perm_note_input':
+      'Bu izin olmadan bazı klavye kısayolları bağlantıda iletilmez.',
+  'mac_perm_open': 'Sistem Ayarları\'nı aç',
   // About
   'about': 'Hakkında',
   'version': 'Sürüm {n}',

@@ -9,6 +9,7 @@ import 'package:flutter_hbb/common/hbbs/hbbs.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_about.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_controller.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_host.dart';
+import 'package:flutter_hbb/desktop/pages/sense_home_mac.dart';
 import 'package:flutter_hbb/desktop/pages/sense_home_strings.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -83,7 +84,306 @@ Future<void> _pump(WidgetTester tester, Widget child,
   await tester.pumpAndSettle();
 }
 
+/// Sense Remote (Mac M7): fake system side of the macOS permission notice.
+class _FakeMac implements SenseMacPermissionBackend {
+  _FakeMac(this.now);
+  SenseMacPermissions now;
+  bool fail = false;
+  final opened = <SenseMacPermission>[];
+  int restarts = 0;
+
+  @override
+  SenseMacPermissions read() {
+    if (fail) throw StateError('unreadable');
+    return now;
+  }
+
+  @override
+  Future<void> open(SenseMacPermission permission) async =>
+      opened.add(permission);
+
+  @override
+  Future<String> restartAgent() async {
+    restarts++;
+    return '';
+  }
+}
+
+const _macNone = SenseMacPermissions(
+    screenRecording: false, accessibility: false, inputMonitoring: false);
+const _macAll = SenseMacPermissions(
+    screenRecording: true, accessibility: true, inputMonitoring: true);
+const _screen = SenseMacPermission.screenRecording;
+const _access = SenseMacPermission.accessibility;
+const _input = SenseMacPermission.inputMonitoring;
+
 void main() {
+  group('macOS permissions', () {
+    test('needed per role: Host all three, Controller input monitoring', () {
+      expect(senseMacNeeded(SenseHomeRole.host), [_screen, _access, _input]);
+      expect(senseMacNeeded(SenseHomeRole.both), [_screen, _access, _input]);
+      expect(senseMacNeeded(SenseHomeRole.controller), [_input]);
+      expect(senseMacNeeded(SenseHomeRole.none), isEmpty);
+    });
+
+    test('missing follows the role and the granted state', () {
+      expect(senseMacMissing(SenseHomeRole.host, _macAll), isEmpty);
+      expect(senseMacMissing(SenseHomeRole.host, _macNone),
+          [_screen, _access, _input]);
+      expect(senseMacMissing(SenseHomeRole.controller, _macNone), [_input]);
+      expect(
+          senseMacMissing(
+              SenseHomeRole.controller,
+              const SenseMacPermissions(
+                  screenRecording: false,
+                  accessibility: false,
+                  inputMonitoring: true)),
+          isEmpty);
+      expect(
+          senseMacMissing(
+              SenseHomeRole.both,
+              const SenseMacPermissions(
+                  screenRecording: true,
+                  accessibility: false,
+                  inputMonitoring: true)),
+          [_access]);
+    });
+
+    test('only screen recording and accessibility block a Host', () {
+      expect(senseMacBlocksHost([]), isFalse);
+      expect(senseMacBlocksHost([_input]), isFalse);
+      expect(senseMacBlocksHost([_screen]), isTrue);
+      expect(senseMacBlocksHost([_access, _input]), isTrue);
+    });
+
+    test('Turkish texts name what is missing', () {
+      expect(senseMacMissingText([]), '');
+      expect(senseMacMissingText([_screen]), 'Ekran Kaydı izni yok');
+      expect(senseMacMissingText([_screen, _access]),
+          'Ekran Kaydı ve Erişilebilirlik izinleri yok');
+      expect(senseMacMissingText([_screen, _access, _input]),
+          'Ekran Kaydı, Erişilebilirlik ve Giriş İzleme izinleri yok');
+      expect(senseMacMissingNote([_input]), t('mac_perm_note_input'));
+      expect(senseMacMissingNote([_access, _input]), t('mac_perm_note_host'));
+    });
+
+    test('each permission opens its own pane of System Settings', () {
+      const base = 'x-apple.systempreferences:com.apple.preference.security';
+      expect(senseMacSettingsUrl(_screen), '$base?Privacy_ScreenCapture');
+      expect(senseMacSettingsUrl(_access), '$base?Privacy_Accessibility');
+      expect(senseMacSettingsUrl(_input), '$base?Privacy_ListenEvent');
+    });
+
+    testWidgets('Host: missing permission is in the status line, with the way '
+        'to System Settings; fits 280 px', (tester) async {
+      final opened = <SenseMacPermission>[];
+      await _pump(
+          tester,
+          SizedBox(
+            width: 280,
+            child: SenseHostHomeView(
+                name: 'Galeri Mac mini',
+                location: 'Galeri 1',
+                deviceId: '123456789',
+                state: SenseHostState.ready,
+                macMissing: const [_screen, _input],
+                onOpenMacPermission: opened.add),
+          ),
+          size: const Size(280, 700));
+      expect(find.text(t('ready')), findsNothing);
+      expect(
+          find.text('Hazır değil — Ekran Kaydı ve Giriş İzleme izinleri yok'),
+          findsOneWidget);
+      // The status line already names them: no second title.
+      expect(find.byKey(const Key('sense-mac-perm-title')), findsNothing);
+      expect(find.text(t('mac_perm_note_host')), findsOneWidget);
+      await tester.tap(find.text(t('mac_perm_open')));
+      expect(opened, [_screen]);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Host: input monitoring alone keeps "ready" and adds a notice',
+        (tester) async {
+      await _pump(
+          tester,
+          SizedBox(
+            width: 280,
+            child: SenseHostHomeView(
+                name: 'Galeri Mac mini',
+                location: '',
+                deviceId: '',
+                state: SenseHostState.ready,
+                macMissing: const [_input],
+                onOpenMacPermission: (_) {}),
+          ),
+          size: const Size(280, 700));
+      expect(find.text(t('ready')), findsOneWidget);
+      expect(find.text('Giriş İzleme izni yok'), findsOneWidget);
+      expect(find.text(t('mac_perm_note_input')), findsOneWidget);
+      expect(find.byKey(const Key('sense-mac-perm-open')), findsOneWidget);
+    });
+
+    testWidgets('Host: not connected keeps its own status; the notice names '
+        'the permissions', (tester) async {
+      await _pump(
+          tester,
+          SizedBox(
+            width: 280,
+            child: SenseHostHomeView(
+                name: '',
+                location: '',
+                deviceId: '',
+                state: SenseHostState.notReady,
+                macMissing: const [_access],
+                onOpenMacPermission: (_) {}),
+          ),
+          size: const Size(280, 700));
+      expect(find.text(t('not_ready')), findsOneWidget);
+      expect(find.text('Erişilebilirlik izni yok'), findsOneWidget);
+    });
+
+    testWidgets('Host: all granted (and Windows) shows no permission notice',
+        (tester) async {
+      await _pump(
+          tester,
+          const SizedBox(
+            width: 280,
+            child: SenseHostHomeView(
+                name: 'Galeri kioskı',
+                location: 'Galeri 1',
+                deviceId: '123456789',
+                state: SenseHostState.ready),
+          ),
+          size: const Size(280, 600));
+      expect(find.text(t('ready')), findsOneWidget);
+      expect(find.byKey(const Key('sense-mac-perm-open')), findsNothing);
+      expect(find.byKey(const Key('sense-mac-perm-note')), findsNothing);
+    });
+
+    testWidgets('Controller card: only input monitoring; fits the 200 px pane',
+        (tester) async {
+      final opened = <SenseMacPermission>[];
+      await _pump(
+          tester,
+          SizedBox(
+            width: 200,
+            child: SenseMacPermissionCardView(
+                missing: senseMacMissing(SenseHomeRole.controller, _macNone),
+                onOpen: opened.add),
+          ),
+          size: const Size(200, 600));
+      expect(find.byKey(const Key('sense-mac-perm-card')), findsOneWidget);
+      expect(find.text('Giriş İzleme izni yok'), findsOneWidget);
+      expect(find.textContaining('Ekran Kaydı'), findsNothing);
+      await tester.tap(find.byKey(const Key('sense-mac-perm-open')));
+      expect(opened, [_input]);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('card is empty when nothing is missing', (tester) async {
+      await _pump(
+          tester, SenseMacPermissionCardView(missing: const [], onOpen: (_) {}));
+      expect(find.byKey(const Key('sense-mac-perm-card')), findsNothing);
+    });
+
+    testWidgets('watch: follows the system state, opens the first missing '
+        'pane, restarts the agent once screen recording arrives',
+        (tester) async {
+      final mac = _FakeMac(_macNone);
+      var changes = 0;
+      await _pump(
+          tester,
+          SenseMacPermissionWatch(
+            role: SenseHomeRole.both,
+            backend: mac,
+            interval: const Duration(seconds: 2),
+            onChanged: () => changes++,
+            builder: (_, missing, open) =>
+                SenseMacPermissionCardView(missing: missing, onOpen: open),
+          ));
+      expect(
+          find.text('Ekran Kaydı, Erişilebilirlik ve Giriş İzleme izinleri yok'),
+          findsOneWidget);
+      expect(changes, 0);
+      await tester.tap(find.byKey(const Key('sense-mac-perm-open')));
+      expect(mac.opened, [_screen]);
+
+      mac.now = const SenseMacPermissions(
+          screenRecording: true, accessibility: false, inputMonitoring: false);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+      expect(find.text('Erişilebilirlik ve Giriş İzleme izinleri yok'),
+          findsOneWidget);
+      expect(changes, 1);
+      expect(mac.restarts, 1);
+
+      // Unreadable state keeps the last known one.
+      mac.fail = true;
+      await tester.pump(const Duration(seconds: 2));
+      expect(changes, 1);
+      mac.fail = false;
+
+      mac.now = _macAll;
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+      expect(find.byKey(const Key('sense-mac-perm-card')), findsNothing);
+      expect(changes, 2);
+      expect(mac.restarts, 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('watch: screen recording already there, or a Controller, '
+        'never restarts the agent', (tester) async {
+      final mac = _FakeMac(const SenseMacPermissions(
+          screenRecording: true, accessibility: false, inputMonitoring: false));
+      await _pump(
+          tester,
+          SenseMacPermissionWatch(
+            key: const ValueKey('host'),
+            role: SenseHomeRole.host,
+            backend: mac,
+            builder: (_, missing, open) =>
+                SenseMacPermissionCardView(missing: missing, onOpen: open),
+          ));
+      mac.now = _macAll;
+      await tester.pump(const Duration(seconds: 2));
+      expect(mac.restarts, 0);
+
+      final controller = _FakeMac(_macNone);
+      await _pump(
+          tester,
+          SenseMacPermissionWatch(
+            key: const ValueKey('controller'),
+            role: SenseHomeRole.controller,
+            backend: controller,
+            builder: (_, missing, open) =>
+                SenseMacPermissionCardView(missing: missing, onOpen: open),
+          ));
+      expect(find.text('Giriş İzleme izni yok'), findsOneWidget);
+      controller.now = _macAll;
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+      expect(controller.restarts, 0);
+      expect(find.byKey(const Key('sense-mac-perm-card')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('watch: unreadable state at start shows no made-up warning',
+        (tester) async {
+      final mac = _FakeMac(_macNone)..fail = true;
+      await _pump(
+          tester,
+          SenseMacPermissionWatch(
+            role: SenseHomeRole.host,
+            backend: mac,
+            builder: (_, missing, open) =>
+                SenseMacPermissionCardView(missing: missing, onOpen: open),
+          ));
+      expect(find.byKey(const Key('sense-mac-perm-card')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   group('role and version', () {
     test('role from the applied hard settings', () {
       expect(
@@ -574,6 +874,7 @@ void main() {
       'lib/desktop/pages/sense_home_controller.dart',
       'lib/desktop/pages/sense_home_connect_id.dart',
       'lib/desktop/pages/sense_home_host.dart',
+      'lib/desktop/pages/sense_home_mac.dart',
       'lib/desktop/pages/sense_home_about.dart',
       'lib/desktop/pages/sense_home_strings.dart',
     ];
