@@ -164,7 +164,7 @@ check_designated_requirement() {
   lower "$requirement" | grep -Fq "certificate leaf = H\"$sha1\"" \
     || fail "DR sertifika ozetini icermiyor: certificate leaf = H\"$sha1\""
   # Metin yetmez: imza bu gereksinimi kriptografik olarak da saglamali (codesign -R).
-  codesign --verify --strict -R="=identifier \"$bundle_id\" and certificate leaf = H\"$sha1\"" "$app" \
+  codesign --verify --strict -R="identifier \"$bundle_id\" and certificate leaf = H\"$sha1\"" "$app" \
     || fail "Imza gereksinimi saglamiyor: identifier \"$bundle_id\" and certificate leaf = H\"$sha1\""
 }
 

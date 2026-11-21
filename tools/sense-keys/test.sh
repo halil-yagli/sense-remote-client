@@ -48,13 +48,23 @@ bad() {
 check() {
   local name=$1
   shift
-  if "$@" >/dev/null 2>&1; then ok "$name"; else bad "$name"; fi
+  if "$@" > "$root/step.out" 2>&1; then ok "$name"; else
+    bad "$name"
+    show_step
+  fi
+}
+# Beklenmeyen sonuçta adımın çıktısı ve çıkış kodu gösterilir (yalnız deneme değerleri).
+show_step() {
+  tail -n 8 "$root/step.out" | sed 's/^/      | /'
 }
 # refuse <açıklama> <komut...>: komut başarısızsa geçer.
 refuse() {
   local name=$1
   shift
-  if "$@" >/dev/null 2>&1; then bad "$name"; else ok "$name"; fi
+  if "$@" > "$root/step.out" 2>&1; then
+    bad "$name"
+    show_step
+  else ok "$name"; fi
 }
 
 # --- sahte gh ---------------------------------------------------------------------------------
