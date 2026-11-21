@@ -196,6 +196,13 @@ jobs:
           vcpkgDirectory: /opt/artifacts/vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
+      # Kurulu vcpkg paketleri (≈7 dk derleme) aynı PR'ın sonraki koşularında önbellekten gelir.
+      - name: Cache installed vcpkg packages
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3
+        with:
+          path: /opt/artifacts/vcpkg/installed
+          key: sense-pr-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json', 'res/vcpkg/**') }}
+
       - name: Install vcpkg dependencies
         shell: bash
         run: $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"
@@ -218,7 +225,10 @@ jobs:
         run: |
           FEATURES=$(python3 ./build.py --flutter --print-features)
           echo "features: $FEATURES"
-          cargo test --locked --lib --features "$FEATURES"
+          # Atlanan tek test RustDesk'in Windows klavye davranışı testi: ekransız Linux
+          # koşucusunda klavye bağlamı açılamadığı için düşer ("kbd context error");
+          # master'daki Windows derlemesinde koşmaya devam eder.
+          cargo test --locked --lib --features "$FEATURES" --             --skip keyboard::shortcuts::tests::alt_only_shortcut_neutralizes_windows_menu
 
   workflows:
     name: workflow lint
