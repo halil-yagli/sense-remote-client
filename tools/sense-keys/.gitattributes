@@ -1,0 +1,2 @@
+# Kabuk betikleri Windows checkout'unda da LF kalir (CRLF ile bash calismaz).
+*.sh text eol=lf
