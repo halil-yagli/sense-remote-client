@@ -1,12 +1,18 @@
 # Sense Remote: Windows (x64) + macOS (yalniz Apple Silicon) derlemesi.
 # RustDesk'in flutter-build.yml dosyasindaki Windows ve macOS adimlarindan sadelestirildi:
-# imzalama, surum yayini, MSI, Linux/Android/iOS ve Windows arm64 yok.
-# Ciktilar imzasizdir ve yalniz ekip cihazlarinda deneme icindir.
-# PR'larda yalniz Windows; macOS master'da ve elle calisir (Windows oncelikli).
+# sertifikali imzalama, notarization, MSI, Linux/Android/iOS ve Windows arm64 yok.
+# Windows ciktisi imzasiz; macOS ciktisi ad-hoc imzali (Apple Developer ID yok, ucretsiz kural).
+# PR'larda yalniz Windows; macOS master'da, etikette ve elle calisir (Windows oncelikli).
 name: Sense Remote build
 
 on:
   workflow_dispatch:
+    inputs:
+      # Sense Remote: macOS paketini etiket atmadan denemek icin (Windows isi atlanir).
+      only_macos:
+        description: "Yalniz macOS paketini derle (Windows atlanir)"
+        type: boolean
+        default: false
   pull_request:
     branches: [master]
     paths-ignore:
@@ -17,7 +23,7 @@ on:
     paths-ignore:
       - "docs/**"
       - "README.md"
-    # Surum: v<n> etiketi (yalniz tam sayi) -> Windows derlemesi -> TASLAK GitHub surumu.
+    # Surum: v<n> etiketi (yalniz tam sayi) -> Windows + macOS derlemesi -> TASLAK GitHub surumu.
     tags: ["v*"]
 
 permissions:
@@ -36,7 +42,8 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   VERSION: "1.5.3"
-  # Sense Remote surum numarasi (duz sayi); kurulum dosyasi SenseRemote-Kurulum-<n>.exe.
+  # Sense Remote surum numarasi (duz sayi); kurulum dosyalari SenseRemote-Kurulum-<n>.exe
+  # ve SenseRemote-<n>.dmg.
   SENSE_VERSION: "1"
   # Panelin imza acik anahtar(lar)i: k1=<base64url>,k2=... (acik anahtar, sir degil). Repo
   # degiskeni (Settings > Variables) yoksa bos gelir: istemci her zarfi reddeder (unknown_key).
@@ -107,7 +114,7 @@ jobs:
   windows:
     name: windows-x86_64
     needs: [verify-tag, generate-bridge]
-    if: ${{ !cancelled() && needs.generate-bridge.result == 'success' }}
+    if: ${{ !cancelled() && needs.generate-bridge.result == 'success' && !(github.event_name == 'workflow_dispatch' && inputs.only_macos) }}
     runs-on: windows-2022
     steps:
       # Etiket derlemesinde surum numarasi etiketten gelir (uygulamaya ve dosya adina gider).
@@ -257,13 +264,12 @@ jobs:
 
   macos:
     name: macos-${{ matrix.job.arch }}
-    needs: [generate-bridge]
-    # Windows oncelikli (karar 2026-11-16): Mac PR'larda calismaz, yalniz master'a
-    # gonderimde ve elle (workflow_dispatch) calisir; Mac kirilmasi boylece yine gorulur.
-    # Etiket (surum) derlemesi yalniz Windows'tur: macOS surum dosyasi bu asamada yok.
+    needs: [verify-tag, generate-bridge]
+    # Windows oncelikli (karar 2026-11-16): Mac PR'larda calismaz; master'a gonderimde,
+    # etiket (surum) derlemesinde ve elle (workflow_dispatch) calisir.
     # Sense Remote (K3-1): generate-bridge atlanmis verify-tag'a bagli; durum islevi
     # (!cancelled) olmadan GitHub bu isi de "skipped" sayiyordu (#12'den beri hic calismadi).
-    if: ${{ !cancelled() && needs.generate-bridge.result == 'success' && github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ !cancelled() && needs.generate-bridge.result == 'success' && github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
@@ -271,6 +277,27 @@ jobs:
         job:
           - { target: aarch64-apple-darwin, os: macos-26, arch: aarch64, extra-build-args: "--screencapturekit" }
     steps:
+      # Etiket derlemesinde surum numarasi etiketten gelir (uygulamaya ve dosya adina gider).
+      - name: Set version from tag
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: echo "SENSE_VERSION=${{ needs.verify-tag.outputs.version }}" >> "$GITHUB_ENV"
+
+      # Sense Remote: Windows'taki kuralin aynisi (G2-9) - etikette anahtarsiz derleme durur.
+      - name: Check panel envelope keys
+        shell: bash
+        run: |
+          if [ -z "$SENSE_ENVELOPE_KEYS" ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "::error title=SENSE_ENVELOPE_KEYS bos::Yayin (etiket) derlemesi panel anahtari olmadan yapilamaz."
+              exit 1
+            fi
+            echo "::warning title=SENSE_ENVELOPE_KEYS bos::Bu derleme panel zarflarini dogrulayacak anahtar icermiyor; istemci her zarfi reddeder (unknown_key). Yayin oncesi repo degiskenine panelin acik anahtarini yazin."
+          else
+            echo "SENSE_ENVELOPE_KEYS: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | wc -l) anahtar"
+            echo "k: $(echo "$SENSE_ENVELOPE_KEYS" | tr ',' '\n' | cut -d= -f1 | tr -d ' ' | paste -sd' ' -)"
+          fi
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
         with:
@@ -366,14 +393,18 @@ jobs:
           fi
           ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
 
-      - name: Create unsigned dmg
+      # Sense Remote: ad-hoc imza (Developer ID / notarization yok, sir kullanilmaz), dmg ve
+      # dmg iceriginin dogrulanmasi (codesign, spctl, ad, --version, boyut, SHA-256).
+      - name: Package (ad-hoc signed dmg) and verify
+        shell: bash
+        env:
+          EXPECTED_BASE_VERSION: ${{ env.VERSION }}
         run: |
-          APP="$(ls -d ./flutter/build/macos/Build/Products/Release/*.app | head -1)"
-          APP_NAME="$(basename "$APP")"
-          CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
-          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
-          mkdir -p out
-          create-dmg --icon "$APP_NAME" 200 190 --hide-extension "$APP_NAME" --window-size 800 400 --app-drop-link 600 185 "out/sense-remote-${{ env.VERSION }}-${{ matrix.job.arch }}-unsigned.dmg" "$APP"
+          bash .github/scripts/sense-macos-package.sh \
+            ./flutter/build/macos/Build/Products/Release/SenseRemote.app \
+            ./flutter/macos/Runner/Release.entitlements \
+            "$SENSE_VERSION" \
+            ./out
 
       - name: Upload macOS build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -386,7 +417,7 @@ jobs:
   # Etiket: SHA-256 uret, herkese ACIK OLMAYAN taslak GitHub surumu olustur (yayinlamak insan adimi).
   release-draft:
     name: draft release
-    needs: [verify-tag, windows]
+    needs: [verify-tag, windows, macos]
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
     permissions:
@@ -396,6 +427,12 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sense-remote-windows-x86_64
+          path: ./release
+
+      - name: Download macOS build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sense-remote-macos-aarch64
           path: ./release
 
       - name: Checksums and draft release
@@ -408,11 +445,14 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           FILE="SenseRemote-Kurulum-${VERSION}.exe"
-          [ -f "$FILE" ] || { echo "::error::$FILE bulunamadi"; ls -la; exit 1; }
-          sha256sum "$FILE" > SHA256SUMS.txt
+          DMG="SenseRemote-${VERSION}.dmg"
+          for f in "$FILE" "$DMG"; do
+            [ -f "$f" ] || { echo "::error::$f bulunamadi"; ls -la; exit 1; }
+          done
+          sha256sum "$FILE" "$DMG" > SHA256SUMS.txt
           cat SHA256SUMS.txt
           # --draft: herkese acik degil; yayinlamayi ekip elle yapar.
-          gh release create "$TAG" "$FILE" SHA256SUMS.txt \
+          gh release create "$TAG" "$FILE" "$DMG" SHA256SUMS.txt \
             --repo "$REPO" --draft --verify-tag \
             --title "Sense Remote ${VERSION}" \
-            --notes "Taslak. Imzasiz Windows kurulum dosyasi; dogrulama icin SHA256SUMS.txt. Surum notlari yayindan once eklenir."
+            --notes "Taslak. Imzasiz Windows kurulum dosyasi ve ad-hoc imzali (notarization yok) macOS Apple Silicon paketi; dogrulama icin SHA256SUMS.txt. Surum notlari yayindan once eklenir."
