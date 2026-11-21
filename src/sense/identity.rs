@@ -21,6 +21,14 @@
 use hbb_common::base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use std::time::SystemTime;
 
+// Sense Remote (Mac M2, plan 2026-11-21 §3.2): macOS has no `--import-config`. The wizard runs
+// one privileged script that creates root's config directory, copies this process's config
+// (ID + key pair) into it and compares the copy; `mac_script` is the pure part (script text,
+// allowed values, result codes). It is declared here, not in the macOS-only `install_mac`, so
+// its tests run on every platform.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub mod mac_script;
+
 /// Whether `--import-config` copies the setup process's config into the service's
 /// (upstream rule, used by `core_main::import_config`).
 pub fn import_runs(
@@ -42,14 +50,36 @@ pub fn import_runs(
 }
 
 /// Install may start only when the setup process's config file has an ID and a key pair.
-// MAC-SONRA: the pkg installer will use it too; until then only Windows calls it.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// Sense Remote (Mac M2): macOS uses the same rule before the privileged copy; there it is the
+/// whole copy decision (the script always replaces root's config with a complete source,
+/// upstream's "newer than" conditions do not apply).
+#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 pub fn stored_for_import(file_is_empty: bool) -> Result<(), &'static str> {
     if file_is_empty {
         Err("identity-store")
     } else {
         Ok(())
     }
+}
+
+/// Sense Remote (Mac M2): polls until the config file on disk is complete. `get_key_pair`
+/// writes a new key pair from a background thread, so right after the first start the file
+/// can still lack it; copying it then would hand root a config without the registered key.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn wait_stored_for_import(
+    tries: u32,
+    mut file_is_empty: impl FnMut() -> bool,
+    mut pause: impl FnMut(),
+) -> Result<(), &'static str> {
+    for attempt in 0..tries {
+        if stored_for_import(file_is_empty()).is_ok() {
+            return Ok(());
+        }
+        if attempt + 1 < tries {
+            pause();
+        }
+    }
+    Err("identity-store")
 }
 
 /// Public device key as the panel stores it (`device_pk`); safe to log, it is public.
@@ -79,6 +109,34 @@ mod tests {
         assert!(import_runs(true, t(100), UNIX_EPOCH, t(130)).is_err());
         assert_eq!(stored_for_import(true), Err("identity-store"));
         assert_eq!(stored_for_import(false), Ok(()));
+    }
+
+    #[test]
+    fn mac_copy_waits_for_the_key_pair_on_disk() {
+        // Complete at once: no pause.
+        let mut pauses = 0;
+        assert_eq!(wait_stored_for_import(30, || false, || pauses += 1), Ok(()));
+        assert_eq!(pauses, 0);
+        // The background write lands before the third look.
+        let mut looks = 0;
+        let mut pauses = 0;
+        let result = wait_stored_for_import(
+            30,
+            || {
+                looks += 1;
+                looks < 3
+            },
+            || pauses += 1,
+        );
+        assert_eq!((result, pauses), (Ok(()), 2));
+        // Never complete: no copy, and no pause after the last look.
+        let mut pauses = 0;
+        assert_eq!(
+            wait_stored_for_import(30, || true, || pauses += 1),
+            Err("identity-store")
+        );
+        assert_eq!(pauses, 29);
+        assert_eq!(wait_stored_for_import(0, || false, || ()), Err("identity-store"));
     }
 
     #[test]
