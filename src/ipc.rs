@@ -387,6 +387,10 @@ pub enum Data {
     FS(FS),
     Test,
     SyncConfig(Option<Box<(Config, Config2)>>),
+    // Sense Remote (Mac M5, plan §3.3): signed panel envelopes, user process -> root daemon
+    // (`Apply`) and the daemon's outcomes back (`Result`). Only acted on in the `_service`
+    // channel of the macOS daemon, which verifies every envelope itself.
+    SenseEnvelope(crate::sense::mac_apply::SenseEnvelopeIpc),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -665,6 +669,10 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
                                     if postfix == crate::POSTFIX_SERVICE {
                                         if matches!(&data, Data::SyncConfig(_)) {
                                             handle(data, &mut stream).await;
+                                        // Sense Remote (Mac M5): the one other message this
+                                        // channel takes; everything else is still rejected.
+                                        } else if sense_service_accepts(&data) {
+                                            sense_service_envelope(data, &mut stream).await;
                                         } else {
                                             log::warn!(
                                                 "Rejected non-sync data on protected _service IPC channel: postfix={}, data_kind={:?}, peer_uid={:?}",
@@ -702,6 +710,41 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
             }
         }
     }
+}
+
+// Sense Remote (Mac M5, plan §3.3): besides `SyncConfig`, the protected `_service` channel takes
+// exactly one message: an envelope `Apply` call. A `Result` (the daemon's own answer) or any other
+// `Data` coming from a client is rejected and the connection closed, as before.
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+fn sense_service_accepts(data: &Data) -> bool {
+    matches!(
+        data,
+        Data::SenseEnvelope(crate::sense::mac_apply::SenseEnvelopeIpc::Apply { .. })
+    )
+}
+
+// Sense Remote (Mac M5): the root daemon verifies and applies the envelopes with its own data
+// (`mac_apply::apply_in_daemon`; file and config writes, so off the async loop) and answers with
+// one outcome per envelope. Nothing of the envelopes is logged.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn sense_service_envelope(data: Data, stream: &mut Connection) {
+    use crate::sense::mac_apply::{apply_in_daemon, SenseEnvelopeIpc};
+    let Data::SenseEnvelope(SenseEnvelopeIpc::Apply {
+        envelopes,
+        server_time,
+    }) = data
+    else {
+        return;
+    };
+    let outcomes =
+        tokio::task::spawn_blocking(move || apply_in_daemon(&envelopes, server_time))
+            .await
+            .unwrap_or_default();
+    allow_err!(
+        stream
+            .send(&Data::SenseEnvelope(SenseEnvelopeIpc::Result(outcomes)))
+            .await
+    );
 }
 
 pub async fn new_listener(postfix: &str) -> ResultType<Incoming> {
@@ -2417,6 +2460,51 @@ pub async fn set_install_option(k: String, v: String) -> ResultType<()> {
 
 #[cfg(test)]
 mod test {
+    // Sense Remote (Mac M5): the `_service` allow list grew by exactly one message.
+    #[test]
+    fn sense_service_channel_takes_only_an_envelope_apply() {
+        use super::{sense_service_accepts, Data};
+        use crate::sense::mac_apply::{SenseApplyOutcome, SenseEnvelopeIpc};
+        assert!(sense_service_accepts(&Data::SenseEnvelope(
+            SenseEnvelopeIpc::Apply {
+                envelopes: vec!["{}".to_owned()],
+                server_time: None,
+            }
+        )));
+        // The daemon's answer is not something a client may send.
+        let result = SenseEnvelopeIpc::Result(vec![SenseApplyOutcome::Applied {
+            seq: 9,
+            role: Some("both".to_owned()),
+            disconnect: vec![],
+        }]);
+        assert!(!sense_service_accepts(&Data::SenseEnvelope(result)));
+        // `SyncConfig` keeps its own branch; everything else is still rejected.
+        for data in [
+            Data::SyncConfig(None),
+            Data::Close,
+            Data::Test,
+            Data::Empty,
+            Data::Options(None),
+            Data::Options(Some(Default::default())),
+            Data::Config(("id".to_owned(), Some("1".to_owned()))),
+            Data::ConfirmedKey(None),
+            Data::Deployed,
+        ] {
+            assert!(!sense_service_accepts(&data), "{data:?}");
+        }
+        // Code path: in the `_service` branch the reject arm is still the last one.
+        let source = include_str!("ipc.rs").replace("\r\n", "\n");
+        let branch_start = source.find("if postfix == crate::POSTFIX_SERVICE {").unwrap();
+        let branch = &source[branch_start..];
+        let branch = &branch[..branch.find("continue;").unwrap()];
+        let sync = branch.find("if matches!(&data, Data::SyncConfig(_)) {").unwrap();
+        let sense = branch.find("} else if sense_service_accepts(&data) {").unwrap();
+        let reject = branch.find("Rejected non-sync data").unwrap();
+        assert!(sync < sense && sense < reject, "{branch}");
+        assert_eq!(branch.matches("else if").count(), 1, "{branch}");
+        assert!(branch[reject..].contains("break;"), "{branch}");
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::*;
 

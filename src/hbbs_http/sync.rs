@@ -374,7 +374,7 @@ fn now_s() -> i64 {
 // sends at most one). Only a verified envelope on a platform that applies them reaches
 // `sense_apply`; every rejection goes to the next heartbeat's `envelope_error`. The registry reads
 // and writes run off the async loop (K2-7).
-#[cfg(not(any(target_os = "ios")))]
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 async fn sense_handle_envelopes(
     envelopes: &[Value],
     id: &str,
@@ -392,28 +392,173 @@ async fn sense_handle_envelopes(
                 report.applied();
                 log::info!("Sense Remote: panel envelope {seq} applied");
             }
-            Err(rejection) => {
-                let (reason, seq) = (rejection.reason, rejection.seq);
-                if report.rejected(rejection, last_seq, now) {
-                    // The panel resends a pending envelope with every heartbeat.
-                    hbb_common::throttled_log!(
-                        API_LOG_INTERVAL,
-                        warn,
-                        "Sense Remote: panel envelope rejected: {} (seq {seq:?})",
-                        reason.as_str()
-                    );
-                }
+            Err(rejection) => sense_note_rejection(report, rejection, last_seq, now),
+        }
+    }
+}
+
+// Sense Remote: a rejection for the next heartbeat's `envelope_error`. Only the reason and the
+// seq are logged, never the envelope.
+#[cfg(not(any(target_os = "ios")))]
+fn sense_note_rejection(
+    report: &mut crate::sense::envelope_apply::Report,
+    rejection: crate::sense::envelope::Rejection,
+    last_seq: u64,
+    now: i64,
+) {
+    let (reason, seq) = (rejection.reason, rejection.seq);
+    if report.rejected(rejection, last_seq, now) {
+        // The panel resends a pending envelope with every heartbeat.
+        hbb_common::throttled_log!(
+            API_LOG_INTERVAL,
+            warn,
+            "Sense Remote: panel envelope rejected: {} (seq {seq:?})",
+            reason.as_str()
+        );
+    }
+}
+
+// Sense Remote (Mac M5, plan 2026-11-21 §3.3): on macOS this process is the session user and
+// can not write the root-owned state; the root daemon applies. Order: own check (so a rejection
+// is reported with `k` and `seq`, and garbage never reaches the daemon) -> the envelopes that
+// passed go to the daemon in one call, as text -> the daemon verifies each one again with its
+// own data and stores settings, role and seq -> only for what it reports as applied this
+// process follows (own settings copy, disconnect, in-process role). Daemon not reachable or no
+// answer: nothing is applied, `apply_failed`.
+#[cfg(target_os = "macos")]
+async fn sense_handle_envelopes(
+    envelopes: &[Value],
+    id: &str,
+    report: &mut crate::sense::envelope_apply::Report,
+) {
+    use crate::sense::mac_apply;
+    if envelopes.is_empty() {
+        return;
+    }
+    let (items, own_id) = (envelopes.to_vec(), id.to_owned());
+    let Ok((last_seq, now, mut role, checks)) = tokio::task::spawn_blocking(move || {
+        let role = crate::sense::installed_role();
+        let mut seen = (0, now_s());
+        let checks: Vec<_> = items
+            .iter()
+            .map(|item| {
+                let (last_seq, now, result) = sense_check(item, &own_id);
+                seen = (last_seq, now);
+                result.map(|verified| (verified, item.to_string()))
+            })
+            .collect();
+        (seen.0, seen.1, role, checks)
+    })
+    .await
+    else {
+        return;
+    };
+    let mut passed = Vec::new();
+    for check in checks {
+        match check {
+            Ok(pair) => passed.push(pair),
+            Err(rejection) => sense_note_rejection(report, rejection, last_seq, now),
+        }
+    }
+    if passed.is_empty() {
+        return;
+    }
+    let forwarded: Vec<(String, u64)> = passed
+        .iter()
+        .map(|(verified, _)| (verified.k.clone(), verified.seq))
+        .collect();
+    let raw: Vec<String> = passed.iter().map(|(_, raw)| raw.clone()).collect();
+    let answer = mac_apply::request_daemon(raw).await;
+    if answer.is_none() {
+        hbb_common::throttled_log!(
+            API_LOG_INTERVAL,
+            warn,
+            "Sense Remote: the daemon did not answer, panel envelope not applied"
+        );
+    }
+    let results = mac_apply::settle(&forwarded, answer.as_deref());
+    for ((verified, _), result) in passed.into_iter().zip(results) {
+        match result {
+            Ok(applied) => {
+                report.applied();
+                log::info!(
+                    "Sense Remote: panel envelope {} applied by the daemon",
+                    applied.seq
+                );
+                let before = role;
+                role = applied.role.or(role);
+                tokio::task::spawn_blocking(move || {
+                    sense_follow_daemon(&verified, applied, before)
+                })
+                .await
+                .ok();
             }
+            Err(rejection) => sense_note_rejection(report, rejection, last_seq, now),
+        }
+    }
+}
+
+// Sense Remote (Mac M5): what this process does after the daemon applied an envelope. The
+// settings are the ones of the envelope this process verified itself (the daemon wrote the same
+// into the root config; the existing config sync keeps both equal); disconnect ids and the role
+// are the daemon's. `before` = the installed role before the call.
+#[cfg(target_os = "macos")]
+fn sense_follow_daemon(
+    verified: &crate::sense::envelope::Verified,
+    applied: crate::sense::mac_apply::AppliedByDaemon,
+    before: Option<crate::sense::SenseRole>,
+) {
+    use crate::sense::{envelope_apply, mac_apply};
+    let options = mac_apply::applicable_options(&verified.body.config_options, true);
+    if let Err(err) = sense_set_envelope_options(options.into_iter().collect()) {
+        log::error!(
+            "Sense Remote: settings of envelope {} not set here: {err}",
+            applied.seq
+        );
+    }
+    if !applied.disconnect.is_empty() {
+        SENDER.lock().unwrap().send(applied.disconnect).ok();
+    }
+    if let Some(role) = applied.role {
+        crate::sense::apply_role(Some(role));
+        log::info!("Sense Remote: role changed to {}", role.as_str());
+        if envelope_apply::restart_needed(before, role) && crate::is_server() {
+            sense_restart_server();
         }
     }
 }
 
 // Sense Remote: one envelope, blocking (registry). Returns (stored seq or 0, local time, result).
-#[cfg(not(any(target_os = "ios")))]
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 fn sense_check_and_apply(
     item: &Value,
     id: &str,
 ) -> (u64, i64, Result<u64, crate::sense::envelope::Rejection>) {
+    use crate::sense::envelope;
+    let (last_seq, now, checked) = sense_check(item, id);
+    let result = checked.and_then(|verified| {
+        sense_apply(&verified)
+            .map(|()| verified.seq)
+            .map_err(|reason| envelope::Rejection {
+                reason,
+                k: Some(verified.k.clone()),
+                seq: Some(verified.seq),
+            })
+    });
+    (last_seq, now, result)
+}
+
+// Sense Remote: this process's own check of one envelope, blocking (registry / state file).
+// Returns (stored seq or 0, local time, verified envelope or rejection).
+#[cfg(not(any(target_os = "ios")))]
+fn sense_check(
+    item: &Value,
+    id: &str,
+) -> (
+    u64,
+    i64,
+    Result<crate::sense::envelope::Verified, crate::sense::envelope::Rejection>,
+) {
     use crate::sense::{envelope, envelope_apply, envelope_keys, envelope_seq};
     // G2-5: an unreadable counter is not 0; the envelope is then refused (`check_stored`).
     let stored = envelope_seq::read_last_seq();
@@ -437,27 +582,33 @@ fn sense_check_and_apply(
         &expect,
         envelope_apply::APPLIES,
         stored.is_ok(),
-    )
-    .and_then(|verified| {
-        sense_apply(&verified)
-            .map(|()| verified.seq)
-            .map_err(|reason| envelope::Rejection {
-                reason,
-                k: Some(verified.k.clone()),
-                seq: Some(verified.seq),
-            })
-    });
+    );
     (last_seq, now, result)
 }
 
-// Sense Remote: the HKLM / `Config` side of `envelope_apply::apply_steps` (K2-2, G2-6).
+// Sense Remote: writes the settings of a verified envelope into this process's `Config`. Shared
+// by the Windows apply (`SenseApplySteps`) and, on macOS, the root daemon (`mac_apply`) and the
+// user process following it.
 #[cfg(not(any(target_os = "ios")))]
+pub(crate) fn sense_set_envelope_options(options: HashMap<String, String>) -> Result<(), String> {
+    let options = merge_config_options(options);
+    // The allow list has no authentication key, so this never changes 2FA / trusted
+    // devices; refuse rather than take upstream's async authentication path.
+    if crate::trusted_devices::config::changes_authentication(&options) {
+        return Err("envelope would change authentication settings".to_owned());
+    }
+    Config::set_options(options);
+    Ok(())
+}
+
+// Sense Remote: the HKLM / `Config` side of `envelope_apply::apply_steps` (K2-2, G2-6).
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 struct SenseApplySteps {
     options: HashMap<String, String>,
     seq: u64,
 }
 
-#[cfg(not(any(target_os = "ios")))]
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 impl crate::sense::envelope_apply::ApplySteps for SenseApplySteps {
     type Snapshot = HashMap<String, String>;
 
@@ -470,14 +621,7 @@ impl crate::sense::envelope_apply::ApplySteps for SenseApplySteps {
     }
 
     fn set_options(&mut self) -> Result<(), String> {
-        let options = merge_config_options(self.options.clone());
-        // The allow list has no authentication key, so this never changes 2FA / trusted
-        // devices; refuse rather than take upstream's async authentication path.
-        if crate::trusted_devices::config::changes_authentication(&options) {
-            return Err("envelope would change authentication settings".to_owned());
-        }
-        Config::set_options(options);
-        Ok(())
+        sense_set_envelope_options(self.options.clone())
     }
 
     fn restore_options(&mut self, snapshot: HashMap<String, String>) {
@@ -496,7 +640,8 @@ impl crate::sense::envelope_apply::ApplySteps for SenseApplySteps {
 // Sense Remote: applies a verified envelope. Settings -> role (HKLM) -> `EnvelopeSeq`, all or
 // nothing (`envelope_apply::apply_steps`); only then disconnect and the in-process role. A failed
 // apply leaves the computer as it was and is retried with the panel's next envelope.
-#[cfg(not(any(target_os = "ios")))]
+// Sense Remote (Mac M5): not on macOS; there the root daemon applies (`sense_handle_envelopes`).
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 fn sense_apply(
     verified: &crate::sense::envelope::Verified,
 ) -> Result<(), crate::sense::envelope::Reason> {
@@ -532,12 +677,16 @@ fn sense_apply(
 
 // Sense Remote (K-ROL-2): ends the `--server` process shortly after a role change, so the
 // service (`run_service`: relaunch when the process has exited) starts it with the new role.
+// Sense Remote (Mac M5): on macOS launchd starts the agent again, but only after an exit that is
+// not 0 (`envelope_apply::restart_exit_code`); role and seq are already in the state file.
 #[cfg(not(any(target_os = "ios")))]
 fn sense_restart_server() {
     log::info!("Sense Remote: role change needs a server restart");
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(2));
-        std::process::exit(0);
+        std::process::exit(crate::sense::envelope_apply::restart_exit_code(cfg!(
+            target_os = "macos"
+        )));
     });
 }
 
