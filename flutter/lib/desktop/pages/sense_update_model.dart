@@ -67,6 +67,7 @@ class SenseUpdateLastResult {
 class SenseUpdateStatus {
   const SenseUpdateStatus({
     this.current = 0,
+    this.supported = false,
     this.state = SenseUpdateState.idle,
     this.target,
     this.source,
@@ -82,6 +83,10 @@ class SenseUpdateStatus {
   static const none = SenseUpdateStatus();
 
   final int current;
+
+  /// Sense Remote (U2 GuiStatus `supported`, missing = false): this build
+  /// installs updates. When false the strip only informs (no install button).
+  final bool supported;
   final SenseUpdateState state;
   final int? target;
 
@@ -104,6 +109,7 @@ class SenseUpdateStatus {
       final pct = _int(v['progress_pct']);
       return SenseUpdateStatus(
         current: _int(v['current']) ?? 0,
+        supported: v['supported'] == true,
         state: _state(v['state']),
         target: _int(v['target']),
         source: _str(v['source']),
@@ -189,7 +195,10 @@ SenseUpdateStrip? senseUpdateStrip(SenseUpdateStatus s,
   final n = '${s.target ?? 0}';
   final dat = senseTurkishDative(s.target ?? 0);
   final cur = '${s.current}';
-  List<SenseUpdateAction> act(List<SenseUpdateAction> a) => ui.supported
+  // Sense Remote: the build (GuiStatus `supported`) and the app's own memory
+  // (an install answered `unsupported`) must both allow installing.
+  List<SenseUpdateAction> act(List<SenseUpdateAction> a) =>
+      ui.supported && s.supported
       ? a
       : a.where((x) => x == SenseUpdateAction.notes || x == SenseUpdateAction.close).toList();
   final notes = s.notesUrl != null ? [SenseUpdateAction.notes] : const <SenseUpdateAction>[];

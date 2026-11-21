@@ -20,7 +20,7 @@ import 'package:flutter_hbb/desktop/widgets/sense_version_chip.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 SenseUpdateStatus _s(Map<String, Object?> json) =>
-    SenseUpdateStatus.parse(jsonEncode({'current': 3, ...json}));
+    SenseUpdateStatus.parse(jsonEncode({'current': 3, 'supported': true, ...json}));
 
 String? _text(Map<String, Object?> json,
         [SenseUpdateUiState ui = const SenseUpdateUiState()]) =>
@@ -48,7 +48,8 @@ class _FakeBackend implements SenseUpdateBackend {
   final opened = <String>[];
 
   @override
-  Future<String> status() async => jsonEncode({'current': 3, ...json});
+  Future<String> status() async =>
+      jsonEncode({'current': 3, 'supported': true, ...json});
 
   @override
   Future<String> install(int version) async {
@@ -118,6 +119,23 @@ void main() {
   });
 
   group('strip text and buttons, every state (§6)', () {
+    test('GuiStatus supported false or missing: strip only informs', () {
+      for (final extra in [
+        {'supported': false},
+        <String, Object?>{},
+      ]) {
+        final s = SenseUpdateStatus.parse(
+            jsonEncode({'current': 3, ..._available, ...extra}));
+        expect(s.supported, isFalse);
+        expect(senseUpdateStrip(s)!.text, 'Yeni sürüm hazır: Sürüm 4');
+        expect(senseUpdateStrip(s)!.actions, [SenseUpdateAction.notes]);
+        final failed = SenseUpdateStatus.parse(jsonEncode(
+            {'current': 3, 'state': 'failed', 'target': 4, ...extra}));
+        expect(senseUpdateStrip(failed)!.actions, isEmpty);
+      }
+      expect(_s(_available).supported, isTrue);
+    });
+
     test('available: Güncelle and Neler yeni', () {
       expect(_text(_available), 'Yeni sürüm hazır: Sürüm 4');
       expect(_actions(_available),
