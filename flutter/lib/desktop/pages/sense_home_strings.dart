@@ -44,7 +44,7 @@ const Map<String, String> kSenseHomeTr = {
   'mac_perm_and': ' ve ',
   'mac_not_ready': 'Hazır değil — {missing}',
   'mac_perm_note_host':
-      'Bu izin verilmeden Sense ekibi bu bilgisayarın ekranını göremez ya da kullanamaz. macOS izni yalnızca bilgisayarın başında onaylatır.',
+      'İzin verilmeden ekip bu bilgisayarı göremez ya da kullanamaz. İzin yalnızca bilgisayarın başında verilir.',
   'mac_perm_note_input':
       'Bu izin olmadan bazı klavye kısayolları bağlantıda iletilmez.',
   'mac_perm_open': 'Sistem Ayarları\'nı aç',

@@ -75,6 +75,11 @@ List<List<String>> _shape(List<SenseHomeProject> projects) => [
       for (final p in projects) [p.name, ...p.computers.map((c) => c.id)]
     ];
 
+/// Sense Remote (Mac M7): the Host card as the home page mounts it — in the
+/// scrolling left pane, 280 px wide (the window height follows the content).
+Widget _hostPane(Widget child) =>
+    SingleChildScrollView(child: SizedBox(width: 280, child: child));
+
 Future<void> _pump(WidgetTester tester, Widget child,
     {Size size = const Size(1000, 700)}) async {
   tester.view.physicalSize = size;
@@ -179,9 +184,8 @@ void main() {
       final opened = <SenseMacPermission>[];
       await _pump(
           tester,
-          SizedBox(
-            width: 280,
-            child: SenseHostHomeView(
+          _hostPane(
+            SenseHostHomeView(
                 name: 'Galeri Mac mini',
                 location: 'Galeri 1',
                 deviceId: '123456789',
@@ -206,9 +210,8 @@ void main() {
         (tester) async {
       await _pump(
           tester,
-          SizedBox(
-            width: 280,
-            child: SenseHostHomeView(
+          _hostPane(
+            SenseHostHomeView(
                 name: 'Galeri Mac mini',
                 location: '',
                 deviceId: '',
@@ -227,9 +230,8 @@ void main() {
         'the permissions', (tester) async {
       await _pump(
           tester,
-          SizedBox(
-            width: 280,
-            child: SenseHostHomeView(
+          _hostPane(
+            SenseHostHomeView(
                 name: '',
                 location: '',
                 deviceId: '',
