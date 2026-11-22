@@ -585,6 +585,8 @@ mod tests {
         extend_heartbeat(&mut sense);
         assert_eq!(sense, json!({ "v": 1 }));
         assert_eq!(request_install(4), "unsupported");
+        // Sense Remote (U7): the manual move is real on Windows and macOS; elsewhere it fails.
+        #[cfg(not(any(windows, target_os = "macos")))]
         assert_eq!(manual::upgrade_in_place(), "failed");
     }
 

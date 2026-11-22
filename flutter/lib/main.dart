@@ -11,6 +11,8 @@ import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/desktop/pages/sense_install_model.dart'
     show senseMacNeedsSetup; // Sense Remote (Mac M3)
+import 'package:flutter_hbb/desktop/pages/sense_install_page.dart'
+    show senseMacNeedsMove; // Sense Remote (U7)
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
@@ -124,6 +126,12 @@ Future<void> main(List<String> args) async {
       envReady = true;
       if (senseMacNeedsSetup(
           isMac: true, roleInstalled: senseRoleInstalled())) {
+        runInstallPage(envReady: true);
+        return;
+      }
+      // Sense Remote (update plan §8, U7): the new app was dragged over version 2; the setup
+      // page shows "Geçişi tamamla" (bundle to root, service restarted, permissions).
+      if (senseRoleInstalled() && await senseMacNeedsMove()) {
         runInstallPage(envReady: true);
         return;
       }

@@ -1,12 +1,14 @@
 // Sense Remote: the install page of the setup file (`SenseRemote-Kurulum-<n>.exe`).
 // Connects the Sense setup wizard to the native side; the wizard itself is pure UI.
 
+import 'dart:async' show unawaited;
 import 'dart:convert';
-import 'dart:io' show exit;
+import 'dart:io' show exit, Process;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart' show isMacOS; // Sense Remote (Mac M3)
+import 'package:flutter_hbb/common/sense_theme.dart' show senseRoleInstalled; // Sense Remote (U7)
 import 'package:flutter_hbb/desktop/pages/sense_home_about.dart' show kSenseVersionOption; // Sense Remote
 import 'package:flutter_hbb/desktop/pages/sense_home_strings.dart' show senseVersionFrom, kSenseVersionDefine; // Sense Remote
 import 'package:flutter_hbb/desktop/pages/sense_install_wizard.dart';
@@ -122,6 +124,11 @@ class _SenseInstallPageState extends State<SenseInstallPage>
       jsonDecode(bind.installInstallOptions()) as Map<String, dynamic>;
   late final _backend = _RustBackend(context);
 
+  // Sense Remote (update plan §8, U7): read once before the wizard is shown; `null` = the
+  // normal wizard.
+  bool _upgradeRead = false;
+  SenseUpgrade? _upgrade;
+
   // Sense Remote (Mac M3): on macOS the window keeps its native close button and closing
   // the last window does not end the app (AppDelegate). So the close is handled here: after
   // installing it leaves through `finish` like the wizard's own buttons (a Host drops the
@@ -129,6 +136,7 @@ class _SenseInstallPageState extends State<SenseInstallPage>
   @override
   void initState() {
     super.initState();
+    unawaited(_readUpgrade());
     if (isMacOS) {
       windowManager.addListener(this);
       windowManager.setPreventClose(true);
@@ -151,6 +159,35 @@ class _SenseInstallPageState extends State<SenseInstallPage>
     }
   }
 
+  /// Sense Remote (U7): a computer with a Sense role gets the upgrade screen (or the "already
+  /// installed" note) instead of the sign-in and registration of a new installation.
+  Future<void> _readUpgrade() async {
+    SenseUpgrade? upgrade;
+    try {
+      upgrade = await senseUpgradeOf(
+        roleInstalled: senseRoleInstalled(),
+        current: int.tryParse(_senseVersion()) ?? 0,
+        host: !bind.isOutgoingOnly(),
+        controller: !bind.isIncomingOnly(),
+        run: () async {
+          _backend._working++;
+          try {
+            return await bind.installSenseUpgradeInPlace();
+          } finally {
+            _backend._working--;
+          }
+        },
+      );
+    } catch (_) {
+      upgrade = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _upgrade = upgrade;
+      _upgradeRead = true;
+    });
+  }
+
   Future<String?> _pickPath(String current) async {
     final dir =
         await FilePicker.platform.getDirectoryPath(initialDirectory: current);
@@ -160,6 +197,10 @@ class _SenseInstallPageState extends State<SenseInstallPage>
 
   @override
   Widget build(BuildContext context) {
+    // Sense Remote (U7): a short black frame until the installed version was read.
+    if (!_upgradeRead) {
+      return const Scaffold(backgroundColor: SenseTokens.black);
+    }
     return Scaffold(
       backgroundColor: SenseTokens.black,
       body: SenseInstallWizard(
@@ -175,6 +216,7 @@ class _SenseInstallPageState extends State<SenseInstallPage>
         onDragStart: () => windowManager.startDragging(),
         // Sense Remote: version number of this setup file (#19 built-in option, T3-11).
         version: _senseVersion(),
+        upgrade: _upgrade, // Sense Remote (U7)
       ),
     );
   }
@@ -187,4 +229,61 @@ String _senseVersion() {
           bind.mainGetBuildinOption(key: kSenseVersionOption)) ??
       senseVersionFrom(kSenseVersionDefine);
   return n == null ? '' : '$n';
+}
+
+/// Sense Remote (update plan §8, U7): the upgrade for a computer that already has a role.
+/// Windows compares the installed version (HKLM `Version`) with this setup file; macOS offers
+/// the move when the app bundle is not root's (it was just dragged over the old one).
+Future<SenseUpgrade?> senseUpgradeOf({
+  required bool roleInstalled,
+  required int current,
+  required bool host,
+  required bool controller,
+  required Future<String> Function() run,
+}) async {
+  if (!roleInstalled) return null;
+  if (isMacOS) {
+    if (current <= 0 || !await senseMacNeedsMove()) return null;
+    return SenseUpgrade(
+        mode: SenseUpgradeMode.upgrade,
+        installed: 0,
+        current: current,
+        host: host,
+        controller: controller,
+        run: run);
+  }
+  final installed = await bind.mainSenseInstalledVersion();
+  final mode = senseUpgradeMode(
+      roleInstalled: roleInstalled, installed: installed, current: current);
+  if (mode == SenseUpgradeMode.none) return null;
+  return SenseUpgrade(
+      mode: mode,
+      installed: installed,
+      current: current,
+      host: host,
+      controller: controller,
+      run: run);
+}
+
+/// Sense Remote (U7, macOS): the paths root executes are not all root's and write-protected,
+/// so the new app was copied over the old one and the move is not finished yet. Same paths as
+/// `root_executed_paths` (src/sense/identity/mac_script.rs). Any failure: `false`.
+Future<bool> senseMacNeedsMove() async {
+  try {
+    final name = await bind.mainGetAppName();
+    final app = '/Applications/$name.app';
+    final paths = [
+      app,
+      '$app/Contents',
+      '$app/Contents/MacOS',
+      '$app/Contents/MacOS/service',
+      '$app/Contents/MacOS/$name',
+    ];
+    final result =
+        await Process.run('/usr/bin/stat', ['-f', '%u %Lp', ...paths]);
+    if (result.exitCode != 0) return false;
+    return !senseMacBundleTrusted('${result.stdout}', paths.length);
+  } catch (_) {
+    return false;
+  }
 }
