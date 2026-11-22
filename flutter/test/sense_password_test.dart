@@ -534,6 +534,48 @@ void main() {
       expect(find.byKey(const Key('sense-pw-ok')), findsOneWidget);
       m.c.dispose();
     });
+
+    // U14: the switch is on in the Windows/macOS build. The status JSON exactly
+    // as `ui::status_value` writes it (`supported: true`) opens the real page
+    // (locked + Kilidi aç); `supported: false` (Linux) keeps "not open yet".
+    testWidgets('switch on: real state, not "henüz açık değil"', (tester) async {
+      const on = [
+        '{"supported":true,"role":"host","perm_set":false,"changed_at":null,'
+            '"stage":"locked","until":null,"user":null}',
+        '{"supported":true,"role":"both","perm_set":true,"changed_at":1700000000,'
+            '"stage":"locked","until":null,"user":null}',
+        '{"supported":true,"role":"host","perm_set":null,"changed_at":null,'
+            '"stage":"locked","until":null,"user":null}',
+      ];
+      const off =
+          '{"supported":false,"role":"host","perm_set":null,"changed_at":null,'
+          '"stage":"locked","until":null,"user":null}';
+      for (final json in [...on, off]) {
+        final m = _make(_Fake()..statusJson = json);
+        await tester.runAsync(m.c.load);
+        await _pump(
+            tester,
+            SingleChildScrollView(
+                child: SizedBox(
+                    width: 440, child: SensePasswordPanel(controller: m.c))),
+            const Size(600, 700));
+        final supported = json != off;
+        expect(m.c.stage,
+            supported ? SensePasswordStage.locked : SensePasswordStage.unsupported,
+            reason: json);
+        expect(find.byKey(const Key('sense-pw-unsupported')),
+            supported ? findsNothing : findsOneWidget,
+            reason: json);
+        expect(find.byKey(const Key('sense-pw-unlock')),
+            supported ? findsOneWidget : findsNothing,
+            reason: json);
+        expect(sensePasswordSummary(m.c.status) == 'Bu sürümde henüz açık değil',
+            !supported,
+            reason: json);
+        expect(sensePasswordHostLine(m.c.status) != null, supported, reason: json);
+        m.c.dispose();
+      }
+    });
   });
 
   group('golden images (Windows + macOS)', () {
