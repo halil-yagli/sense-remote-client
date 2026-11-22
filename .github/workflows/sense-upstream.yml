@@ -1,0 +1,172 @@
+# Sense Remote: RustDesk sürüm izleme (yol haritası S13, İnşa planı §9). Haftada bir ve elle.
+# rustdesk/rustdesk'in son sürüm etiketini okur, depodaki taban (.github/sense-upstream-base)
+# ile karşılaştırır. Yeniyse upstream/<etiket> dalında etiketi master'a birleştirmeyi dener:
+#   temiz   -> dalı iter, PR açar, sense-pr.yml'yi o dalda başlatır
+#   çakışma -> PR açmaz; çakışan dosyaları ve sürüm notu bağlantısını içeren issue açar
+# HİÇBİR ŞEYİ birleştirmez, derlemez, yayınlamaz. Aynı sürüm için ikinci dal/PR/issue açmaz.
+# Sır yok: yalnız GITHUB_TOKEN. GITHUB_TOKEN iş akışı dosyası iten bir push'u reddeder; bu yüzden
+# birleşmede .github/workflows/ master'daki haliyle bırakılır, fark PR metnine yazılır.
+name: Sense Remote upstream
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sense-upstream
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: check RustDesk release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Read latest release and compare with base
+        id: ver
+        shell: bash
+        run: |
+          latest=$(gh api repos/rustdesk/rustdesk/releases/latest --jq .tag_name)
+          base=$(tr -d ' \r\n' < .github/sense-upstream-base)
+          # Etiket komut satırına girmeden önce biçimi doğrulanır.
+          case "$latest" in
+            ''|*[!0-9A-Za-z._-]*) echo "::error::Beklenmeyen etiket biçimi."; exit 1 ;;
+          esac
+          case "$base" in
+            ''|*[!0-9A-Za-z._-]*) echo "::error::Taban dosyası geçersiz."; exit 1 ;;
+          esac
+          l=${latest#v}; b=${base#v}
+          top=$(printf '%s\n%s\n' "$l" "$b" | sort -V | tail -n 1)
+          if [ "$l" != "$b" ] && [ "$top" = "$l" ]; then new=true; else new=false; fi
+          {
+            echo "latest=$latest"
+            echo "base=$base"
+            echo "new=$new"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### RustDesk sürüm izleme"
+            echo "| Son sürüm | Taban | Yeni mi |"
+            echo "| --- | --- | --- |"
+            echo "| $latest | $base | $new |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Aynı sürüm için tekrar iş yapılmaz: dal, açık/kapalı PR ya da issue varsa dur.
+      - name: Skip if this version was already handled
+        id: dedupe
+        if: ${{ steps.ver.outputs.new == 'true' }}
+        shell: bash
+        env:
+          TAG: ${{ steps.ver.outputs.latest }}
+        run: |
+          handled=false
+          if git ls-remote --exit-code --heads origin "upstream/$TAG" >/dev/null 2>&1; then handled=true; fi
+          n=$(gh pr list --repo "$REPO" --state all --head "upstream/$TAG" --json number --jq length)
+          [ "$n" = 0 ] || handled=true
+          n=$(gh issue list --repo "$REPO" --state all --search "\"RustDesk $TAG\" in:title" --json number --jq length)
+          [ "$n" = 0 ] || handled=true
+          echo "handled=$handled" >> "$GITHUB_OUTPUT"
+          echo "Daha önce işlendi mi: $handled" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Try to merge the release tag
+        id: merge
+        if: ${{ steps.ver.outputs.new == 'true' && steps.dedupe.outputs.handled == 'false' }}
+        shell: bash
+        env:
+          TAG: ${{ steps.ver.outputs.latest }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/rustdesk/rustdesk.git
+          git fetch --no-tags upstream "refs/tags/$TAG:refs/tags/upstream-$TAG"
+          git checkout -b "upstream/$TAG" "origin/$DEFAULT_BRANCH"
+          if git merge --no-commit --no-ff "refs/tags/upstream-$TAG" > "$RUNNER_TEMP/merge.log" 2>&1; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt"
+            if [ -s "$RUNNER_TEMP/conflicts.txt" ]; then
+              echo "conflict=true" >> "$GITHUB_OUTPUT"
+              git merge --abort || true
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/merge.log"
+            echo "::error::Birleştirme çakışma dışı bir nedenle başarısız."
+            exit 1
+          fi
+          # GITHUB_TOKEN iş akışı dosyası iten push'u reddeder: .github/workflows/ master'daki haline döner.
+          git diff --cached --name-status "origin/$DEFAULT_BRANCH" -- .github/workflows > "$RUNNER_TEMP/wf-diff.txt" || true
+          if [ -s "$RUNNER_TEMP/wf-diff.txt" ]; then
+            git ls-files .github/workflows | xargs -r git rm -q -f
+            git checkout "origin/$DEFAULT_BRANCH" -- .github/workflows
+          fi
+          printf '%s\n' "$TAG" > .github/sense-upstream-base
+          git add .github/sense-upstream-base
+          git commit -q -m "RustDesk $TAG birleştirildi (sense-upstream; otomatik, incelenmeden birleştirilmez)"
+          git push origin "upstream/$TAG"
+
+      - name: Open PR and start the PR check
+        if: ${{ steps.merge.outputs.conflict == 'false' }}
+        shell: bash
+        env:
+          TAG: ${{ steps.ver.outputs.latest }}
+          BASE: ${{ steps.ver.outputs.base }}
+        run: |
+          {
+            echo "RustDesk [$TAG](https://github.com/rustdesk/rustdesk/releases/tag/$TAG) etiketi \`$DEFAULT_BRANCH\` dalına çakışmasız birleştirildi (önceki taban: $BASE)."
+            echo
+            echo "- Otomatik açıldı (sense-upstream). Hiçbir şey birleştirilmedi, derlenmedi, yayınlanmadı."
+            echo "- İnşa planı §9.3: tam test (katman 1-3) ve Windows/macOS tam derleme birleştirmeden önce; bir Sense sürümüne bağlanır."
+            echo "- Taban dosyası \`.github/sense-upstream-base\` $TAG olarak güncellendi."
+            if [ -s "$RUNNER_TEMP/wf-diff.txt" ]; then
+              echo "- Yukarı akışta \`.github/workflows/\` altında değişen dosyalar (token iş akışı dosyası itemediği için bu PR'a **alınmadı**; gerekiyorsa elle taşıyın):"
+              echo '```'
+              cat "$RUNNER_TEMP/wf-diff.txt"
+              echo '```'
+            fi
+          } > "$RUNNER_TEMP/body.md"
+          url=$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "upstream/$TAG" \
+            --title "RustDesk $TAG yukarı akış birleştirmesi" --body-file "$RUNNER_TEMP/body.md")
+          echo "PR: $url"
+          num=${url##*/}
+          # GITHUB_TOKEN ile açılan PR pull_request iş akışını tetiklemez; elle başlatılır.
+          gh workflow run sense-pr.yml --repo "$REPO" --ref "upstream/$TAG" -f pr="$num"
+          echo "Temiz birleşme: PR $url; PR kontrolü başlatıldı." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open conflict issue
+        if: ${{ steps.merge.outputs.conflict == 'true' }}
+        shell: bash
+        env:
+          TAG: ${{ steps.ver.outputs.latest }}
+          BASE: ${{ steps.ver.outputs.base }}
+        run: |
+          {
+            echo "RustDesk [$TAG](https://github.com/rustdesk/rustdesk/releases/tag/$TAG) çıktı (taban: $BASE). \`$DEFAULT_BRANCH\` ile otomatik birleştirme **çakışıyor**; PR açılmadı."
+            echo
+            echo "Çakışan dosyalar:"
+            echo '```'
+            cat "$RUNNER_TEMP/conflicts.txt"
+            echo '```'
+            echo
+            echo "Elle alım: İnşa planı §9.3 (\`upstream/$TAG\` dalı, çakışmalar işaretli çağrı noktalarında beklenir). Bu iş aynı sürüm için ikinci issue açmaz."
+          } > "$RUNNER_TEMP/issue.md"
+          gh issue create --repo "$REPO" --title "RustDesk $TAG birleştirme çakışması" --body-file "$RUNNER_TEMP/issue.md"
+          echo "Çakışma: issue açıldı." >> "$GITHUB_STEP_SUMMARY"
