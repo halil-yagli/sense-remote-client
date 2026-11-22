@@ -26,6 +26,17 @@ use std::{
 };
 
 static PANEL_V2: AtomicBool = AtomicBool::new(false);
+static CONNECTED: AtomicBool = AtomicBool::new(false);
+
+/// Sense Remote (O8): whether a remote session is open on this computer (sync loop, from the
+/// `--server` connection list). Shortens the health interval (`health_model::health_interval`).
+pub fn set_connected(connected: bool) {
+    CONNECTED.store(connected, Ordering::Relaxed);
+}
+
+pub fn connected() -> bool {
+    CONNECTED.load(Ordering::Relaxed)
+}
 
 #[derive(Default)]
 struct InventoryState {

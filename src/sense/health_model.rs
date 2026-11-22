@@ -28,6 +28,21 @@ use std::{
 
 /// Capability the panel announces in its heartbeat answer when it accepts the fields below.
 pub const CAP_HEALTH_V2: &str = "health_v2";
+/// Health interval while a session is open (O8 "Canlı · 8 sn önce"); only the live values, never
+/// the inventory. The sync loop runs every 3 s with a session, so it is sent about every 9 s.
+pub const HEALTH_INTERVAL_CONNECTED: Duration = Duration::from_secs(8);
+
+/// How often `health` goes into the heartbeat: `HEALTH_INTERVAL_CONNECTED` while connected and
+/// the panel takes `health_v2` (an older panel's contract says at most once a minute), else
+/// `idle`.
+pub fn health_interval(v2: bool, connected: bool, idle: Duration) -> Duration {
+    if v2 && connected {
+        HEALTH_INTERVAL_CONNECTED.min(idle)
+    } else {
+        idle
+    }
+}
+
 /// The inventory is read again this often (and at start).
 pub const INVENTORY_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
@@ -733,6 +748,15 @@ mod tests {
         ];
         assert_eq!(gpu_summary(&gpus), (Some(40.0), Some(70.0)));
         assert_eq!(gpu_summary(&[]), (None, None));
+    }
+
+    #[test]
+    fn health_interval_is_short_only_while_connected_with_v2() {
+        let idle = Duration::from_secs(60);
+        assert_eq!(health_interval(true, true, idle), Duration::from_secs(8));
+        assert_eq!(health_interval(true, false, idle), idle);
+        assert_eq!(health_interval(false, true, idle), idle, "v1 panel: at most once a minute");
+        assert_eq!(health_interval(false, false, idle), idle);
     }
 
     #[test]

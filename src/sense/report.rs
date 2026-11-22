@@ -468,8 +468,15 @@ static CPU_SYSTEM: Mutex<Option<System>> = Mutex::new(None);
 static LAST_HEALTH: Mutex<Option<Instant>> = Mutex::new(None);
 
 fn take_health_slot(now: Instant) -> bool {
+    // Sense Remote (O8 "Canlı · 8 sn"): every 8 s while a session is open, for a panel that
+    // takes `health_v2`; otherwise `HEALTH_INTERVAL`.
+    let interval = super::health_model::health_interval(
+        super::health_v2::enabled(),
+        super::health_v2::connected(),
+        HEALTH_INTERVAL,
+    );
     let mut last = LAST_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
-    if health_due(*last, now) {
+    if due_after(*last, now, interval) {
         *last = Some(now);
         true
     } else {
@@ -478,9 +485,13 @@ fn take_health_slot(now: Instant) -> bool {
 }
 
 fn health_due(last: Option<Instant>, now: Instant) -> bool {
+    due_after(last, now, HEALTH_INTERVAL)
+}
+
+fn due_after(last: Option<Instant>, now: Instant, interval: Duration) -> bool {
     match last {
         None => true,
-        Some(t) => now.saturating_duration_since(t) >= HEALTH_INTERVAL,
+        Some(t) => now.saturating_duration_since(t) >= interval,
     }
 }
 
