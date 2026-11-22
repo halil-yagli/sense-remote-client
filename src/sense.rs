@@ -42,9 +42,8 @@ pub mod envelope_seq;
 pub mod enroll;
 // Sense Remote (K3-2): the service imports the ID + key pair the panel registers.
 pub mod identity;
-// Sense Remote (update plan 2026-11-21, §3): signed self-update. U0 is the skeleton: nothing acts
-// yet (`update::SUPPORTED` is false), so most of it is unused for now.
-#[allow(dead_code)]
+// Sense Remote (update plan 2026-11-21, §3): signed self-update; on for Windows and macOS since
+// U8 (`update::SUPPORTED`).
 pub mod update;
 // Sense Remote (permanent password plan 2026-11-21): the password is set in the app after a Sense
 // sign-in. U9 is the skeleton plus the locks (`password::guard`); `password::SUPPORTED` is false.

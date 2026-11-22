@@ -1358,6 +1358,18 @@ mod tests {
         assert!(update::CAP_UPDATE.len() <= SCHEMA_CAP_MAX_CHARS);
     }
 
+    // Sense Remote (U8): the signed report's `caps` carries `update` on Windows and macOS (run by
+    // the Windows and Mac CI jobs) and not on Linux.
+    #[test]
+    fn update_cap_on_windows_and_macos_only() {
+        let reported = caps_with_update(caps(false, false), crate::sense::update::SUPPORTED);
+        let has_update = reported.iter().any(|cap| cap == "update");
+        #[cfg(any(windows, target_os = "macos"))]
+        assert!(has_update);
+        #[cfg(not(any(windows, target_os = "macos")))]
+        assert!(!has_update);
+    }
+
     // Permanent password plan §3.5: `password` follows its one switch, which is off in U9.
     #[test]
     fn password_cap_follows_the_switch() {

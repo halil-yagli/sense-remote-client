@@ -4,7 +4,7 @@
 //! Lives in the privileged process that holds the engine: Windows `--server` (SYSTEM). On
 //! macOS the root daemon holds it (`daemon_mac`, U4, may reuse these functions); the agent
 //! only forwards (`super::on_answer`, `super::on_ipc`). Nothing starts while
-//! `super::SUPPORTED` is false.
+//! `super::SUPPORTED` is false (platforms other than Windows and macOS).
 //!
 //! - One engine state behind a mutex. Every event goes through `engine::next` under the lock;
 //!   the resulting actions become jobs, performed outside the lock on the runner's own thread
