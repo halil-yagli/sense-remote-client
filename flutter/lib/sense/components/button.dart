@@ -109,7 +109,9 @@ class _SenseInteractiveState extends State<SenseInteractive> {
         child: widget.builder(context, state),
       ),
     );
+    // Its own node: a control is one thing for a screen reader.
     child = Semantics(
+      container: true,
       button: widget.button,
       enabled: enabled,
       toggled: widget.toggled,
