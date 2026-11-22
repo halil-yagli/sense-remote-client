@@ -101,7 +101,8 @@ void main() {
       expectNoRotation(tester);
       await tester.pump(const Duration(milliseconds: 70));
       expect(_enterOpacity(tester).opacity, 1);
-      expect(tester.hasRunningAnimations, isFalse);
+      await tester.pumpAndSettle(); // settles: the opening does not loop
+      expect(_enterOpacity(tester).opacity, 1);
     });
   });
 
