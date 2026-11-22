@@ -24,8 +24,8 @@ import '../../common/shared_state.dart';
 import './popup_menu.dart';
 import './kb_layout_type_chooser.dart';
 // Sense Remote: connection window parts (map, info, status, chat, ghost).
-import 'sense_remote_strings.dart' show kSenseRemoteWindow;
-import 'sense_remote_window.dart';
+import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
+import '../../sense/screens/session/sense_remote_window.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
 
