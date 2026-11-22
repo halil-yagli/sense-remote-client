@@ -2543,8 +2543,8 @@ pub fn main_sense_installed_version() -> i32 {
 }
 
 // Sense Remote (permanent password plan 2026-11-21, §3.7): the "Kalıcı şifre" page. Every
-// answer is JSON or a code; no password, token or key is ever returned. U9: the feature is off
-// (`sense::password::SUPPORTED`), every call answers `unsupported`.
+// answer is JSON or a code; no password, token or key is ever returned. On where
+// `sense::password::SUPPORTED` (U14: Windows, macOS); elsewhere every call answers `unsupported`.
 pub fn main_sense_password_status() -> String {
     crate::sense::password::ui::status()
 }

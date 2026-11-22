@@ -4,9 +4,9 @@
 //!
 //! U9 is the skeleton: the IPC/FFI types and the locks (`guard`). U10 adds the pure core: the
 //! grant check (`grant`, §3.3), request and ack signing (`request`, `ack`), the pending nonce
-//! (`pending`), the password rule (`rule`) and the UI side of the unlock (`ui`). Nothing changes
-//! a password yet (`SUPPORTED` is false, the privileged side is U11/U12): every request is
-//! answered `unsupported` and `caps` does not carry `password`.
+//! (`pending`), the password rule (`rule`) and the UI side of the unlock (`ui`). U11/U12 add the
+//! privileged side (Windows, macOS), U13 the page. U14 turns it on (`SUPPORTED`) on Windows and
+//! macOS; elsewhere every request is answered `unsupported` and `caps` does not carry `password`.
 
 use serde_derive::{Deserialize, Serialize};
 
@@ -28,9 +28,10 @@ pub mod ui;
 #[cfg(test)]
 mod vector;
 
-/// Sense Remote (plan §8.1 U14): the one switch. True only once the grant check, the stores and
-/// the UI are in (U10–U13).
-pub const SUPPORTED: bool = false;
+/// Sense Remote (plan §8.1 U14): the one switch. On where the privileged side exists (Windows:
+/// SYSTEM `--server`, U11; macOS: root daemon, U12); off elsewhere (Linux), which keeps the
+/// U9 behaviour there: `unsupported`, no `password` in `caps`, no `sense.access`.
+pub const SUPPORTED: bool = cfg!(any(windows, target_os = "macos"));
 
 /// Capability in the signed report (`sense.caps`) when `SUPPORTED`.
 pub const CAP_PASSWORD: &str = "password";
@@ -211,9 +212,29 @@ mod tests {
         assert_eq!(back, set);
     }
 
+    // U14: the switch is on exactly on Windows and macOS, and nowhere else.
+    #[test]
+    fn switch_is_on_for_windows_and_macos_only() {
+        assert_eq!(SUPPORTED, cfg!(windows) || cfg!(target_os = "macos"));
+    }
+
+    // U14: where the switch stays off (Linux), the main channel answers nothing, as in U9.
+    #[cfg(not(any(windows, target_os = "macos")))]
+    #[test]
+    fn while_off_the_main_channel_does_not_answer() {
+        let runtime = hbb_common::tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        for message in [SensePasswordIpc::Begin, SensePasswordIpc::StatusQuery] {
+            assert_eq!(runtime.block_on(on_main_ipc(message)), None);
+        }
+        assert_eq!(status::heartbeat_ext(), None);
+    }
+
+    // The answer used while off (Linux, and the macOS/Windows paths that are not the
+    // privileged process).
     #[test]
     fn while_off_requests_are_unsupported_and_answers_are_ignored() {
-        assert!(!SUPPORTED);
         assert_eq!(
             unsupported_answer(&SensePasswordIpc::Begin),
             Some(SensePasswordIpc::Request(Err("unsupported".to_owned())))

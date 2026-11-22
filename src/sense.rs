@@ -47,7 +47,7 @@ pub mod identity;
 #[allow(dead_code)]
 pub mod update;
 // Sense Remote (permanent password plan 2026-11-21): the password is set in the app after a Sense
-// sign-in. U9 is the skeleton plus the locks (`password::guard`); `password::SUPPORTED` is false.
+// sign-in. On for Windows and macOS (`password::SUPPORTED`, U14); unused parts stay off elsewhere.
 #[allow(dead_code)]
 pub mod password;
 

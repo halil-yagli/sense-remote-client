@@ -236,17 +236,22 @@ pub fn heartbeat_base() -> Option<Value> {
         // signed updates.
         // Sense Remote (permanent password plan §3.5): `password` only where the permanent
         // password is set in the app (`password::SUPPORTED`).
-        caps: Some(caps_with_password(
-            caps_with_update(
-                caps(curtain_supported, super::envelope_apply::APPLIES),
-                super::update::SUPPORTED,
-            ),
-            super::password::SUPPORTED,
-        )),
+        caps: Some(heartbeat_caps(curtain_supported)),
         maintenance_curtain: curtain_state(curtain_supported, crate::sense::curtain::is_shown()),
         mac_permissions: mac_permissions(),
     };
     to_json(&base)
+}
+
+/// Sense Remote (permanent password plan U14): the `caps` this build sends, from the switches.
+fn heartbeat_caps(curtain_supported: bool) -> Vec<String> {
+    caps_with_password(
+        caps_with_update(
+            caps(curtain_supported, super::envelope_apply::APPLIES),
+            super::update::SUPPORTED,
+        ),
+        super::password::SUPPORTED,
+    )
 }
 
 /// Sense Remote: `caps` of this computer: `CAPS`, plus `curtain` where it can be shown and
@@ -1358,22 +1363,39 @@ mod tests {
         assert!(update::CAP_UPDATE.len() <= SCHEMA_CAP_MAX_CHARS);
     }
 
-    // Permanent password plan §3.5: `password` follows its one switch, which is off in U9.
+    // Permanent password plan §3.5: `password` follows its one switch.
     #[test]
     fn password_cap_follows_the_switch() {
         use crate::sense::password;
-        assert!(!password::SUPPORTED);
         let base = || caps_with_update(caps(true, true), true);
-        assert_eq!(caps_with_password(base(), password::SUPPORTED), base());
-        assert!(!caps_with_password(base(), password::SUPPORTED)
-            .iter()
-            .any(|cap| cap == "password"));
+        assert_eq!(caps_with_password(base(), false), base());
         assert_eq!(
             caps_with_password(base(), true),
             ["role_all", "curtain", "apply", "update", "password"]
         );
         assert!(caps_with_password(base(), true).len() <= SCHEMA_CAPS_MAX);
         assert!(password::CAP_PASSWORD.len() <= SCHEMA_CAP_MAX_CHARS);
+    }
+
+    // U14: the heartbeat carries `password` on Windows and macOS (last, after `update`), and
+    // never on Linux.
+    #[test]
+    fn heartbeat_caps_carry_password_on_windows_and_macos() {
+        let on = cfg!(windows) || cfg!(target_os = "macos");
+        for curtain in [false, true] {
+            let caps = heartbeat_caps(curtain);
+            assert_eq!(caps.iter().filter(|cap| *cap == "password").count(), usize::from(on));
+            if on {
+                assert_eq!(caps.last().map(String::as_str), Some("password"), "{caps:?}");
+            }
+            assert!(caps.len() <= SCHEMA_CAPS_MAX);
+        }
+        #[cfg(windows)]
+        assert!(heartbeat_caps(true).contains(&"password".to_owned()));
+        #[cfg(target_os = "macos")]
+        assert!(heartbeat_caps(false).contains(&"password".to_owned()));
+        #[cfg(not(any(windows, target_os = "macos")))]
+        assert!(!heartbeat_caps(true).contains(&"password".to_owned()));
     }
 
     /// I10: `curtain` and `maintenance_curtain` only where the curtain can be shown; the order
