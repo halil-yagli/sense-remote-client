@@ -46,6 +46,10 @@ pub mod identity;
 // yet (`update::SUPPORTED` is false), so most of it is unused for now.
 #[allow(dead_code)]
 pub mod update;
+// Sense Remote (permanent password plan 2026-11-21): the password is set in the app after a Sense
+// sign-in. U9 is the skeleton plus the locks (`password::guard`); `password::SUPPORTED` is false.
+#[allow(dead_code)]
+pub mod password;
 
 /// Registry key (under HKLM) that holds the installed role and setup info.
 pub const REG_SUBKEY: &str = "SOFTWARE\\SenseRemote";
@@ -93,17 +97,13 @@ type Settings = Vec<(&'static str, &'static str)>;
 
 /// (hard settings, builtin settings) for a role. Hard settings are what RustDesk reads for
 /// custom clients (`config::is_incoming_only`, `is_outgoing_only`, `is_disable_settings`...).
-/// Host keeps the elevated command line allowed so the team can set the permanent password
-/// with `SenseRemote.exe --password ...` even though the settings page is locked.
+// Sense Remote (permanent password plan 2026-11-21, §6.3): no role allows the elevated command
+// line any more (`--password`, `--option`, `--set-id` answer "Settings are disabled!"). The
+// permanent password is changed only inside the app after a Sense sign-in. The key stays in
+// `ROLE_BUILTIN_KEYS` so a value left by an older build is still cleared.
 pub fn role_settings(role: Option<SenseRole>) -> (Settings, Settings) {
     let locks = || -> (Settings, Settings) {
-        (
-            vec![("disable-settings", "Y"), ("disable-ab", "Y")],
-            vec![(
-                keys::OPTION_ALLOW_COMMAND_LINE_SETTINGS_WHEN_SETTINGS_DISABLED,
-                "Y",
-            )],
-        )
+        (vec![("disable-settings", "Y"), ("disable-ab", "Y")], vec![])
     };
     match role {
         Some(SenseRole::Host) => {
@@ -152,6 +152,36 @@ pub fn installed_role() -> Option<SenseRole> {
         log::error!("Sense Remote: unknown installed role {value:?}, no role applied");
     }
     role
+}
+
+/// Sense Remote (security review of PR #40): the installed role for the locks
+/// (`password::guard`). Unlike `installed_role`, a role that is there but can not be read or is
+/// not valid is an error, not "not installed": the locks stay closed on it.
+pub fn installed_role_state() -> Result<Option<SenseRole>, String> {
+    #[cfg(windows)]
+    return role_state_from(read_reg_value_state(REG_SUBKEY, REG_VALUE_ROLE));
+    #[cfg(target_os = "macos")]
+    return match mac_state::read() {
+        Ok(None) => Ok(None),
+        Ok(Some(state)) => state
+            .role
+            .map(Some)
+            .ok_or_else(|| "state file without a role".to_owned()),
+        Err(err) => Err(err),
+    };
+    #[cfg(not(any(windows, target_os = "macos")))]
+    return Ok(None);
+}
+
+/// Pure part of `installed_role_state` (Windows): the raw `Role` value read.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn role_state_from(read: Result<Option<String>, String>) -> Result<Option<SenseRole>, String> {
+    match read? {
+        None => Ok(None),
+        Some(value) => SenseRole::parse(&value)
+            .map(Some)
+            .ok_or_else(|| "unknown installed role".to_owned()),
+    }
 }
 
 /// Called once at start (`load_custom_client`) in every process.
@@ -372,6 +402,25 @@ fn read_reg_value_in(subkey: &str, name: &str) -> Option<String> {
         .ok()?
         .get_value::<String, _>(name)
         .ok()
+}
+
+/// Sense Remote (security review of PR #40): like `read_reg_value_in`, but a missing key or
+/// value (`Ok(None)`) is told apart from one that can not be read (`Err`, e.g. wrong type or no
+/// access).
+#[cfg(windows)]
+fn read_reg_value_state(subkey: &str, name: &str) -> Result<Option<String>, String> {
+    use std::io::ErrorKind::NotFound;
+    use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+    let key = match RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(subkey) {
+        Ok(key) => key,
+        Err(err) if err.kind() == NotFound => return Ok(None),
+        Err(err) => return Err(format!("registry key not readable: {:?}", err.kind())),
+    };
+    match key.get_value::<String, _>(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(err) if err.kind() == NotFound => Ok(None),
+        Err(err) => Err(format!("registry value not readable: {:?}", err.kind())),
+    }
 }
 
 /// Sense Remote (Mac M0, plan §3.1): macOS reads the same two values from the root-owned state
@@ -957,6 +1006,18 @@ mod tests {
         assert!(!config::option2bool(key, &effective));
     }
 
+    // Security review of PR #40: a role that is there but unreadable or unknown is an error
+    // (locks closed), only a missing one is "not installed".
+    #[test]
+    fn role_state_tells_missing_from_unreadable() {
+        assert_eq!(role_state_from(Ok(None)), Ok(None));
+        assert_eq!(role_state_from(Ok(Some("host".to_owned()))), Ok(Some(SenseRole::Host)));
+        assert_eq!(role_state_from(Ok(Some("both".to_owned()))), Ok(Some(SenseRole::Both)));
+        assert!(role_state_from(Ok(Some("Host".to_owned()))).is_err());
+        assert!(role_state_from(Ok(Some(String::new()))).is_err());
+        assert!(role_state_from(Err("denied".to_owned())).is_err());
+    }
+
     #[test]
     fn role_parse_round_trip() {
         for role in [SenseRole::Host, SenseRole::Controller, SenseRole::Both] {
@@ -969,13 +1030,13 @@ mod tests {
     }
 
     #[test]
-    fn host_is_incoming_and_locked_with_cli_password() {
+    fn host_is_incoming_and_locked_without_cli() {
         let (hard, builtin) = role_settings(Some(SenseRole::Host));
         assert!(hard.contains(&("conn-type", "incoming")));
         assert!(hard.contains(&("disable-settings", "Y")));
         assert!(hard.contains(&("disable-ab", "Y")));
-        assert_eq!(builtin, vec![(CLI, "Y")]);
-        assert!(config::option2bool(CLI, "Y"));
+        // Sense Remote (password plan §6.3): the command line is closed for Host too.
+        assert!(builtin.iter().all(|(k, _)| *k != CLI));
     }
 
     #[test]
@@ -991,7 +1052,7 @@ mod tests {
         assert!(hard.iter().all(|(k, _)| *k != "conn-type"));
         assert!(hard.contains(&("disable-settings", "Y")));
         assert!(hard.contains(&("disable-ab", "Y")));
-        assert_eq!(builtin, vec![(CLI, "Y")]);
+        assert!(builtin.iter().all(|(k, _)| *k != CLI));
     }
 
     #[test]
@@ -1011,8 +1072,13 @@ mod tests {
     #[test]
     fn switching_role_clears_stale_locks_and_keeps_other_keys() {
         let mut hard = HashMap::from([("disable-account".to_owned(), "Y".to_owned())]);
-        let mut builtin = HashMap::from([("hide-tray".to_owned(), "Y".to_owned())]);
+        let mut builtin = HashMap::from([
+            ("hide-tray".to_owned(), "Y".to_owned()),
+            // Sense Remote: a value left by a Sense Remote 1-2 build is cleared.
+            (CLI.to_owned(), "Y".to_owned()),
+        ]);
         apply_role_to(Some(SenseRole::Host), &mut hard, &mut builtin);
+        assert_eq!(builtin.get(CLI), None);
         assert_eq!(hard.get("conn-type").map(String::as_str), Some("incoming"));
         apply_role_to(Some(SenseRole::Both), &mut hard, &mut builtin);
         assert_eq!(hard.get("conn-type"), None);

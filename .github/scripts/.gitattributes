@@ -1,0 +1,2 @@
+# Sense betikleri Windows checkout'unda da LF kalir (tools/sense-keys/test.sh yerelde calistirir).
+sense-*.sh text eol=lf

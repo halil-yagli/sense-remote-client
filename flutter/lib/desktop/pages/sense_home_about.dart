@@ -12,6 +12,7 @@ import '../../models/platform_model.dart';
 import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
 import 'sense_home_strings.dart';
+import 'sense_password_page.dart'; // Sense Remote: Güvenlik › Kalıcı şifre (U13)
 import 'sense_update_model.dart'; // Sense Remote: update line (§6)
 import 'sense_update_strings.dart';
 
@@ -62,6 +63,7 @@ class SenseAboutPage extends StatelessWidget {
             updateText: senseAboutUpdateText(
                 SenseUpdateStatus.parse(update.data ?? ''),
                 DateTime.now().millisecondsSinceEpoch ~/ 1000),
+            passwordSection: const SensePasswordAboutRow(),
           )),
     ));
   }
@@ -78,6 +80,7 @@ class SenseAboutView extends StatelessWidget {
     this.baseVersion = '',
     this.year,
     this.updateText,
+    this.passwordSection,
   });
 
   final int? version;
@@ -89,6 +92,10 @@ class SenseAboutView extends StatelessWidget {
 
   /// Sense Remote (update plan §6): update line; null hides the row.
   final String? updateText;
+
+  /// Sense Remote (permanent password plan §4): Güvenlik › Kalıcı şifre;
+  /// null hides it.
+  final Widget? passwordSection;
 
   @override
   Widget build(BuildContext context) {
@@ -166,6 +173,10 @@ class SenseAboutView extends StatelessWidget {
                   ],
                 ),
               ),
+              if (passwordSection != null) ...[
+                const SizedBox(height: 18),
+                passwordSection!,
+              ],
               const SizedBox(height: 18),
               Wrap(
                 alignment: WrapAlignment.center,

@@ -22,6 +22,10 @@
 //! - U7 `manual`: the one-time manual move from version 2 (§8).
 //! - U8 flips `SUPPORTED`.
 //!
+//! U2 fills the engine and adds the runner (`runner.rs`: the thread, IPC and heartbeat glue
+//! around the pure `engine::next`). All of it stays off while `SUPPORTED` is false: no timer
+//! starts, the heartbeat carries no `update`, the UI gets the idle status.
+//!
 //! Every module is compiled on every platform (the shared files call them without `cfg`); a
 //! module gates its own platform-only parts, like `mac_apply` does.
 
@@ -78,6 +82,7 @@ pub mod keys;
 pub mod manifest;
 pub mod manual;
 pub mod order;
+pub mod runner;
 pub mod sign_mac;
 pub mod store;
 pub mod store_mac;
@@ -179,7 +184,8 @@ wire_enum!(
 
 /// `sense.update` of the heartbeat (`SenseUpdateStatus`, §3.5). Display only: it is NOT part of
 /// the signed report, and the panel decides "installed" from `app_version`, never from this.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// Sense Remote (U4): `Deserialize` too, the macOS agent reads it from the daemon's answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateStatus {
     pub state: UpdateState,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -211,7 +217,7 @@ pub struct UpdateStatus {
 }
 
 /// What this computer already holds, so the panel does not send it again (§3.4).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Have {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release: Option<u32>,
@@ -227,6 +233,9 @@ pub struct Have {
 pub struct GuiStatus {
     /// Sense version of this build; 0 without `SENSE_VERSION` (local builds).
     pub current: u32,
+    /// `SUPPORTED`: this build installs updates; when false the UI only informs.
+    #[serde(default)]
+    pub supported: bool,
     pub state: UpdateState,
     pub target: Option<u32>,
     pub source: Option<UpdateSource>,
@@ -257,6 +266,7 @@ impl GuiStatus {
     pub fn idle(current: u32) -> Self {
         Self {
             current,
+            supported: SUPPORTED,
             state: UpdateState::Idle,
             target: None,
             source: None,
@@ -282,6 +292,9 @@ pub enum SenseUpdateIpc {
     Status(String),
     /// UI → `--server`: the user pressed "Güncelle".
     InstallRequest { version: u32 },
+    /// `--server` -> UI (and on macOS daemon -> agent): the answer to `InstallRequest` /
+    /// `Install`, one of `request_install`'s codes (`""` = accepted).
+    InstallAnswer(String),
     /// macOS only, agent (`--server`, session user) → daemon (root), `_service` channel: the raw
     /// signed release and order as received from the panel, plus the unsigned hint. The daemon
     /// verifies all of it again with its own keys and identity; the agent is not trusted (M5).
@@ -374,22 +387,50 @@ pub fn current_version() -> u32 {
 }
 
 /// Called once by the heartbeat loop (`hbbs_http/sync.rs`) when it starts, in the `--server`
-/// process. U2: start the engine's timer; U3 (Windows, SYSTEM): the new version's self-check
-/// (§5.3). On macOS the self-check belongs to the daemon (`daemon_mac::start`).
-pub fn on_server_start() {}
-
-/// Called by the heartbeat loop for every successful answer, after the envelopes.
-/// U2: verify `release` / `order` (`manifest::verify`, `order::verify`), apply the hint rules
-/// (§3.4) and feed the engine; on macOS forward them to the daemon as `Offer` instead. The
-/// future must stay `Send` and must not block (registry and file work in `spawn_blocking`).
-pub async fn on_answer(answer: Answer) {
-    let _ = answer;
+/// process: starts the engine (`runner::start`, its own thread), which first runs the new
+/// version's self-check (§5.3, `apply::self_check`, U3). On macOS the engine and the
+/// self-check belong to the daemon (`daemon_mac::start`).
+pub fn on_server_start() {
+    if SUPPORTED && !cfg!(target_os = "macos") {
+        runner::start();
+    }
 }
 
-/// `sense.update` for the next heartbeat; `None` leaves the field out (skeleton, no installed
-/// role, unsupported platform). U2: from the engine's memory, without blocking.
+/// Called by the heartbeat loop for every successful answer, after the envelopes: verifies
+/// `release` / `order` and feeds the engine with them and the hint (`runner::on_answer`); on
+/// macOS forwards them raw to the daemon as `Offer`, which verifies again. The future stays
+/// `Send`; the engine work is short (two signature checks, a lock).
+pub async fn on_answer(answer: Answer) {
+    if !SUPPORTED || answer == Answer::default() {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let offer = SenseUpdateIpc::Offer {
+            // `""` = this answer carried no notice (the daemon keeps the one it holds).
+            release: answer.release.map(|v| v.to_string()).unwrap_or_default(),
+            order: answer.order.map(|v| v.to_string()),
+            hint_release: answer.hint.as_ref().and_then(|h| h.release),
+            hint_oid: answer.hint.and_then(|h| h.oid),
+        };
+        // The daemon answers with its `sense.update` for the next heartbeat.
+        daemon_mac::forward_offer(offer).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    runner::on_answer(answer);
+}
+
+/// `sense.update` for the next heartbeat; `None` leaves the field out (switched off, engine not
+/// running, macOS agent). From the engine's memory, without blocking.
 pub fn heartbeat_status() -> Option<UpdateStatus> {
-    None
+    if !SUPPORTED {
+        return None;
+    }
+    // macOS agent: what the daemon gave with its last `Offer` answer.
+    #[cfg(target_os = "macos")]
+    return daemon_mac::agent_heartbeat_status();
+    #[cfg(not(target_os = "macos"))]
+    return runner::heartbeat_status();
 }
 
 /// Adds `sense.update` to a heartbeat's `sense`. Called after the report was signed: the field
@@ -404,28 +445,113 @@ pub fn extend_heartbeat(sense: &mut Value) {
     }
 }
 
-/// Main IPC channel, `--server` side: answers `StatusQuery` with `Status` and takes
-/// `InstallRequest`; every other variant is ignored here (`None` = no answer). U2 implements;
-/// the future must stay `Send`.
+/// Main IPC channel, `--server` side: answers `StatusQuery` with `Status` and
+/// `InstallRequest` with `InstallAnswer`; every other variant is ignored here (`None` = no
+/// answer). The future stays `Send`.
 /// The main channel's handler also runs in other processes that listen on it; this function
-/// must only act in the `--server` process (the one that holds the engine, or on macOS talks
-/// to the daemon) and answer `None` everywhere else.
+/// only acts in the `--server` process (the one that holds the engine, or on macOS talks to
+/// the daemon) and answers `None` everywhere else.
 pub async fn on_ipc(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
-    let _ = message;
-    None
+    if !SUPPORTED || !crate::is_server() {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    return forward_to_daemon(message).await;
+    #[cfg(not(target_os = "macos"))]
+    return runner::on_ipc(message);
 }
 
-/// FFI `main_sense_update_status`: GuiStatus JSON. U2: ask `--server` over IPC (`StatusQuery`);
-/// on any failure this same idle status.
+/// macOS agent: the engine is the daemon's; status and install requests go there.
+#[cfg(target_os = "macos")]
+async fn forward_to_daemon(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
+    match message {
+        SenseUpdateIpc::StatusQuery => {
+            match daemon_mac::request_daemon(SenseUpdateIpc::StatusQuery).await {
+                Some(SenseUpdateIpc::DaemonStatus(json)) => Some(SenseUpdateIpc::Status(json)),
+                _ => None,
+            }
+        }
+        SenseUpdateIpc::InstallRequest { version } => {
+            let asked = daemon_mac::request_daemon(SenseUpdateIpc::Install { version }).await;
+            let code = match asked {
+                Some(SenseUpdateIpc::InstallAnswer(code)) => code,
+                _ => IPC_FAILED.to_owned(),
+            };
+            Some(SenseUpdateIpc::InstallAnswer(code))
+        }
+        _ => None,
+    }
+}
+
+/// `request_install` when the privileged process did not answer.
+pub const IPC_FAILED: &str = "ipc_failed";
+/// How long the UI waits for `--server`.
+pub const IPC_TIMEOUT_MS: u64 = 3000;
+
+/// UI side: one message to `--server` on the main channel and its answer; `None` on any
+/// failure. Blocking (FFI threads are not on a tokio runtime).
+fn ask_server(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
+    let runtime = hbb_common::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    runtime.block_on(async move {
+        let mut conn = crate::ipc::connect(1000, "").await.ok()?;
+        conn.send(&crate::ipc::Data::SenseUpdate(message))
+            .await
+            .ok()?;
+        match conn.next_timeout(IPC_TIMEOUT_MS).await {
+            Ok(Some(crate::ipc::Data::SenseUpdate(reply))) => Some(reply),
+            _ => None,
+        }
+    })
+}
+
+/// FFI `main_sense_update_status`: GuiStatus JSON, asked from `--server` (`StatusQuery`); on
+/// any failure (and while switched off) the idle status. What comes back is parsed and written
+/// again, so the UI only ever gets the contract's shape.
 pub fn gui_status_json() -> String {
-    serde_json::to_string(&GuiStatus::idle(current_version())).unwrap_or_default()
+    let asked = if SUPPORTED {
+        match ask_server(SenseUpdateIpc::StatusQuery) {
+            Some(SenseUpdateIpc::Status(json)) => serde_json::from_str::<GuiStatus>(&json).ok(),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let status = asked.unwrap_or_else(|| GuiStatus::idle(current_version()));
+    serde_json::to_string(&status).unwrap_or_default()
 }
 
 /// FFI `main_sense_update_install`: `""` (accepted), `no_release`, `not_newer`, `busy`,
-/// `ipc_failed` or `unsupported`. U2: send `InstallRequest` to `--server`.
+/// `ipc_failed` or `unsupported`; sends `InstallRequest` to `--server`.
 pub fn request_install(version: i32) -> String {
-    let _ = version;
-    UNSUPPORTED.to_owned()
+    if !SUPPORTED {
+        return UNSUPPORTED.to_owned();
+    }
+    let Some(version) = u32::try_from(version)
+        .ok()
+        .filter(|v| (1..=MAX_VERSION).contains(v))
+    else {
+        return engine::NO_RELEASE.to_owned();
+    };
+    match ask_server(SenseUpdateIpc::InstallRequest { version }) {
+        Some(SenseUpdateIpc::InstallAnswer(code)) if is_install_code(&code) => code,
+        _ => IPC_FAILED.to_owned(),
+    }
+}
+
+/// The codes `request_install` may return.
+pub fn is_install_code(code: &str) -> bool {
+    [
+        engine::INSTALL_ACCEPTED,
+        engine::NO_RELEASE,
+        engine::NOT_NEWER,
+        engine::BUSY,
+        IPC_FAILED,
+        UNSUPPORTED,
+    ]
+    .contains(&code)
 }
 
 /// FFI `main_sense_installed_version`: the installed Sense version (Windows: HKLM `Version`;
@@ -547,15 +673,16 @@ mod tests {
             [
                 "blocked", "checked_at", "current", "error", "error_detail", "last_result",
                 "mac_permission_warning", "notes_url", "progress_pct", "source", "state",
-                "target",
+                "supported", "target",
             ]
         );
         assert_eq!(status["state"], "idle");
         assert_eq!(status["current"], current_version());
         assert_eq!(status["target"], Value::Null);
+        assert_eq!(status["supported"], SUPPORTED);
         // The plan's example reads back.
         let example = json!({
-            "current": 3, "state": "available", "target": 4, "source": null,
+            "current": 3, "supported": true, "state": "available", "target": 4, "source": null,
             "progress_pct": null, "error": null, "error_detail": null,
             "blocked": "session_active", "notes_url": "https://panel.example/#surum-4",
             "checked_at": 1_795_000_000, "mac_permission_warning": false,
@@ -622,6 +749,7 @@ mod tests {
             SenseUpdateIpc::StatusQuery,
             SenseUpdateIpc::Status("{}".to_owned()),
             SenseUpdateIpc::InstallRequest { version: 4 },
+            SenseUpdateIpc::InstallAnswer("busy".to_owned()),
             offer,
             SenseUpdateIpc::Install { version: 4 },
             SenseUpdateIpc::DaemonStatus("{}".to_owned()),
@@ -629,6 +757,27 @@ mod tests {
             let text = serde_json::to_string(&message).unwrap();
             assert_eq!(serde_json::from_str::<SenseUpdateIpc>(&text).unwrap(), message);
         }
+    }
+
+    #[test]
+    fn install_codes() {
+        for code in ["", "no_release", "not_newer", "busy", "ipc_failed", "unsupported"] {
+            assert!(is_install_code(code), "{code}");
+        }
+        for code in ["ok", "BUSY", " ", "installed"] {
+            assert!(!is_install_code(code), "{code}");
+        }
+    }
+
+    // While switched off nothing reaches `--server` and no engine runs.
+    #[test]
+    fn switched_off_asks_nobody() {
+        assert!(!SUPPORTED);
+        on_server_start();
+        assert_eq!(heartbeat_status(), None);
+        assert_eq!(runner::heartbeat_status(), None);
+        let status: GuiStatus = serde_json::from_str(&gui_status_json()).unwrap();
+        assert_eq!(status, GuiStatus::idle(current_version()));
     }
 
     #[test]

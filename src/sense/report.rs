@@ -234,9 +234,14 @@ pub fn heartbeat_base() -> Option<Value> {
         health,
         // Sense Remote (update plan 2026-11-21, §3.5): `update` only where this build installs
         // signed updates.
-        caps: Some(caps_with_update(
-            caps(curtain_supported, super::envelope_apply::APPLIES),
-            super::update::SUPPORTED,
+        // Sense Remote (permanent password plan §3.5): `password` only where the permanent
+        // password is set in the app (`password::SUPPORTED`).
+        caps: Some(caps_with_password(
+            caps_with_update(
+                caps(curtain_supported, super::envelope_apply::APPLIES),
+                super::update::SUPPORTED,
+            ),
+            super::password::SUPPORTED,
         )),
         maintenance_curtain: curtain_state(curtain_supported, crate::sense::curtain::is_shown()),
         mac_permissions: mac_permissions(),
@@ -263,6 +268,15 @@ fn caps(curtain_supported: bool, applies: bool) -> Vec<String> {
 fn caps_with_update(mut caps: Vec<String>, update_supported: bool) -> Vec<String> {
     if update_supported {
         caps.push(super::update::CAP_UPDATE.to_owned());
+    }
+    caps
+}
+
+/// Sense Remote (permanent password plan §3.5): `password` comes after `update`, only when this
+/// build sets the permanent password in the app (`password::SUPPORTED`).
+fn caps_with_password(mut caps: Vec<String>, password_supported: bool) -> Vec<String> {
+    if password_supported {
+        caps.push(super::password::CAP_PASSWORD.to_owned());
     }
     caps
 }
@@ -1342,6 +1356,24 @@ mod tests {
         assert_eq!(caps_with_update(caps(false, false), true), ["role_all", "update"]);
         assert!(caps_with_update(caps(true, true), true).len() <= SCHEMA_CAPS_MAX);
         assert!(update::CAP_UPDATE.len() <= SCHEMA_CAP_MAX_CHARS);
+    }
+
+    // Permanent password plan §3.5: `password` follows its one switch, which is off in U9.
+    #[test]
+    fn password_cap_follows_the_switch() {
+        use crate::sense::password;
+        assert!(!password::SUPPORTED);
+        let base = || caps_with_update(caps(true, true), true);
+        assert_eq!(caps_with_password(base(), password::SUPPORTED), base());
+        assert!(!caps_with_password(base(), password::SUPPORTED)
+            .iter()
+            .any(|cap| cap == "password"));
+        assert_eq!(
+            caps_with_password(base(), true),
+            ["role_all", "curtain", "apply", "update", "password"]
+        );
+        assert!(caps_with_password(base(), true).len() <= SCHEMA_CAPS_MAX);
+        assert!(password::CAP_PASSWORD.len() <= SCHEMA_CAP_MAX_CHARS);
     }
 
     /// I10: `curtain` and `maintenance_curtain` only where the curtain can be shown; the order

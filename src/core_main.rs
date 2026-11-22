@@ -431,6 +431,15 @@ pub fn core_main() -> Option<CoreMainAction> {
             }
             return None;
         } else if args[0] == "--password" {
+            // Sense Remote (permanent password plan §6.3): with a role installed the permanent
+            // password is changed only inside the app, after a Sense sign-in (the main IPC
+            // refuses this write too, `sense::password::guard`).
+            if crate::sense::password::guard::refuses_cli_password(
+                &crate::sense::installed_role_state(),
+            ) {
+                println!("{}", crate::sense::password::CLI_PASSWORD_REFUSED);
+                return None;
+            }
             if is_cli_setting_change_disabled() {
                 println!("Settings are disabled!");
                 return None;
