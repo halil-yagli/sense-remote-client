@@ -401,6 +401,9 @@ pub enum Data {
     // password, UI -> `--server` and, on macOS, `--server` -> root daemon (`_service` channel,
     // `Begin` / `Set` / `Cancel` / `StatusQuery` only).
     SensePassword(SensePasswordIpc),
+    // Sense Remote (S7-b): the Controller started (true) / stopped (false) recording this
+    // connection; connection -> connection manager (red dot, recording strip).
+    SenseRecording(bool),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),

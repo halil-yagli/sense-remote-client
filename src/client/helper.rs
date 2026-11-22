@@ -11,6 +11,10 @@ pub struct QualityStatus {
     pub target_bitrate: Option<i32>,
     pub codec_format: Option<CodecFormat>,
     pub chroma: Option<String>,
+    // Sense Remote (S10, O13): ms since the last decoded frame, and the loss estimate in
+    // percent (`sense::link_quality`).
+    pub last_frame_ms: Option<i64>,
+    pub loss_est: Option<f32>,
 }
 
 #[inline]

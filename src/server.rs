@@ -500,6 +500,9 @@ impl Server {
         self.connections.remove(&conn.id());
         #[cfg(target_os = "macos")]
         self.update_enable_retina();
+        // Sense Remote (S7-a): a closed connection watches nothing.
+        #[cfg(windows)]
+        self.sense_update_watched();
     }
 
     pub fn close_connections(&mut self) {
@@ -534,7 +537,38 @@ impl Server {
             }
             #[cfg(target_os = "macos")]
             self.update_enable_retina();
+            // Sense Remote (S7-a): the watched screens changed.
+            #[cfg(windows)]
+            if Self::is_video_service_name(name) {
+                self.sense_update_watched();
+            }
         }
+    }
+
+    // Sense Remote (S7-a, H5): the screens any connection watches turn green on the maintenance
+    // curtain. Screen indexes are those of the display list the Controller got.
+    #[cfg(windows)]
+    fn sense_update_watched(&self) {
+        let prefix = VideoSource::Monitor.service_name_prefix();
+        let displays = display_service::get_sync_displays();
+        let mut watched: Vec<_> = self
+            .services
+            .iter()
+            .filter_map(|(name, s)| {
+                let idx: usize = name.strip_prefix(prefix)?.parse().ok()?;
+                if !self.connections.keys().any(|id| s.is_subed(*id)) {
+                    return None;
+                }
+                let d = displays.get(idx)?;
+                Some(crate::sense::curtain::WatchedDisplay {
+                    name: d.name.clone(),
+                    x: d.x,
+                    y: d.y,
+                })
+            })
+            .collect();
+        watched.sort_by(|a, b| a.name.cmp(&b.name));
+        crate::sense::curtain::set_watched(watched);
     }
 
     // get a new unique id
