@@ -496,7 +496,7 @@ mod win {
     /// `installer_handoff::directory::create`); fails when it already exists.
     pub(super) fn create_protected_dir(path: &Path) -> Result<(), String> {
         use windows::{
-            core::{HSTRING, PCWSTR},
+            core::{w, PCWSTR},
             Win32::{
                 Foundation::{LocalFree, HLOCAL},
                 Security::{
@@ -917,7 +917,7 @@ mod win {
         let _ = run("taskkill", &taskkill_args(std::process::id()));
         let result = match mirror(&prev, &install) {
             Ok(()) => {
-                if let Err(err) = store::store_installed_version(before.from.unwrap_or(0)) {
+                if let Err(err) = crate::sense::update::store_win::store_installed_version(before.from.unwrap_or(0)) {
                     log::error!("Sense Remote: version not restored: {err}");
                 }
                 write_state(&rolled_back_state(&before));
@@ -970,7 +970,7 @@ mod win {
                 Ok(())
             }
             SelfCheck::Healthy => {
-                if let Err(err) = store::store_installed_version(mine) {
+                if let Err(err) = crate::sense::update::store_win::store_installed_version(mine) {
                     log::error!("Sense Remote: version not stored: {err}");
                 }
                 state.state = StoredState::Installed;
