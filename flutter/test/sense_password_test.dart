@@ -688,5 +688,7 @@ void main() {
       await expectLater(find.byKey(const Key('golden')),
           matchesGoldenFile('goldens/sense_password_about.png'));
     });
-  });
+    // Sense Remote: goldens are rendered on the Linux runner; text rasterises
+    // differently on macOS/Windows, so compare them only on Linux.
+  }, skip: !Platform.isLinux);
 }
