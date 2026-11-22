@@ -217,24 +217,28 @@ class SenseButton extends StatelessWidget {
   ({Color bg, Color border, Color fg}) _colors(SenseInteractionState s) {
     switch (kind) {
       case SenseButtonKind.normal:
-        final bg = s.pressed
+        final normalBg = s.pressed
             ? SenseColors.raised
             : s.hovered
                 ? SenseColors.hover
                 : SenseColors.bg;
-        return (bg: bg, border: s.hovered ? SenseColors.lineStrong : SenseColors.line, fg: SenseColors.text);
+        return (
+          bg: normalBg,
+          border: s.hovered ? SenseColors.lineStrong : SenseColors.line,
+          fg: SenseColors.text,
+        );
       case SenseButtonKind.primary:
       case SenseButtonKind.on:
         // `.btn.pri:hover` #E6E6EA: white at 90 % on black.
-        final bg = s.pressed
+        final whiteBg = s.pressed
             ? SenseColors.textSecondary
             : s.hovered
                 ? Color.alphaBlend(SenseColors.text.withOpacity(0.9), SenseColors.bg)
                 : SenseColors.text;
-        return (bg: bg, border: bg, fg: SenseColors.bg);
+        return (bg: whiteBg, border: whiteBg, fg: SenseColors.bg);
       case SenseButtonKind.danger:
-        final bg = s.hovered || s.pressed ? SenseColors.dangerHover : SenseColors.danger;
-        return (bg: bg, border: bg, fg: SenseColors.text);
+        final redBg = s.hovered || s.pressed ? SenseColors.dangerHover : SenseColors.danger;
+        return (bg: redBg, border: redBg, fg: SenseColors.text);
     }
   }
 
