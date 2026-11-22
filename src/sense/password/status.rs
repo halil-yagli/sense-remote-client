@@ -47,23 +47,46 @@ impl AccessRecord {
     }
 }
 
-/// Pure part of the status: the ack goes along for `PASSWORD_ACK_REPORT_S` after it was made
-/// (the panel ignores a repeated `gid`); an ack that is not JSON is left out.
-pub fn status_from(perm_set: bool, record: Option<&AccessRecord>, now: i64) -> AccessStatus {
-    let ack = record.and_then(|record| {
-        let ack_at = record.ack_at?;
-        if now.saturating_sub(ack_at) >= super::PASSWORD_ACK_REPORT_S {
-            return None;
-        }
-        serde_json::from_str::<Value>(record.ack.as_deref()?)
-            .ok()
-            .filter(Value::is_object)
-    });
+/// Whether an ack made at `ack_at` still goes into the heartbeat at `now`: for
+/// `PASSWORD_ACK_REPORT_S` after it was made, and not when its time lies in the future by more
+/// than the grant's clock skew (`grant::CLOCK_SKEW_BEFORE_S`).
+pub fn ack_is_reported(ack_at: i64, now: i64) -> bool {
+    now.checked_sub(ack_at).is_some_and(|age| {
+        (-super::grant::CLOCK_SKEW_BEFORE_S..super::PASSWORD_ACK_REPORT_S).contains(&age)
+    })
+}
+
+/// The one place that builds the status from what a platform store keeps (Windows:
+/// `status_from`; macOS `access.json` can call it the same way). `ack` is the signed `{k,p,s}`;
+/// anything that is not an object is left out.
+pub fn access_status(
+    perm_set: bool,
+    changed_at: Option<i64>,
+    ack: Option<Value>,
+    ack_at: Option<i64>,
+    now: i64,
+) -> AccessStatus {
+    let ack = ack
+        .filter(Value::is_object)
+        .filter(|_| ack_at.is_some_and(|at| ack_is_reported(at, now)));
     AccessStatus {
         perm_set,
-        changed_at: record.map(|record| record.changed_at),
+        changed_at,
         ack,
     }
+}
+
+/// `access_status` from the Windows record (the ack is stored as JSON text).
+pub fn status_from(perm_set: bool, record: Option<&AccessRecord>, now: i64) -> AccessStatus {
+    access_status(
+        perm_set,
+        record.map(|record| record.changed_at),
+        record
+            .and_then(|record| record.ack.as_deref())
+            .and_then(|ack| serde_json::from_str(ack).ok()),
+        record.and_then(|record| record.ack_at),
+        now,
+    )
 }
 
 /// The status as the privileged process sees it now. Elsewhere (and off Windows until U12) the
@@ -151,6 +174,16 @@ mod tests {
             serde_json::to_value(&old).unwrap(),
             json!({"perm_set": true, "changed_at": 1_800_000_000})
         );
+    }
+
+    #[test]
+    fn ack_from_the_future_is_bounded_by_the_grant_skew() {
+        let ack = r#"{"k":"0011223344556677","p":"e30","s":"x"}"#.to_owned();
+        let record = AccessRecord::after_change(1_800_000_000, Some(ack));
+        assert!(status_from(true, Some(&record), 1_800_000_000 - 300).ack.is_some());
+        assert_eq!(status_from(true, Some(&record), 1_800_000_000 - 301).ack, None);
+        assert!(ack_is_reported(0, 86_399) && !ack_is_reported(0, 86_400));
+        assert!(!ack_is_reported(i64::MAX, -10)); // no overflow
     }
 
     #[test]

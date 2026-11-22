@@ -9,8 +9,8 @@
 //! The main channel's handler also runs in other processes that listen on it (a user process
 //! can take over the main IPC while the service restarts, `ipc::get_id`): this acts only in the
 //! SYSTEM `--server` process and answers `None` everywhere else. The UI checks the other way
-//! round that the pipe's server is a SYSTEM process before it sends a password
-//! (`is_service_pid`).
+//! round that the pipe is SYSTEM-owned with a restricted DACL before it sends a password
+//! (`ipc::connect_main_system`).
 //!
 //! `Service` is the pure state machine (tested on every platform); `on_ipc` is the Windows glue
 //! (config, registry, time).
@@ -163,7 +163,7 @@ pub fn sign_ack_for(
 }
 
 #[cfg(windows)]
-pub use service::{is_service_pid, is_service_process, on_ipc};
+pub use service::{is_service_process, on_ipc};
 
 #[cfg(not(windows))]
 pub async fn on_ipc(message: SensePasswordIpc) -> Option<SensePasswordIpc> {
@@ -183,13 +183,6 @@ mod service {
     /// The process that may write the permanent password: `--server` running as SYSTEM.
     pub fn is_service_process() -> bool {
         crate::is_server() && crate::platform::is_root()
-    }
-
-    /// UI side: the process at the other end of the main pipe runs as SYSTEM (the service's
-    /// `--server`), not a user process that took the pipe over.
-    pub fn is_service_pid(pid: Option<u32>) -> bool {
-        pid.and_then(|pid| crate::platform::windows::is_process_running_as_system(pid).ok())
-            .unwrap_or(false)
     }
 
     fn context() -> GrantContext {

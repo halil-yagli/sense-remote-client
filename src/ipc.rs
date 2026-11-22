@@ -1786,6 +1786,16 @@ pub async fn connect(ms_timeout: u64, postfix: &str) -> ResultType<ConnectionTmp
     }
 }
 
+/// Sense Remote (permanent password plan §3.7, U11): main IPC only when its server is the
+/// SYSTEM `--server` (pipe owned by SYSTEM, restricted DACL). The UI sends a new permanent
+/// password and its grant only this way.
+#[cfg(windows)]
+pub async fn connect_main_system(ms_timeout: u64) -> ResultType<ConnectionTmpl<ConnClient>> {
+    Ok(ConnectionTmpl::new(
+        timeout(ms_timeout, ipc_windows::connect_system(&Config::ipc_path(""))).await??,
+    ))
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub async fn connect_for_uid(
     ms_timeout: u64,
