@@ -135,7 +135,8 @@ void main() {
     expect(SenseColors.all.values, isNot(contains(const Color(0xFF0071FF))),
         reason: 'no RustDesk blue (YH T1)');
     expect(SenseMotion.popupOpen.duration.inMilliseconds, 140);
-    expect(SenseMotion.islandExpand.curve, const Cubic(0.3, 1.45, 0.45, 1));
+    final island = SenseMotion.islandExpand.curve;
+    expect([island.a, island.b, island.c, island.d], [0.3, 1.45, 0.45, 1.0]);
     expect(SenseMotion.islandExpand.duration.inMilliseconds, 420);
     expect(SenseMotion.callRing.duration.inMilliseconds, 1600);
     expect(SenseMotion.groupPulse.duration.inMilliseconds, 4500);
