@@ -21,13 +21,19 @@ pub const NOT_INSTALLED: &str = "not_installed";
 pub const NOT_NEWER: &str = "not_newer";
 pub const FAILED: &str = "failed";
 
-/// Exit codes of `--sense-upgrade-local`. Sense Remote (U7): the same values as
-/// `apply_win::UPGRADE_*` of package U3 (written here so U7 does not depend on U3's file).
-pub const EXIT_OK: i32 = 0;
-pub const EXIT_FAILED: i32 = 1;
-pub const EXIT_NOT_INSTALLED: i32 = 2;
-pub const EXIT_NOT_NEWER: i32 = 3;
-pub const EXIT_NOT_ELEVATED: i32 = 4;
+/// Exit codes of `--sense-upgrade-local`: the constants of package U3 (`apply_win::UPGRADE_*`).
+pub use super::apply_win::{
+    UPGRADE_FAILED as EXIT_FAILED, UPGRADE_NOT_ELEVATED as EXIT_NOT_ELEVATED,
+    UPGRADE_NOT_INSTALLED as EXIT_NOT_INSTALLED, UPGRADE_NOT_NEWER as EXIT_NOT_NEWER,
+    UPGRADE_OK as EXIT_OK,
+};
+
+/// Pure (Windows): the setup screen must not run as the installed program's file name:
+/// `update_me` ends every other `SenseRemote.exe` process (U3), so the screen would close
+/// while it waits for the elevated step. The setup file is `SenseRemote-Kurulum-<n>.exe`.
+pub fn runs_as_installed_exe(file_name: &str) -> bool {
+    file_name.eq_ignore_ascii_case(super::apply_win::INSTALLED_EXE)
+}
 
 /// Text of the macOS administrator password prompt.
 pub const PROMPT_MAC: &str = "Sense Remote, yeni sürüme geçişi tamamlamak için yönetici izni istiyor.";
@@ -158,6 +164,11 @@ mod win {
                 return FAILED.to_owned();
             }
         };
+        let name = exe.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        if runs_as_installed_exe(name) {
+            log::error!("Sense Remote: manual move refused, setup runs as the installed exe name");
+            return FAILED.to_owned();
+        }
         match run_elevated(&exe, ARG_UPGRADE_LOCAL) {
             Ok(exit) => {
                 let code = code_for_exit(exit as i32);
@@ -299,6 +310,22 @@ mod tests {
         assert_eq!(code_for_exit(EXIT_NOT_ELEVATED), FAILED);
         assert_eq!(code_for_exit(-1), FAILED);
         assert_eq!(code_for_exit(259), FAILED);
+    }
+
+    #[test]
+    fn exit_codes_are_u3_constants() {
+        assert_eq!(
+            [EXIT_OK, EXIT_FAILED, EXIT_NOT_INSTALLED, EXIT_NOT_NEWER, EXIT_NOT_ELEVATED],
+            [0, 1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn setup_never_runs_as_the_installed_exe() {
+        assert!(runs_as_installed_exe("SenseRemote.exe"));
+        assert!(runs_as_installed_exe("senseremote.EXE"));
+        assert!(!runs_as_installed_exe("SenseRemote-Kurulum-3.exe"));
+        assert!(!runs_as_installed_exe(""));
     }
 
     fn env() -> ScriptEnv {
