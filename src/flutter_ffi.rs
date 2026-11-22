@@ -2542,6 +2542,37 @@ pub fn main_sense_installed_version() -> i32 {
     crate::sense::update::installed_version()
 }
 
+// Sense Remote (permanent password plan 2026-11-21, §3.7): the "Kalıcı şifre" page. Every
+// answer is JSON or a code; no password, token or key is ever returned. U9: the feature is off
+// (`sense::password::SUPPORTED`), every call answers `unsupported`.
+pub fn main_sense_password_status() -> String {
+    crate::sense::password::ui::status()
+}
+
+pub fn main_sense_password_begin() -> String {
+    crate::sense::password::ui::begin()
+}
+
+pub fn main_sense_password_login_status() -> String {
+    crate::sense::password::ui::login_status()
+}
+
+pub fn main_sense_password_unlock() -> String {
+    crate::sense::password::ui::unlock()
+}
+
+pub fn main_sense_password_check(password: String) -> String {
+    crate::sense::password::ui::check(&password)
+}
+
+pub fn main_sense_password_set(password: String) -> String {
+    crate::sense::password::ui::set(password)
+}
+
+pub fn main_sense_password_cancel() {
+    crate::sense::password::ui::cancel()
+}
+
 // Sense Remote (update plan 2026-11-21, §8): the one-time manual move from version 2, from the
 // setup screen. "" on success, otherwise `cancelled`, `not_installed`, `not_newer` or `failed`.
 pub fn install_sense_upgrade_in_place() -> String {

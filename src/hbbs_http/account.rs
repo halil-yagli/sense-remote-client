@@ -38,6 +38,9 @@ pub struct OidcAuthUrl {
 pub enum LoginPurpose {
     App,
     Install,
+    // Sense Remote (permanent password plan §3.4): unlocking the permanent password; the token
+    // is short-lived and never saved as the app sign-in.
+    Password,
 }
 
 impl LoginPurpose {
@@ -45,6 +48,7 @@ impl LoginPurpose {
         match self {
             Self::App => "app",
             Self::Install => "install",
+            Self::Password => "password",
         }
     }
 }
@@ -507,7 +511,11 @@ mod sense_tests {
 
     #[test]
     fn auth_body_says_why_we_sign_in() {
-        for (purpose, value) in [(LoginPurpose::App, "app"), (LoginPurpose::Install, "install")] {
+        for (purpose, value) in [
+            (LoginPurpose::App, "app"),
+            (LoginPurpose::Install, "install"),
+            (LoginPurpose::Password, "password"),
+        ] {
             let body = auth_request_body(
                 "Google",
                 "123456789",

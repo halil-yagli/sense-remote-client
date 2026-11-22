@@ -15,6 +15,7 @@ import 'sense_cm_style.dart';
 import 'sense_cm_widgets.dart';
 import 'sense_home_mac.dart';
 import 'sense_home_strings.dart';
+import 'sense_password_page.dart'; // Sense Remote: permanent password line (U13)
 import 'sense_update_view.dart'; // Sense Remote: update strip (§6)
 import '../widgets/sense_version_chip.dart'; // Sense Remote: version label (§6)
 
@@ -71,11 +72,18 @@ class SenseHostHome extends StatelessWidget {
     final location = bind.mainGetBuildinOption(key: kSenseLocationOption);
     // Sense Remote (update plan §6): version label and update strip.
     final version = senseAppVersion();
+    // Sense Remote (permanent password plan §4): one line, a tap opens About.
     Widget view(List<SenseMacPermission> macMissing,
             void Function(SenseMacPermission)? openMacPermission) =>
-        SenseUpdateWatch(
+        SensePasswordHostWatch(
+          onChanged: onMacPermissionsChanged,
+          builder: (_, line) => SenseUpdateWatch(
           onLayoutChanged: onMacPermissionsChanged,
-          builder: (_, strip) => Obx(() => SenseHostHomeView(
+          builder: (_, strip) {
+            final password = line == null
+                ? null
+                : SensePasswordHostLine(text: line, onTap: senseOpenAbout);
+            return Obx(() => SenseHostHomeView(
               name: name,
               location: location,
               deviceId: gFFI.serverModel.serverId.text,
@@ -88,7 +96,9 @@ class SenseHostHome extends StatelessWidget {
               versionChip:
                   SenseVersionChip(version: version, onTap: senseOpenAbout),
               updateStrip: strip,
-            )));
+              passwordLine: password,
+            ));
+          }));
     // Sense Remote (Mac M7): macOS privacy permissions are part of "ready" on
     // a Mac Host; Windows keeps the view as it was.
     if (!isMacOS) return view(const [], null);
@@ -114,6 +124,7 @@ class SenseHostHomeView extends StatelessWidget {
     this.onOpenMacPermission,
     this.versionChip,
     this.updateStrip,
+    this.passwordLine,
   });
 
   final String name;
@@ -131,6 +142,10 @@ class SenseHostHomeView extends StatelessWidget {
   /// strip under it (null when there is nothing to say).
   final Widget? versionChip;
   final Widget? updateStrip;
+
+  /// Sense Remote (permanent password plan §4): "Kalıcı şifre: ayarlı" line
+  /// with a lock; null hides it.
+  final Widget? passwordLine;
 
   @override
   Widget build(BuildContext context) {
@@ -249,6 +264,10 @@ class SenseHostHomeView extends StatelessWidget {
               ],
             ),
           ),
+          if (passwordLine != null) ...[
+            const SizedBox(height: 10),
+            passwordLine!,
+          ],
           const SizedBox(height: 14),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
