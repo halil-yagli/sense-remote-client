@@ -13,13 +13,21 @@ name: Sense Remote PR
 on:
   pull_request:
     branches: [master]
+  # sense-upstream.yml'nin GITHUB_TOKEN ile actigi PR pull_request is akisini tetiklemez; o is
+  # bu is akisini PR dalinda elle baslatir (pr girdisi = PR numarasi).
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Kontrol edilecek PR numarasi (degisen dosyalar buradan okunur)"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 # Aynı PR'a yeni commit gelince eski koşu iptal edilir.
 concurrency:
-  group: sense-pr-${{ github.event.pull_request.number }}
+  group: sense-pr-${{ github.event.pull_request.number || inputs.pr }}
   cancel-in-progress: true
 
 env:
@@ -51,7 +59,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
           gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" \
             --jq '.[] | .filename, (.previous_filename // empty)' > files.txt
@@ -140,7 +148,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
           gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[].filename' > "$RUNNER_TEMP/files.txt"
           files=()
