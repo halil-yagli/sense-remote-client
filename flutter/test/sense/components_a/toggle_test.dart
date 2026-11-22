@@ -90,7 +90,7 @@ void main() {
     final handle = tester.ensureSemantics();
     await pumpSense(tester, const _Host());
     expect(
-        tester.getSemantics(find.byType(SenseToggle)),
+        tester.getSemantics(find.bySemanticsLabel('Pano eşitle')),
         containsSemantics(
             label: 'Pano eşitle',
             isButton: true,
