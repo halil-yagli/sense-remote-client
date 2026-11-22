@@ -71,9 +71,10 @@ pub fn check(password: &str, rid: &str) -> Result<(), &'static str> {
     if !rid.is_empty() && password.contains(rid) {
         return Err("contains_id");
     }
-    // common: only A–Z are lowered (no locale-dependent mapping).
-    let lower = password.to_ascii_lowercase();
-    if COMMON.iter().any(|word| lower.contains(word)) {
+    // common: only A–Z are lowered (no locale-dependent mapping). Sense Remote (security review
+    // C2): the lowered copy is a password too, so it lives in a buffer that is zeroed on drop.
+    let lower = super::SensePasswordSecret::new(password.to_ascii_lowercase());
+    if COMMON.iter().any(|word| lower.expose().contains(word)) {
         return Err("common");
     }
     Ok(())
