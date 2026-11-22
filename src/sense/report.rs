@@ -1363,6 +1363,27 @@ mod tests {
         assert!(update::CAP_UPDATE.len() <= SCHEMA_CAP_MAX_CHARS);
     }
 
+    // Sense Remote (U8): the heartbeat's `caps` (`heartbeat_caps`) carries `update` on Windows
+    // and macOS (run by the Windows and Mac CI jobs), right before `password`, and never on Linux.
+    #[test]
+    fn heartbeat_caps_carry_update_on_windows_and_macos() {
+        let on = cfg!(any(windows, target_os = "macos"));
+        for curtain in [false, true] {
+            let caps = heartbeat_caps(curtain);
+            assert_eq!(caps.iter().filter(|cap| *cap == "update").count(), usize::from(on));
+            if on {
+                let at = |name: &str| caps.iter().position(|cap| cap == name);
+                assert_eq!(at("update").map(|i| i + 1), at("password"), "{caps:?}");
+            }
+        }
+        #[cfg(windows)]
+        assert!(heartbeat_caps(true).contains(&"update".to_owned()));
+        #[cfg(target_os = "macos")]
+        assert!(heartbeat_caps(false).contains(&"update".to_owned()));
+        #[cfg(not(any(windows, target_os = "macos")))]
+        assert!(!heartbeat_caps(true).contains(&"update".to_owned()));
+    }
+
     // Permanent password plan §3.5: `password` follows its one switch.
     #[test]
     fn password_cap_follows_the_switch() {

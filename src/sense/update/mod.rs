@@ -10,8 +10,9 @@
 //!
 //! U0 only fixes the signatures and wires the shared files (`sense.rs`, `ipc.rs`,
 //! `flutter_ffi.rs`, `hbbs_http/sync.rs`, `envelope_apply.rs`, `report.rs`, `core_main.rs`,
-//! `service.rs`). Nothing here acts yet: `SUPPORTED` is false, every entry point is a no-op or
-//! answers "unsupported", and `caps` does not carry `update`.
+//! `service.rs`). Sense Remote (U8): `SUPPORTED` is now true on Windows and macOS; on other
+//! platforms every entry point stays a no-op or answers "unsupported" and `caps` does not carry
+//! `update`.
 //!
 //! Who fills what (plan §11.1; the shared files above are not touched again):
 //! - U1 `manifest`, `order`, `keys`: verification (§3.3) and `SENSE_RELEASE_KEYS`.
@@ -20,10 +21,10 @@
 //! - U3 `store_win`, `apply_win`; U4 `store_mac`, `apply_mac`, `daemon_mac`, `sign_mac`:
 //!   the platform side (§4.4, §5, §7).
 //! - U7 `manual`: the one-time manual move from version 2 (§8).
-//! - U8 flips `SUPPORTED`.
+//! - U8 flips `SUPPORTED` (Windows and macOS on, other platforms off).
 //!
 //! U2 fills the engine and adds the runner (`runner.rs`: the thread, IPC and heartbeat glue
-//! around the pure `engine::next`). All of it stays off while `SUPPORTED` is false: no timer
+//! around the pure `engine::next`). All of it stays off where `SUPPORTED` is false: no timer
 //! starts, the heartbeat carries no `update`, the UI gets the idle status.
 //!
 //! Every module is compiled on every platform (the shared files call them without `cfg`); a
@@ -72,8 +73,13 @@ macro_rules! wire_enum {
     };
 }
 
+// Sense Remote (U8): every module is compiled everywhere; only the other platform's modules are
+// allowed to be unused there (macOS runs the daemon, Windows the runner in `--server`).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod apply_mac;
+#[cfg_attr(not(windows), allow(dead_code))]
 pub mod apply_win;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod daemon_mac;
 pub mod download;
 pub mod engine;
@@ -82,10 +88,14 @@ pub mod keys;
 pub mod manifest;
 pub mod manual;
 pub mod order;
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub mod runner;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod sign_mac;
 pub mod store;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod store_mac;
+#[cfg_attr(not(windows), allow(dead_code))]
 pub mod store_win;
 
 /// Platform side of the engine: the same function set in both modules. Other platforms get the
@@ -101,8 +111,9 @@ pub use store_win as store_os;
 
 /// This build installs signed updates. The one switch: `caps` carries `update` only when it is
 /// true (`report.rs`), and the panel gives releases and orders only to computers reporting it.
-/// U8 turns it on per platform, after U1–U4, U6 and U7.
-pub const SUPPORTED: bool = false;
+/// Sense Remote (U8): on for Windows and macOS (U1–U4, U6, U7 merged); off elsewhere (Linux has
+/// no installer side).
+pub const SUPPORTED: bool = cfg!(any(windows, target_os = "macos"));
 /// `SENSE_CAPS.update` (§3.5).
 pub const CAP_UPDATE: &str = "update";
 /// Largest version number of the contract (`Version`, §3.2).
@@ -576,18 +587,23 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // U0: the skeleton changes no behaviour. U8 replaces this test when it turns the switch on.
+    // Sense Remote (U8): the switch is on exactly on Windows and macOS.
     #[test]
-    fn skeleton_is_switched_off() {
-        assert!(!SUPPORTED);
-        assert_eq!(heartbeat_status(), None);
-        let mut sense = json!({ "v": 1 });
-        extend_heartbeat(&mut sense);
-        assert_eq!(sense, json!({ "v": 1 }));
-        assert_eq!(request_install(4), "unsupported");
-        // Sense Remote (U7): the manual move is real on Windows and macOS; elsewhere it fails.
+    fn switch_is_on_for_windows_and_macos_only() {
+        assert_eq!(SUPPORTED, cfg!(any(windows, target_os = "macos")));
+        #[cfg(any(windows, target_os = "macos"))]
+        assert!(SUPPORTED);
         #[cfg(not(any(windows, target_os = "macos")))]
-        assert_eq!(manual::upgrade_in_place(), "failed");
+        {
+            assert!(!SUPPORTED);
+            assert_eq!(heartbeat_status(), None);
+            let mut sense = json!({ "v": 1 });
+            extend_heartbeat(&mut sense);
+            assert_eq!(sense, json!({ "v": 1 }));
+            assert_eq!(request_install(4), "unsupported");
+            // Sense Remote (U7): the manual move is real on Windows and macOS; elsewhere it fails.
+            assert_eq!(manual::upgrade_in_place(), "failed");
+        }
     }
 
     // Names are the panel's (`sense-ext.ts`), in the contract's order.
@@ -769,7 +785,8 @@ mod tests {
         }
     }
 
-    // While switched off nothing reaches `--server` and no engine runs.
+    // While switched off (Linux) nothing reaches `--server` and no engine runs.
+    #[cfg(not(any(windows, target_os = "macos")))]
     #[test]
     fn switched_off_asks_nobody() {
         assert!(!SUPPORTED);
@@ -778,6 +795,16 @@ mod tests {
         assert_eq!(runner::heartbeat_status(), None);
         let status: GuiStatus = serde_json::from_str(&gui_status_json()).unwrap();
         assert_eq!(status, GuiStatus::idle(current_version()));
+    }
+
+    // Sense Remote (U8): switched on, the UI is told this build installs updates even when
+    // `--server` is not there to ask (the test process is not `--server`).
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn switched_on_reports_supported() {
+        let status: GuiStatus = serde_json::from_str(&gui_status_json()).unwrap();
+        assert!(status.supported);
+        assert_eq!(status.current, current_version());
     }
 
     #[test]

@@ -40,6 +40,8 @@ wire_enum!(
 impl StoredState {
     /// The state as the heartbeat reports it; `unhealthy` is still `installing` for the panel
     /// (the guard decides what it becomes).
+    // Sense Remote (U8): read by the Windows runner; the macOS daemon reports its own way.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn reported(self) -> UpdateState {
         match self {
             Self::Unhealthy => UpdateState::Installing,
