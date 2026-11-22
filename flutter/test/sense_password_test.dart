@@ -232,7 +232,7 @@ void main() {
       'not_incoming': 'Bu bilgisayar yalnız bağlanır; kalıcı şifre gerekmez.',
       'unsupported': 'Bu özellik bu sürümde henüz açık değil.',
       'busy': 'Başka bir işlem sürüyor. Biraz sonra yeniden dene.',
-      'rate_limited': 'Çok fazla deneme. Birkaç dakika sonra yeniden dene.',
+      'rate_limited': 'Çok fazla deneme. 1 saat içinde yeniden dene.',
       'ipc_failed': 'Sense Remote servisine ulaşılamadı. Biraz sonra yeniden dene.',
       // unlock (PasswordGrantError + network + panel_outdated)
       'token_invalid': 'Giriş geçersiz, yeniden doğrula.',
