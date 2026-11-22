@@ -27,7 +27,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
-import 'sense_home_about.dart'; // Sense Remote
+import '../../sense/screens/controller/sense_home_about.dart'; // Sense Remote
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;

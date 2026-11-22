@@ -6,7 +6,7 @@ import 'package:draggable_float_widget/draggable_float_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
-import 'package:flutter_hbb/desktop/widgets/sense_cm_window.dart'; // Sense Remote
+import 'package:flutter_hbb/sense/screens/host_live/sense_cm_window.dart'; // Sense Remote
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/desktop/widgets/windows_cm_window_position.dart';
 import 'package:flutter_hbb/mobile/pages/home_page.dart';

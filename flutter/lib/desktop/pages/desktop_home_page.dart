@@ -25,10 +25,10 @@ import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
 // Sense Remote: Sense home screens (Controller project cards, small Host home).
-import 'sense_home_controller.dart';
-import 'sense_home_host.dart';
-import 'sense_home_mac.dart';
-import 'sense_home_strings.dart';
+import '../../sense/screens/controller/sense_home_controller.dart';
+import '../../sense/screens/host/sense_home_host.dart';
+import '../../sense/screens/host/sense_home_mac.dart';
+import '../../sense/screens/controller/sense_home_strings.dart';
 
 /// Sense Remote: role of this computer for the home screen (from the role
 /// the installer applied); `none` keeps the stock home screen.

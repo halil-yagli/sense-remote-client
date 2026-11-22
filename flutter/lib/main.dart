@@ -9,10 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
-import 'package:flutter_hbb/desktop/pages/sense_install_model.dart'
-    show senseMacNeedsSetup; // Sense Remote (Mac M3)
-import 'package:flutter_hbb/desktop/pages/sense_install_page.dart'
-    show senseMacNeedsMove; // Sense Remote (U7)
+import 'package:flutter_hbb/sense/screens/install/sense_install_page.dart'
+    show senseInstallBoot; // Sense Remote (Mac M3, U7)
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
@@ -20,8 +18,7 @@ import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_remote_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_terminal_screen.dart';
 import 'package:flutter_hbb/desktop/widgets/refresh_wrapper.dart';
-import 'package:flutter_hbb/desktop/widgets/sense_cm_geometry.dart'; // Sense Remote
-import 'package:flutter_hbb/desktop/widgets/sense_cm_window.dart'; // Sense Remote
+import 'package:flutter_hbb/sense/screens/host_live/sense_cm_window.dart'; // Sense Remote
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -116,22 +113,14 @@ Future<void> main(List<String> args) async {
   } else {
     desktopType = DesktopType.main;
     await windowManager.ensureInitialized();
-    // Sense Remote (Mac M3): on macOS the app is its own setup file. Without an installed
-    // role (root-owned state file) the Sense setup wizard opens instead of the main window;
-    // Windows gets there with `--install` from the setup exe. The role is read from the
-    // native side, so the environment is initialised here once and not again below.
+    // Sense Remote (Mac M3, U7): on macOS the app is its own setup file; the Sense setup
+    // wizard may open instead of the main window (see senseInstallBoot). The role is read from
+    // the native side, so the environment is initialised here once and not again below.
     var envReady = false;
     if (isMacOS) {
       await initEnv(kAppTypeMain);
       envReady = true;
-      if (senseMacNeedsSetup(
-          isMac: true, roleInstalled: senseRoleInstalled())) {
-        runInstallPage(envReady: true);
-        return;
-      }
-      // Sense Remote (update plan §8, U7): the new app was dragged over version 2; the setup
-      // page shows "Geçişi tamamla" (bundle to root, service restarted, permissions).
-      if (senseRoleInstalled() && await senseMacNeedsMove()) {
+      if (await senseInstallBoot()) {
         runInstallPage(envReady: true);
         return;
       }
@@ -335,30 +324,13 @@ void runConnectionManagerScreen() async {
 bool _isCmReadyToShow = false;
 
 showCmWindow({bool isStartup = false}) async {
-  // Sense Remote: icon mode shows the small icon at its remembered place
-  // (bottom right first), always on top and off the task bar.
+  // Sense Remote: icon mode shows the small icon instead (see senseCmShowWindow).
   if (SenseCm.enabled) {
-    if (isStartup) {
-      WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
-          size: kSenseCmIconSize, alwaysOnTop: true);
-      await windowManager.waitUntilReadyToShow(windowOptions, null);
-      bind.mainHideDock();
-      await windowManager.setSkipTaskbar(true);
-      await SenseCm.showIcon();
-      await Future.wait([windowManager.show(), windowManager.setOpacity(1)]);
-      _isCmReadyToShow = true;
-    } else if (_isCmReadyToShow) {
-      if (await windowManager.getOpacity() != 1 ||
-          !await windowManager.isVisible()) {
-        await SenseCm.showIcon();
-        await windowManager.setOpacity(1);
-        await windowManager.show();
-        await windowManager.setAlwaysOnTop(true);
-      } else if (await windowManager.isMinimized()) {
-        // "Show desktop" and similar must not take the icon away.
-        await windowManager.restore();
-      }
-    }
+    _isCmReadyToShow = await senseCmShowWindow(
+        isStartup: isStartup,
+        readyToShow: _isCmReadyToShow,
+        startupOptions: (size) =>
+            getHiddenTitleBarWindowOptions(size: size, alwaysOnTop: true));
     return;
   }
   if (isStartup) {

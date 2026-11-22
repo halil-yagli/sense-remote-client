@@ -13,7 +13,7 @@ import 'package:window_manager/window_manager.dart';
 import '../common.dart';
 import '../common/formatter/id_formatter.dart';
 import '../desktop/pages/server_page.dart' as desktop;
-import '../desktop/widgets/sense_cm_window.dart'; // Sense Remote
+import '../sense/screens/host_live/sense_cm_window.dart'; // Sense Remote
 import '../desktop/widgets/tabbar_widget.dart';
 import '../mobile/pages/server_page.dart';
 import '../mobile/widgets/android_file_transfer_setup.dart';

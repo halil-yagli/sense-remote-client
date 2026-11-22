@@ -13,7 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../common.dart';
 // Sense Remote: pairing code texts and 3+3 format (wave 3 K-GİRİŞ).
-import '../../desktop/pages/sense_install_strings.dart';
+import '../../sense/screens/install/sense_install_strings.dart';
 import './dialog.dart';
 import './oidc_auth_status.dart';
 
