@@ -135,7 +135,8 @@ mod tests {
         );
     }
 
-    // U0: no store yet. Sense Remote (U4): macOS has its store (`store_mac`), tested there.
+    // U0: no store yet. Sense Remote: Windows (U3, `store_win`) and macOS (U4, `store_mac`)
+    // have their stores now, tested there.
     #[cfg(not(any(windows, target_os = "macos")))]
     #[test]
     fn skeleton_has_no_store() {
