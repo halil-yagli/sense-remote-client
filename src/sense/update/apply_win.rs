@@ -3,7 +3,7 @@
 //!
 //! The privileged folder is `<ProgramData>\SenseRemote` (`FOLDERID_ProgramData`). It is created
 //! in one step with its security descriptor (`CreateDirectoryW`, protected DACL: SYSTEM and
-//! Administrators only, `SENSE_DIR_DACL`). An existing folder is used only when it is a real
+//! Administrators only, `SENSE_DIR_SDDL`). An existing folder is used only when it is a real
 //! folder owned by SYSTEM or Administrators with exactly that DACL; anything else (a standard
 //! user can create folders in ProgramData beforehand) is moved aside under a random name and
 //! the folder is created again: an existing tree is never repaired and reused, so no handle,
@@ -57,9 +57,11 @@ pub const GUARD_TASK: &str = "SenseRemoteUpdateGuard";
 pub const INSTALLED_EXE: &str = "SenseRemote.exe";
 /// Service name (`crate::get_app_name()` of the installed program).
 pub const SERVICE: &str = "SenseRemote";
-/// DACL of `<ProgramData>\SenseRemote`: protected (no inheritance), full access for SYSTEM and
+/// Security of `<ProgramData>\SenseRemote`: owner Administrators (set explicitly: an elevated
+/// administrator's own account would otherwise become the owner, e.g. the built-in
+/// Administrator), protected DACL (no inheritance) with full access for SYSTEM and
 /// Administrators, inherited by everything inside. No one else, not even read.
-pub const SENSE_DIR_DACL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+pub const SENSE_DIR_SDDL: &str = "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
 
 /// `upgrade_local` exit codes (U7 maps them to `manual::*`).
 pub const UPGRADE_OK: i32 = 0;
@@ -492,7 +494,7 @@ mod win {
         }
     }
 
-    /// Creates the folder with `SENSE_DIR_DACL` in the same call (as upstream's
+    /// Creates the folder with `SENSE_DIR_SDDL` in the same call (as upstream's
     /// `installer_handoff::directory::create`); fails when it already exists.
     pub(super) fn create_protected_dir(path: &Path) -> Result<(), String> {
         use windows::{
@@ -512,9 +514,9 @@ mod win {
         let wide_path = crate::platform::wide_string(path_text);
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
         unsafe {
-            // The literal is `SENSE_DIR_DACL` (`w!` needs a literal; a test compares them).
+            // The literal is `SENSE_DIR_SDDL` (`w!` needs a literal; a test compares them).
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                w!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),
+                w!("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),
                 SDDL_REVISION_1,
                 &mut descriptor,
                 None,
@@ -1180,7 +1182,7 @@ mod tests {
     #[test]
     fn only_our_own_protected_folder_is_trusted() {
         // The descriptor the folder is created with is the one checked.
-        assert!(include_str!("apply_win.rs").contains(&format!("w!(\"{SENSE_DIR_DACL}\")")));
+        assert!(include_str!("apply_win.rs").contains(&format!("w!(\"{SENSE_DIR_SDDL}\")")));
         for good in [
             "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
             "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
