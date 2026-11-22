@@ -73,8 +73,13 @@ macro_rules! wire_enum {
     };
 }
 
+// Sense Remote (U8): every module is compiled everywhere; only the other platform's modules are
+// allowed to be unused there (macOS runs the daemon, Windows the runner in `--server`).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod apply_mac;
+#[cfg_attr(not(windows), allow(dead_code))]
 pub mod apply_win;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod daemon_mac;
 pub mod download;
 pub mod engine;
@@ -83,10 +88,14 @@ pub mod keys;
 pub mod manifest;
 pub mod manual;
 pub mod order;
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub mod runner;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod sign_mac;
 pub mod store;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod store_mac;
+#[cfg_attr(not(windows), allow(dead_code))]
 pub mod store_win;
 
 /// Platform side of the engine: the same function set in both modules. Other platforms get the

@@ -16,12 +16,15 @@ use crate::sense::identity::mac_script::{root_executed_paths, ScriptEnv, FAILED_
 
 /// Result codes of `upgrade_in_place` (FFI `install_sense_upgrade_in_place`).
 pub const OK: &str = "";
+#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 pub const CANCELLED: &str = "cancelled";
 pub const NOT_INSTALLED: &str = "not_installed";
 pub const NOT_NEWER: &str = "not_newer";
 pub const FAILED: &str = "failed";
 
 /// Exit codes of `--sense-upgrade-local`: the constants of package U3 (`apply_win::UPGRADE_*`).
+// Sense Remote (U8): the Windows step; unused in the macOS build.
+#[cfg_attr(target_os = "macos", allow(unused_imports))]
 pub use super::apply_win::{
     UPGRADE_FAILED as EXIT_FAILED, UPGRADE_NOT_ELEVATED as EXIT_NOT_ELEVATED,
     UPGRADE_NOT_INSTALLED as EXIT_NOT_INSTALLED, UPGRADE_NOT_NEWER as EXIT_NOT_NEWER,
@@ -31,15 +34,18 @@ pub use super::apply_win::{
 /// Pure (Windows): the setup screen must not run as the installed program's file name:
 /// `update_me` ends every other `SenseRemote.exe` process (U3), so the screen would close
 /// while it waits for the elevated step. The setup file is `SenseRemote-Kurulum-<n>.exe`.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn runs_as_installed_exe(file_name: &str) -> bool {
     file_name.eq_ignore_ascii_case(super::apply_win::INSTALLED_EXE)
 }
 
 /// Text of the macOS administrator password prompt.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const PROMPT_MAC: &str = "Sense Remote, yeni sürüme geçişi tamamlamak için yönetici izni istiyor.";
 
 /// Pure: the code for the exit code of the elevated Windows step. Anything unknown (also
 /// "not elevated", which can only mean the prompt did not give the rights) is `failed`.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn code_for_exit(code: i32) -> &'static str {
     match code {
         EXIT_OK => OK,
