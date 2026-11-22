@@ -22,8 +22,8 @@ import '../../common/shared_state.dart';
 import '../../utils/image.dart';
 import '../widgets/remote_toolbar.dart';
 // Sense Remote: connection window parts.
-import '../widgets/sense_remote_strings.dart' show kSenseRemoteWindow;
-import '../widgets/sense_remote_window.dart'
+import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
+import '../../sense/screens/session/sense_remote_window.dart'
     show SenseRemoteOverlay, SenseRemoteSession;
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';

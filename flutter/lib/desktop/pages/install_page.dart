@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
-import 'package:flutter_hbb/desktop/pages/sense_install_page.dart';
+import 'package:flutter_hbb/sense/screens/install/sense_install_page.dart';
 import 'package:flutter_hbb/desktop/widgets/install_directory_confirmation.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
