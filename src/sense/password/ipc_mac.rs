@@ -13,8 +13,9 @@
 //! storage value.
 //!
 //! Limits in the daemon (U9 review: a new process must not reset them):
-//! - one call a second per peer process, `MAX_CALLS_PER_UID` a second for all processes of one
-//!   uid, `MAX_CALLS_PER_SECOND` in total (`busy`);
+//! - per second, in two separate buckets (U12 review M2: a status poll or a cancel never makes
+//!   the next `Begin`/`Set` `busy`): one call per peer process, `MAX_CALLS_PER_UID` for all
+//!   processes of one uid, `MAX_CALLS_PER_SECOND` in total (`busy`);
 //! - `Begin` `MAX_BEGINS_PER_HOUR` per rolling hour for the whole daemon (`rate_limited`);
 //! - `Set` `MAX_SETS_PER_NONCE` per pending nonce, then the nonce is dropped (`no_pending`).
 //!
@@ -28,9 +29,8 @@ use super::{
     grant::{check_for_set, GrantContext},
     pending::Pending,
     request::{incoming_role, sign_request, PasswordRequestPayload},
-    status::AccessStatus,
-    store_mac::AccessRecord,
-    SensePasswordIpc, SensePasswordSecret, PASSWORD_ACK_REPORT_S, UNSUPPORTED,
+    status::{status_from, AccessRecord, AccessStatus},
+    SensePasswordIpc, SensePasswordSecret, UNSUPPORTED,
 };
 use crate::sense::{envelope_keys::TrustedKey, SenseRole};
 use hbb_common::log;
@@ -165,13 +165,68 @@ pub trait DaemonEnv {
     fn write_record(&mut self, record: &AccessRecord) -> Result<(), String>;
 }
 
-/// The daemon's in-memory state: the one pending nonce and the limits.
+/// The daemon's in-memory state: the one pending nonce and the limits. `changes` limits
+/// `Begin`/`Set`, `queries` `StatusQuery`/`Cancel` (separate buckets, M2).
 #[derive(Debug, Default)]
 pub struct Daemon {
     pending: Pending,
-    calls: CallLimiter,
+    changes: CallLimiter,
+    queries: CallLimiter,
     begins: BeginLimiter,
     sets_for_nonce: u32,
+}
+
+/// A `Set` whose grant passed (§3.3 steps 1–10, nonce used up): left to do are the write
+/// (step 11) and the record (12). Run after the daemon's lock is released (U12 review M5), so
+/// the trusted-device snapshot and the config write never run under it.
+pub struct SetWork {
+    grant: super::grant::PasswordGrantPayload,
+    first: bool,
+    now: i64,
+    password: SensePasswordSecret,
+}
+
+impl std::fmt::Debug for SetWork {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SetWork")
+    }
+}
+
+/// What the daemon decided under its lock.
+#[derive(Debug)]
+pub enum Decision {
+    Reply(Option<SensePasswordIpc>),
+    Write(SetWork),
+}
+
+impl SetWork {
+    /// Steps 11–12, outside the daemon's lock.
+    pub fn run<E: DaemonEnv>(self, env: &mut E) -> SensePasswordIpc {
+        let (storage, salt) = match env.write_password(&self.password) {
+            Ok(written) => written,
+            Err(err) => {
+                log::error!("Sense Remote: permanent password not written: {err}");
+                return set_result(WRITE_FAILED);
+            }
+        };
+        let ack = sign_ack(
+            &PasswordAckPayload::for_grant(&self.grant, self.first, self.now),
+            &env.secret_key(),
+        );
+        if ack.is_err() {
+            log::error!("Sense Remote: password ack not signed");
+        }
+        if let Err(err) = env.write_record(&AccessRecord::after_change(self.now, ack.ok())) {
+            // The password is in place; only the panel's "changed" line waits for the next one.
+            log::error!("Sense Remote: access record not written: {err}");
+        }
+        log::info!("Sense Remote: permanent password changed by the daemon");
+        SensePasswordIpc::SetResult {
+            code: String::new(),
+            storage: Some(storage),
+            salt: Some(salt),
+        }
+    }
 }
 
 fn set_result(code: &str) -> SensePasswordIpc {
@@ -192,26 +247,9 @@ fn refusal(message: &SensePasswordIpc, code: &str) -> Option<SensePasswordIpc> {
     }
 }
 
-/// `AccessStatus` from the record: the ack only for `PASSWORD_ACK_REPORT_S` after it was made
-/// (and not when its time lies in the future by more than the grant skew).
-pub fn status_from(record: Option<&AccessRecord>, perm_set: bool, now: i64) -> AccessStatus {
-    let ack = record.and_then(|record| {
-        let at = record.ack_at?;
-        let age = now.checked_sub(at)?;
-        ((-super::grant::CLOCK_SKEW_BEFORE_S..=PASSWORD_ACK_REPORT_S).contains(&age))
-            .then(|| record.ack.clone())
-            .flatten()
-    });
-    AccessStatus {
-        perm_set,
-        changed_at: record.map(|record| record.changed_at),
-        ack,
-    }
-}
-
 impl Daemon {
-    /// One `_service` message. `None` = no answer (`Cancel`, answer kinds, calls over the
-    /// limit that have no answer kind).
+    /// One `_service` message decided and done in one go (tests). The daemon itself calls
+    /// `decide` under its lock and runs the write after releasing it.
     pub fn handle<E: DaemonEnv>(
         &mut self,
         message: SensePasswordIpc,
@@ -220,6 +258,22 @@ impl Daemon {
         now: Instant,
         env: &mut E,
     ) -> Option<SensePasswordIpc> {
+        match self.decide(message, pid, uid, now, env) {
+            Decision::Reply(reply) => reply,
+            Decision::Write(work) => Some(work.run(env)),
+        }
+    }
+
+    /// One `_service` message. `Reply(None)` = no answer (`Cancel`, answer kinds, calls over
+    /// the limit that have no answer kind).
+    pub fn decide<E: DaemonEnv>(
+        &mut self,
+        message: SensePasswordIpc,
+        pid: Option<u32>,
+        uid: Option<u32>,
+        now: Instant,
+        env: &mut E,
+    ) -> Decision {
         // Answer kinds never come from a client (`sense_service_accepts` already drops them).
         if !matches!(
             message,
@@ -228,26 +282,35 @@ impl Daemon {
                 | SensePasswordIpc::Cancel
                 | SensePasswordIpc::StatusQuery
         ) {
-            return None;
+            return Decision::Reply(None);
         }
-        if !self.calls.allow(pid, uid, now) {
+        let bucket = match message {
+            SensePasswordIpc::Begin | SensePasswordIpc::Set { .. } => &mut self.changes,
+            _ => &mut self.queries,
+        };
+        if !bucket.allow(pid, uid, now) {
             log::warn!("Sense Remote: password call refused (rate limit)");
-            return refusal(&message, BUSY);
+            return Decision::Reply(refusal(&message, BUSY));
         }
         match message {
-            SensePasswordIpc::StatusQuery => Some(SensePasswordIpc::Status(
+            SensePasswordIpc::StatusQuery => Decision::Reply(Some(SensePasswordIpc::Status(
                 self.status(env).to_json(),
-            )),
+            ))),
             SensePasswordIpc::Cancel => {
                 self.pending.cancel();
                 self.sets_for_nonce = 0;
-                None
+                Decision::Reply(None)
             }
-            SensePasswordIpc::Begin => Some(SensePasswordIpc::Request(self.begin(now, env))),
+            SensePasswordIpc::Begin => {
+                Decision::Reply(Some(SensePasswordIpc::Request(self.begin(now, env))))
+            }
             SensePasswordIpc::Set { grant, password } => {
-                Some(self.set(&grant, &password, now, env))
+                match self.check_set(&grant, &password, now, env) {
+                    Ok(work) => Decision::Write(work),
+                    Err(code) => Decision::Reply(Some(set_result(&code))),
+                }
             }
-            _ => None,
+            _ => Decision::Reply(None),
         }
     }
 
@@ -257,7 +320,7 @@ impl Daemon {
             None
         });
         let now = env.grant_context().now;
-        status_from(record.as_ref(), env.has_permanent_password(), now)
+        status_from(env.has_permanent_password(), record.as_ref(), now)
     }
 
     fn incoming<E: DaemonEnv>(env: &mut E) -> Result<&'static str, &'static str> {
@@ -291,59 +354,38 @@ impl Daemon {
         signed.map_err(|_| UNSUPPORTED.to_owned())
     }
 
-    fn set<E: DaemonEnv>(
+    /// §3.3 steps 1–10 under the lock; `Err` = the answer code. On `Ok` the nonce is used up
+    /// (single use), whatever the write does.
+    fn check_set<E: DaemonEnv>(
         &mut self,
         grant: &str,
         password: &SensePasswordSecret,
         now: Instant,
         env: &mut E,
-    ) -> SensePasswordIpc {
-        if let Err(code) = Self::incoming(env) {
-            return set_result(code);
-        }
+    ) -> Result<SetWork, String> {
+        Self::incoming(env)?;
         if !self.pending.is_pending(now) {
-            return set_result(NO_PENDING);
+            return Err(NO_PENDING.to_owned());
         }
         self.sets_for_nonce += 1;
         if self.sets_for_nonce > MAX_SETS_PER_NONCE {
             log::warn!("Sense Remote: pending password unlock dropped (too many attempts)");
             self.pending.cancel();
-            return set_result(NO_PENDING);
+            return Err(NO_PENDING.to_owned());
         }
         let ctx = env.grant_context();
         let first = !env.has_permanent_password();
-        let payload = match check_for_set(grant, password, env.keys(), &ctx, &mut self.pending, now)
-        {
-            Ok(payload) => payload,
-            Err(code) => {
+        let grant = check_for_set(grant, password, env.keys(), &ctx, &mut self.pending, now)
+            .map_err(|code| {
                 log::warn!("Sense Remote: permanent password not changed: {code}");
-                return set_result(&code);
-            }
-        };
-        // The nonce is used up from here on (single use), whatever the write does.
-        let (storage, salt) = match env.write_password(password) {
-            Ok(written) => written,
-            Err(err) => {
-                log::error!("Sense Remote: permanent password not written: {err}");
-                return set_result(WRITE_FAILED);
-            }
-        };
-        let ack = sign_ack(&PasswordAckPayload::for_grant(&payload, first, ctx.now), &env.secret_key())
-            .ok()
-            .and_then(|ack| serde_json::from_str(&ack).ok());
-        if ack.is_none() {
-            log::error!("Sense Remote: password ack not signed");
-        }
-        if let Err(err) = env.write_record(&AccessRecord::new(ctx.now, ack)) {
-            // The password is in place; only the panel's "changed" line waits for the next one.
-            log::error!("Sense Remote: access record not written: {err}");
-        }
-        log::info!("Sense Remote: permanent password changed by the daemon");
-        SensePasswordIpc::SetResult {
-            code: String::new(),
-            storage: Some(storage),
-            salt: Some(salt),
-        }
+                code
+            })?;
+        Ok(SetWork {
+            grant,
+            first,
+            now: ctx.now,
+            password: password.clone(),
+        })
     }
 }
 
@@ -359,11 +401,17 @@ pub fn on_service_ipc(
     if super::SUPPORTED {
         use std::sync::{Mutex, OnceLock};
         static DAEMON: OnceLock<Mutex<Daemon>> = OnceLock::new();
-        let mut daemon = DAEMON
+        let decision = DAEMON
             .get_or_init(|| Mutex::new(Daemon::default()))
             .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        return daemon.handle(message, peer_pid, peer_uid, Instant::now(), &mut root::RootEnv);
+            .unwrap_or_else(|err| err.into_inner())
+            .decide(message, peer_pid, peer_uid, Instant::now(), &mut root::RootEnv);
+        // U12 review M5: the lock guard was a temporary of the statement above and is gone;
+        // the write (trusted-device snapshot, config store) runs outside it.
+        return match decision {
+            Decision::Reply(reply) => reply,
+            Decision::Write(work) => Some(work.run(&mut root::RootEnv)),
+        };
     }
     let _ = (peer_pid, peer_uid);
     super::unsupported_answer(&message)

@@ -14,6 +14,7 @@
 //! The file code is `cfg(unix)` with a test door (`read_in` / `write_in`, `require_root`), so
 //! the rules are tested on Linux CI as well; only macOS uses it for real.
 
+use super::status::AccessRecord;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -25,9 +26,10 @@ pub const ACCESS_FILE: &str = "/Library/Application Support/SenseRemote/access.j
 /// Value of `v` this build reads and writes.
 pub const ACCESS_VERSION: u32 = 1;
 
-/// Content of `access.json` (§3.9).
+/// Content of `access.json` (§3.9). The rest of the code uses the shared
+/// `status::AccessRecord` (U12 review M3); `read`/`write` convert at the file boundary.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AccessRecord {
+pub struct AccessFile {
     pub v: u32,
     /// Last change of the permanent password, Unix seconds (device clock).
     pub changed_at: i64,
@@ -38,7 +40,7 @@ pub struct AccessRecord {
     pub ack_at: Option<i64>,
 }
 
-impl AccessRecord {
+impl AccessFile {
     pub fn new(changed_at: i64, ack: Option<Value>) -> Self {
         Self {
             v: ACCESS_VERSION,
@@ -49,19 +51,47 @@ impl AccessRecord {
     }
 }
 
+impl From<&AccessFile> for AccessRecord {
+    fn from(file: &AccessFile) -> Self {
+        AccessRecord {
+            changed_at: file.changed_at,
+            ack: file.ack.as_ref().map(Value::to_string),
+            ack_at: file.ack_at,
+        }
+    }
+}
+
+impl From<&AccessRecord> for AccessFile {
+    /// An ack that is not a `{k,p,s}` object is not stored (nor its time).
+    fn from(record: &AccessRecord) -> Self {
+        let ack = record
+            .ack
+            .as_deref()
+            .and_then(|ack| serde_json::from_str::<Value>(ack).ok())
+            .filter(is_ack);
+        AccessFile {
+            v: ACCESS_VERSION,
+            changed_at: record.changed_at,
+            ack_at: ack.as_ref().and(record.ack_at),
+            ack,
+        }
+    }
+}
+
+fn is_ack(ack: &Value) -> bool {
+    ["k", "p", "s"].iter().all(|key| ack[key].is_string())
+        && ack.as_object().is_some_and(|o| o.len() == 3)
+}
+
 /// Bytes of the file → record. Anything that is not exactly our format is an error.
-pub fn parse(bytes: &[u8]) -> Result<AccessRecord, String> {
-    let record: AccessRecord =
+pub fn parse(bytes: &[u8]) -> Result<AccessFile, String> {
+    let record: AccessFile =
         serde_json::from_slice(bytes).map_err(|err| format!("bad-json: {err}"))?;
     if record.v != ACCESS_VERSION {
         return Err(format!("unknown-version: {}", record.v));
     }
-    if let Some(ack) = &record.ack {
-        let ok = ["k", "p", "s"].iter().all(|key| ack[key].is_string())
-            && ack.as_object().is_some_and(|o| o.len() == 3);
-        if !ok {
-            return Err("bad-ack".to_owned());
-        }
+    if record.ack.as_ref().is_some_and(|ack| !is_ack(ack)) {
+        return Err("bad-ack".to_owned());
     }
     Ok(record)
 }
@@ -71,6 +101,7 @@ pub fn read() -> Result<Option<AccessRecord>, String> {
     #[cfg(target_os = "macos")]
     {
         files::read_in(std::path::Path::new(STATE_DIR), true)
+            .map(|file| file.as_ref().map(AccessRecord::from))
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -82,7 +113,7 @@ pub fn read() -> Result<Option<AccessRecord>, String> {
 pub fn write(record: &AccessRecord) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        files::write_in(std::path::Path::new(STATE_DIR), record, true)
+        files::write_in(std::path::Path::new(STATE_DIR), &AccessFile::from(record), true)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -94,7 +125,7 @@ pub fn write(record: &AccessRecord) -> Result<(), String> {
 /// The `state.json` rules for `access.json`.
 #[cfg(unix)]
 pub mod files {
-    use super::{parse, AccessRecord, ACCESS_FILE_NAME};
+    use super::{parse, AccessFile, ACCESS_FILE_NAME};
     use hbb_common::{libc, log};
     use std::{
         fs::{self, File, OpenOptions, Permissions},
@@ -144,7 +175,7 @@ pub mod files {
     }
 
     /// `Ok(None)` when the directory or the file does not exist.
-    pub fn read_in(dir: &Path, require_root: bool) -> Result<Option<AccessRecord>, String> {
+    pub fn read_in(dir: &Path, require_root: bool) -> Result<Option<AccessFile>, String> {
         match fs::symlink_metadata(dir) {
             Ok(meta) => check_node("dir", &meta, true, require_root)?,
             Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
@@ -180,7 +211,7 @@ pub mod files {
 
     /// Writes `record` atomically under `flock`. The directory must exist and follow the rule;
     /// an existing file that breaks it is not overwritten.
-    pub fn write_in(dir: &Path, record: &AccessRecord, require_root: bool) -> Result<(), String> {
+    pub fn write_in(dir: &Path, record: &AccessFile, require_root: bool) -> Result<(), String> {
         // SAFETY: geteuid has no arguments and cannot fail.
         if require_root && unsafe { libc::geteuid() } != 0 {
             return Err(ERR_NOT_ROOT.to_owned());
@@ -272,12 +303,12 @@ mod tests {
 
     #[test]
     fn record_round_trip_and_strict_parse() {
-        let record = AccessRecord::new(1_800_000_000, Some(ack()));
+        let record = AccessFile::new(1_800_000_000, Some(ack()));
         assert_eq!(record.ack_at, Some(1_800_000_000));
         let bytes = serde_json::to_vec(&record).unwrap();
         assert_eq!(parse(&bytes).unwrap(), record);
         // No ack: no `ack`/`ack_at` in the file.
-        let plain = serde_json::to_value(AccessRecord::new(5, None)).unwrap();
+        let plain = serde_json::to_value(AccessFile::new(5, None)).unwrap();
         assert_eq!(plain, json!({"v": 1, "changed_at": 5}));
         for bad in [
             r#"{"v":2,"changed_at":1}"#,
@@ -292,8 +323,20 @@ mod tests {
     }
 
     #[test]
+    fn converts_to_and_from_the_shared_record() {
+        let record = AccessRecord::after_change(7, Some(ack().to_string()));
+        let file = AccessFile::from(&record);
+        assert_eq!(file, AccessFile::new(7, Some(ack())));
+        assert_eq!(AccessRecord::from(&file), record);
+        // An ack that is not {k,p,s} is not stored.
+        let odd = AccessRecord::after_change(7, Some("not json".to_owned()));
+        assert_eq!(AccessFile::from(&odd), AccessFile::new(7, None));
+        assert_eq!(AccessRecord::from(&AccessFile::new(7, None)), AccessRecord::after_change(7, None));
+    }
+
+    #[test]
     fn never_holds_a_password_field() {
-        let text = serde_json::to_string(&AccessRecord::new(1, Some(ack()))).unwrap();
+        let text = serde_json::to_string(&AccessFile::new(1, Some(ack()))).unwrap();
         for word in ["password", "salt", "storage"] {
             assert!(!text.contains(word), "{text}");
         }
@@ -363,7 +406,7 @@ mod tests {
         fn write_then_read_with_mode_0644() {
             let sandbox = Sandbox::new();
             assert_eq!(read_in(&sandbox.0, false).unwrap(), None);
-            let record = AccessRecord::new(1_800_000_000, Some(json!({"k":"a","p":"b","s":"c"})));
+            let record = AccessFile::new(1_800_000_000, Some(json!({"k":"a","p":"b","s":"c"})));
             write_in(&sandbox.0, &record, false).unwrap();
             assert_eq!(read_in(&sandbox.0, false).unwrap(), Some(record));
             let mode = fs::metadata(sandbox.file()).unwrap().permissions().mode();
@@ -379,7 +422,7 @@ mod tests {
             fs::write(&target, r#"{"v":1,"changed_at":1}"#).unwrap();
             symlink(&target, sandbox.file()).unwrap();
             assert_eq!(read_in(&sandbox.0, false).unwrap_err(), "file-is-symlink");
-            let err = write_in(&sandbox.0, &AccessRecord::new(2, None), false).unwrap_err();
+            let err = write_in(&sandbox.0, &AccessFile::new(2, None), false).unwrap_err();
             assert_eq!(err, "file-is-symlink");
             // The link and its target are untouched.
             assert!(fs::symlink_metadata(sandbox.file()).unwrap().file_type().is_symlink());
@@ -395,7 +438,7 @@ mod tests {
                 read_in(&sandbox.0, false).unwrap_err(),
                 "file-writable-by-others"
             );
-            assert!(write_in(&sandbox.0, &AccessRecord::new(2, None), false).is_err());
+            assert!(write_in(&sandbox.0, &AccessFile::new(2, None), false).is_err());
         }
 
         #[test]
@@ -406,7 +449,7 @@ mod tests {
                 read_in(&sandbox.0, false).unwrap_err(),
                 "dir-writable-by-others"
             );
-            assert!(write_in(&sandbox.0, &AccessRecord::new(2, None), false).is_err());
+            assert!(write_in(&sandbox.0, &AccessFile::new(2, None), false).is_err());
         }
 
         #[test]
@@ -415,8 +458,8 @@ mod tests {
             fs::write(sandbox.file(), "garbage").unwrap();
             fs::set_permissions(sandbox.file(), fs::Permissions::from_mode(0o644)).unwrap();
             assert!(read_in(&sandbox.0, false).is_err());
-            write_in(&sandbox.0, &AccessRecord::new(3, None), false).unwrap();
-            assert_eq!(read_in(&sandbox.0, false).unwrap(), Some(AccessRecord::new(3, None)));
+            write_in(&sandbox.0, &AccessFile::new(3, None), false).unwrap();
+            assert_eq!(read_in(&sandbox.0, false).unwrap(), Some(AccessFile::new(3, None)));
         }
 
         #[test]
@@ -424,7 +467,7 @@ mod tests {
             let sandbox = Sandbox::new();
             let missing = sandbox.0.join("missing");
             assert_eq!(read_in(&missing, false).unwrap(), None);
-            assert!(write_in(&missing, &AccessRecord::new(1, None), false).is_err());
+            assert!(write_in(&missing, &AccessFile::new(1, None), false).is_err());
             assert!(!missing.exists());
         }
 
@@ -436,7 +479,7 @@ mod tests {
             }
             let sandbox = Sandbox::new();
             assert_eq!(
-                write_in(&sandbox.0, &AccessRecord::new(1, None), true).unwrap_err(),
+                write_in(&sandbox.0, &AccessFile::new(1, None), true).unwrap_err(),
                 ERR_NOT_ROOT
             );
         }

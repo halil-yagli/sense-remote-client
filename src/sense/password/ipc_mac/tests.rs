@@ -2,6 +2,7 @@
 //! user `--server`'s handling of the daemon's answers. Every platform.
 
 use super::*;
+use crate::sense::password::PASSWORD_ACK_REPORT_S;
 use crate::sense::{envelope_keys::key_id, password::grant::PasswordGrantPayload};
 use hbb_common::{
     base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _},
@@ -232,7 +233,7 @@ fn unlock_and_set_writes_root_once_with_a_signed_ack() {
     let record = h.root.record.clone().unwrap();
     assert_eq!(record.changed_at, NOW_S);
     let ack = open(
-        &record.ack.clone().unwrap().to_string(),
+        record.ack.as_deref().unwrap(),
         crate::sense::password::PASSWORD_ACK_PREFIX,
         &h.root.device_pk,
     );
@@ -243,7 +244,7 @@ fn unlock_and_set_writes_root_once_with_a_signed_ack() {
     let now = status(&mut h);
     assert!(now.perm_set);
     assert_eq!(now.changed_at, Some(NOW_S));
-    assert_eq!(now.ack, record.ack);
+    assert_eq!(now.ack, serde_json::from_str::<Value>(record.ack.as_deref().unwrap()).ok());
 
     // Single use: the same grant again changes nothing.
     assert_eq!(code_of(h.set(&grant, "Baska-Kapi_58?tuz")), "no_pending");
@@ -255,7 +256,7 @@ fn unlock_and_set_writes_root_once_with_a_signed_ack() {
     let grant = h.grant(&nonce);
     assert_eq!(code_of(h.set(&grant, "Baska-Kapi_58?tuz")), "");
     let ack = open(
-        &h.root.record.clone().unwrap().ack.unwrap().to_string(),
+        &h.root.record.clone().unwrap().ack.unwrap(),
         crate::sense::password::PASSWORD_ACK_PREFIX,
         &h.root.device_pk,
     );
@@ -438,17 +439,96 @@ fn calls_over_the_second_limit_are_busy() {
     assert!(h.root.untouched());
 }
 
+/// U12 review M2: a status poll or a cancel in the same second does not make the next
+/// `Begin`/`Set` of that process `busy` (separate buckets).
 #[test]
-fn status_carries_the_ack_for_a_day() {
-    let ack = serde_json::json!({"k": "a", "p": "b", "s": "c"});
-    let record = AccessRecord::new(NOW_S, Some(ack.clone()));
-    let at = |now| status_from(Some(&record), true, now);
-    assert_eq!(at(NOW_S).ack, Some(ack.clone()));
-    assert_eq!(at(NOW_S + PASSWORD_ACK_REPORT_S).ack, Some(ack));
-    assert_eq!(at(NOW_S + PASSWORD_ACK_REPORT_S + 1).ack, None);
+fn status_and_cancel_do_not_starve_begin_and_set() {
+    let mut h = Harness::new(Some(SenseRole::Host));
+    let t = h.t;
+    let at_once = |h: &mut Harness, message: SensePasswordIpc| {
+        h.daemon.handle(message, Some(7), Some(501), t, &mut h.root)
+    };
+    // Status, then Begin, in the same second from the same process: both pass.
+    assert!(matches!(
+        at_once(&mut h, SensePasswordIpc::StatusQuery),
+        Some(SensePasswordIpc::Status(_))
+    ));
+    let Some(SensePasswordIpc::Request(Ok(request))) = at_once(&mut h, SensePasswordIpc::Begin)
+    else {
+        panic!("begin was busy");
+    };
+    // The query bucket is spent for this second (a second status is busy: no answer) ...
+    assert_eq!(at_once(&mut h, SensePasswordIpc::StatusQuery), None);
+    // ... but a cancel from the same process still gets in next second, and so does the next
+    // Begin of the change bucket.
+    let payload = open(&request, PASSWORD_REQUEST_PREFIX_FOR_TEST, &h.root.device_pk);
+    assert!(payload["nonce"].is_string());
+    let next = t + Duration::from_secs(1);
+    assert_eq!(
+        h.daemon
+            .handle(SensePasswordIpc::Cancel, Some(7), Some(501), next, &mut h.root),
+        None
+    );
+    assert!(matches!(
+        h.daemon
+            .handle(SensePasswordIpc::Begin, Some(7), Some(501), next, &mut h.root),
+        Some(SensePasswordIpc::Request(Ok(_)))
+    ));
+}
+
+/// U12 review M5: the daemon decides under its lock and hands the write out; a refused grant
+/// never becomes a write.
+#[test]
+fn decide_hands_the_write_out_of_the_lock() {
+    let mut h = Harness::new(Some(SenseRole::Host));
+    let nonce = h.begin();
+    let grant = h.grant(&nonce);
+    h.t += Duration::from_secs(1);
+    let decision = h.daemon.decide(
+        SensePasswordIpc::Set {
+            grant: grant.clone(),
+            password: SensePasswordSecret::new(GOOD.to_owned()),
+        },
+        Some(h.pid),
+        Some(501),
+        h.t,
+        &mut h.root,
+    );
+    let Decision::Write(work) = decision else {
+        panic!("no write: {decision:?}");
+    };
+    // Nothing written while deciding; the nonce is already used up.
+    assert!(h.root.untouched());
+    assert!(!format!("{work:?}").contains(GOOD));
+    assert_eq!(code_of(h.set(&grant, GOOD)), "no_pending");
+    assert_eq!(code_of(work.run(&mut h.root)), "");
+    assert_eq!(h.root.password.as_deref(), Some(GOOD));
+    h.t += Duration::from_secs(1);
+    let refused = h.daemon.decide(
+        SensePasswordIpc::Set {
+            grant,
+            password: SensePasswordSecret::new(GOOD.to_owned()),
+        },
+        Some(h.pid),
+        Some(501),
+        h.t,
+        &mut h.root,
+    );
+    assert!(matches!(refused, Decision::Reply(Some(_))));
+}
+
+#[test]
+fn status_uses_the_shared_window() {
+    let ack = r#"{"k":"a","p":"b","s":"c"}"#.to_owned();
+    let record = AccessRecord::after_change(NOW_S, Some(ack));
+    let at = |now| status_from(true, Some(&record), now);
+    let value = serde_json::json!({"k": "a", "p": "b", "s": "c"});
+    assert_eq!(at(NOW_S).ack, Some(value.clone()));
+    assert_eq!(at(NOW_S + PASSWORD_ACK_REPORT_S - 1).ack, Some(value));
+    assert_eq!(at(NOW_S + PASSWORD_ACK_REPORT_S).ack, None);
     assert_eq!(at(NOW_S - 3600).ack, None);
     assert_eq!(at(NOW_S + PASSWORD_ACK_REPORT_S + 1).changed_at, Some(NOW_S));
-    assert_eq!(status_from(None, false, NOW_S), AccessStatus::default());
+    assert_eq!(status_from(false, None, NOW_S), AccessStatus::default());
 }
 
 #[test]

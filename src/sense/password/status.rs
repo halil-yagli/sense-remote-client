@@ -112,8 +112,17 @@ fn reports_access(supported: bool, privileged: bool, incoming: bool) -> bool {
     supported && privileged && incoming
 }
 
-/// `sense.access` for this heartbeat; `None` = the field is left out.
+/// `sense.access` for this heartbeat; `None` = the field is left out. macOS: the user
+/// `--server` sends the heartbeat and reports the root daemon's status (`ipc_mac`, U12).
 pub fn heartbeat_ext() -> Option<AccessStatus> {
+    #[cfg(target_os = "macos")]
+    return super::ipc_mac::heartbeat_ext();
+    #[cfg(not(target_os = "macos"))]
+    heartbeat_ext_privileged()
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn heartbeat_ext_privileged() -> Option<AccessStatus> {
     #[cfg(windows)]
     let (privileged, incoming) = (
         super::ipc_win::is_service_process(),
@@ -149,6 +158,21 @@ mod tests {
         let mut sense = json!({"v": 1});
         extend_heartbeat(&mut sense);
         assert_eq!(sense, json!({"v": 1}));
+    }
+
+    /// U12 review M1: on macOS the heartbeat takes the daemon's status through `ipc_mac`.
+    #[test]
+    fn heartbeat_is_wired_to_the_mac_daemon() {
+        let source = include_str!("status.rs").replace("\r\n", "\n");
+        let start = source.find("pub fn heartbeat_ext()").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains(
+            "#[cfg(target_os = \"macos\")]\n    return super::ipc_mac::heartbeat_ext();"
+        ));
+        assert!(body.contains(
+            "#[cfg(not(target_os = \"macos\"))]\n    heartbeat_ext_privileged()"
+        ));
     }
 
     #[test]
