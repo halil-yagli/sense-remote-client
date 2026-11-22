@@ -184,7 +184,8 @@ wire_enum!(
 
 /// `sense.update` of the heartbeat (`SenseUpdateStatus`, §3.5). Display only: it is NOT part of
 /// the signed report, and the panel decides "installed" from `app_version`, never from this.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// Sense Remote (U4): `Deserialize` too, the macOS agent reads it from the daemon's answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateStatus {
     pub state: UpdateState,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -216,7 +217,7 @@ pub struct UpdateStatus {
 }
 
 /// What this computer already holds, so the panel does not send it again (§3.4).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Have {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release: Option<u32>,
@@ -412,7 +413,8 @@ pub async fn on_answer(answer: Answer) {
             hint_release: answer.hint.as_ref().and_then(|h| h.release),
             hint_oid: answer.hint.and_then(|h| h.oid),
         };
-        let _ = daemon_mac::request_daemon(offer).await;
+        // The daemon answers with its `sense.update` for the next heartbeat.
+        daemon_mac::forward_offer(offer).await;
     }
     #[cfg(not(target_os = "macos"))]
     runner::on_answer(answer);
@@ -424,7 +426,11 @@ pub fn heartbeat_status() -> Option<UpdateStatus> {
     if !SUPPORTED {
         return None;
     }
-    runner::heartbeat_status()
+    // macOS agent: what the daemon gave with its last `Offer` answer.
+    #[cfg(target_os = "macos")]
+    return daemon_mac::agent_heartbeat_status();
+    #[cfg(not(target_os = "macos"))]
+    return runner::heartbeat_status();
 }
 
 /// Adds `sense.update` to a heartbeat's `sense`. Called after the report was signed: the field

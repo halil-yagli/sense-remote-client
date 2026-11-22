@@ -337,6 +337,40 @@ pub fn sense_update_daemon_start() {
     crate::sense::update::daemon_mac::start();
 }
 
+/// Sense Remote (update plan 2026-11-21, §4.4 steps 3–4, package U4): installs a downloaded
+/// dmg as root with upstream's code. The dmg is copied and checked once more
+/// (`copy_and_verify_dmg_file`), the copy is mounted read-only and `accept` decides on the
+/// bundle's `SenseRemoteVersion` (empty when missing); then the transactional
+/// `update_from_dmg_as_root` runs with the bundle's own `CFBundleShortVersionString` (the
+/// upstream version, which that function binds the bundle to). `Ok(false)` = `accept` refused,
+/// nothing was changed. Returns once upstream's update script was launched.
+pub fn sense_update_from_dmg_as_root(
+    file: &str,
+    sha256: &str,
+    size: u64,
+    accept: impl FnOnce(&str) -> bool,
+) -> ResultType<bool> {
+    let verified = copy_and_verify_dmg_file(file, sha256, Some(size))?;
+    let path = verified_dmg_path(&verified)?.to_owned();
+    let (sense_version, short_version) = {
+        let guard = attach_dmg(&path)?;
+        let app = Path::new(guard.mount_point()).join(format!("{}.app", crate::get_app_name()));
+        let key = crate::sense::update::store_mac::INFO_PLIST_VERSION_KEY;
+        (
+            read_bundle_plist_value(&app, key).unwrap_or_default(),
+            read_bundle_plist_value(&app, "CFBundleShortVersionString")?,
+        )
+    };
+    if !accept(&sense_version) {
+        return Ok(false);
+    }
+    verify_stored_dmg(&verified)?;
+    update_from_dmg_as_root(&path, &short_version)?;
+    // `verified` (the private copy) is removed here; upstream extracted it already.
+    drop(verified);
+    Ok(true)
+}
+
 enum UpdateSource {
     AppDir(String),
     VerifiedDmg {

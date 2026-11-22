@@ -135,7 +135,8 @@ mod tests {
         );
     }
 
-    // U0: no store yet.
+    // U0: no store yet. Sense Remote (U4): macOS has its store (`store_mac`), tested there.
+    #[cfg(not(any(windows, target_os = "macos")))]
     #[test]
     fn skeleton_has_no_store() {
         assert_eq!(read(), Err("unsupported".to_owned()));
