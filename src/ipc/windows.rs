@@ -86,6 +86,18 @@ fn open_pipe(path: &str) -> io::Result<ConnectionClient> {
 /// and executable, and no lower elevation than the client.
 /// The caller must enforce the timeout, including retries while all instances are busy.
 pub(super) async fn connect(path: &str, postfix: &str) -> ResultType<ConnectionClient> {
+    connect_requiring(path, config::is_service_ipc_postfix(postfix)).await
+}
+
+/// Sense Remote (permanent password plan §3.7, U11): main IPC, but only to a SYSTEM-owned pipe
+/// with a restricted DACL (the service's `--server`), never to a user process that took the
+/// pipe over. Checked from the pipe's security descriptor, so a standard user can run it (no
+/// SYSTEM process token is opened).
+pub(super) async fn connect_system(path: &str) -> ResultType<ConnectionClient> {
+    connect_requiring(path, true).await
+}
+
+async fn connect_requiring(path: &str, require_system: bool) -> ResultType<ConnectionClient> {
     let client = loop {
         match open_pipe(path) {
             Ok(client) => break client,
@@ -96,7 +108,7 @@ pub(super) async fn connect(path: &str, postfix: &str) -> ResultType<ConnectionC
         }
     };
     // The UI can own the main pipe while an installed service is unavailable.
-    if let Err(error) = ensure_server(&client, config::is_service_ipc_postfix(postfix)) {
+    if let Err(error) = ensure_server(&client, require_system) {
         hbb_common::throttled_log!(
             AUTH_LOG_INTERVAL,
             warn,

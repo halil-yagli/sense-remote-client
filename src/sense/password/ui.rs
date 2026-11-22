@@ -107,6 +107,17 @@ fn is_incoming(role: Option<SenseRole>) -> bool {
 
 #[tokio::main(flavor = "current_thread")]
 async fn ipc_call(message: SensePasswordIpc, timeout_ms: Option<u64>) -> Option<SensePasswordIpc> {
+    // Sense Remote (U11): on Windows only the SYSTEM `--server` gets the password (and the
+    // grant): the pipe must be SYSTEM-owned with a restricted DACL.
+    #[cfg(windows)]
+    let mut conn = match crate::ipc::connect_main_system(1_000).await {
+        Ok(conn) => conn,
+        Err(err) => {
+            log::warn!("Sense Remote: the main IPC is not served by the service: {err}");
+            return None;
+        }
+    };
+    #[cfg(not(windows))]
     let mut conn = crate::ipc::connect(1_000, "").await.ok()?;
     conn.send(&crate::ipc::Data::SensePassword(message)).await.ok()?;
     match conn.next_timeout(timeout_ms?).await {
