@@ -319,6 +319,8 @@ async fn start_hbbs_sync_async() {
                                 answer.ignored
                             );
                         }
+                        // Sense Remote (S6): detailed health data only for a panel that takes it.
+                        crate::sense::health_v2::set_panel_caps(answer.panel_caps.as_deref());
                         sense_report.server_time(answer.server_time, now_s());
                         sense_handle_envelopes(&answer.envelopes, &id, &mut sense_report).await;
                         // Sense Remote (update plan 2026-11-21, §3.4): hint, release notice and

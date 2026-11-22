@@ -257,17 +257,22 @@ const MAC_HELPER_PREFIXES: [&str; 10] = [
 ];
 
 fn is_virtual(adapter: &RawAdapter) -> bool {
-    let name = adapter.name.to_ascii_lowercase();
-    let description = adapter.description.to_ascii_lowercase();
-    if VIRTUAL_MARKERS
-        .iter()
-        .any(|m| name.contains(m) || description.contains(m))
-    {
+    if looks_virtual(&adapter.name, &adapter.description) {
         return true;
     }
     // Sense Remote (Mac M4): by BSD name, not by the shown name ("Apple USB Ethernet Adapter"
     // starts with "ap" too).
     adapter.bsd_name.as_deref().is_some_and(is_mac_helper)
+}
+
+/// Sense Remote (S6): the same name / description test for the detailed inventory
+/// (`health_parse`), so both lists leave out the same adapters.
+pub(super) fn looks_virtual(name: &str, description: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let description = description.to_ascii_lowercase();
+    VIRTUAL_MARKERS
+        .iter()
+        .any(|m| name.contains(m) || description.contains(m))
 }
 
 fn is_mac_helper(bsd_name: &str) -> bool {
