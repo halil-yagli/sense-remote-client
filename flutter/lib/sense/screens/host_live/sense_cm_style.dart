@@ -3,6 +3,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../tokens/sense_tokens.dart';
+
 import '../../../models/server_model.dart';
 
 /// Interface text (Turkish first; the app UI is Turkish for now).
@@ -44,37 +46,56 @@ const Map<String, String> kSenseCmText = {
 String senseCmText(String key) => kSenseCmText[key] ?? key;
 
 /// Design tokens (BRAND_CORE §5: black and white, navy→purple light accent).
+// Sense Remote (A1b, YH T1): bridge only. Every field is an alias of the one token set
+// (tokens/sense_tokens.dart); screens move to SenseColors in their own PRs, then this goes.
 class SenseCmTokens {
-  static const black = Color(0xFF000000);
-  static const white = Color(0xFFFFFFFF);
-  static const line = Color(0xFF1D1D25);
-  static const border = Color(0xFF33333D);
-  static const iconBorder = Color(0xFF3A3A45);
-  static const field = Color(0xFF0A0A0E);
-  static const muted = Color(0xFF8E8E98);
-  static const soft = Color(0xFFC9C9D1);
-  static const accent1 = Color(0xFF020162);
-  static const accent2 = Color(0xFF640164);
-  static const live = Color(0xFF00FFB6);
-  static const idle = Color(0xFF55555F);
-  // Sense Remote: white 12 px text on #FF3B4D was 3.5:1; #D81E30 is about
-  // 5.1:1 (WCAG AA, design review T3-6).
-  static const danger = Color(0xFFD81E30);
-  static const radius = 10.0;
-  static const radiusCard = 14.0;
-  static const font = 'Poppins';
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const black = SenseColors.bg;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const white = SenseColors.text;
+  // Was #1D1D25: the hover tone, not a border.
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const line = SenseColors.hover;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const border = SenseColors.line;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const iconBorder = SenseColors.lineStrong;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const field = SenseColors.surface;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const muted = SenseColors.textMuted;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const soft = SenseColors.textSecondary;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const accent1 = SenseColors.glowStart;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const accent2 = SenseColors.glowEnd;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const live = SenseColors.ok;
+  // Off LED (decoration).
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const idle = SenseColors.textDim;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const danger = SenseColors.danger;
+  @Deprecated('Sense Remote A1b: use SenseRadii / tokens/sense_tokens.dart')
+  static const radius = SenseRadii.categoryLarge;
+  @Deprecated('Sense Remote A1b: use SenseRadii / tokens/sense_tokens.dart')
+  static const radiusCard = SenseRadii.popup;
+  @Deprecated('Sense Remote A1b: use SenseFont / tokens/sense_tokens.dart')
+  static const font = SenseFont.family;
+  // No token: system fonts after the bundled Poppins.
+  @Deprecated('Sense Remote A1b: use SenseFont / tokens/sense_tokens.dart')
   static const fontFallback = ['Segoe UI', 'Helvetica Neue', 'Arial'];
-  static const gradient = LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [accent1, accent2]);
+  @Deprecated('Sense Remote A1b: use SenseGradients / tokens/sense_tokens.dart')
+  static const gradient = SenseGradients.glow;
 
+  @Deprecated('Sense Remote A1b: use tokens/sense_tokens.dart')
   static TextStyle text(
-          {double size = 12,
-          FontWeight weight = FontWeight.w300,
-          Color color = white}) =>
+          {double size = SenseFontSize.bodySmall,
+          FontWeight weight = SenseFontWeight.thin,
+          Color color = SenseColors.text}) =>
       TextStyle(
-          fontFamily: font,
+          fontFamily: SenseFont.family,
           fontFamilyFallback: fontFallback,
           fontSize: size,
           fontWeight: weight,
