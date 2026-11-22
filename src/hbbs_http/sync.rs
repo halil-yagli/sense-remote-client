@@ -292,6 +292,9 @@ async fn start_hbbs_sync_async() {
                     // Sense Remote (update plan 2026-11-21, §3.5): `sense.update`, display only
                     // and outside the signed report, so it is added after signing.
                     crate::sense::update::extend_heartbeat(&mut sense);
+                    // Sense Remote (permanent password plan §3.5): `sense.access`, likewise
+                    // outside the signed report (the ack signs itself); left out while `None`.
+                    crate::sense::password::status::extend_heartbeat(&mut sense);
                     v["sense"] = sense;
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
