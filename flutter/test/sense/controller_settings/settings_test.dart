@@ -448,7 +448,7 @@ void main() {
           ..stores[SenseOptionStore.main]!.addAll({'custom-rendezvous-server': 'x', 'api-server': 'y'});
         await _pump(tester, b, open: e.value, size: const Size(1450, 1000));
         await expectLater(find.byType(SenseSettingsView), matchesGoldenFile(goldenPath(e.key)));
-      }, skip: goldenSkip(e.key));
+      }, skip: goldenSkip(e.key), tags: const ['golden']);
     }
   });
 }

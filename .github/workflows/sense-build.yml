@@ -315,10 +315,12 @@ jobs:
           cd $(dirname $(dirname $(which flutter)))
           git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
 
-      # Sense Remote: Dart testleri (kurulum ekrani dahil) Windows PR'larinda da calissin.
+      # Sense Remote: Dart testleri (kurulum ekrani dahil). Golden testleri disarida: goruntuler
+      # Linux'ta uretilir, yazi cizimi Windows/macOS'ta farkli; golden yalniz Linux'ta kosar
+      # (PR kontrolu, sense-golden.yml).
       - name: Run the Dart tests
         working-directory: flutter
-        run: flutter test --timeout 60s
+        run: flutter test --timeout 60s --exclude-tags golden
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -559,7 +561,7 @@ jobs:
       - name: Run the Dart tests
         if: ${{ matrix.job.arch == 'aarch64' }}
         working-directory: flutter
-        run: flutter test --timeout 60s
+        run: flutter test --timeout 60s --exclude-tags golden
 
       - name: Setup vcpkg with Github Actions binary cache
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11

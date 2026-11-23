@@ -675,7 +675,8 @@ void main() {
       expect(files, greaterThan(10));
       expect(upstream.hasMatch(File('lib/sense/strings/host.dart').readAsStringSync()), isFalse);
       // The Host branch of the home page builds only the Sense window.
-      final home = File('lib/desktop/pages/desktop_home_page.dart').readAsStringSync();
+      // Line endings differ per platform (CRLF on Windows checkouts).
+      final home = File('lib/desktop/pages/desktop_home_page.dart').readAsStringSync().replaceAll(RegExp(r'\r\n?'), '\n');
       final start = home.indexOf('if (senseHomeRole() == SenseHomeRole.host) {\n      return _buildBlock(');
       expect(start, greaterThan(0));
       final branch = home.substring(start, home.indexOf('}', start));
@@ -709,7 +710,7 @@ void main() {
       await shot(tester, 'host_a09', window(_view(password: pw, role: role, recent: _recent)));
       pw.dispose();
       role.dispose();
-    }, skip: goldenSkip('host_a09'));
+    }, skip: goldenSkip('host_a09'), tags: const ['golden']);
 
     testWidgets('a10: Kalıcı şifre · doğrulama', (tester) async {
       final pw = passwordIn(SensePasswordStage.verifying)
@@ -718,7 +719,7 @@ void main() {
       await shot(tester, 'host_a10', window(_view(password: pw, role: role, recent: _recent, initialOpen: 'pw')));
       pw.dispose();
       role.dispose();
-    }, skip: goldenSkip('host_a10'));
+    }, skip: goldenSkip('host_a10'), tags: const ['golden']);
 
     testWidgets('a11: Bu bilgisayarın rolü, Controller eklenecek', (tester) async {
       final pw = passwordIn(SensePasswordStage.locked);
@@ -726,7 +727,7 @@ void main() {
       await shot(tester, 'host_a11', window(_view(password: pw, role: role, recent: _recent, initialOpen: 'role')));
       pw.dispose();
       role.dispose();
-    }, skip: goldenSkip('host_a11'));
+    }, skip: goldenSkip('host_a11'), tags: const ['golden']);
 
     testWidgets('status box: the six states', (tester) async {
       Widget one(SenseHostPhase p) => SizedBox(
@@ -755,7 +756,7 @@ void main() {
             ),
           ),
           size: const Size(1200, 1500));
-    }, skip: goldenSkip('host_states'));
+    }, skip: goldenSkip('host_states'), tags: const ['golden']);
 
     testWidgets('password and role steps', (tester) async {
       var t = kNow;
@@ -811,6 +812,6 @@ void main() {
       for (final c in roles) {
         c.dispose();
       }
-    }, skip: goldenSkip('host_steps'));
+    }, skip: goldenSkip('host_steps'), tags: const ['golden']);
   });
 }

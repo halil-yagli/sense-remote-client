@@ -191,12 +191,12 @@ void main() {
     testWidgets('about_current', (tester) async {
       await _pump(tester, _FakeAbout());
       await expectLater(find.byType(SenseAboutView), matchesGoldenFile(goldenPath('about_current')));
-    }, skip: goldenSkip('about_current'));
+    }, skip: goldenSkip('about_current'), tags: const ['golden']);
 
     testWidgets('about_ready_licenses', (tester) async {
       await _pump(tester, _FakeAbout(update: {'state': 'available', 'target': 4, 'checked_at': 1000}),
           licenses: true);
       await expectLater(find.byType(SenseAboutView), matchesGoldenFile(goldenPath('about_ready_licenses')));
-    }, skip: goldenSkip('about_ready_licenses'));
+    }, skip: goldenSkip('about_ready_licenses'), tags: const ['golden']);
   });
 }
