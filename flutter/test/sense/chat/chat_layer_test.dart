@@ -16,7 +16,10 @@ import 'support.dart';
 const area = Size(1200, 700);
 
 Widget layer(SenseChatController c,
-        {SensePopupController? popups, ValueNotifier<bool>? focused, VoidCallback? front}) =>
+        {SensePopupController? popups,
+        ValueNotifier<bool>? focused,
+        VoidCallback? front,
+        Future<bool> Function(String title, String body)? notify}) =>
     app(
       Align(
         alignment: Alignment.topLeft,
@@ -28,6 +31,7 @@ Widget layer(SenseChatController c,
             popups: popups,
             windowFocused: focused,
             onBringToFront: front,
+            systemNotify: notify,
             animate: false,
           ),
         ),
@@ -174,6 +178,50 @@ void main() {
     expect(front, 1);
     expect(c.isOpen, isTrue);
     expect(stateOf(tester).noticeVisible, isFalse);
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('system notification instead of the card; chat opens when the focus returns (#62, D3e)',
+      (tester) async {
+    setWindow(tester, const Size(1280, 760));
+    final focused = ValueNotifier(false);
+    final sent = <List<String>>[];
+    final c = makeController();
+    await tester.pumpWidget(layer(c, focused: focused, notify: (t, b) async {
+      sent.add([t, b]);
+      return true;
+    }));
+    c.receiveText('Ekran 2 dondu');
+    await tester.pump();
+    await tester.pump();
+    expect(sent, [
+      ['Giriş Salonu PC-2 · yeni mesaj', 'Sahadaki kişi: Ekran 2 dondu']
+    ]);
+    expect(stateOf(tester).noticeVisible, isFalse, reason: 'no in-app card');
+    expect(c.isOpen, isFalse);
+    focused.value = true; // the notification was pressed: the window comes forward
+    await tester.pump();
+    expect(c.isOpen, isTrue);
+    // Once only: minimised and focused again, it stays an icon.
+    c.minimize();
+    focused.value = false;
+    focused.value = true;
+    await tester.pump();
+    expect(c.isOpen, isFalse);
+  });
+
+  testWidgets('the card when the system could not show the notification (#62, D3e)', (tester) async {
+    setWindow(tester, const Size(1280, 760));
+    final focused = ValueNotifier(false);
+    final c = makeController();
+    await tester.pumpWidget(layer(c, focused: focused, notify: (t, b) async => false));
+    c.receiveText('merhaba');
+    await tester.pump();
+    await tester.pump();
+    expect(stateOf(tester).noticeVisible, isTrue);
+    focused.value = true;
+    await tester.pump();
+    expect(c.isOpen, isFalse, reason: 'no system notification, nothing opens by itself');
     await tester.pump(const Duration(seconds: 7));
   });
 }

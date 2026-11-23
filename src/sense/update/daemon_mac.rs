@@ -188,7 +188,10 @@ pub fn classify(
         SenseUpdateIpc::Status(_)
         | SenseUpdateIpc::InstallRequest { .. }
         | SenseUpdateIpc::InstallAnswer(_)
-        | SenseUpdateIpc::DaemonStatus(_) => None,
+        | SenseUpdateIpc::DaemonStatus(_)
+        // Sense Remote (D3e): "Vazgeç" is not taken by the daemon yet.
+        | SenseUpdateIpc::CancelRequest
+        | SenseUpdateIpc::CancelAnswer(_) => None,
     }
 }
 

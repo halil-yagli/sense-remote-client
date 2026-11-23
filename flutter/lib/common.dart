@@ -42,6 +42,7 @@ import 'models/model.dart';
 import 'models/platform_model.dart';
 import 'common/sense_theme.dart'; // Sense Remote
 import 'sense/strings/common.dart'; // Sense Remote (A2c)
+import 'sense/screens/controller/data/tray_link.dart'; // Sense Remote (D3e)
 
 import 'package:flutter_hbb/native/win32.dart'
     if (dart.library.html) 'package:flutter_hbb/web/win32.dart';
@@ -2247,6 +2248,12 @@ setEnvTerminalAdmin() {
 
 // uri link handler
 bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
+  // Sense Remote (YH C5, D3e): the tray menu's "Çıkış yap" (would otherwise be
+  // read as a connection to the id "sense-signout").
+  if (senseIsTraySignOutLink(cmdArgs: cmdArgs, uri: uri, uriString: uriString)) {
+    senseTraySignOut(bringToFront: () => windowOnTop(null));
+    return true;
+  }
   List<String>? args;
   if (cmdArgs != null && cmdArgs.isNotEmpty) {
     args = cmdArgs;

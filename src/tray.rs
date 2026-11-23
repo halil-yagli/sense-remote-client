@@ -1,6 +1,8 @@
-use crate::client::translate;
 #[cfg(windows)]
 use crate::ipc::Data;
+// Sense Remote (YH C5, H6; decision #69): the menu items, tooltip and icon come from
+// `sense::tray_menu`; the menu is the operating system's own.
+use crate::sense::tray_menu::{self as sense_tray, Action as SenseTrayAction, Entry as SenseTrayEntry};
 #[cfg(windows)]
 use hbb_common::tokio;
 use hbb_common::{allow_err, log};
@@ -28,7 +30,7 @@ fn make_tray() -> hbb_common::ResultType<()> {
     use hbb_common::anyhow::Context;
     use tao::event_loop::{ControlFlow, EventLoopBuilder};
     use tray_icon::{
-        menu::{Menu, MenuEvent, MenuItem},
+        menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
         TrayIcon, TrayIconBuilder, TrayIconEvent as TrayEvent,
     };
 
@@ -40,62 +42,74 @@ fn make_tray() -> hbb_common::ResultType<()> {
         return Ok(());
     }
 
-    let icon;
-    #[cfg(target_os = "macos")]
-    {
-        icon = include_bytes!("../res/mac-tray-dark-x2.png"); // use as template, so color is not important
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        icon = include_bytes!("../res/tray-icon.ico");
-    }
-
-    let (icon_rgba, icon_width, icon_height) = {
-        let image = load_icon_from_asset()
-            .unwrap_or(image::load_from_memory(icon).context("Failed to open icon path")?)
+    // Sense Remote (decision #70): the Sense mark, black on a light taskbar and white on a dark
+    // one (Windows, followed while running); macOS draws the template in the bar's colour. The
+    // app icon from the Flutter assets is not used for the tray.
+    let load_icon = |bytes: &[u8]| -> hbb_common::ResultType<tray_icon::Icon> {
+        let image = image::load_from_memory(bytes)
+            .context("Failed to open icon path")?
             .into_rgba8();
         let (width, height) = image.dimensions();
-        let rgba = image.into_raw();
-        (rgba, width, height)
+        Ok(tray_icon::Icon::from_rgba(image.into_raw(), width, height)
+            .context("Failed to open icon")?)
     };
-    let icon = tray_icon::Icon::from_rgba(icon_rgba, icon_width, icon_height)
-        .context("Failed to open icon")?;
+    #[cfg(target_os = "macos")]
+    let icon = load_icon(include_bytes!("../res/mac-tray-dark-x2.png"))?; // template
+    #[cfg(windows)]
+    let tray_icons = (
+        load_icon(include_bytes!("../res/tray-light.ico"))?,
+        load_icon(include_bytes!("../res/tray-dark.ico"))?,
+    );
+    #[cfg(windows)]
+    let mut light_taskbar = sense_tray::taskbar_is_light();
+    #[cfg(windows)]
+    let icon = if light_taskbar {
+        tray_icons.0.clone()
+    } else {
+        tray_icons.1.clone()
+    };
+    #[cfg(target_os = "linux")]
+    let icon = match load_icon_from_asset() {
+        Some(image) => {
+            let image = image.into_rgba8();
+            let (width, height) = image.dimensions();
+            tray_icon::Icon::from_rgba(image.into_raw(), width, height)
+                .context("Failed to open icon")?
+        }
+        None => load_icon(include_bytes!("../res/tray-icon.ico"))?,
+    };
 
     let mut event_loop = EventLoopBuilder::new().build();
 
-    let tray_menu = Menu::new();
-    let hide_stop_service = crate::ui_interface::get_builtin_option(
-        keys::OPTION_HIDE_STOP_SERVICE,
-    ) == "Y";
-    // The tray icon is only shown when the service is running, so we don't need to check
-    // the `stop-service` option here.
-    let quit_i = if !hide_stop_service {
-        Some(MenuItem::new(translate("Stop service".to_owned()), true, None))
-    } else {
-        None
-    };
-    let open_i = MenuItem::new(translate("Open".to_owned()), true, None);
-    if let Some(quit_i) = &quit_i {
-        tray_menu.append_items(&[&open_i, quit_i]).ok();
-    } else {
-        tray_menu.append_items(&[&open_i]).ok();
-    }
-    let tooltip = |count: usize| {
-        if count == 0 {
-            format!(
-                "{} {}",
-                crate::get_app_name(),
-                translate("Service is running".to_owned()),
-            )
-        } else {
-            format!(
-                "{} - {}\n{}",
-                crate::get_app_name(),
-                translate("Ready".to_owned()),
-                translate("{".to_string() + &format!("{count}") + "} sessions"),
-            )
+    // Sense Remote (YH C5, H6): Host: only "Sense Remote'u aç" (never "Servisi durdur": the
+    // person at the computer can not stop the service from the tray). Controller: + the last 3
+    // connections (one click connects) + "Çıkış yap". Rebuilt when the recent list changes.
+    let controller = sense_tray::controller_menu(crate::sense::installed_role());
+    let build_menu = move |recent: &[sense_tray::Recent]| -> Menu {
+        let menu = Menu::new();
+        for entry in sense_tray::menu(controller, recent, sense_tray::now_s()) {
+            match entry {
+                SenseTrayEntry::Item { id, label } => {
+                    menu.append(&MenuItem::with_id(id, label, true, None)).ok();
+                }
+                SenseTrayEntry::Header(label) => {
+                    menu.append(&MenuItem::new(label, false, None)).ok();
+                }
+                SenseTrayEntry::Separator => {
+                    menu.append(&PredefinedMenuItem::separator()).ok();
+                }
+            }
         }
+        menu
     };
+    let mut recent = if controller {
+        sense_tray::recent(sense_tray::RECENT_MAX)
+    } else {
+        vec![]
+    };
+    let tray_menu = build_menu(&recent);
+    let mut last_refresh = std::time::Instant::now();
+    let tooltip = sense_tray::tooltip;
     let mut _tray_icon: Arc<Mutex<Option<TrayIcon>>> = Default::default();
 
     let menu_channel = MenuEvent::receiver();
@@ -187,40 +201,46 @@ fn make_tray() -> hbb_common::ResultType<()> {
             }
         }
 
+        // Sense Remote (YH C5, H6): what the Sense menu items do. There is no item that stops
+        // the service.
         if let Ok(event) = menu_channel.try_recv() {
-            if let Some(quit_i) = &quit_i {
-                if event.id == quit_i.id() {
-                    /* failed in windows, seems no permission to check system process
-                    if !crate::check_process("--server", false) {
-                        *control_flow = ControlFlow::Exit;
-                        return;
-                    }
-                    */
-                    // Remove the icon first: on success `uninstall_service()` ends
-                    // this process with `std::process::exit`, which skips the
-                    // destructor that would remove it, leaving a ghost icon behind.
-                    #[cfg(windows)]
-                    let _ = _tray_icon
-                        .lock()
-                        .unwrap()
-                        .as_mut()
-                        .map(|t| t.set_visible(false));
-                    if !crate::platform::uninstall_service(false, false) {
-                        *control_flow = ControlFlow::Exit;
-                    }
-                    // Still alive, so stopping the service failed or was cancelled
-                    // in the UAC prompt. Show the icon again.
-                    #[cfg(windows)]
-                    let _ = _tray_icon
-                        .lock()
-                        .unwrap()
-                        .as_mut()
-                        .map(|t| t.set_visible(true));
-                } else if event.id == open_i.id() {
-                    open_func();
+            match sense_tray::action_of(event.id.as_ref()) {
+                Some(SenseTrayAction::Open) => open_func(),
+                Some(SenseTrayAction::Connect(peer_id)) => {
+                    allow_err!(crate::run_me(vec!["--connect", peer_id.as_str()]));
                 }
-            } else if event.id == open_i.id() {
-                open_func();
+                Some(SenseTrayAction::SignOut) => sense_sign_out(),
+                None => {}
+            }
+        }
+
+        // Sense Remote: every 5 s, the recent list (Controller) and the taskbar colour (Windows).
+        if last_refresh.elapsed() >= std::time::Duration::from_secs(5) {
+            last_refresh = std::time::Instant::now();
+            if controller {
+                let now = sense_tray::recent(sense_tray::RECENT_MAX);
+                if now != recent {
+                    recent = now;
+                    let menu = build_menu(&recent);
+                    if let Some(tray) = _tray_icon.lock().unwrap().as_mut() {
+                        tray.set_menu(Some(Box::new(menu)));
+                    }
+                }
+            }
+            #[cfg(windows)]
+            {
+                let light = sense_tray::taskbar_is_light();
+                if light != light_taskbar {
+                    light_taskbar = light;
+                    let icon = if light {
+                        tray_icons.0.clone()
+                    } else {
+                        tray_icons.1.clone()
+                    };
+                    if let Some(tray) = _tray_icon.lock().unwrap().as_mut() {
+                        allow_err!(tray.set_icon(Some(icon)));
+                    }
+                }
             }
         }
 
@@ -298,6 +318,33 @@ async fn start_query_session_count(sender: std::sync::mpsc::Sender<Data>) {
     }
 }
 
+/// Sense Remote (YH C5): "Çıkış yap" in the tray. The open app window signs out itself (the
+/// link `<scheme>://sense-signout`, `tray_link.dart`: only without an open connection), so its
+/// memory and the stored session agree. Without an open window the stored session is removed
+/// here.
+fn sense_sign_out() {
+    let link = sense_tray::sign_out_link();
+    #[cfg(windows)]
+    let handed = crate::platform::send_message_to_hnwd(
+        &crate::platform::FLUTTER_RUNNER_WIN32_WINDOW_CLASS,
+        &crate::get_app_name(),
+        (winapi::um::winuser::WM_USER + 2) as _, // the app's link message (`core_main`)
+        &link,
+        true,
+    );
+    #[cfg(target_os = "macos")]
+    let handed = crate::ipc::send_url_scheme(link).is_ok();
+    #[cfg(target_os = "linux")]
+    let handed = crate::dbus::invoke_new_connection(link).is_ok();
+    if !handed {
+        use hbb_common::config::LocalConfig;
+        LocalConfig::set_option("access_token".to_owned(), String::new());
+        LocalConfig::set_option("user_info".to_owned(), String::new());
+        log::info!("Sense Remote: signed out from the tray");
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn load_icon_from_asset() -> Option<image::DynamicImage> {
     let Some(path) = std::env::current_exe().map_or(None, |x| x.parent().map(|x| x.to_path_buf()))
     else {

@@ -9,6 +9,7 @@
 // to the app (GuiStatus every 5 s, `main_sense_update_install` on Güncelle).
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -58,10 +59,16 @@ class SenseUpdateBridge extends SenseUpdateBackend {
   @override
   void openUrl(String url) => launchUrlString(url);
 
-  // TODO(bridge): `main_sense_update_cancel` is not in plan §2.6; until the core
-  // can stop a download, Vazgeç is not offered (no button that does nothing).
+  // D3e (#68): `main_sense_update_cancel` stops the user's own download on
+  // Windows. The macOS daemon does not take it yet, so Vazgeç is not offered
+  // there (no button that does nothing).
   @override
-  bool get canCancel => false;
+  bool get canCancel => Platform.isWindows;
+
+  @override
+  Future<void> cancel() async {
+    await bind.mainSenseUpdateCancel();
+  }
 }
 
 /// Binds the strip: asks GuiStatus every 5 s and hands the strip (or null)

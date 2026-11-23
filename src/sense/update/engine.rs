@@ -57,6 +57,12 @@ pub const NO_RELEASE: &str = "no_release";
 pub const NOT_NEWER: &str = "not_newer";
 pub const BUSY: &str = "busy";
 
+/// Answers of "Vazgeç" while downloading (`check_cancel`, FFI `main_sense_update_cancel`).
+pub const CANCEL_ACCEPTED: &str = "";
+pub const NOT_DOWNLOADING: &str = "not_downloading";
+/// A panel order's download is not stopped from the computer (the panel's choice stands).
+pub const PANEL_ORDER: &str = "panel_order";
+
 /// What the machine remembers between events.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State {
@@ -131,6 +137,8 @@ pub enum Event {
     Hint(Hint),
     /// "Güncelle" in the app (`InstallRequest` / macOS `Install`).
     InstallRequested { version: u32 },
+    /// "Vazgeç" in the app while downloading (`CancelRequest`, macOS `Cancel`).
+    CancelRequested,
     DownloadProgress(u8),
     Downloaded,
     Verified,
@@ -162,6 +170,8 @@ pub struct Ctx {
 pub enum Action {
     /// Start `download::fetch` for the held release.
     Download,
+    /// Stop the running `download::fetch`; its `.part` file is removed.
+    AbortDownload,
     /// Size and SHA-256 of the downloaded file once more.
     Verify,
     /// Hand the verified file to `super::apply::install`.
@@ -190,6 +200,21 @@ pub fn next(mut state: State, event: Event, ctx: &Ctx) -> (State, Vec<Action>) {
                 s.phase = UpdateState::Scheduled;
                 clear_error(s);
                 try_start(s, ctx, &mut actions);
+            }
+        }
+        Event::CancelRequested => {
+            if check_cancel(s).is_ok() {
+                // Back to "Yeni sürüm hazır": the user's own download, so the cancelled attempt
+                // does not count and nothing waits before "Güncelle" works again.
+                s.phase = UpdateState::Available;
+                s.source = None;
+                s.progress_pct = None;
+                s.not_before_s = None;
+                s.attempts = s.attempts.saturating_sub(1);
+                if s.attempts == 0 {
+                    s.first_attempt_s = None;
+                }
+                actions.push(Action::AbortDownload);
             }
         }
         Event::DownloadProgress(pct) => {
@@ -261,6 +286,18 @@ pub fn check_install(state: &State, version: u32, ctx: &Ctx) -> Result<(), &'sta
         UpdateState::Failed if attempts_left(state, ctx.now_s) => Ok(()),
         _ => Err(BUSY),
     }
+}
+
+/// Whether "Vazgeç" is taken now; `Err` is the FFI's answer. Only the user's own download
+/// (`source == local`) is stopped; verification and installation are never interrupted.
+pub fn check_cancel(state: &State) -> Result<(), &'static str> {
+    if state.phase != UpdateState::Downloading {
+        return Err(NOT_DOWNLOADING);
+    }
+    if state.source != Some(UpdateSource::Local) {
+        return Err(PANEL_ORDER);
+    }
+    Ok(())
 }
 
 /// What a change has to be written for (the rest is memory only).

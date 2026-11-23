@@ -298,7 +298,8 @@ SenseUpdateStrip? senseUpdateStrip(SenseUpdateStatus s,
               ? senseUpdateText('downloading', {'n': n})
               : senseUpdateText('downloading_pct', {'n': n, 'p': '$p'}),
           busy: true,
-          actions: ui.canCancel ? const [SenseUpdateAction.cancel] : const []);
+          // A panel order's download is not stopped from the computer (D3e).
+          actions: ui.canCancel && s.source != 'panel' ? const [SenseUpdateAction.cancel] : const []);
     case SenseUpdateState.verifying:
       if (s.target == null) return null;
       return SenseUpdateStrip(senseUpdateText('verifying', {'n': n}), busy: true);

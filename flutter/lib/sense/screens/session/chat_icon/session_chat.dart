@@ -33,6 +33,19 @@ SenseChatController senseSessionChatController(FFI ffi) {
   );
 }
 
+/// #62 (D3e): event the core sends to the session windows when a chat
+/// notification was pressed (`tray_menu::NOTIFY_ACTIVATED_EVENT`).
+const String kSenseNotifyActivatedEvent = 'sense_notify_activated';
+
+/// `main_sense_notify`: true when the operating system showed it.
+Future<bool> senseSystemNotify(String title, String body) async {
+  try {
+    return (await bind.mainSenseNotify(title: title, body: body)).isEmpty;
+  } catch (_) {
+    return false;
+  }
+}
+
 /// desktop_drop around the chat popup (O12 sürükle-bırak).
 Widget senseDesktopDrop(
     Widget child, void Function(List<String> paths) onFiles, ValueChanged<bool> onHover) {
@@ -78,6 +91,10 @@ class _SenseSessionChatState extends State<SenseSessionChat> with WindowListener
   late SenseChatController _chat;
   final ValueNotifier<bool> _focused = ValueNotifier(true);
 
+  /// Title of the last system notification of this window (#62).
+  String? _notified;
+  late final String _handlerKey = 'sense-chat-${identityHashCode(this)}';
+
   @override
   void initState() {
     super.initState();
@@ -85,11 +102,26 @@ class _SenseSessionChatState extends State<SenseSessionChat> with WindowListener
     widget.ffi.chatModel.attachSenseChat(_chat);
     _chat.startPolling();
     windowManager.addListener(this);
+    platformFFI.registerEventHandler(kSenseNotifyActivatedEvent, _handlerKey, _onNotifyActivated);
+  }
+
+  /// A press on this window's notification: bring it forward; the chat opens
+  /// when the focus arrives (chat_layer).
+  Future<void> _onNotifyActivated(Map<String, dynamic> evt) async {
+    if (_notified == null || evt['title'] != _notified) return;
+    await windowOnTop(stateGlobal.windowId);
+  }
+
+  Future<bool> _notify(String title, String body) async {
+    final shown = await senseSystemNotify(title, body);
+    if (shown) _notified = title;
+    return shown;
   }
 
   @override
   void dispose() {
     windowManager.removeListener(this);
+    platformFFI.unregisterEventHandler(kSenseNotifyActivatedEvent, _handlerKey);
     widget.ffi.chatModel.detachSenseChat(_chat);
     // S12: the chat lives only as long as the connection window.
     _chat.clear();
@@ -112,6 +144,7 @@ class _SenseSessionChatState extends State<SenseSessionChat> with WindowListener
       popups: widget.popups,
       windowFocused: _focused,
       onBringToFront: () => windowOnTop(stateGlobal.windowId),
+      systemNotify: _notify,
       pickFiles: sensePickFiles,
       dropBuilder: senseDesktopDrop,
       iconPlacement: widget.iconPlacement,

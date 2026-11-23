@@ -2692,10 +2692,10 @@ pub fn main_sense_notify(title: String, body: String) -> String {
     crate::sense::tray_menu::ffi_notify(&title, &body)
 }
 
-// Update "Vazgeç" while downloading (Ek, #68; D3e): "" when stopped, otherwise a code. The
-// updater has no way to stop a download yet; D3e moves the body into `sense::update`.
+// Update "Vazgeç" while downloading (Ek, #68; D3e): "" when stopped, otherwise
+// `not_downloading`, `panel_order`, `ipc_failed` or `unsupported` (macOS for now).
 pub fn main_sense_update_cancel() -> String {
-    "unsupported".to_owned()
+    crate::sense::update::request_cancel()
 }
 
 pub fn main_account_auth(op: String, remember_me: bool) {

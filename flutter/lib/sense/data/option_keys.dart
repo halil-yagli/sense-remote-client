@@ -38,7 +38,8 @@ enum SenseOptionLock {
   /// Sense's own flow (permanent password).
   sense,
 
-  /// Decision 5 (2026-11-23): locked for real; D3e adds them to `OVERWRITE_SETTINGS`.
+  /// Decision 5 (2026-11-23): locked for real (D3e: LAN discovery and direct IP
+  /// in `OVERWRITE_SETTINGS`, the proxy in `ui_interface::set_socks`).
   decision,
 }
 
@@ -164,18 +165,20 @@ typedef SenseOptionLockedFn = bool Function(String key);
 
 /// Asks the computer whether [key] is managed by the panel. Tests replace it.
 ///
-/// Until D3e lands `main_sense_option_locked` (plan §2.6), the answer is
-/// RustDesk's `isOptionFixed` (OVERWRITE_SETTINGS) or the design list above.
-/// D3e: replace the body of [_bridgeLocked] with `bind.mainSenseOptionLocked(key: key)`.
+/// `main_sense_option_locked` (D3e, plan §2.6) answers from the computer:
+/// OVERWRITE_SETTINGS, the role's HARD_SETTINGS, the panel envelope's
+/// ALLOWED_OPTIONS and the proxy lock (TK9 §4). The design list above stays
+/// a floor: a key locked by design is never offered, whatever the build says.
 SenseOptionLockedFn senseOptionLockedImpl = _bridgeLocked;
 
 bool _bridgeLocked(String key) {
+  if (SenseOptionKeys.lockedByDesign.contains(key)) return true;
   try {
-    if (bind.mainIsOptionFixed(key: key)) return true;
+    return bind.mainSenseOptionLocked(key: key);
   } catch (_) {
-    // Native side not ready (tests, early start): fall back to the design list.
+    // Native side not ready (tests, early start): the design list decided.
+    return false;
   }
-  return SenseOptionKeys.lockedByDesign.contains(key);
 }
 
 /// "Panelden yönetilir": the row is faded and cannot be changed (C3, O3–O6).

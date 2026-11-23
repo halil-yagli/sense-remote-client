@@ -44,6 +44,7 @@ class SenseChatLayer extends StatefulWidget {
     this.popups,
     this.windowFocused,
     this.onBringToFront,
+    this.systemNotify,
     this.pickFiles,
     this.dropBuilder,
     this.animate = true,
@@ -68,6 +69,12 @@ class SenseChatLayer extends StatefulWidget {
 
   /// Brings the window forward (card press).
   final VoidCallback? onBringToFront;
+
+  /// #62 (D3e): shows an operating-system notification (title, body); true
+  /// when the system showed it. Then the in-app card is not drawn, and the
+  /// chat opens the next time the window gets the focus (a press on the
+  /// notification brings the window forward). Null or false: the in-app card.
+  final Future<bool> Function(String title, String body)? systemNotify;
   final Future<List<String>> Function()? pickFiles;
   final SenseFileDropBuilder? dropBuilder;
   final bool animate;
@@ -82,6 +89,10 @@ class SenseChatLayerState extends State<SenseChatLayer> {
   Size _area = Size.zero;
   StreamSubscription<SenseChatIncoming>? _sub;
   SenseChatIncoming? _notice;
+
+  /// A system notification was shown: open the chat when the focus returns.
+  bool _openOnFocus = false;
+  ValueListenable<bool>? _focusSource;
   bool _noticeVisible = false;
   Timer? _noticeTimer;
 
@@ -97,6 +108,19 @@ class SenseChatLayerState extends State<SenseChatLayer> {
     _sub = c.incoming.listen(_onIncoming);
     widget.popups?.addListener(_onPopups);
     c.addListener(_onChat);
+    _watchFocus(widget.windowFocused);
+  }
+
+  void _watchFocus(ValueListenable<bool>? source) {
+    _focusSource?.removeListener(_onFocus);
+    _focusSource = source;
+    source?.addListener(_onFocus);
+  }
+
+  void _onFocus() {
+    if (!_focused || !_openOnFocus) return;
+    _openOnFocus = false;
+    if (mounted && !c.isOpen) c.open();
   }
 
   @override
@@ -112,6 +136,7 @@ class SenseChatLayerState extends State<SenseChatLayer> {
       old.popups?.removeListener(_onPopups);
       widget.popups?.addListener(_onPopups);
     }
+    if (old.windowFocused != widget.windowFocused) _watchFocus(widget.windowFocused);
   }
 
   @override
@@ -119,6 +144,7 @@ class SenseChatLayerState extends State<SenseChatLayer> {
     _sub?.cancel();
     _noticeTimer?.cancel();
     widget.popups?.removeListener(_onPopups);
+    _focusSource?.removeListener(_onFocus);
     c.removeListener(_onChat);
     super.dispose();
   }
@@ -128,6 +154,7 @@ class SenseChatLayerState extends State<SenseChatLayer> {
   void _onChat() {
     // Chat opened: close the other popup (one popup at a time).
     if (c.isOpen && !_wasOpen) {
+      _openOnFocus = false;
       widget.popups?.close();
       _hideNotice();
     }
@@ -145,14 +172,37 @@ class SenseChatLayerState extends State<SenseChatLayer> {
   void _onIncoming(SenseChatIncoming m) {
     if (_focused) return;
     final author = widget.labels.peer;
+    final notice = SenseChatIncoming(
+      text: m.isFile
+          ? SenseChatStrings.noticeFile(author, m.text)
+          : SenseChatStrings.noticeBody(author, m.text),
+      isFile: m.isFile,
+      at: m.at,
+    );
+    final notify = widget.systemNotify;
+    if (notify == null) {
+      _showNotice(notice);
+      return;
+    }
+    // #62: the operating system's notification; the in-app card only when the
+    // system could not show it.
+    notify(SenseChatStrings.noticeTitle(widget.computerName), notice.text)
+        .catchError((_) => false)
+        .then((shown) {
+      if (!mounted) return;
+      if (shown) {
+        _openOnFocus = true;
+        // The focus may have come back while the system was asked.
+        _onFocus();
+      } else if (!_focused) {
+        _showNotice(notice);
+      }
+    });
+  }
+
+  void _showNotice(SenseChatIncoming notice) {
     setState(() {
-      _notice = SenseChatIncoming(
-        text: m.isFile
-            ? SenseChatStrings.noticeFile(author, m.text)
-            : SenseChatStrings.noticeBody(author, m.text),
-        isFile: m.isFile,
-        at: m.at,
-      );
+      _notice = notice;
       _noticeVisible = true;
     });
     _noticeTimer?.cancel();
