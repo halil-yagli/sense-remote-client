@@ -131,6 +131,8 @@ windows = { version = "0.61", features = [
     "Wdk_Storage_FileSystem",
     "Win32",
     "Win32_Foundation",
+    # Sense Remote (S6): graphics adapter list (name, LUID, memory) for the health data.
+    "Win32_Graphics_Dxgi",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",

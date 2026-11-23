@@ -742,6 +742,20 @@ pub mod report_sig;
 #[cfg(windows)]
 mod displays_win;
 mod network;
+// Sense Remote (S6): detailed health data (O8 "Bilgisayar durumu"): contract shapes and pure
+// rules, tool runner and parsers (every platform, tested), state, platform readers.
+mod health_cmd;
+mod health_model;
+mod health_parse;
+pub mod health_v2;
+#[cfg(windows)]
+mod health_win;
+#[cfg(windows)]
+mod inventory_win;
+#[cfg(target_os = "macos")]
+mod health_mac;
+#[cfg(target_os = "macos")]
+mod inventory_mac;
 // Sense Remote (plan 2026-11-21 §3): the macOS modules: state file (M1), installation (M2),
 // displays + permissions (M4), envelope apply through the root daemon (M5).
 // `displays_mac` and `mac_perm` are still being filled in by M4; parts of them are unused.

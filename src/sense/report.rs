@@ -35,7 +35,11 @@
 // Sense Remote: `health()`, `displays()` and `network()` are only used by tests so far.
 #![allow(dead_code)]
 
-use super::{network::SenseNetwork, SenseRole};
+use super::{
+    health_model::{DiskLive, GpuLive, Inventory, NetLive, TopProcess, WifiLive},
+    network::SenseNetwork,
+    SenseRole,
+};
 use hbb_common::{
     log,
     sysinfo::{Components, Disks, System, MINIMUM_CPU_UPDATE_INTERVAL},
@@ -140,6 +144,26 @@ pub struct SenseHealth {
     pub disks: Option<Vec<SenseDisk>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uptime_s: Option<u64>,
+    // Sense Remote (S6): the fields below (and `gpu_pct` / `gpu_temp_c`) are filled only while
+    // the panel announces `health_v2` (`health_v2::enabled`); shapes in `health_model`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_mhz: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_processes: Option<Vec<TopProcess>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem_available_mb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swap_used_mb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swap_total_mb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpus: Option<Vec<GpuLive>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub physical_disks: Option<Vec<DiskLive>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net_io: Option<Vec<NetLive>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wifi: Option<WifiLive>,
 }
 
 /// Sense Remote (Mac M4): `SenseMacPermissions`, the heartbeat's `mac_permissions` (`mac_perm`
@@ -166,6 +190,9 @@ pub struct SysinfoExt {
     pub displays_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<Vec<SenseNetwork>>,
+    /// Sense Remote (S6): only while the panel announces `health_v2` (`health_v2`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inventory: Option<Inventory>,
 }
 
 /// The part of `SenseHeartbeatExt` this module fills (I4 adds the envelope fields).
@@ -216,6 +243,7 @@ pub fn sysinfo_ext() -> Option<Value> {
                 Some(network_hash(network.as_deref()));
             network
         },
+        inventory: super::health_v2::inventory_for_sysinfo(),
     };
     to_json(&ext)
 }
@@ -352,6 +380,8 @@ pub fn network_check_due() -> bool {
     )
 }
 
+/// Sense Remote (S6): also true when the detailed inventory differs from the one in the last
+/// sysinfo, or the panel's `health_v2` changed (`health_v2::inventory_changed`).
 pub fn network_changed_since_sysinfo() -> bool {
     let now = Instant::now();
     {
@@ -360,6 +390,9 @@ pub fn network_changed_since_sysinfo() -> bool {
             return false;
         }
         *last = Some(now);
+    }
+    if super::health_v2::inventory_changed() {
+        return true;
     }
     let Some(sent) = SENT_NETWORK_HASH.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
         return false;
@@ -435,8 +468,15 @@ static CPU_SYSTEM: Mutex<Option<System>> = Mutex::new(None);
 static LAST_HEALTH: Mutex<Option<Instant>> = Mutex::new(None);
 
 fn take_health_slot(now: Instant) -> bool {
+    // Sense Remote (O8 "Canlı · 8 sn"): every 8 s while a session is open, for a panel that
+    // takes `health_v2`; otherwise `HEALTH_INTERVAL`.
+    let interval = super::health_model::health_interval(
+        super::health_v2::enabled(),
+        super::health_v2::connected(),
+        HEALTH_INTERVAL,
+    );
     let mut last = LAST_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
-    if health_due(*last, now) {
+    if due_after(*last, now, interval) {
         *last = Some(now);
         true
     } else {
@@ -445,13 +485,17 @@ fn take_health_slot(now: Instant) -> bool {
 }
 
 fn health_due(last: Option<Instant>, now: Instant) -> bool {
+    due_after(last, now, HEALTH_INTERVAL)
+}
+
+fn due_after(last: Option<Instant>, now: Instant, interval: Duration) -> bool {
     match last {
         None => true,
-        Some(t) => now.saturating_duration_since(t) >= HEALTH_INTERVAL,
+        Some(t) => now.saturating_duration_since(t) >= interval,
     }
 }
 
-fn unix_now() -> i64 {
+pub(super) fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -483,6 +527,10 @@ fn measure_health() -> SenseHealth {
             health.mem_used_mb = Some(bytes_to_mb(used.min(total)));
         }
         health.uptime_s = Some(system.uptime());
+        // Sense Remote (S6): detailed live values, only for a panel that takes them.
+        if super::health_v2::enabled() {
+            super::health_v2::extend_health(&mut health, system);
+        }
     }
     let disks = measure_disks();
     health.disks = (!disks.is_empty()).then_some(disks);
@@ -991,6 +1039,7 @@ mod tests {
                 total_gb: Some(953.8),
             }]),
             uptime_s: Some(3600),
+            ..Default::default()
         }
     }
 
@@ -1010,6 +1059,7 @@ mod tests {
             displays: Some(vec![full_display()]),
             displays_hash: Some("0".repeat(64)),
             network: Some(full_network()),
+            inventory: None,
         })
         .unwrap();
         assert_eq!(keys(&sysinfo), set(&SCHEMA_SYSINFO_KEYS));
@@ -1058,6 +1108,7 @@ mod tests {
             displays: None,
             displays_hash: None,
             network,
+            inventory: None,
         };
         let empty = serde_json::to_value(ext(Some(vec![]))).unwrap();
         assert_eq!(empty["network"], serde_json::json!([]));
