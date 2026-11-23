@@ -158,6 +158,9 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(stray, isEmpty);
 
+    // The test binding checks foundation variables before tear-down callbacks run.
+    debugPrint = oldPrint;
+
     // Teardown: close the tabs the way the window does.
     controller.clear();
     await tester.pump(const Duration(milliseconds: 50));
