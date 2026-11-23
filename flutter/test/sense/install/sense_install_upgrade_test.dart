@@ -1,18 +1,18 @@
-// Sense Remote (update plan 2026-11-21 §8, U7): the one-time move from version 2. Three
-// branches of the setup file (older installed → upgrade; same / newer → information only; no
-// role → the normal wizard), the macOS "Geçişi tamamla" flow, and never a sign-in or a
-// registration on the way.
+// Sense Remote: move from an older version (YH K7 geçiş, i09; update plan §8, U7). Neither
+// platform signs in or registers again; hesap, rol, proje ve kimlik korunur.
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_hbb/sense/screens/install/sense_install_strings.dart';
+import 'package:flutter_hbb/sense/strings/install.dart';
 import 'package:flutter_hbb/sense/screens/install/sense_install_wizard.dart';
 
-import 'sense_install_wizard_test.dart' show FakeBackend, pollPermissions;
+import 'sense_install_wizard_test.dart'
+    show FakeBackend, frames, pumpWizard, tap, currentStep;
 
-String t(String key) => kSenseInstallTr[key]!;
+String t(String key, [Map<String, String> args = const {}]) =>
+    senseInstallText(key, args);
 
 class FakeUpgrade {
   int runs = 0;
@@ -26,8 +26,8 @@ class FakeUpgrade {
 
   SenseUpgrade make(
           {SenseUpgradeMode mode = SenseUpgradeMode.upgrade,
-          int installed = 0,
-          int current = 3,
+          int installed = 3,
+          int current = 4,
           bool host = true,
           bool controller = false}) =>
       SenseUpgrade(
@@ -39,32 +39,11 @@ class FakeUpgrade {
           run: run);
 }
 
-Future<int> pumpUpgrade(WidgetTester tester, FakeBackend backend,
-    SenseUpgrade upgrade,
-    {bool mac = false}) async {
-  tester.view.physicalSize = const Size(860, 620);
-  tester.view.devicePixelRatio = 1;
-  addTearDown(tester.view.reset);
-  var closes = 0;
-  await tester.pumpWidget(MaterialApp(
-    home: SenseInstallWizard(
-      initialPath: r'C:\Program Files\SenseRemote',
-      icon: const SizedBox(),
-      backend: backend,
-      mac: mac,
-      upgrade: upgrade,
-      onClose: () => closes++,
-    ),
-  ));
-  await tester.pumpAndSettle();
-  return closes;
-}
-
 /// Nothing of a new installation happened: no sign-in, no project list, no install, no
-/// registration.
+/// registration (K7: hesap, rol, proje ve kimlik korunur).
 void expectNoEnrollment(FakeBackend backend) {
   expect(backend.loginStarts, 0);
-  expect(backend.projectCalls, 0);
+  expect(backend.optionCalls, 0);
   expect(backend.installs, isEmpty);
   expect(backend.enrolls, isEmpty);
 }
@@ -123,143 +102,105 @@ void main() {
   });
 
   group('Windows', () {
-    testWidgets('older version: Güncelle runs the move, no sign-in',
-        (tester) async {
+    testWidgets('Sürüm 3 → 4: tiles, Güncelle runs the move, no sign-in', (tester) async {
       final backend = FakeBackend();
-      final upgrade = FakeUpgrade();
-      await pumpUpgrade(tester, backend, upgrade.make());
-
+      final u = FakeUpgrade();
+      await pumpWizard(tester, backend, upgrade: u.make());
       expect(find.text(t('step-upgrade')), findsOneWidget);
       expect(find.text(t('step-account')), findsNothing);
-      expect(
-          find.textContaining('Bu bilgisayarda Sense Remote 2 kurulu. Sürüm 3'),
-          findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('sense-upgrade-start')));
-      await tester.pumpAndSettle();
-
-      expect(upgrade.runs, 1);
+      expect(find.text(t('upgrade-lead', {'from': '3', 'to': '4'})), findsOneWidget);
+      expect(find.text('Sürüm 3'), findsOneWidget);
+      expect(find.text('Sürüm 4'), findsOneWidget);
+      expect(find.text(t('upgrade-login-value')), findsOneWidget);
+      await tap(tester, 'sense-upgrade-start');
+      expect(u.runs, 1);
       expect(find.text(t('upgrade-done-title')), findsOneWidget);
       expectNoEnrollment(backend);
     });
 
-    testWidgets('declined administrator prompt shows the error and can retry',
-        (tester) async {
-      final backend = FakeBackend();
-      final upgrade = FakeUpgrade()..result = 'cancelled';
-      await pumpUpgrade(tester, backend, upgrade.make());
+    testWidgets('version 2 wrote no number: shown as Sürüm 2', (tester) async {
+      final u = FakeUpgrade();
+      await pumpWizard(tester, FakeBackend(), upgrade: u.make(installed: 0));
+      expect(find.text('Sürüm 2'), findsOneWidget);
+    });
 
-      await tester.tap(find.byKey(const Key('sense-upgrade-start')));
-      await tester.pumpAndSettle();
+    testWidgets('declined administrator prompt: red box, then retry', (tester) async {
+      final backend = FakeBackend();
+      final u = FakeUpgrade()..result = 'cancelled';
+      await pumpWizard(tester, backend, upgrade: u.make());
+      await tap(tester, 'sense-upgrade-start');
       expect(find.text(t('upgrade-error-cancelled')), findsOneWidget);
-
-      upgrade.result = '';
-      await tester.tap(find.byKey(const Key('sense-upgrade-start')));
-      await tester.pumpAndSettle();
-      expect(upgrade.runs, 2);
+      u.result = '';
+      await tap(tester, 'sense-upgrade-start');
       expect(find.text(t('upgrade-done-title')), findsOneWidget);
-      expectNoEnrollment(backend);
     });
 
-    testWidgets('buttons are disabled while the elevated step runs',
-        (tester) async {
-      final backend = FakeBackend();
-      final upgrade = FakeUpgrade()..pending = Completer<String>();
-      await pumpUpgrade(tester, backend, upgrade.make());
-
-      await tester.tap(find.byKey(const Key('sense-upgrade-start')));
-      await tester.pump();
-      expect(find.text(t('upgrade-running')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('sense-upgrade-start')));
-      await tester.pump();
-      expect(upgrade.runs, 1);
-
-      upgrade.pending!.complete('failed');
-      await tester.pumpAndSettle();
+    testWidgets('buttons are closed while the elevated step runs', (tester) async {
+      final u = FakeUpgrade()..pending = Completer();
+      await pumpWizard(tester, FakeBackend(), upgrade: u.make());
+      await tap(tester, 'sense-upgrade-start');
+      expect(find.byKey(const Key('sense-upgrade-running')), findsOneWidget);
+      await tap(tester, 'sense-upgrade-start');
+      expect(u.runs, 1);
+      u.pending!.complete('failed');
+      await frames(tester);
       expect(find.text(t('upgrade-error-failed')), findsOneWidget);
     });
 
-    testWidgets('same version installed: only the information and Kapat',
-        (tester) async {
-      final backend = FakeBackend();
-      final upgrade = FakeUpgrade();
-      await pumpUpgrade(tester, backend,
-          upgrade.make(mode: SenseUpgradeMode.current, installed: 3));
-
-      expect(find.textContaining('Bu bilgisayarda Sense Remote 3 kurulu.'),
-          findsOneWidget);
+    testWidgets('same version installed: only the information and Kapat', (tester) async {
+      var closed = 0;
+      final u = FakeUpgrade();
+      await pumpWizard(tester, FakeBackend(),
+          upgrade: u.make(mode: SenseUpgradeMode.current, installed: 4),
+          onClose: () => closed++);
       expect(find.byKey(const Key('sense-upgrade-start')), findsNothing);
-      expect(find.byKey(const Key('sense-upgrade-close')), findsOneWidget);
-      expect(upgrade.runs, 0);
-      expectNoEnrollment(backend);
+      await tap(tester, 'sense-upgrade-close');
+      expect(closed, 1);
     });
 
-    testWidgets('native side answers not_newer: switches to the information',
-        (tester) async {
-      final backend = FakeBackend();
-      final upgrade = FakeUpgrade()..result = 'not_newer';
-      await pumpUpgrade(tester, backend, upgrade.make(installed: 2));
-
-      await tester.tap(find.byKey(const Key('sense-upgrade-start')));
-      await tester.pumpAndSettle();
+    testWidgets('native side answers not_newer: switches to the information', (tester) async {
+      final u = FakeUpgrade()..result = 'not_newer';
+      await pumpWizard(tester, FakeBackend(), upgrade: u.make());
+      await tap(tester, 'sense-upgrade-start');
       expect(find.byKey(const Key('sense-upgrade-close')), findsOneWidget);
       expect(find.byKey(const Key('sense-upgrade-start')), findsNothing);
     });
 
-    testWidgets('no upgrade: the normal wizard starts with the sign-in',
-        (tester) async {
-      final backend = FakeBackend();
-      tester.view.physicalSize = const Size(860, 620);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      await tester.pumpWidget(MaterialApp(
-        home: SenseInstallWizard(
-          initialPath: r'C:\Program Files\SenseRemote',
-          icon: const SizedBox(),
-          backend: backend,
-        ),
-      ));
-      await tester.pumpAndSettle();
-      expect(find.text(t('step-account')), findsOneWidget);
+    testWidgets('Kapat on the done page closes the setup file', (tester) async {
+      var closed = 0;
+      final u = FakeUpgrade();
+      await pumpWizard(tester, FakeBackend(), upgrade: u.make(), onClose: () => closed++);
+      await tap(tester, 'sense-upgrade-start');
+      await tap(tester, 'sense-upgrade-finish-close');
+      expect(closed, 1);
+    });
+
+    testWidgets('no upgrade: the normal wizard starts with the sign-in', (tester) async {
+      await pumpWizard(tester, FakeBackend());
+      expect(currentStep(tester), SenseInstallStep.account);
       expect(find.text(t('step-upgrade')), findsNothing);
     });
   });
 
   group('macOS', () {
-    testWidgets('Geçişi tamamla → permissions → done, no sign-in',
-        (tester) async {
-      final backend = FakeBackend();
-      final upgrade = FakeUpgrade();
-      await pumpUpgrade(tester, backend, upgrade.make(host: true), mac: true);
-
-      // No Applications check first: the role is installed, the app runs from there.
-      expect(backend.inAppsCalls, 0);
-      // The title and the button both read "Geçişi tamamla".
-      expect(find.descendant(
-              of: find.byKey(const Key('sense-upgrade-start')),
-              matching: find.text(t('upgrade-mac-start'))),
-          findsOneWidget);
-      expect(find.textContaining('Uygulamalar klasörüne kopyalandı'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('sense-upgrade-start')));
-      await tester.pumpAndSettle();
-      expect(upgrade.runs, 1);
-
-      // The permissions step of the installation, for the installed role (Host).
-      expect(find.byKey(const Key('sense-perm-screenRecording')), findsOneWidget);
-      await pollPermissions(
-          tester,
-          backend,
-          const SenseMacPermissions(
-              screenRecording: true,
-              accessibility: true,
-              inputMonitoring: true));
-      await tester.tap(find.byKey(const Key('sense-perm-next')));
-      await tester.pumpAndSettle();
-
+    testWidgets('Geçişi tamamla → permissions → done, no sign-in', (tester) async {
+      final backend = FakeBackend()..inApps = true;
+      final u = FakeUpgrade();
+      await pumpWizard(tester, backend, mac: true, upgrade: u.make(controller: true));
+      expect(find.text(t('upgrade-mac-start')), findsOneWidget);
+      expect(find.text(t('upgrade-note-mac')), findsOneWidget);
+      await tap(tester, 'sense-upgrade-start');
+      expect(currentStep(tester), SenseInstallStep.permissions);
+      backend.permissions = const SenseMacPermissions(
+          screenRecording: true, accessibility: true, inputMonitoring: true);
+      await tester.pump(const Duration(seconds: 1));
+      await frames(tester);
+      await tap(tester, 'sense-perm-next');
       expect(find.text(t('upgrade-done-title-mac')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('sense-upgrade-finish-close')));
-      expect(backend.finishes, [false]);
+      await tap(tester, 'sense-upgrade-finish-open');
+      expect(backend.finishes, [true]);
       expectNoEnrollment(backend);
+      expect(backend.inAppsCalls, 0);
     });
   });
 }

@@ -1,32 +1,43 @@
-// Sense Remote: widget tests for the Sense setup wizard (wave 3 I6: Sense sign-in with the
-// pairing code, panel projects, install, panel registration with retry / skip).
+// Sense Remote: behaviour of the setup wizard (YH K1–K7). Every button, switch, chip and
+// state of the steps; the golden images are in sense_install_golden_test.dart.
 
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_hbb/common/widgets/login.dart';
-import 'package:flutter_hbb/sense/screens/install/sense_install_strings.dart';
+import 'package:flutter_hbb/sense/sense.dart';
+import 'package:flutter_hbb/sense/strings/install.dart';
 import 'package:flutter_hbb/sense/screens/install/sense_install_wizard.dart';
 
-String t(String key) => kSenseInstallTr[key]!;
+String t(String key, [Map<String, String> args = const {}]) =>
+    senseInstallText(key, args);
 
-const kUrl = 'https://remote.snsdpt.com/panel/istemci-onay/f1';
+const kUrl = 'https://panel.example.test/panel/istemci-onay/f1';
 const kEmail = 'ad.soyad@sensedepartment.com';
+const kCode = '482913';
+
+const kMuseum = SenseProject('prj_1', 'Örnek Müze', [
+  SenseLocation('loc_1', 'Lobi'),
+  SenseLocation('loc_2', 'Ana salon'),
+  SenseLocation('loc_3', 'Galeri 1'),
+  SenseLocation('loc_4', 'Kubbe'),
+]);
+const kFair = SenseProject('prj_2', 'Örnek Fuar Standı', [SenseLocation('loc_5', 'Stand')]);
+const kOffice = SenseProject('prj_3', 'Ofis');
 
 class FakeBackend implements SenseInstallBackend {
   int loginStarts = 0;
   int loginCancels = 0;
   final opened = <String>[];
+  final copied = <String>[];
   SenseLoginStatus status = const SenseLoginStatus('requesting');
 
-  int projectCalls = 0;
-  SenseProjectList projectList = const SenseProjectList.ok([
-    SenseProject('prj_1', 'Örnek Müze'),
-    SenseProject('prj_2', 'Ekip'),
-  ]);
+  int optionCalls = 0;
+  SenseInstallOptions options = const SenseInstallOptions.ok([kMuseum, kFair, kOffice]);
+
+  bool notEmpty = false;
+  final folderChecks = <String>[];
 
   final installs = <SenseInstallRequest>[];
   Completer<String>? pendingInstall;
@@ -34,32 +45,35 @@ class FakeBackend implements SenseInstallBackend {
 
   final enrolls = <SenseEnrollRequest>[];
   Completer<SenseEnrollResult>? pendingEnroll;
-  SenseEnrollResult enrollResult = const SenseEnrollResult.ok(['Örnek Müze']);
+  SenseEnrollResult enrollResult = const SenseEnrollResult.ok(['Örnek Müze'], 'Galeri 1');
 
   final finishes = <bool>[];
 
   @override
-  Future<void> loginStart() async {
-    loginStarts++;
-  }
+  Future<void> loginStart() async => loginStarts++;
 
   @override
   Future<SenseLoginStatus> loginStatus() async => status;
 
   @override
-  Future<void> loginCancel() async {
-    loginCancels++;
+  Future<void> loginCancel() async => loginCancels++;
+
+  @override
+  Future<void> openUrl(String url) async => opened.add(url);
+
+  @override
+  Future<void> copy(String text) async => copied.add(text);
+
+  @override
+  Future<SenseInstallOptions> installOptions() async {
+    optionCalls++;
+    return options;
   }
 
   @override
-  Future<void> openUrl(String url) async {
-    opened.add(url);
-  }
-
-  @override
-  Future<SenseProjectList> projects() async {
-    projectCalls++;
-    return projectList;
+  Future<bool> folderNotEmpty(String path) async {
+    folderChecks.add(path);
+    return notEmpty;
   }
 
   @override
@@ -77,7 +91,7 @@ class FakeBackend implements SenseInstallBackend {
   @override
   void finish(bool openApp) => finishes.add(openApp);
 
-  // Sense Remote (Mac M3): the macOS side.
+  // macOS.
   bool inApps = true;
   int inAppsCalls = 0;
   SenseMacPermissions permissions = const SenseMacPermissions();
@@ -99,9 +113,8 @@ class FakeBackend implements SenseInstallBackend {
   }
 
   @override
-  Future<void> openMacPermission(SenseMacPermission permission) async {
-    openedPermissions.add(permission);
-  }
+  Future<void> openMacPermission(SenseMacPermission permission) async =>
+      openedPermissions.add(permission);
 
   @override
   Future<String> restartAgent() async {
@@ -110,968 +123,708 @@ class FakeBackend implements SenseInstallBackend {
   }
 }
 
+/// A few frames; never waits for the spinners (they turn for ever).
+Future<void> frames(WidgetTester tester, [int n = 4]) async {
+  for (var i = 0; i < n; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
 Future<void> pumpWizard(WidgetTester tester, FakeBackend backend,
-    {bool mac = false}) async {
-  tester.view.physicalSize = const Size(860, 620);
+    {bool mac = false,
+    SenseUpgrade? upgrade,
+    String version = '4',
+    Future<String?> Function(String)? onPickPath,
+    VoidCallback? onClose}) async {
+  tester.view.physicalSize = kSenseInstallSize;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
-    home: SenseInstallWizard(
-      initialPath: r'C:\Program Files\SenseRemote',
-      icon: const SizedBox(),
-      backend: backend,
-      // Sense Remote (Mac M3): the macOS flow is a parameter, so it runs on any CI platform.
-      mac: mac,
+    debugShowCheckedModeBanner: false,
+    theme: senseTheme(),
+    home: Scaffold(
+      body: SenseInstallWizard(
+        key: const Key('golden'),
+        initialPath: r'C:\Program Files\Sense Remote',
+        backend: backend,
+        mac: mac,
+        upgrade: upgrade,
+        version: version,
+        onPickPath: onPickPath,
+        onClose: onClose,
+      ),
     ),
   ));
-  await tester.pumpAndSettle();
+  await frames(tester);
 }
 
-/// One read of the macOS permission state (the wizard reads it every second).
-Future<void> pollPermissions(WidgetTester tester, FakeBackend backend,
-    SenseMacPermissions permissions) async {
-  backend.permissions = permissions;
-  await tester.pump(const Duration(seconds: 1));
-  await tester.pumpAndSettle();
+Future<void> tapFinder(WidgetTester tester, Finder f) async {
+  await tester.ensureVisible(f);
+  await frames(tester, 2);
+  await tester.tap(f);
+  await frames(tester);
 }
 
-String permissionStatus(WidgetTester tester, SenseMacPermission permission) =>
-    tester
-        .widget<Text>(find.byKey(Key('sense-perm-status-${permission.name}')))
-        .data!;
+Future<void> tap(WidgetTester tester, String key) => tapFinder(tester, find.byKey(Key(key)));
 
-Finder permissionOpen(SenseMacPermission permission) =>
-    find.byKey(Key('sense-perm-open-${permission.name}'));
+/// The switch of a setting row.
+Future<void> tapToggle(WidgetTester tester, String key) => tapFinder(tester,
+    find.descendant(of: find.byKey(Key(key)), matching: find.byType(SenseToggle)));
 
-Finder get next => find.byKey(const Key('sense-next'));
-
-/// The check mark inside a selected panel project chip.
-Finder checked(String projectId) => find.descendant(
-    of: find.byKey(Key('sense-project-$projectId')),
-    matching: find.byIcon(Icons.check));
-
-bool enabled(WidgetTester tester, Finder finder) =>
-    tester.widget<ButtonStyleButton>(finder).onPressed != null;
-
-Future<void> tapAndSettle(WidgetTester tester, Finder finder) async {
-  await tester.ensureVisible(finder);
-  await tester.pumpAndSettle();
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
-
-/// One poll of the sign-in state (the wizard reads it every second).
-Future<void> poll(WidgetTester tester, SenseLoginStatus status,
-    FakeBackend backend) async {
+/// Advances the sign-in poll (every second).
+Future<void> poll(WidgetTester tester, SenseLoginStatus status, FakeBackend backend) async {
   backend.status = status;
   await tester.pump(const Duration(seconds: 1));
-  await tester.pumpAndSettle();
+  await frames(tester);
 }
 
-const waiting =
-    SenseLoginStatus('waiting', url: kUrl, pairingCode: '482913');
-const signedIn =
-    SenseLoginStatus('done', email: kEmail, displayName: 'Ad Soyad');
+const kWaiting = SenseLoginStatus('waiting', url: kUrl, pairingCode: kCode);
+const kDone = SenseLoginStatus('done', email: kEmail, displayName: 'Ad Soyad');
 
-Future<void> signIn(WidgetTester tester, FakeBackend backend) async {
-  await tapAndSettle(tester, find.byKey(const Key('sense-login')));
-  await poll(tester, waiting, backend);
-  await poll(tester, signedIn, backend);
+Future<void> signIn(WidgetTester tester, FakeBackend backend,
+    {SenseLoginStatus done = kDone}) async {
+  await tap(tester, 'sense-google');
+  await poll(tester, kWaiting, backend);
+  await poll(tester, done, backend);
 }
 
-/// Sign-in -> role -> info -> summary with the given choices.
-Future<void> goToSummary(WidgetTester tester, FakeBackend backend,
-    {bool host = true, bool controller = false}) async {
+Future<void> toRole(WidgetTester tester, FakeBackend backend) async {
   await signIn(tester, backend);
-  await tapAndSettle(tester, next);
-  if (host) {
-    await tapAndSettle(tester, find.byKey(const Key('sense-role-host')));
+  await tap(tester, 'sense-account-next');
+}
+
+Future<void> toInfo(WidgetTester tester, FakeBackend backend,
+    {bool host = true, bool controller = false}) async {
+  await toRole(tester, backend);
+  if (host) await tap(tester, 'sense-role-host');
+  if (controller) await tap(tester, 'sense-role-controller');
+  await tap(tester, 'sense-role-next');
+}
+
+Future<void> fillInfo(WidgetTester tester) async {
+  await tester.enterText(find.byKey(const Key('sense-name')), 'Galeri kioskı');
+  await tap(tester, 'sense-project-prj_1');
+  await tap(tester, 'sense-location-loc_3');
+}
+
+Future<void> toSummary(WidgetTester tester, FakeBackend backend,
+    {bool host = true, bool controller = false}) async {
+  await toInfo(tester, backend, host: host, controller: controller);
+  await fillInfo(tester);
+  await tap(tester, 'sense-info-next');
+}
+
+SenseButton button(WidgetTester tester, String key) =>
+    tester.widget<SenseButton>(find.byKey(Key(key)));
+
+bool enabled(WidgetTester tester, String key) => button(tester, key).onPressed != null;
+
+SenseInstallStep? currentStep(WidgetTester tester) {
+  for (final step in SenseInstallStep.values) {
+    final f = find.byKey(Key('sense-step-${step.name}'));
+    if (f.evaluate().isEmpty) continue;
+    if (tester.widget<Semantics>(f).properties.selected == true) return step;
   }
-  if (controller) {
-    await tapAndSettle(tester, find.byKey(const Key('sense-role-controller')));
-  }
-  await tapAndSettle(tester, next);
-  await tester.enterText(find.byKey(const Key('sense-name')), '  Galeri kioskı ');
-  await tester.enterText(find.byKey(const Key('sense-location')), 'Galeri 1');
-  await tapAndSettle(tester, find.byKey(const Key('sense-project-prj_1')));
-  // Typed but not confirmed with Enter: still added on "Devam".
-  await tester.enterText(find.byKey(const Key('sense-project')), 'Yeni Müze');
-  await tester.enterText(find.byKey(const Key('sense-note')), '2 ekran');
-  await tapAndSettle(tester, next);
+  return null;
 }
 
 void main() {
-  testWidgets('starts at the Sense sign-in; Devam waits for it',
-      (tester) async {
-    final semantics = tester.ensureSemantics();
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend);
-
-    expect(find.text(t('step-account')), findsOneWidget);
-    expect(find.text(t('google-sign-in')), findsOneWidget);
-    expect(find.text(t('domain-hint')), findsOneWidget);
-    expect(find.textContaining('RustDesk'), findsNothing);
-    expect(enabled(tester, next), isFalse);
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-login')));
-    expect(backend.loginStarts, 1);
-    expect(find.byKey(const Key('sense-login-requesting')), findsOneWidget);
-
-    // The code is shown large, 3+3 like the panel; the browser opens only on request.
-    await poll(tester, waiting, backend);
-    expect(find.text('482 913'), findsOneWidget);
-    expect(find.text(t('pairing-hint')), findsOneWidget);
-    expect(find.bySemanticsLabel('${t('pairing-spoken')}4 8 2 9 1 3'),
-        findsOneWidget);
-    expect(backend.opened, isEmpty);
-    await tapAndSettle(tester, find.byKey(const Key('sense-open-browser')));
-    expect(backend.opened, [kUrl]);
-    expect(enabled(tester, next), isFalse);
-
-    await poll(tester, signedIn, backend);
-    expect(find.byKey(const Key('sense-account')), findsOneWidget);
-    expect(find.text(kEmail), findsOneWidget);
-    expect(find.text('AS'), findsOneWidget);
-    expect(find.text(t('verified')), findsOneWidget);
-    expect(enabled(tester, next), isTrue);
-    expect(backend.projectCalls, 1);
-    semantics.dispose();
-  });
-
-  testWidgets('copy link copies the approval URL', (tester) async {
-    final copied = <Object?>[];
-    tester.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method == 'Clipboard.setData') copied.add(call.arguments);
-      return null;
-    });
-    addTearDown(() => tester.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, null));
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-login')));
-    await poll(tester, waiting, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-copy-link')));
-    expect(copied, [
-      {'text': kUrl}
-    ]);
-    expect(find.text(t('link-copied')), findsOneWidget);
-  });
-
-  testWidgets('timeout asks for a new code; other errors offer a retry',
-      (tester) async {
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-login')));
-    await poll(tester, waiting, backend);
-    await poll(tester,
-        const SenseLoginStatus('failed', error: 'timeout'), backend);
-    expect(find.text(t('login-timeout')), findsOneWidget);
-    expect(find.text('482 913'), findsNothing);
-    expect(find.text(t('new-code')), findsOneWidget);
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-login')));
-    expect(backend.loginStarts, 2);
-    await poll(
-        tester,
-        const SenseLoginStatus('failed',
-            error: 'failed', detail: 'Hesap kapalı'),
-        backend);
-    expect(find.text('${t('login-failed')}\nHesap kapalı'), findsOneWidget);
-    expect(find.text(t('retry')), findsOneWidget);
-    expect(enabled(tester, next), isFalse);
-  });
-
-  testWidgets('cancel and another account go back to the start',
-      (tester) async {
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-login')));
-    await poll(tester, waiting, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-login-cancel')));
-    expect(backend.loginCancels, 1);
-    expect(find.text(t('google-sign-in')), findsOneWidget);
-    // The old attempt's state no longer counts.
-    backend.status = signedIn;
-    await tester.pump(const Duration(seconds: 3));
-    expect(find.byKey(const Key('sense-account')), findsNothing);
-
-    await signIn(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-other-account')));
-    expect(backend.loginCancels, 2);
-    expect(enabled(tester, next), isFalse);
-  });
-
-  testWidgets('role step: one or both roles, back to the account',
-      (tester) async {
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend);
-    await signIn(tester, backend);
-    await tapAndSettle(tester, next);
-
-    expect(find.text('Host'), findsOneWidget);
-    expect(find.text('Controller'), findsOneWidget);
-    expect(enabled(tester, next), isFalse);
-    expect(find.text(t('no-role')), findsOneWidget);
-    await tapAndSettle(tester, find.byKey(const Key('sense-role-host')));
-    expect(find.text('Host.'), findsOneWidget);
-    await tapAndSettle(tester, find.byKey(const Key('sense-role-controller')));
-    expect(find.text('Host + Controller${t('both-desc')}'), findsOneWidget);
-    await tapAndSettle(tester, find.byKey(const Key('sense-role-host')));
-    expect(find.text('Controller.'), findsOneWidget);
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-back')));
-    expect(find.byKey(const Key('sense-account')), findsOneWidget);
-  });
-
-  testWidgets('info step: panel projects, new projects, name required',
-      (tester) async {
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend);
-    await signIn(tester, backend);
-    await tapAndSettle(tester, next);
-    await tapAndSettle(tester, find.byKey(const Key('sense-role-host')));
-    await tapAndSettle(tester, next);
-
-    expect(find.text('Örnek Müze'), findsOneWidget);
-    expect(find.text('Ekip'), findsOneWidget);
-    expect(enabled(tester, next), isFalse);
-    await tester.enterText(find.byKey(const Key('sense-name')), '   ');
-    await tester.pump();
-    expect(enabled(tester, next), isFalse);
-    await tester.enterText(find.byKey(const Key('sense-name')), 'Kiosk');
-    await tester.pump();
-    expect(enabled(tester, next), isTrue);
-
-    // A typed name matching a panel project selects it (Turkish case rules).
-    await tester.enterText(find.byKey(const Key('sense-project')), 'EKİP');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    expect(checked('prj_2'), findsOneWidget);
-    expect(checked('prj_1'), findsNothing);
-    expect(find.byKey(const Key('sense-new-project-EKİP')), findsNothing);
-
-    await tester.enterText(find.byKey(const Key('sense-project')), 'Yeni Müze');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('sense-project')), 'yeni müze');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('sense-new-project-Yeni Müze')), findsOneWidget);
-    expect(find.text(t('new-tag')), findsOneWidget);
-
-    // Remove the new one, unselect the panel one.
-    await tapAndSettle(tester, find.byTooltip(t('remove-project')));
-    expect(find.byKey(const Key('sense-new-project-Yeni Müze')), findsNothing);
-    await tapAndSettle(tester, find.byKey(const Key('sense-project-prj_2')));
-    expect(checked('prj_2'), findsNothing);
-  });
-
-  testWidgets('project list errors can be retried; empty list explains',
-      (tester) async {
-    final backend = FakeBackend()
-      ..projectList = const SenseProjectList.error('network');
-    await pumpWizard(tester, backend);
-    await signIn(tester, backend);
-    await tapAndSettle(tester, next);
-    await tapAndSettle(tester, find.byKey(const Key('sense-role-host')));
-    await tapAndSettle(tester, next);
-
-    expect(find.text(t('projects-error-network')), findsOneWidget);
-    backend.projectList = const SenseProjectList.ok([]);
-    await tapAndSettle(tester, find.byKey(const Key('sense-projects-retry')));
-    expect(backend.projectCalls, 2);
-    expect(find.byKey(const Key('sense-projects-error')), findsNothing);
-    expect(find.text(t('projects-empty')), findsOneWidget);
-  });
-
-  testWidgets('summary -> install -> panel registration -> done',
-      (tester) async {
-    final backend = FakeBackend()
-      ..pendingInstall = Completer<String>()
-      ..pendingEnroll = Completer<SenseEnrollResult>();
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend, host: true, controller: true);
-
-    final summary = find.byKey(const Key('sense-summary'));
-    Finder inSummary(String text) =>
-        find.descendant(of: summary, matching: find.text(text));
-    expect(inSummary(kEmail), findsOneWidget);
-    expect(inSummary('Host + Controller'), findsOneWidget);
-    expect(inSummary('Galeri kioskı'), findsOneWidget);
-    expect(inSummary('Örnek Müze, Yeni Müze (${t('new-tag')})'), findsOneWidget);
-    expect(inSummary('Galeri 1'), findsOneWidget);
-    expect(inSummary('2 ekran'), findsOneWidget);
-    expect(inSummary(t('password-value')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('sense-install')));
-    await tester.pump();
-    expect(find.text(t('installing')), findsOneWidget);
-    expect(enabled(tester, find.byKey(const Key('sense-install'))), isFalse);
-
-    final request = backend.installs.single;
-    expect(request.role, 'both');
-    expect(request.options, ' startmenu desktopicon');
-    expect(request.path, r'C:\Program Files\SenseRemote');
-    // K-YEREL: only name and location stay on the computer.
-    expect(jsonDecode(request.infoJson),
-        {'name': 'Galeri kioskı', 'location': 'Galeri 1'});
-
-    backend.pendingInstall!.complete('');
-    await tester.pump();
-    await tester.pump();
-    expect(find.text(t('registering')), findsOneWidget);
-    expect(jsonDecode(backend.enrolls.single.toJson()), {
-      'name': 'Galeri kioskı',
-      'location': 'Galeri 1',
-      'note': '2 ekran',
-      'project_ids': ['prj_1'],
-      'new_projects': ['Yeni Müze'],
+  group('model', () {
+    test('install options with panel locations', () {
+      final o = SenseInstallOptions.fromJson(jsonEncode({
+        'ok': true,
+        'projects': [
+          {
+            'id': 'prj_1',
+            'name': 'Örnek Müze',
+            'locations': [
+              {'id': 'loc_1', 'name': 'Lobi'},
+              {'location_id': 'loc_2', 'name': 'Galeri 1'},
+            ],
+          },
+          {'id': 'prj_2', 'name': 'Ofis'},
+        ],
+      }));
+      expect(o.ok, isTrue);
+      expect(o.projects.first.locations.map((l) => l.id), ['loc_1', 'loc_2']);
+      expect(o.projects.last.locations, isEmpty);
+      expect(SenseInstallOptions.fromJson('{"ok":false,"error":"network"}').error, 'network');
+      expect(SenseInstallOptions.fromJson('nonsense').error, 'retry');
     });
 
-    backend.pendingEnroll!
-        .complete(const SenseEnrollResult.ok(['Örnek Müze', 'Yeni Müze']));
-    await tester.pumpAndSettle();
-    expect(find.text(t('done-title')), findsOneWidget);
-    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
-    expect(done, contains(t('done-lead')));
-    expect(
-        done,
-        contains(t('done-panel-projects')
-            .replaceAll('{projects}', 'Örnek Müze, Yeni Müze')));
-    expect(done, contains(t('done-lead-locked')));
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-finish-open')));
-    expect(backend.finishes, [true]);
-  });
-
-  testWidgets('registration failure: retry, then skip -> waiting for approval',
-      (tester) async {
-    final backend = FakeBackend()
-      ..enrollResult = const SenseEnrollResult.error('network');
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend, host: false, controller: true);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-
-    expect(find.byKey(const Key('sense-register-failed')), findsOneWidget);
-    expect(find.text(t('enroll-network')), findsOneWidget);
-    expect(backend.enrolls, hasLength(1));
-
-    backend.enrollResult = const SenseEnrollResult.error('something_new');
-    await tapAndSettle(tester, find.byKey(const Key('sense-retry-register')));
-    expect(backend.enrolls, hasLength(2));
-    expect(find.text(t('enroll-other')), findsOneWidget);
-
-    // Another computer holds the ID: no retry, only skip.
-    backend.enrollResult = const SenseEnrollResult.error('uuid_mismatch');
-    await tapAndSettle(tester, find.byKey(const Key('sense-retry-register')));
-    expect(find.text(t('enroll-uuid_mismatch')), findsOneWidget);
-    expect(find.byKey(const Key('sense-retry-register')), findsNothing);
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-skip-register')));
-    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
-    expect(done, contains(t('done-pending')));
-    expect(done, isNot(contains(t('done-lead-locked'))));
-
-    // Leaving through the title bar also goes through `finish` after installing.
-    await tapAndSettle(tester, find.byKey(const Key('sense-window-close')));
-    expect(backend.finishes, [false]);
-  });
-
-  for (final code in ['token_invalid', 'install_scope', 'device_mismatch']) {
-    testWidgets('registration "$code": sign in again, then register',
-        (tester) async {
-      final backend = FakeBackend()
-        ..enrollResult = SenseEnrollResult.error(code);
-      await pumpWizard(tester, backend);
-      await goToSummary(tester, backend);
-      await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-      expect(find.text(t('enroll-$code')), findsOneWidget);
-      expect(find.byKey(const Key('sense-retry-register')), findsNothing);
-
-      await tapAndSettle(
-          tester, find.byKey(const Key('sense-relogin-register')));
-      expect(backend.loginCancels, 1);
-      expect(find.text(t('google-sign-in')), findsOneWidget);
-      backend.enrollResult = const SenseEnrollResult.ok(['Örnek Müze']);
-      await signIn(tester, backend);
-      // Devam registers directly: the role is installed and can not change.
-      await tapAndSettle(tester, next);
-      expect(backend.installs, hasLength(1));
-      expect(backend.enrolls, hasLength(2));
-      // The project choice survives the new sign-in.
-      expect(jsonDecode(backend.enrolls.last.toJson())['project_ids'], ['prj_1']);
-      expect(find.byKey(const Key('sense-done')), findsOneWidget);
+    test('registration body: location id and name, no new projects', () {
+      final body = jsonDecode(const SenseEnrollRequest(
+        name: 'Galeri kioskı',
+        locationId: 'loc_3',
+        locationName: 'Galeri 1',
+        note: '',
+        projectIds: ['prj_1'],
+      ).toJson()) as Map<String, dynamic>;
+      expect(body['location_id'], 'loc_3');
+      expect(body['location'], 'Galeri 1');
+      expect(body['project_ids'], ['prj_1']);
+      expect(body['new_projects'], isEmpty);
     });
-  }
 
-  for (final code in ['validation', 'project_not_found']) {
-    testWidgets('registration "$code": edit the details, then register',
-        (tester) async {
-      final backend = FakeBackend()
-        ..enrollResult = SenseEnrollResult.error(code);
-      await pumpWizard(tester, backend);
-      await goToSummary(tester, backend);
-      await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-      expect(find.text(t('enroll-$code')), findsOneWidget);
-
-      await tapAndSettle(tester, find.byKey(const Key('sense-edit-register')));
-      expect(find.byKey(const Key('sense-name')), findsOneWidget);
-      expect(find.text(t('back')), findsNothing);
-      await tapAndSettle(tester, find.byKey(const Key('sense-project-prj_1')));
-      await tapAndSettle(tester, next);
-      expect(find.byKey(const Key('sense-install')), findsNothing);
-      expect(find.byKey(const Key('sense-advanced')), findsNothing);
-
-      backend.enrollResult = const SenseEnrollResult.ok([]);
-      await tapAndSettle(tester, find.byKey(const Key('sense-register-save')));
-      expect(backend.installs, hasLength(1));
-      expect(jsonDecode(backend.enrolls.last.toJson())['project_ids'], isEmpty);
-      expect(find.byKey(const Key('sense-done')), findsOneWidget);
+    test('registration result keeps the location', () {
+      final r = SenseEnrollResult.fromJson(jsonEncode({
+        'ok': true,
+        'projects': [
+          {'name': 'Örnek Müze', 'created': false}
+        ],
+        'location': {'location_id': 'loc_3', 'name': 'Galeri 1'},
+      }));
+      expect(r.projects, ['Örnek Müze']);
+      expect(r.location, 'Galeri 1');
     });
-  }
 
-  testWidgets('registration "rate_limited": wait a minute, then retry',
-      (tester) async {
-    final backend = FakeBackend()
-      ..enrollResult = const SenseEnrollResult.error('rate_limited');
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.text(t('enroll-rate_limited')), findsOneWidget);
-    final retry = find.byKey(const Key('sense-retry-register'));
-    expect(enabled(tester, retry), isFalse);
-    expect(find.text('${t('retry')} (60 ${t('seconds-short')})'),
-        findsOneWidget);
-    await tester.pump(const Duration(seconds: 30));
-    expect(find.text('${t('retry')} (30 ${t('seconds-short')})'),
-        findsOneWidget);
-    await tester.pump(const Duration(seconds: 30));
-    expect(enabled(tester, retry), isTrue);
-    backend.enrollResult = const SenseEnrollResult.ok(['Örnek Müze']);
-    await tapAndSettle(tester, retry);
-    expect(backend.enrolls, hasLength(2));
-    expect(find.byKey(const Key('sense-done')), findsOneWidget);
-  });
+    test('new panel codes', () {
+      expect(senseEnrollAction('location_not_found'), SenseEnrollAction.edit);
+      expect(senseEnrollAction('permission_denied'), SenseEnrollAction.retry);
+      expect(senseEnrollAction('token_invalid'), SenseEnrollAction.relogin);
+      expect(senseEnrollAction('rate_limited'), SenseEnrollAction.wait);
+      expect(senseEnrollAction('uuid_mismatch'), SenseEnrollAction.none);
+      for (final code in ['permission_denied', 'location_not_found', 'project_not_found']) {
+        expect(kSenseInstallTr.containsKey('enroll-$code'), isTrue, reason: code);
+      }
+    });
 
-  test('every panel registration error has a message and an action', () {
-    const actions = {
-      'token_invalid': SenseEnrollAction.relogin,
-      'install_scope': SenseEnrollAction.relogin,
-      'device_mismatch': SenseEnrollAction.relogin,
-      'validation': SenseEnrollAction.edit,
-      'project_not_found': SenseEnrollAction.edit,
-      'uuid_mismatch': SenseEnrollAction.none,
-      'rate_limited': SenseEnrollAction.wait,
-      'retry': SenseEnrollAction.retry,
-      'network': SenseEnrollAction.retry,
-      'other': SenseEnrollAction.retry,
-      'something_new': SenseEnrollAction.retry,
-      // Sense Remote (review K3-5): local codes of src/sense/enroll.rs.
-      'invalid-name': SenseEnrollAction.edit,
-      'invalid-location': SenseEnrollAction.edit,
-      'invalid-note': SenseEnrollAction.edit,
-      'invalid-project': SenseEnrollAction.edit,
-      'not-installed': SenseEnrollAction.none,
-      'build': SenseEnrollAction.none,
-      'identity': SenseEnrollAction.none,
-      'identity-store': SenseEnrollAction.none,
-      // Panel #31.
-      'device_closed': SenseEnrollAction.none,
-      'reinstall_not_allowed': SenseEnrollAction.retry,
-    };
-    actions.forEach((code, action) {
-      expect(senseEnrollAction(code), action, reason: code);
-      if (code != 'something_new') {
-        expect(kSenseInstallTr['enroll-$code'], isNotNull, reason: code);
+    test('company accounts only', () {
+      expect(senseCompanyEmail('A.B@SenseDepartment.com'), isTrue);
+      expect(senseCompanyEmail('ab@gmail.com'), isFalse);
+      expect(senseCompanyEmail('ab@sensedepartment.com.evil.test'), isFalse);
+    });
+
+    test('Turkish only: no English text left', () {
+      for (final v in kSenseInstallTr.values) {
+        expect(v, isNot(contains('Install')));
+        expect(v, isNot(contains('Sign in')));
       }
     });
   });
 
-  testWidgets('registration without projects says the computer is active',
-      (tester) async {
-    final backend = FakeBackend()
-      ..enrollResult = const SenseEnrollResult.ok([]);
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
-    expect(done, contains(t('done-panel-none')));
-    expect(done, contains(t('done-lead-locked')));
+  group('K1 window and steps', () {
+    testWidgets('Windows: five steps, version line, Kapat', (tester) async {
+      final backend = FakeBackend();
+      var closed = 0;
+      await pumpWizard(tester, backend, onClose: () => closed++);
+      for (final k in ['step-account', 'step-role', 'step-info', 'step-summary', 'step-done']) {
+        expect(find.text(t(k)), findsOneWidget, reason: k);
+      }
+      expect(find.text(t('step-apps')), findsNothing);
+      expect(find.text(t('step-permissions')), findsNothing);
+      expect(find.text('Sürüm 4 · Windows'), findsOneWidget);
+      expect(currentStep(tester), SenseInstallStep.account);
+      await tap(tester, 'sense-window-close');
+      expect(closed, 1);
+    });
+
+    testWidgets('macOS: seven steps, no close button of its own', (tester) async {
+      await pumpWizard(tester, FakeBackend(), mac: true);
+      expect(find.text(t('step-apps')), findsOneWidget);
+      expect(find.text(t('step-permissions')), findsOneWidget);
+      expect(find.text('Sürüm 4 · macOS'), findsOneWidget);
+      expect(find.byKey(const Key('sense-window-close')), findsNothing);
+    });
+
+    testWidgets('no version: only the system', (tester) async {
+      await pumpWizard(tester, FakeBackend(), version: '');
+      expect(find.text('Windows'), findsOneWidget);
+    });
+
+    testWidgets('no gradient circle or card; transparent mark', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      for (final c in tester.widgetList<Container>(find.byType(Container))) {
+        final d = c.decoration;
+        if (d is BoxDecoration) expect(d.gradient, isNull);
+      }
+      expect(find.byType(SenseMark), findsNWidgets(2));
+    });
   });
 
-  // Sense Remote (design review T3-2): a Host has no large window to open.
-  testWidgets('Host only: the done page only closes', (tester) async {
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
-    expect(done, contains(t('done-host-background')));
-    expect(find.byKey(const Key('sense-finish-open')), findsNothing);
-    await tapAndSettle(tester, find.byKey(const Key('sense-finish-close')));
-    expect(backend.finishes, [false]);
+  group('K2 Sense account', () {
+    testWidgets('idle: Google button, Devam closed', (tester) async {
+      await pumpWizard(tester, FakeBackend());
+      expect(find.text(t('google-sign-in')), findsOneWidget);
+      expect(find.text(t('sign-in-note')), findsOneWidget);
+      expect(find.text(t('domain-note')), findsOneWidget);
+      expect(enabled(tester, 'sense-account-next'), isFalse);
+    });
+
+    testWidgets('code: 482 913, open, copy, cancel', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await tap(tester, 'sense-google');
+      expect(backend.loginStarts, 1);
+      expect(find.byKey(const Key('sense-login-requesting')), findsOneWidget);
+      await poll(tester, kWaiting, backend);
+      expect(find.text('482 913'), findsOneWidget);
+      expect(find.text(t('waiting')), findsOneWidget);
+      await tap(tester, 'sense-login-open');
+      expect(backend.opened, [kUrl]);
+      await tap(tester, 'sense-login-copy');
+      expect(backend.copied, [kUrl]);
+      expect(find.text(t('link-copied')), findsOneWidget);
+      await tap(tester, 'sense-login-cancel');
+      expect(backend.loginCancels, 1);
+      expect(find.text(t('google-sign-in')), findsOneWidget);
+    });
+
+    testWidgets('done: green box with the account, Başka hesap', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await signIn(tester, backend);
+      expect(find.text(kEmail), findsOneWidget);
+      expect(find.text(t('verified')), findsOneWidget);
+      expect(enabled(tester, 'sense-account-next'), isTrue);
+      await tap(tester, 'sense-login-other');
+      expect(backend.loginCancels, 1);
+      expect(enabled(tester, 'sense-account-next'), isFalse);
+    });
+
+    testWidgets('time out: red box, Yeni kod al starts again', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await tap(tester, 'sense-google');
+      await poll(tester, const SenseLoginStatus('failed', error: 'timeout'), backend);
+      expect(find.text(t('login-timeout')), findsOneWidget);
+      await tap(tester, 'sense-login-new-code');
+      expect(backend.loginStarts, 2);
+    });
+
+    testWidgets('other failure shows the panel text and Yeniden dene', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await tap(tester, 'sense-google');
+      await poll(tester, const SenseLoginStatus('failed', error: 'failed', detail: 'Hesap kapalı'),
+          backend);
+      expect(find.text('Hesap kapalı'), findsOneWidget);
+      await tap(tester, 'sense-login-retry');
+      expect(backend.loginStarts, 2);
+    });
+
+    testWidgets('account outside the company is refused', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await signIn(tester, backend, done: const SenseLoginStatus('done', email: 'kisi@gmail.com'));
+      expect(find.text(t('login-domain')), findsOneWidget);
+      expect(backend.loginCancels, 1);
+      expect(enabled(tester, 'sense-account-next'), isFalse);
+    });
   });
 
-  // Sense Remote (design review T3-11): the version comes from the build.
-  testWidgets('the sidebar shows the build version, none without it',
-      (tester) async {
-    tester.view.physicalSize = const Size(860, 620);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    Widget wizard(String version) => MaterialApp(
-          home: SenseInstallWizard(
-            initialPath: r'C:\Program Files\SenseRemote',
-            icon: const SizedBox(),
-            backend: FakeBackend(),
-            version: version,
-          ),
-        );
-    await tester.pumpWidget(wizard('7'));
-    await tester.pumpAndSettle();
-    expect(find.text('${t('version')} 7'), findsOneWidget);
-    await tester.pumpWidget(wizard(''));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('sense-version')), findsNothing);
+  group('K3 role', () {
+    testWidgets('Devam closed until a role is chosen; summary follows', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toRole(tester, backend);
+      expect(currentStep(tester), SenseInstallStep.role);
+      expect(find.text(t('role-none')), findsOneWidget);
+      expect(enabled(tester, 'sense-role-next'), isFalse);
+      await tap(tester, 'sense-role-host');
+      expect(find.text(t('role-sum-host')), findsOneWidget);
+      expect(enabled(tester, 'sense-role-next'), isTrue);
+      await tap(tester, 'sense-role-controller');
+      expect(find.text(t('role-sum-both')), findsOneWidget);
+      await tap(tester, 'sense-role-host');
+      expect(find.text(t('role-sum-controller')), findsOneWidget);
+      await tap(tester, 'sense-role-controller');
+      expect(enabled(tester, 'sense-role-next'), isFalse);
+      await tap(tester, 'sense-back');
+      expect(currentStep(tester), SenseInstallStep.account);
+    });
   });
 
-  // Sense Remote (panel #31): closed computer -> only skip; already active -> retry or skip.
-  testWidgets('closed or already registered computer', (tester) async {
-    final backend = FakeBackend()
-      ..enrollResult = const SenseEnrollResult.error('device_closed');
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend, host: false, controller: true);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.text(t('enroll-device_closed')), findsOneWidget);
-    expect(find.byKey(const Key('sense-retry-register')), findsNothing);
-    expect(find.byKey(const Key('sense-skip-register')), findsOneWidget);
+  group('K4 details', () {
+    testWidgets('only assigned projects; location from the chosen project', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toInfo(tester, backend);
+      expect(backend.optionCalls, 1);
+      expect(find.text(t('projects-label', {'n': '3'})), findsOneWidget);
+      expect(find.text(t('location-first')), findsOneWidget);
+      expect(find.text(t('info-missing')), findsOneWidget);
+      expect(enabled(tester, 'sense-info-next'), isFalse);
+      await tester.enterText(find.byKey(const Key('sense-name')), 'Galeri kioskı');
+      await tap(tester, 'sense-project-prj_1');
+      for (final l in ['Lobi', 'Ana salon', 'Galeri 1', 'Kubbe']) {
+        expect(find.text(l), findsOneWidget);
+      }
+      expect(enabled(tester, 'sense-info-next'), isFalse);
+      await tap(tester, 'sense-location-loc_3');
+      expect(enabled(tester, 'sense-info-next'), isTrue);
+      expect(find.text(t('info-missing')), findsNothing);
+      // Dropping the project drops its location.
+      await tap(tester, 'sense-project-prj_1');
+      expect(enabled(tester, 'sense-info-next'), isFalse);
+      expect(find.text(t('location-first')), findsOneWidget);
+    });
+
+    testWidgets('two projects: the location chips name their project', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toInfo(tester, backend);
+      await tap(tester, 'sense-project-prj_1');
+      await tap(tester, 'sense-project-prj_2');
+      expect(find.textContaining('Stand', findRichText: true), findsWidgets);
+      final chip = tester.widget<SenseInteractive>(find.byKey(const Key('sense-location-loc_5')));
+      expect(chip.semanticLabel, 'Örnek Fuar Standı Stand');
+    });
+
+    testWidgets('name at most 64, note at most 300', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toInfo(tester, backend);
+      await tester.enterText(find.byKey(const Key('sense-name')), 'a' * 80);
+      await tester.enterText(find.byKey(const Key('sense-note')), 'b' * 400);
+      await frames(tester);
+      expect(tester.widget<TextField>(find.byKey(const Key('sense-name'))).controller!.text.length,
+          kSenseMaxName);
+      expect(tester.widget<TextField>(find.byKey(const Key('sense-note'))).controller!.text.length,
+          kSenseMaxNote);
+    });
+
+    testWidgets('no project: orange box, can not go on, updates by itself', (tester) async {
+      final backend = FakeBackend()..options = const SenseInstallOptions.ok([]);
+      await pumpWizard(tester, backend);
+      await toInfo(tester, backend);
+      await tester.enterText(find.byKey(const Key('sense-name')), 'Galeri kioskı');
+      await frames(tester);
+      expect(find.byKey(const Key('sense-projects-none')), findsOneWidget);
+      expect(find.text(t('projects-label', {'n': '0'})), findsOneWidget);
+      expect(enabled(tester, 'sense-info-next'), isFalse);
+      // The panel makes the employee a member: the next read (10 s) shows the project.
+      backend.options = const SenseInstallOptions.ok([kMuseum]);
+      await tester.pump(kSenseOptionsPoll);
+      await frames(tester);
+      expect(backend.optionCalls, 2);
+      expect(find.byKey(const Key('sense-projects-none')), findsNothing);
+      expect(find.byKey(const Key('sense-project-prj_1')), findsOneWidget);
+    });
+
+    testWidgets('project without locations: orange box until one is added', (tester) async {
+      final backend = FakeBackend()..options = const SenseInstallOptions.ok([kOffice]);
+      await pumpWizard(tester, backend);
+      await toInfo(tester, backend);
+      await tester.enterText(find.byKey(const Key('sense-name')), 'Ofis PC');
+      await tap(tester, 'sense-project-prj_3');
+      expect(find.byKey(const Key('sense-location-none')), findsOneWidget);
+      expect(find.textContaining('Projeler › Ofis › Yerler'), findsOneWidget);
+      expect(enabled(tester, 'sense-info-next'), isFalse);
+      backend.options = const SenseInstallOptions.ok(
+          [SenseProject('prj_3', 'Ofis', [SenseLocation('loc_9', 'Toplantı odası')])]);
+      await tester.pump(kSenseOptionsPoll);
+      await frames(tester);
+      expect(find.byKey(const Key('sense-location-none')), findsNothing);
+      await tap(tester, 'sense-location-loc_9');
+      expect(enabled(tester, 'sense-info-next'), isTrue);
+    });
+
+    testWidgets('project removed in the panel is unselected', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toInfo(tester, backend);
+      await fillInfo(tester);
+      backend.options = const SenseInstallOptions.ok([kFair]);
+      await tester.pump(kSenseOptionsPoll);
+      await frames(tester);
+      expect(enabled(tester, 'sense-info-next'), isFalse);
+    });
+
+    testWidgets('list error: red box; token error leads to a new sign-in', (tester) async {
+      final backend = FakeBackend()..options = const SenseInstallOptions.error('network');
+      await pumpWizard(tester, backend);
+      await toInfo(tester, backend);
+      expect(find.text(t('projects-error-network')), findsOneWidget);
+      backend.options = const SenseInstallOptions.ok([kMuseum]);
+      await tap(tester, 'sense-projects-retry');
+      expect(find.byKey(const Key('sense-project-prj_1')), findsOneWidget);
+      backend.options = const SenseInstallOptions.error('token_invalid');
+      await tester.pump(kSenseOptionsPoll);
+      await frames(tester);
+      await tap(tester, 'sense-projects-relogin');
+      expect(currentStep(tester), SenseInstallStep.account);
+    });
+
+    testWidgets('Geri goes back to the role', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toInfo(tester, backend);
+      await tap(tester, 'sense-back');
+      expect(currentStep(tester), SenseInstallStep.role);
+    });
   });
 
-  testWidgets('already registered computer can retry after the panel allows it',
-      (tester) async {
-    final backend = FakeBackend()
-      ..enrollResult = const SenseEnrollResult.error('reinstall_not_allowed');
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend, host: false, controller: true);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.text(t('enroll-reinstall_not_allowed')), findsOneWidget);
-    expect(find.byKey(const Key('sense-skip-register')), findsOneWidget);
-    backend.enrollResult = const SenseEnrollResult.ok(['Örnek Müze']);
-    await tapAndSettle(tester, find.byKey(const Key('sense-retry-register')));
-    expect(backend.enrolls, hasLength(2));
-    expect(find.byKey(const Key('sense-done')), findsOneWidget);
+  group('K5 summary and install', () {
+    testWidgets('tiles show what was chosen', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      expect(currentStep(tester), SenseInstallStep.summary);
+      for (final v in [kEmail, 'Host', 'Galeri kioskı', 'Örnek Müze', 'Galeri 1',
+          t('sum-update-value'), t('sum-password-value')]) {
+        expect(find.text(v), findsOneWidget, reason: v);
+      }
+      expect(find.text(t('summary-lead')), findsOneWidget);
+      expect(find.text(t('install-note')), findsOneWidget);
+    });
+
+    testWidgets('Gelişmiş: closed category with folder and three switches', (tester) async {
+      final backend = FakeBackend();
+      String? asked;
+      await pumpWizard(tester, backend, onPickPath: (current) async {
+        asked = current;
+        return r'D:\Araclar\Sense Remote';
+      });
+      await toSummary(tester, backend);
+      expect(find.text(t('install-path')), findsNothing);
+      await tap(tester, 'sense-advanced');
+      expect(find.text(t('install-path')), findsOneWidget);
+      await tapToggle(tester, 'sense-start-menu');
+      await tapToggle(tester, 'sense-desktop-icon');
+      await tapToggle(tester, 'sense-printer');
+      backend.notEmpty = true;
+      await tap(tester, 'sense-change-path');
+      expect(asked, r'C:\Program Files\Sense Remote');
+      expect(find.byKey(const Key('sense-path-warning')), findsOneWidget);
+      // Warning shown: the next Kur installs there (second step in place, no window).
+      await tap(tester, 'sense-install');
+      expect(backend.installs, hasLength(1));
+      final r = backend.installs.single;
+      expect(r.path, r'D:\Araclar\Sense Remote');
+      expect(r.options, ' printer');
+      expect(r.role, 'host');
+      expect(find.byType(Dialog), findsNothing);
+    });
+
+    testWidgets('Kur on a full default folder warns first', (tester) async {
+      final backend = FakeBackend()..notEmpty = true;
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(backend.installs, isEmpty);
+      expect(find.byKey(const Key('sense-path-warning')), findsOneWidget);
+      await tap(tester, 'sense-install');
+      expect(backend.installs, hasLength(1));
+    });
+
+    testWidgets('install then register: active in the panel without approval', (tester) async {
+      final backend = FakeBackend()
+        ..pendingInstall = Completer()
+        ..pendingEnroll = Completer();
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(find.byKey(const Key('sense-installing')), findsOneWidget);
+      expect(enabled(tester, 'sense-install'), isFalse);
+      expect(enabled(tester, 'sense-back'), isFalse);
+      expect(tester.widget<SenseInteractive>(find.byKey(const Key('sense-window-close'))).onTap,
+          isNull);
+      backend.pendingInstall!.complete('');
+      await frames(tester);
+      expect(find.byKey(const Key('sense-registering')), findsOneWidget);
+      final e = backend.enrolls.single;
+      expect(e.projectIds, ['prj_1']);
+      expect(e.locationId, 'loc_3');
+      expect(e.name, 'Galeri kioskı');
+      backend.pendingEnroll!.complete(const SenseEnrollResult.ok(['Örnek Müze'], 'Galeri 1'));
+      await frames(tester);
+      expect(currentStep(tester), SenseInstallStep.done);
+      expect(find.text(t('done-panel', {'projects': 'Örnek Müze', 'location': 'Galeri 1'})),
+          findsOneWidget);
+    });
+
+    testWidgets('administrator prompt declined: red box, nothing installed', (tester) async {
+      final backend = FakeBackend()..installResult = 'cancelled';
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(find.text(t('error-cancelled')), findsOneWidget);
+      expect(backend.enrolls, isEmpty);
+      expect(enabled(tester, 'sense-install'), isTrue);
+      backend.installResult = '';
+      await tap(tester, 'sense-install');
+      expect(currentStep(tester), SenseInstallStep.done);
+    });
+
+    testWidgets('unknown install error: general text', (tester) async {
+      final backend = FakeBackend()..installResult = 'x-strange';
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(find.text(t('error-failed')), findsOneWidget);
+      expect(find.text(t('error-failed-hint')), findsOneWidget);
+    });
+
+    testWidgets('panel not reachable: Yeniden dene / Kaydı atla', (tester) async {
+      final backend = FakeBackend()..enrollResult = const SenseEnrollResult.error('network');
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(find.text(t('register-failed')), findsOneWidget);
+      expect(find.text(t('enroll-network')), findsOneWidget);
+      await tap(tester, 'sense-enroll-retry');
+      expect(backend.enrolls, hasLength(2));
+      expect(backend.installs, hasLength(1));
+      await tap(tester, 'sense-enroll-skip');
+      expect(currentStep(tester), SenseInstallStep.done);
+      expect(find.text(t('done-panel-skipped')), findsOneWidget);
+    });
+
+    testWidgets('rate limited: Yeniden dene waits 60 s', (tester) async {
+      final backend = FakeBackend()..enrollResult = const SenseEnrollResult.error('rate_limited');
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(enabled(tester, 'sense-enroll-retry'), isFalse);
+      await tester.pump(const Duration(seconds: 61));
+      await frames(tester);
+      expect(enabled(tester, 'sense-enroll-retry'), isTrue);
+    });
+
+    testWidgets('permission_denied: the right text, retry and new sign-in', (tester) async {
+      final backend = FakeBackend()
+        ..enrollResult = const SenseEnrollResult.error('permission_denied');
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(find.text(t('enroll-permission_denied')), findsOneWidget);
+      expect(find.byKey(const Key('sense-enroll-retry')), findsOneWidget);
+      expect(find.byKey(const Key('sense-enroll-relogin')), findsOneWidget);
+    });
+
+    testWidgets('location_not_found: fix the details, then it registers again', (tester) async {
+      final backend = FakeBackend()
+        ..enrollResult = const SenseEnrollResult.error('location_not_found');
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(find.text(t('enroll-location_not_found')), findsOneWidget);
+      await tap(tester, 'sense-enroll-edit');
+      expect(currentStep(tester), SenseInstallStep.info);
+      backend.enrollResult = const SenseEnrollResult.ok(['Örnek Müze'], 'Kubbe');
+      await tap(tester, 'sense-location-loc_4');
+      await tap(tester, 'sense-info-next');
+      expect(backend.enrolls.last.locationId, 'loc_4');
+      expect(backend.installs, hasLength(1));
+      expect(currentStep(tester), SenseInstallStep.done);
+    });
+
+    testWidgets('token_invalid: sign in again, then register', (tester) async {
+      final backend = FakeBackend()..enrollResult = const SenseEnrollResult.error('token_invalid');
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      await tap(tester, 'sense-enroll-relogin');
+      expect(currentStep(tester), SenseInstallStep.account);
+      backend.enrollResult = const SenseEnrollResult.ok(['Örnek Müze'], 'Galeri 1');
+      await signIn(tester, backend);
+      await tap(tester, 'sense-account-next');
+      expect(backend.enrolls, hasLength(2));
+      expect(currentStep(tester), SenseInstallStep.done);
+    });
+
+    testWidgets('uuid_mismatch: only Kaydı atla', (tester) async {
+      final backend = FakeBackend()..enrollResult = const SenseEnrollResult.error('uuid_mismatch');
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(find.byKey(const Key('sense-enroll-retry')), findsNothing);
+      expect(find.byKey(const Key('sense-enroll-skip')), findsOneWidget);
+    });
   });
 
-  testWidgets('declined administrator prompt stays on the summary',
-      (tester) async {
-    final backend = FakeBackend()..installResult = 'cancelled';
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend);
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.text(t('error-cancelled')), findsOneWidget);
-    expect(find.byKey(const Key('sense-summary')), findsOneWidget);
-    expect(enabled(tester, find.byKey(const Key('sense-install'))), isTrue);
-    expect(backend.installs.single.role, 'host');
-    expect(backend.enrolls, isEmpty);
-  });
-
-  testWidgets('install errors are shown', (tester) async {
-    final backend = FakeBackend()..installResult = 'not-signed-in';
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend, host: false, controller: true);
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.text(t('error-not-signed-in')), findsOneWidget);
-    expect(backend.installs.single.role, 'controller');
-
-    backend.installResult = 'install failed with elevated exit code 1';
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    // Code review K4-9: the general text only; the result code is not on screen.
-    expect(find.text(t('error-failed')), findsOneWidget);
-    expect(find.textContaining('elevated exit code'), findsNothing);
-    expect(backend.enrolls, isEmpty);
-  });
-
-  testWidgets('advanced options change the install options', (tester) async {
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend);
-    await goToSummary(tester, backend);
-
-    expect(find.text(t('desktop-icon')), findsNothing);
-    await tapAndSettle(tester, find.byKey(const Key('sense-advanced')));
-    expect(find.text(r'C:\Program Files\SenseRemote'), findsOneWidget);
-    await tapAndSettle(tester, find.text(t('desktop-icon')));
-    await tapAndSettle(tester, find.text(t('printer')));
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(backend.installs.single.options, ' startmenu printer');
-  });
-
-  testWidgets('app login window shows the pairing code 3+3', (tester) async {
-    final semantics = tester.ensureSemantics();
-    await tester.pumpWidget(const MaterialApp(
-        home: Scaffold(body: SensePairingCode(code: '123456'))));
-    expect(find.text('123 456'), findsOneWidget);
-    expect(find.text(t('pairing-hint')), findsOneWidget);
-    expect(find.bySemanticsLabel('${t('pairing-spoken')}1 2 3 4 5 6'),
-        findsOneWidget);
-    semantics.dispose();
-  });
-
-  test('role values match src/sense.rs; info keeps name and location only',
-      () {
-    SenseInstallRequest request(bool host, bool controller) =>
-        SenseInstallRequest(
-          host: host,
-          controller: controller,
-          name: 'a',
-          location: 'b',
-          path: '',
-          startMenu: false,
-          desktopIcon: false,
-          printer: false,
-        );
-    expect(request(true, false).role, 'host');
-    expect(request(false, true).role, 'controller');
-    expect(request(true, true).role, 'both');
-    expect(request(true, true).options, '');
-    expect(jsonDecode(request(true, false).infoJson), {'name': 'a', 'location': 'b'});
-    expect(senseRoleLabel(true, true), 'Host + Controller');
-  });
-
-  test('native JSON is read defensively', () {
-    final status = SenseLoginStatus.fromJson(jsonEncode({
-      'state': 'waiting',
-      'url': kUrl,
-      'pairing_code': '482913',
-    }));
-    expect(status.isWaiting, isTrue);
-    expect(status.pairingCode, '482913');
-    final done = SenseLoginStatus.fromJson(jsonEncode({
-      'state': 'done',
-      'user': {'name': kEmail, 'display_name': 'Ad Soyad'},
-    }));
-    expect(done.email, kEmail);
-    expect(SenseLoginStatus.fromJson('nope').isFailed, isTrue);
-    expect(SenseLoginStatus.fromJson('{"state":1}').isFailed, isTrue);
-
-    final list = SenseProjectList.fromJson(jsonEncode({
-      'ok': true,
-      'projects': [
-        {'id': 'prj_1', 'name': 'Örnek Müze'}
-      ],
-    }));
-    expect(list.ok, isTrue);
-    expect(list.projects.single.id, 'prj_1');
-    expect(SenseProjectList.fromJson('{"ok":false,"error":"network"}').error,
-        'network');
-    expect(SenseProjectList.fromJson('[]').error, 'retry');
-
-    final enrolled = SenseEnrollResult.fromJson(jsonEncode({
-      'ok': true,
-      'projects': [
-        {'name': 'Örnek Müze', 'created': false}
-      ],
-    }));
-    expect(enrolled.projects, ['Örnek Müze']);
-    expect(SenseEnrollResult.fromJson('{"ok":false,"error":"uuid_mismatch"}').error,
-        'uuid_mismatch');
-    expect(SenseEnrollResult.fromJson('').error, 'other');
-  });
-
-  test('pairing code format and Turkish lower case', () {
-    expect(formatSensePairingCode('482913'), '482 913');
-    expect(formatSensePairingCode('12345'), '12345');
-    expect(spokenSensePairingCode('482913'), '4 8 2 9 1 3');
-    expect(senseTrLower('EKİP'), 'ekip');
-    expect(senseTrLower('IŞIK'), 'ışık');
-  });
-
-  test('every Turkish text has an English counterpart; enroll codes covered',
-      () {
-    expect(kSenseInstallTr.keys.toSet(), kSenseInstallEn.keys.toSet());
-    for (final code in [
-      'token_invalid',
-      'install_scope',
-      'device_mismatch',
-      'validation',
-      'project_not_found',
-      'uuid_mismatch',
-      'rate_limited',
-      'retry',
-      'network',
-    ]) {
-      expect(kSenseInstallTr['enroll-$code'], isNotNull, reason: code);
+  group('K6 macOS permissions', () {
+    Future<void> toPermissions(WidgetTester tester, FakeBackend backend,
+        {bool host = true, bool controller = false}) async {
+      await pumpWizard(tester, backend, mac: true);
+      await toSummary(tester, backend, host: host, controller: controller);
+      await tap(tester, 'sense-install');
     }
-  });
 
-  // ---- Sense Remote (Mac M3): macOS flow ----
-
-  test('macOS: setup opens without a role; permissions per role', () {
-    expect(senseMacNeedsSetup(isMac: true, roleInstalled: false), isTrue);
-    expect(senseMacNeedsSetup(isMac: true, roleInstalled: true), isFalse);
-    expect(senseMacNeedsSetup(isMac: false, roleInstalled: false), isFalse);
-
-    expect(senseMacPermissionsFor(host: true, controller: false),
-        SenseMacPermission.values);
-    expect(senseMacPermissionsFor(host: true, controller: true),
-        SenseMacPermission.values);
-    expect(senseMacPermissionsFor(host: false, controller: true),
-        [SenseMacPermission.inputMonitoring]);
-    expect(SenseMacPermission.values, [
-      SenseMacPermission.screenRecording,
-      SenseMacPermission.accessibility,
-      SenseMacPermission.inputMonitoring,
-    ]);
-    const base = 'x-apple.systempreferences:com.apple.preference.security?';
-    expect(SenseMacPermission.screenRecording.settingsUrl,
-        '${base}Privacy_ScreenCapture');
-    expect(SenseMacPermission.accessibility.settingsUrl,
-        '${base}Privacy_Accessibility');
-    expect(SenseMacPermission.inputMonitoring.settingsUrl,
-        '${base}Privacy_ListenEvent');
-    for (final p in SenseMacPermission.values) {
-      expect(kSenseInstallTr['perm-${p.textKey}'], isNotNull);
-      expect(kSenseInstallTr['perm-${p.textKey}-desc'], isNotNull);
+    Future<void> read(WidgetTester tester, FakeBackend backend, SenseMacPermissions p) async {
+      backend.permissions = p;
+      await tester.pump(const Duration(seconds: 1));
+      await frames(tester);
     }
-    const some = SenseMacPermissions(accessibility: true);
-    expect(some.granted(SenseMacPermission.accessibility), isTrue);
-    expect(some.granted(SenseMacPermission.screenRecording), isFalse);
-    expect(some.sameAs(const SenseMacPermissions(accessibility: true)), isTrue);
-    expect(some.sameAs(const SenseMacPermissions()), isFalse);
+
+    String status(WidgetTester tester, SenseMacPermission p) =>
+        tester.widget<SenseChip>(find.byKey(Key('sense-perm-status-${p.name}'))).label;
+
+    testWidgets('Applications folder first; outside it the wizard waits', (tester) async {
+      final backend = FakeBackend()..inApps = false;
+      await pumpWizard(tester, backend, mac: true);
+      expect(find.byKey(const Key('sense-apps-outside')), findsOneWidget);
+      backend.inApps = true;
+      await tap(tester, 'sense-apps-recheck');
+      expect(currentStep(tester), SenseInstallStep.account);
+    });
+
+    testWidgets('rows turn green by themselves', (tester) async {
+      final backend = FakeBackend();
+      await toPermissions(tester, backend);
+      expect(currentStep(tester), SenseInstallStep.permissions);
+      expect(find.text(t('installing-mac')), findsNothing);
+      expect(status(tester, SenseMacPermission.screenRecording), t('perm-missing'));
+      await tap(tester, 'sense-perm-open-screenRecording');
+      expect(backend.openedPermissions, [SenseMacPermission.screenRecording]);
+      await read(tester, backend, const SenseMacPermissions(screenRecording: true));
+      expect(status(tester, SenseMacPermission.screenRecording), t('perm-granted'));
+      expect(backend.agentRestarts, 1);
+      expect(button(tester, 'sense-perm-open-accessibility').kind, SenseButtonKind.primary);
+      await read(tester, backend, const SenseMacPermissions(
+          screenRecording: true, accessibility: true, inputMonitoring: true));
+      await tap(tester, 'sense-perm-next');
+      expect(currentStep(tester), SenseInstallStep.done);
+    });
+
+    testWidgets('Daha sonra: warning in place, then Yine de devam et', (tester) async {
+      final backend = FakeBackend();
+      await toPermissions(tester, backend);
+      await read(tester, backend, const SenseMacPermissions());
+      await tap(tester, 'sense-perm-later');
+      expect(find.byKey(const Key('sense-perm-warning')), findsOneWidget);
+      expect(currentStep(tester), SenseInstallStep.permissions);
+      await tap(tester, 'sense-perm-later');
+      expect(currentStep(tester), SenseInstallStep.done);
+      expect(find.text(t('done-permissions-missing')), findsOneWidget);
+    });
+
+    testWidgets('Controller needs only Input Monitoring', (tester) async {
+      final backend = FakeBackend();
+      await toPermissions(tester, backend, host: false, controller: true);
+      await read(tester, backend, const SenseMacPermissions());
+      expect(find.byKey(const Key('sense-perm-inputMonitoring')), findsOneWidget);
+      expect(find.byKey(const Key('sense-perm-screenRecording')), findsNothing);
+      expect(find.text(t('perm-lead-one')), findsOneWidget);
+    });
   });
 
-  testWidgets('macOS: outside Applications the wizard waits at step 0',
-      (tester) async {
-    final backend = FakeBackend()..inApps = false;
-    await pumpWizard(tester, backend, mac: true);
+  group('K7 done', () {
+    testWidgets('Host: lines and only Kapat', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-install');
+      expect(find.text(t('done-title')), findsWidgets);
+      expect(find.text(t('done-host')), findsOneWidget);
+      expect(find.text(t('done-locked')), findsOneWidget);
+      expect(find.byKey(const Key('sense-finish-open')), findsNothing);
+      await tap(tester, 'sense-finish-close');
+      expect(backend.finishes, [false]);
+    });
 
-    expect(find.text(t('apps-lead')), findsOneWidget);
-    expect(find.byKey(const Key('sense-apps-detail')), findsOneWidget);
-    expect(find.byKey(const Key('sense-login')), findsNothing);
-    expect(find.byKey(const Key('sense-apps-outside')), findsNothing);
-    expect(find.textContaining('RustDesk'), findsNothing);
-    // macOS keeps its own window buttons.
-    expect(find.byKey(const Key('sense-window-close')), findsNothing);
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-apps-recheck')));
-    expect(backend.inAppsCalls, 2);
-    expect(find.text(t('apps-still-outside')), findsOneWidget);
-
-    backend.inApps = true;
-    await tapAndSettle(tester, find.byKey(const Key('sense-apps-recheck')));
-    expect(find.text(t('google-sign-in')), findsOneWidget);
-    expect(find.text(t('apps-lead')), findsNothing);
-  });
-
-  testWidgets('macOS Host: install, register, then the three permissions',
-      (tester) async {
-    final backend = FakeBackend()..pendingInstall = Completer<String>();
-    await pumpWizard(tester, backend, mac: true);
-    expect(find.text(t('step-permissions')), findsOneWidget);
-    await goToSummary(tester, backend);
-
-    // No Windows folder / shortcut options on macOS.
-    expect(find.byKey(const Key('sense-advanced')), findsNothing);
-    await tester.tap(find.byKey(const Key('sense-install')));
-    await tester.pump();
-    expect(find.text(t('installing-mac')), findsOneWidget);
-    expect(find.text(t('installing')), findsNothing);
-    backend.pendingInstall!.complete('');
-    await tester.pumpAndSettle();
-
-    // Registered: the permissions come before "Kuruldu".
-    expect(backend.enrolls, hasLength(1));
-    expect(find.byKey(const Key('sense-done')), findsNothing);
-    for (final p in SenseMacPermission.values) {
-      expect(find.byKey(Key('sense-perm-${p.name}')), findsOneWidget);
-      expect(permissionStatus(tester, p), t('perm-missing'));
-      expect(permissionOpen(p), findsOneWidget);
-    }
-    expect(find.text(t('perm-screen')), findsOneWidget);
-    expect(find.text(t('perm-accessibility')), findsOneWidget);
-    expect(find.text(t('perm-input')), findsOneWidget);
-    expect(find.text(t('perm-open')), findsNWidgets(3));
-    expect(find.byKey(const Key('sense-perm-next')), findsNothing);
-    expect(find.textContaining('RustDesk'), findsNothing);
-    // In order: the first missing one is the primary button.
-    expect(
-        tester.widget(permissionOpen(SenseMacPermission.screenRecording)),
-        isA<FilledButton>());
-    expect(tester.widget(permissionOpen(SenseMacPermission.accessibility)),
-        isA<OutlinedButton>());
-
-    await tapAndSettle(
-        tester, permissionOpen(SenseMacPermission.screenRecording));
-    expect(backend.openedPermissions, [SenseMacPermission.screenRecording]);
-
-    // Screen Recording granted while the wizard watches: the agent restarts once.
-    await pollPermissions(
-        tester, backend, const SenseMacPermissions(screenRecording: true));
-    expect(permissionStatus(tester, SenseMacPermission.screenRecording),
-        t('perm-granted'));
-    expect(permissionOpen(SenseMacPermission.screenRecording), findsNothing);
-    expect(backend.agentRestarts, 1);
-    expect(find.byKey(const Key('sense-perm-agent-error')), findsNothing);
-    expect(tester.widget(permissionOpen(SenseMacPermission.accessibility)),
-        isA<FilledButton>());
-
-    await tapAndSettle(tester, permissionOpen(SenseMacPermission.accessibility));
-    await pollPermissions(
-        tester,
-        backend,
-        const SenseMacPermissions(screenRecording: true, accessibility: true));
-    await tapAndSettle(
-        tester, permissionOpen(SenseMacPermission.inputMonitoring));
-    expect(backend.openedPermissions, SenseMacPermission.values);
-    expect(find.byKey(const Key('sense-perm-next')), findsNothing);
-
-    await pollPermissions(
-        tester,
-        backend,
-        const SenseMacPermissions(
-            screenRecording: true, accessibility: true, inputMonitoring: true));
-    expect(find.text(t('perm-all-granted')), findsOneWidget);
-    expect(find.text(t('perm-open')), findsNothing);
-    expect(find.byKey(const Key('sense-perm-later')), findsNothing);
-    expect(backend.agentRestarts, 1);
-
-    await tapAndSettle(tester, find.byKey(const Key('sense-perm-next')));
-    // Code review K4-4: leaving the step restarts the agent of a Host once more.
-    expect(backend.agentRestarts, 2);
-    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
-    expect(done, contains(t('done-lead')));
-    expect(done, isNot(contains(t('done-permissions-missing'))));
-    // The state is no longer read after the step.
-    final reads = backend.permissionReads;
-    await tester.pump(const Duration(seconds: 3));
-    expect(backend.permissionReads, reads);
-    await tapAndSettle(tester, find.byKey(const Key('sense-finish-close')));
-    expect(backend.finishes, [false]);
-  });
-
-  testWidgets(
-      'macOS: a permission that was already there restarts nothing until the '
-      'Host leaves the step', (tester) async {
-    final backend = FakeBackend()
-      ..permissions = const SenseMacPermissions(
-          screenRecording: true, accessibility: true, inputMonitoring: true);
-    await pumpWizard(tester, backend, mac: true);
-    await goToSummary(tester, backend, host: true, controller: true);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.text(t('perm-all-granted')), findsOneWidget);
-    expect(backend.agentRestarts, 0);
-    await tapAndSettle(tester, find.byKey(const Key('sense-perm-next')));
-    expect(backend.agentRestarts, 1);
-    expect(find.byKey(const Key('sense-finish-open')), findsOneWidget);
-  });
-
-  testWidgets('macOS: a failed agent restart is said', (tester) async {
-    final backend = FakeBackend()..restartResult = 'unsupported';
-    await pumpWizard(tester, backend, mac: true);
-    await goToSummary(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    await pollPermissions(
-        tester, backend, const SenseMacPermissions(screenRecording: true));
-    expect(backend.agentRestarts, 1);
-    expect(find.text(t('perm-agent-error')), findsOneWidget);
-  });
-
-  testWidgets('macOS Controller: only Input Monitoring; later needs a warning',
-      (tester) async {
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend, mac: true);
-    await goToSummary(tester, backend, host: false, controller: true);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-
-    expect(find.byKey(const Key('sense-perm-inputMonitoring')), findsOneWidget);
-    expect(find.byKey(const Key('sense-perm-screenRecording')), findsNothing);
-    expect(find.byKey(const Key('sense-perm-accessibility')), findsNothing);
-    expect(find.text(t('perm-lead-controller')), findsOneWidget);
-
-    // Screen Recording changes do not concern a Controller.
-    await pollPermissions(
-        tester, backend, const SenseMacPermissions(screenRecording: true));
-    expect(backend.agentRestarts, 0);
-    expect(find.byKey(const Key('sense-perm-next')), findsNothing);
-
-    // "Daha sonra": first the warning, then leaving.
-    expect(find.text(t('perm-later')), findsOneWidget);
-    await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
-    expect(find.byKey(const Key('sense-done')), findsNothing);
-    expect(find.text(t('perm-later-warning-controller')), findsOneWidget);
-    expect(find.text(t('perm-later-confirm')), findsOneWidget);
-    await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
-    final done = tester.widget<Text>(find.byKey(const Key('sense-done'))).data!;
-    expect(done, contains(t('done-permissions-missing')));
-    expect(find.byKey(const Key('sense-finish-open')), findsOneWidget);
-    // A Controller has no agent that captures the screen.
-    expect(backend.agentRestarts, 0);
-  });
-
-  testWidgets('macOS Host: later shows the Host warning', (tester) async {
-    final backend = FakeBackend();
-    await pumpWizard(tester, backend, mac: true);
-    await goToSummary(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
-    expect(find.text(t('perm-later-warning')), findsOneWidget);
-    expect(find.byKey(const Key('sense-done')), findsNothing);
-    // Code review K4-4: leaving with "Daha sonra" restarts the agent too, although no
-    // permission was seen as granted (macOS may still give this process the old answer).
-    expect(backend.agentRestarts, 0);
-    await tapAndSettle(tester, find.byKey(const Key('sense-perm-later')));
-    expect(find.byKey(const Key('sense-done')), findsOneWidget);
-    expect(backend.agentRestarts, 1);
-  });
-
-  testWidgets('macOS: skipped registration still asks for the permissions',
-      (tester) async {
-    final backend = FakeBackend()
-      ..enrollResult = const SenseEnrollResult.error('network');
-    await pumpWizard(tester, backend, mac: true);
-    await goToSummary(tester, backend);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.byKey(const Key('sense-register-failed')), findsOneWidget);
-    expect(backend.permissionReads, 0);
-    await tapAndSettle(tester, find.byKey(const Key('sense-skip-register')));
-    expect(find.byKey(const Key('sense-perm-screenRecording')), findsOneWidget);
-    expect(backend.permissionReads, greaterThan(0));
-  });
-
-  testWidgets('macOS: install results are Turkish texts', (tester) async {
-    final backend = FakeBackend()..installResult = 'cancelled';
-    await pumpWizard(tester, backend, mac: true);
-    await goToSummary(tester, backend);
-    for (final code in ['cancelled', 'not-in-applications', 'daemon-timeout']) {
-      backend.installResult = code;
-      await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-      expect(find.text(t('error-$code')), findsOneWidget, reason: code);
-      expect(find.byKey(const Key('sense-summary')), findsOneWidget);
-    }
-    backend.installResult = 'unsupported';
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.text(t('error-failed')), findsOneWidget);
-    expect(find.textContaining('unsupported'), findsNothing);
-    expect(backend.enrolls, isEmpty);
-    expect(backend.permissionReads, 0);
-  });
-
-  testWidgets('Windows: no Applications step, no permissions step',
-      (tester) async {
-    final backend = FakeBackend()..inApps = false;
-    await pumpWizard(tester, backend);
-    expect(find.text(t('google-sign-in')), findsOneWidget);
-    expect(find.text(t('step-permissions')), findsNothing);
-    expect(find.byKey(const Key('sense-window-close')), findsOneWidget);
-    await goToSummary(tester, backend);
-    expect(find.byKey(const Key('sense-advanced')), findsOneWidget);
-    await tapAndSettle(tester, find.byKey(const Key('sense-install')));
-    expect(find.byKey(const Key('sense-done')), findsOneWidget);
-    await tester.pump(const Duration(seconds: 3));
-    expect(backend.inAppsCalls, 0);
-    expect(backend.permissionReads, 0);
-    expect(backend.openedPermissions, isEmpty);
-    expect(backend.agentRestarts, 0);
+    testWidgets('Controller: Sense Remote\'u aç', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend, host: false, controller: true);
+      expect(find.text(t('summary-lead-controller')), findsOneWidget);
+      await tap(tester, 'sense-install');
+      expect(find.text(t('done-host')), findsNothing);
+      await tap(tester, 'sense-finish-open');
+      expect(backend.finishes, [true]);
+    });
   });
 }

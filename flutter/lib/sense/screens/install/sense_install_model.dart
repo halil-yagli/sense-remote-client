@@ -1,26 +1,31 @@
-// Sense Remote: data, tokens and the platform interface of the Sense setup wizard (split out of
-// sense_install_wizard.dart, code review K3-6; behaviour unchanged).
+// Sense Remote: data and the platform interface of the setup wizard (YH K1–K7).
+// Pure Dart: the wizard and its tests use only this; `data/install_bridge.dart` binds it to Rust.
 
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
 import '../../tokens/sense_tokens.dart';
-
-import 'sense_install_strings.dart';
 import 'sense_mac_permissions.dart';
 
 export 'sense_mac_permissions.dart';
 
-String _t(String key) => senseInstallText(key);
-
-/// Limits match `src/sense.rs` and `src/sense/enroll.rs`.
+/// Limits match the panel contract (`EnrollBody`) and `src/sense/enroll.rs`.
 const int kSenseMaxName = 64;
 const int kSenseMaxProjects = 10;
-const int kSenseMaxProject = 48;
-const int kSenseMaxLocation = 96;
 const int kSenseMaxNote = 300;
 
+/// Only company accounts may install (YH K2).
+const String kSenseCompanyDomain = '@sensedepartment.com';
+
+/// How often the project and location lists are read again on the details step (YH K4: a
+/// membership or a location added in the panel shows up by itself).
+const Duration kSenseOptionsPoll = Duration(seconds: 10);
+
+/// Panel `429` comes with `Retry-After: 60`.
+const int kSenseRetryAfterSeconds = 60;
+
+// Sense Remote: legacy colour class; no screen of the wizard uses it any more.
 /// Design tokens (BRAND_CORE §5: black and white, navy→purple light accent).
 // Sense Remote (A1b, YH T1): bridge only. Every field is an alias of the one token set
 // (tokens/sense_tokens.dart); screens move to SenseColors in their own PRs, then this goes.
@@ -64,49 +69,27 @@ class SenseTokens {
   static const gradient = SenseGradients.glow;
 }
 
-// Sense Remote (Mac M3): `applications` and `permissions` are macOS only; Windows never
-// enters them. The order is the order of the wizard (the sidebar compares indexes).
-// Sense Remote (update plan §8, U7): `upgrade` is the one-time move from version 2; it replaces
-// sign-in, role, info and registration (only `permissions` on macOS and `done` follow it).
-enum SenseInstallStep {
-  upgrade,
-  applications,
-  account,
-  role,
-  info,
-  summary,
-  register,
-  permissions,
-  done
-}
-
-// ---- macOS (Mac M3, plan 2026-11-21 §4.1) ----
+/// Steps in wizard order (the sidebar compares indexes). `applications` and `permissions`
+/// are macOS only; `upgrade` replaces the whole flow on a computer with an older version.
+enum SenseInstallStep { upgrade, applications, account, role, info, summary, permissions, done }
 
 /// Pure: on macOS the app itself is the setup file, so a launch without an installed role
 /// opens the wizard (Windows gets there with the `--install` argument of the setup exe).
 bool senseMacNeedsSetup({required bool isMac, required bool roleInstalled}) =>
     isMac && !roleInstalled;
 
-// Sense Remote (code review K4-5): the permission model is shared with the home screens
-// (sense_mac_permissions.dart, exported above).
-
 /// What the employee can do about a refused registration (panel `EnrollErrorCode`).
 enum SenseEnrollAction { retry, relogin, edit, wait, none }
 
-/// Panel `429` comes with `Retry-After: 60`.
-const int kSenseRetryAfterSeconds = 60;
-
 SenseEnrollAction senseEnrollAction(String code) {
   switch (code) {
-    // The install token is not valid for this computer any more: sign in again.
     case 'token_invalid':
     case 'install_scope':
     case 'device_mismatch':
       return SenseEnrollAction.relogin;
-    // The details or project choice were refused: fix them.
     case 'validation':
     case 'project_not_found':
-    // Sense Remote: local checks of src/sense/enroll.rs (review K3-5).
+    case 'location_not_found':
     case 'invalid-name':
     case 'invalid-location':
     case 'invalid-note':
@@ -114,29 +97,23 @@ SenseEnrollAction senseEnrollAction(String code) {
       return SenseEnrollAction.edit;
     case 'rate_limited':
       return SenseEnrollAction.wait;
-    // Another computer holds this ID (panel alert): retrying can not help.
     case 'uuid_mismatch':
-    // Sense Remote: a broken setup file or install; retrying can not fix it (review K3-5).
     case 'not-installed':
     case 'build':
     case 'identity':
     case 'identity-store':
-    // Sense Remote: the panel closed this computer (refused / removed); only an admin helps.
-    case 'device_closed':
       return SenseEnrollAction.none;
-    // Sense Remote: already active in the panel; retry after "Yeniden kurulum izni" there.
-    case 'reinstall_not_allowed':
-      return SenseEnrollAction.retry;
-    default: // retry, network, other, unknown codes
+    // permission_denied: an admin turns "Bilgisayar kurma" on in the panel, then a retry works.
+    default:
       return SenseEnrollAction.retry;
   }
 }
 
-/// Lower case as the panel compares project names (`toLocaleLowerCase("tr")`).
-String senseTrLower(String value) =>
-    value.replaceAll('I', 'ı').replaceAll('İ', 'i').toLowerCase();
+/// Whether a signed-in e-mail may install (company domain, any letter case).
+bool senseCompanyEmail(String email) =>
+    email.trim().toLowerCase().endsWith(kSenseCompanyDomain);
 
-// ---- Data from / to the native side (src/sense/enroll.rs) ----
+// ---- Data from / to the native side ----
 
 /// Sign-in state (`install_sense_login_status`). The access token never reaches Dart.
 class SenseLoginStatus {
@@ -198,29 +175,44 @@ class SenseLoginStatus {
   bool get isFailed => state == 'failed';
 }
 
-class SenseProject {
-  const SenseProject(this.id, this.name);
+/// A location (salon, section) defined in the panel for a project (YH K4, S2).
+class SenseLocation {
+  const SenseLocation(this.id, this.name);
   final String id;
   final String name;
 }
 
-/// Projects the signed-in employee can pick (`install_sense_projects`).
-class SenseProjectList {
-  const SenseProjectList.ok(this.projects) : error = '';
-  const SenseProjectList.error(this.error) : projects = const [];
+/// A project the signed-in employee is a member of, with its panel locations.
+class SenseProject {
+  const SenseProject(this.id, this.name, [this.locations = const []]);
+  final String id;
+  final String name;
+  final List<SenseLocation> locations;
+}
 
-  factory SenseProjectList.fromJson(String json) {
+/// What the details step offers. Only projects the employee is a member of; no new projects.
+class SenseInstallOptions {
+  const SenseInstallOptions.ok(this.projects) : error = '';
+  const SenseInstallOptions.error(this.error) : projects = const [];
+
+  /// `{"ok": true, "projects": [{id, name, locations: [{id, name}]}]}` or
+  /// `{"ok": false, "error": "token_invalid" | "network" | "retry"}`. Location items may also
+  /// use the panel names (`location_id`).
+  factory SenseInstallOptions.fromJson(String json) {
     try {
       final map = jsonDecode(json) as Map<String, dynamic>;
       if (map['ok'] != true) {
-        return SenseProjectList.error(map['error'] as String? ?? 'retry');
+        return SenseInstallOptions.error(map['error'] as String? ?? 'retry');
       }
-      return SenseProjectList.ok([
+      return SenseInstallOptions.ok([
         for (final p in map['projects'] as List)
-          SenseProject(p['id'] as String, p['name'] as String),
+          SenseProject(p['id'] as String, p['name'] as String, [
+            for (final l in (p['locations'] as List?) ?? const [])
+              SenseLocation((l['id'] ?? l['location_id']) as String, l['name'] as String),
+          ]),
       ]);
     } catch (_) {
-      return const SenseProjectList.error('retry');
+      return const SenseInstallOptions.error('retry');
     }
   }
 
@@ -231,8 +223,10 @@ class SenseProjectList {
 
 /// Panel registration result (`install_sense_enroll`).
 class SenseEnrollResult {
-  const SenseEnrollResult.ok(this.projects) : error = '';
-  const SenseEnrollResult.error(this.error) : projects = const [];
+  const SenseEnrollResult.ok(this.projects, [this.location = '']) : error = '';
+  const SenseEnrollResult.error(this.error)
+      : projects = const [],
+        location = '';
 
   factory SenseEnrollResult.fromJson(String json) {
     try {
@@ -240,16 +234,20 @@ class SenseEnrollResult {
       if (map['ok'] != true) {
         return SenseEnrollResult.error(map['error'] as String? ?? 'other');
       }
+      final location = map['location'];
       return SenseEnrollResult.ok([
         for (final p in map['projects'] as List) p['name'] as String,
-      ]);
+      ], location is Map ? (location['name'] as String? ?? '') : '');
     } catch (_) {
       return const SenseEnrollResult.error('other');
     }
   }
 
-  /// Names of the projects the computer was added to (shown on the done page).
+  /// Names of the projects the computer was added to.
   final List<String> projects;
+
+  /// Registered location name (empty while the native side does not pass it on).
+  final String location;
   final String error;
   bool get ok => error.isEmpty;
 }
@@ -298,34 +296,45 @@ class SenseInstallRequest {
 class SenseEnrollRequest {
   const SenseEnrollRequest({
     required this.name,
-    required this.location,
+    required this.locationId,
+    required this.locationName,
     required this.note,
     required this.projectIds,
-    required this.newProjects,
   });
 
   final String name;
-  final String location;
+  final String locationId;
+  final String locationName;
   final String note;
   final List<String> projectIds;
-  final List<String> newProjects;
 
+  /// `location` (the name) stays for today's native side, which forwards only the name (the
+  /// panel then finds the location by name in the chosen projects); `location_id` is the
+  /// Sürüm 4 field. TODO(D3-0): `enroll_body` forwards `location_id` to the panel.
   String toJson() => jsonEncode({
         'name': name,
-        'location': location,
+        'location': locationName,
+        'location_id': locationId,
         'note': note,
         'project_ids': projectIds,
-        'new_projects': newProjects,
+        'new_projects': const <String>[],
       });
 }
 
-/// Platform side of the wizard (`sense_install_page.dart` binds it to Rust).
+/// Platform side of the wizard (`data/install_bridge.dart` binds it to Rust; tests fake it).
 abstract class SenseInstallBackend {
   Future<void> loginStart();
   Future<SenseLoginStatus> loginStatus();
   Future<void> loginCancel();
   Future<void> openUrl(String url);
-  Future<SenseProjectList> projects();
+  Future<void> copy(String text);
+
+  /// Projects of the signed-in employee and their panel locations.
+  Future<SenseInstallOptions> installOptions();
+
+  /// Whether installing into [path] could overwrite other files (folder exists, not empty and
+  /// not this app's own install folder). Shown in place, never as a window (YH K5).
+  Future<bool> folderNotEmpty(String path);
 
   /// "" on success, "cancelled" when the administrator prompt was declined, otherwise an error.
   Future<String> install(SenseInstallRequest request);
@@ -334,7 +343,7 @@ abstract class SenseInstallBackend {
   /// Leaves the setup screen; `true` opens the installed app.
   void finish(bool openApp);
 
-  // Sense Remote (Mac M3): macOS only; the wizard calls these only when it runs as `mac`.
+  // macOS only; the wizard calls these only when it runs as `mac`.
 
   /// Whether the app runs from the Applications folder (not from the disk image).
   Future<bool> inApplications();
@@ -348,11 +357,3 @@ abstract class SenseInstallBackend {
   /// Restarts the background agent after Screen Recording was granted; "" on success.
   Future<String> restartAgent();
 }
-
-String senseRoleLabel(bool host, bool controller) => host && controller
-    ? 'Host + Controller'
-    : host
-        ? 'Host'
-        : controller
-            ? 'Controller'
-            : _t('none');

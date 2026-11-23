@@ -1,5 +1,4 @@
-// Sense Remote (update plan 2026-11-21 §8, package U7): the one-time manual move from
-// version 2, which has no updater (part of sense_install_wizard.dart).
+// Sense Remote: move from an older version (YH K7 "geçiş", i09; update plan 2026-11-21 §8, U7).
 //
 // Windows: the new setup file finds an older installed version and shows the short
 // "Güncelleme" screen; [Güncelle] asks for the administrator and runs the setup file with
@@ -86,15 +85,13 @@ class SenseUpgrade {
   final Future<String> Function() run;
 }
 
-String _upgradeText(String key, SenseUpgrade upgrade) => _t(key)
-    .replaceAll('{from}', '${upgrade.installed > 0 ? upgrade.installed : 2}')
-    .replaceAll('{to}', '${upgrade.current}')
-    .replaceAll('{n}', '${upgrade.installed}');
+String _fromVersion(SenseUpgrade u) => '${u.installed > 0 ? u.installed : 2}';
 
 extension _SenseInstallUpgradeSteps on _SenseInstallWizardState {
   SenseUpgrade get _upgrade => widget.upgrade!;
 
   Future<void> _runUpgrade() async {
+    if (_upgradeRunning) return;
     _update(() {
       _upgradeRunning = true;
       _upgradeError = '';
@@ -109,8 +106,11 @@ extension _SenseInstallUpgradeSteps on _SenseInstallWizardState {
     _update(() {
       _upgradeRunning = false;
       if (code.isEmpty) {
-        _step =
-            widget.mac ? SenseInstallStep.permissions : SenseInstallStep.done;
+        if (widget.mac) {
+          _step = SenseInstallStep.permissions;
+        } else {
+          _upgradeDone = true;
+        }
       } else if (code == 'not_newer') {
         _upgradeNotNewer = true;
       } else {
@@ -120,114 +120,89 @@ extension _SenseInstallUpgradeSteps on _SenseInstallWizardState {
     if (code.isEmpty && widget.mac) _startPermissionPoll();
   }
 
-  Widget _upgradePage() {
+  (List<Widget>, List<Widget>) _upgradePage() {
+    if (_upgradeDone) return _upgradeDonePage();
     final upgrade = _upgrade;
     if (upgrade.mode == SenseUpgradeMode.current || _upgradeNotNewer) {
-      return _page([
-        _heading(_upgradeText('upgrade-current-title-a', upgrade),
-            _t('upgrade-current-title-b')),
-        _lead(_upgradeText('upgrade-current-lead', upgrade)),
-      ], [
-        const Spacer(),
-        _primaryButton(_t('close'), _close,
-            key: const Key('sense-upgrade-close')),
-      ]);
+      final n = '${upgrade.installed}';
+      return (
+        [
+          _header([
+            (_t('upgrade-current-title-a', {'n': n}), true),
+            (_t('upgrade-current-title-b'), false),
+          ], _t('upgrade-current-lead', {'n': n})),
+        ],
+        [
+          const Spacer(),
+          _button(_t('close'), _close, primary: true, key: const Key('sense-upgrade-close')),
+        ],
+      );
     }
     final mac = widget.mac;
     final error = _upgradeError;
-    return _page([
-      _heading(_t(mac ? 'upgrade-mac-title-a' : 'upgrade-title-a'),
-          _t(mac ? 'upgrade-mac-title-b' : 'upgrade-title-b')),
-      _lead(_upgradeText(mac ? 'upgrade-mac-lead' : 'upgrade-lead', upgrade)),
-      Text(_t(mac ? 'upgrade-mac-note' : 'upgrade-note'),
-          key: const Key('sense-upgrade-note'),
-          style: const TextStyle(fontSize: 13, color: SenseTokens.soft)),
-      if (_upgradeRunning)
-        Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: _progress(_t('upgrade-running')),
+    final to = '${upgrade.current}';
+    return (
+      [
+        _header([(_t('upgrade-title-a'), false), (_t('upgrade-title-b'), true)],
+            _t('upgrade-lead', {'from': _fromVersion(upgrade), 'to': to})),
+        _box(
+          Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const SizedBox(height: 8),
+            _tiles([
+              (_t('upgrade-installed'), _t('upgrade-version', {'n': _fromVersion(upgrade)}), null),
+              (_t('upgrade-target'), _t('upgrade-version', {'n': to}), SenseLevel.ok),
+              (_t('upgrade-login'), _t('upgrade-login-value'), null),
+            ], valueSize: SenseFontSize.categoryTitle),
+            const SizedBox(height: 8),
+            _hint(_t(mac ? 'upgrade-note-mac' : 'upgrade-note'),
+                key: const Key('sense-upgrade-note')),
+          ]),
+          key: const Key('sense-upgrade-box'),
         ),
-      if (error.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: _errorRow(
-              _t(error == 'cancelled' || error == 'not_installed'
-                  ? 'upgrade-error-$error'
-                  : 'upgrade-error-failed'),
-              key: const Key('sense-upgrade-error')),
-        ),
-    ], [
-      _secondaryButton(_t('close'), _upgradeRunning ? null : _close,
-          key: const Key('sense-upgrade-cancel')),
-      const Spacer(),
-      _primaryButton(_t(mac ? 'upgrade-mac-start' : 'upgrade-start'),
-          _upgradeRunning ? null : _runUpgrade,
-          key: const Key('sense-upgrade-start')),
-    ]);
+        if (_upgradeRunning) _progress(_t('upgrade-running'), key: const Key('sense-upgrade-running')),
+        if (error.isNotEmpty)
+          _statusBox(SenseLevel.hot, _t('upgrade-error'), [
+            _meta(_t(error == 'cancelled' || error == 'not_installed'
+                ? 'upgrade-error-$error'
+                : 'upgrade-error-failed'))
+          ], key: const Key('sense-upgrade-error')),
+      ],
+      [
+        const Spacer(),
+        _button(_t('close'), _upgradeRunning ? null : _close,
+            key: const Key('sense-upgrade-cancel')),
+        _button(_t(mac ? 'upgrade-mac-start' : 'upgrade-start'),
+            _upgradeRunning ? null : _runUpgrade,
+            primary: true, key: const Key('sense-upgrade-start')),
+      ],
+    );
   }
 
-  Widget _upgradeDonePage() {
-    final upgrade = _upgrade;
+  (List<Widget>, List<Widget>) _upgradeDonePage() {
     final mac = widget.mac;
+    final to = '${_upgrade.current}';
     final lines = [
-      _upgradeText(mac ? 'upgrade-done-lead-mac' : 'upgrade-done-lead', upgrade),
+      _t(mac ? 'upgrade-done-lead-mac' : 'upgrade-done-lead', {'to': to}),
       if (_permissionsSkipped) _t('done-permissions-missing'),
     ];
-    return Column(
-      children: [
-        Expanded(
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: const BoxDecoration(
-                      gradient: SenseTokens.gradient, shape: BoxShape.circle),
-                  child: const Icon(Icons.check,
-                      size: 30, color: SenseTokens.white),
-                ),
-                const SizedBox(height: 16),
-                _heading(
-                    _t(mac ? 'upgrade-done-title-mac' : 'upgrade-done-title'),
-                    '',
-                    boldFirst: true),
-                const SizedBox(height: 6),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
-                  child: Text(
-                    lines.join(' '),
-                    key: const Key('sense-upgrade-done'),
-                    textAlign: TextAlign.center,
-                    style:
-                        const TextStyle(fontSize: 13, color: SenseTokens.muted),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Row(
-          children: [
-            const Spacer(),
-            // macOS: the wizard runs inside the app, so it leaves through `finish` (a
-            // Controller may open the app); Windows: the setup file only closes.
-            if (mac && _controller) ...[
-              _secondaryButton(_t('close'), () => widget.backend.finish(false),
-                  key: const Key('sense-upgrade-finish-close')),
-              const SizedBox(width: 10),
-              _primaryButton(_t('open-app'), () => widget.backend.finish(true),
-                  key: const Key('sense-upgrade-finish-open')),
-            ] else
-              _primaryButton(
-                  _t('close'),
-                  mac
-                      ? () => widget.backend.finish(false)
-                      : () => widget.onClose?.call(),
-                  key: const Key('sense-upgrade-finish-close')),
-          ],
-        ),
+    return (
+      [
+        _resultPage(_t(mac ? 'upgrade-done-title-mac' : 'upgrade-done-title'), lines,
+            key: const Key('sense-upgrade-done')),
+      ],
+      [
+        const Spacer(),
+        // macOS: the wizard runs inside the app, so it leaves through `finish` (a Controller
+        // may open the app); Windows: the setup file only closes.
+        if (mac && _controller) ...[
+          _button(_t('close'), () => widget.backend.finish(false),
+              key: const Key('sense-upgrade-finish-close')),
+          _button(_t('open-app'), () => widget.backend.finish(true),
+              primary: true, key: const Key('sense-upgrade-finish-open')),
+        ] else
+          _button(_t('close'),
+              mac ? () => widget.backend.finish(false) : () => widget.onClose?.call(),
+              primary: true, key: const Key('sense-upgrade-finish-close')),
       ],
     );
   }
