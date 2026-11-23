@@ -4,6 +4,9 @@ import 'package:get/get.dart';
 
 import '../consts.dart';
 import './platform_model.dart';
+// Sense Remote: the space above the remote screen.
+import '../sense/screens/session/data/session_state.dart' show senseTopInset;
+import '../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
 
 enum SvcStatus { notReady, connecting, ready }
 
@@ -40,7 +43,18 @@ class StateGlobal {
   int get windowId => _windowId;
   RxBool get fullscreen => _fullscreen;
   bool get isMinimized => _isMinimized;
-  double get tabBarHeight => fullscreen.isTrue ? 0 : kDesktopRemoteTabBarHeight;
+  double get tabBarHeight => kSenseRemoteWindow
+      // Sense Remote: tab strip only with several sessions (0 with one), plus the 46 px
+      // Sense bar above the remote screen (decision 3, O1).
+      ? senseTopInset(
+          tabStrip: _showTabBar.value && !_fullscreen.value,
+          barHeight: senseBarHeight.value)
+      : fullscreen.isTrue
+          ? 0
+          : kDesktopRemoteTabBarHeight;
+
+  /// Sense Remote: height of the Sense session bar (0 while hidden); set by the bar.
+  final RxDouble senseBarHeight = 0.0.obs;
   RxBool get showTabBar => _showTabBar;
   RxDouble get resizeEdgeSize => _resizeEdgeSize;
   RxDouble get windowBorderWidth => _windowBorderWidth;

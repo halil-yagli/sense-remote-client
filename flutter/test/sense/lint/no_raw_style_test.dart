@@ -32,10 +32,7 @@ const _legacy = <String, int>{
   'lib/sense/screens/install/sense_install_steps_mac.dart': 18,
   'lib/sense/screens/install/sense_install_steps_upgrade.dart': 6,
   'lib/sense/screens/install/sense_install_wizard.dart': 16,
-  'lib/sense/screens/session/sense_remote_chat.dart': 20,
-  'lib/sense/screens/session/sense_remote_display_info.dart': 20,
   'lib/sense/screens/session/sense_remote_map.dart': 16,
-  'lib/sense/screens/session/sense_remote_status.dart': 21,
   'lib/sense/screens/session/sense_remote_strings.dart': 1,
   'lib/sense/screens/session/sense_remote_window.dart': 12,
 };

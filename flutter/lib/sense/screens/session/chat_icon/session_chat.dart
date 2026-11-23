@@ -21,6 +21,7 @@ import '../../../sense.dart';
 import '../../shared/chat/chat_controller.dart';
 import '../../shared/chat/data/call.dart';
 import '../../shared/chat/data/files.dart';
+import '../popups/status/status_widgets.dart' show SenseChatIconPlacement;
 import 'chat_layer.dart';
 
 /// The chat controller of a connection, made from its FFI.
@@ -59,9 +60,13 @@ class SenseSessionChat extends StatefulWidget {
     required this.ffi,
     required this.computerName,
     this.popups,
+    this.iconPlacement,
   });
 
   final FFI ffi;
+
+  /// Where the icon is, for the right popups (C1).
+  final ValueNotifier<SenseChatIconPlacement?>? iconPlacement;
   final String computerName;
   final SensePopupController? popups;
 
@@ -109,6 +114,7 @@ class _SenseSessionChatState extends State<SenseSessionChat> with WindowListener
       onBringToFront: () => windowOnTop(stateGlobal.windowId),
       pickFiles: sensePickFiles,
       dropBuilder: senseDesktopDrop,
+      iconPlacement: widget.iconPlacement,
     );
   }
 }

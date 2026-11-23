@@ -5,7 +5,7 @@ import '../../../../../common.dart' show closeConnection;
 import '../../../../../models/chat_model.dart';
 import '../../../../../models/model.dart';
 import '../../../../../models/platform_model.dart';
-import '../../sense_remote_window.dart' show SenseRemoteSession;
+import '../../bar/session_popups.dart' show SenseSessionPopups;
 import '../layer_controller.dart';
 
 class SenseFfiLayerHost implements SenseLayerHost {
@@ -55,9 +55,7 @@ class SenseFfiLayerHost implements SenseLayerHost {
   @override
   void closePopups() {
     ffi.dialogManager.dismissAll();
-    final s = SenseRemoteSession.of(id);
-    if (s.statusOpen) s.toggleStatus();
-    if (s.infoOpen) s.toggleInfo();
-    s.setChatOpen(false);
+    // Status, display info and the bar lists share one popup place (C1).
+    SenseSessionPopups.closeAllOf(id);
   }
 }
