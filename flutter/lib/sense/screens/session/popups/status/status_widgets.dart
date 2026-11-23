@@ -6,7 +6,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/widgets.dart';
 
 import '../../../../sense.dart';
@@ -113,15 +112,15 @@ class _TrafficValue extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = (style.fontSize ?? SenseFontSize.hintLarge) + 1;
-    Widget arrow(IconData d) => Padding(
+    Widget arrow(SenseGlyphKind k) => Padding(
           padding: const EdgeInsets.only(right: 2),
-          child: Icon(d, key: ValueKey('sense-traffic-${d == Icons.arrow_downward ? 'down' : 'up'}'), size: size, color: style.color),
+          child: SenseGlyph(k, key: ValueKey('sense-traffic-${k.name}'), size: size, color: style.color),
         );
     return Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.end, children: [
-      arrow(Icons.arrow_downward),
+      arrow(SenseGlyphKind.down),
       Text(traffic.down, style: style),
       Text(' · ', style: style),
-      arrow(Icons.arrow_upward),
+      arrow(SenseGlyphKind.up),
       Text('${traffic.up} Mbit/s', style: style),
     ]);
   }
@@ -288,17 +287,22 @@ class SenseStatusCardView extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: _kCardHeadBottom),
           child: Row(children: [
-            Flexible(
-              child: Text(card.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold)),
+            // The title takes all the room the tags and the button leave (a Spacer next to a
+            // Flexible split it in half and cut "Samsung SSD 9…", G7).
+            Expanded(
+              child: Row(children: [
+                Flexible(
+                  child: Text(card.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold)),
+                ),
+                for (final t in card.tags) ...[
+                  const SizedBox(width: _kCardHeadGap),
+                  SenseStatusTagView(label: t),
+                ],
+              ]),
             ),
-            for (final t in card.tags) ...[
-              const SizedBox(width: _kCardHeadGap),
-              SenseStatusTagView(label: t),
-            ],
-            const Spacer(),
             const SizedBox(width: _kCardHeadGap),
             SenseCopyButton(key: Key('sense-copy-${card.title}'), text: card.copyText, onCopied: onCopied),
           ]),
