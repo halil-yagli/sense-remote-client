@@ -311,8 +311,12 @@ String senseBarePeerId(String id) {
 typedef SenseHttpGet = Future<({int statusCode, String body})> Function(
     Uri url, Map<String, String> headers);
 
+/// How long one peer-status request may take (P3, B8).
+const Duration kSensePeerStatusTimeout = Duration(seconds: 8);
+
 /// Reads peer-status with the key this app already holds (the same Bearer
 /// key the address book uses). The key never leaves the HTTP header.
+
 class SensePeerStatusClient {
   SensePeerStatusClient({
     Future<String> Function()? apiServer,
@@ -346,7 +350,9 @@ class SensePeerStatusClient {
           : server;
       final url = Uri.parse('$base/api/sense/peer-status')
           .replace(queryParameters: {'id': id});
-      final resp = await _get(url, {'Authorization': 'Bearer $token'});
+      // P3 (B8): a hung network ends in an error state, not in an endless load.
+      final resp = await _get(url, {'Authorization': 'Bearer $token'})
+          .timeout(kSensePeerStatusTimeout);
       return senseParsePeerStatusResponse(resp.statusCode, resp.body);
     } catch (_) {
       return const SensePeerStatusResult.error(SensePeerStatusError.failed);

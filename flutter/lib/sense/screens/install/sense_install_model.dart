@@ -308,9 +308,8 @@ class SenseEnrollRequest {
   final String note;
   final List<String> projectIds;
 
-  /// `location` (the name) stays for today's native side, which forwards only the name (the
-  /// panel then finds the location by name in the chosen projects); `location_id` is the
-  /// Sürüm 4 field. TODO(D3-0): `enroll_body` forwards `location_id` to the panel.
+  /// `location` (the name) stays for older panels; `location_id` is the Sürüm 4 field (the native
+  /// side forwards it, `enroll.rs`).
   String toJson() => jsonEncode({
         'name': name,
         'location': locationName,

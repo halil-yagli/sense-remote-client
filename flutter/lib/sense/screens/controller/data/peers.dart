@@ -414,7 +414,8 @@ class SensePeersBridge implements SensePeersBackend {
       final headers = getHttpHeaders();
       headers['Content-Type'] = 'application/json';
       final resp = await http.post(Uri.parse('$api/api/sense/device-order'),
-          headers: headers, body: jsonEncode({'project_id': projectId, 'device_ids': deviceIds}));
+          headers: headers, body: jsonEncode({'project_id': projectId, 'device_ids': deviceIds}))
+          .timeout(const Duration(seconds: 8)); // P3 (B8)
       return resp.statusCode == 200;
     } catch (_) {
       return false;

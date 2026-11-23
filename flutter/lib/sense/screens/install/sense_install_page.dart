@@ -17,6 +17,7 @@ import 'package:flutter_hbb/sense/sense.dart' show SenseColors, senseTheme;
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
+import 'package:window_size/window_size.dart' as window_size;
 
 class SenseInstallPage extends StatefulWidget {
   const SenseInstallPage({super.key});
@@ -44,13 +45,31 @@ class _SenseInstallPageState extends State<SenseInstallPage>
   void initState() {
     super.initState();
     unawaited(_readUpgrade());
-    // Sense Remote (YH K1): the wizard window is 860 × 620, at least 760 × 540.
-    unawaited(windowManager.setMinimumSize(kSenseInstallMinSize));
-    unawaited(windowManager.setSize(kSenseInstallSize).then((_) => windowManager.center()));
+    // Sense Remote (YH K1, B6): the wizard window is 860 × 620, at least 760 × 540, but never
+    // bigger than the screen; set in one place, in order (no race with the first 800 × 600).
+    unawaited(_sizeWindow());
     if (isMacOS) {
       windowManager.addListener(this);
       windowManager.setPreventClose(true);
     }
+  }
+
+  /// Sense Remote (B6): size from the visible screen, then the minimum, then the centre.
+  Future<void> _sizeWindow() async {
+    Size? visible;
+    try {
+      final screen = await window_size.getCurrentScreen();
+      if (screen != null && screen.scaleFactor > 0) {
+        visible = Size(screen.visibleFrame.width / screen.scaleFactor,
+            screen.visibleFrame.height / screen.scaleFactor);
+      }
+    } catch (_) {}
+    final f = senseInstallWindowFor(visible);
+    try {
+      await windowManager.setMinimumSize(f.min);
+      await windowManager.setSize(f.size);
+      await windowManager.center();
+    } catch (_) {}
   }
 
   @override

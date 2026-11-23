@@ -53,13 +53,11 @@ class SenseInstallBridge implements SenseInstallBackend {
   @override
   Future<void> copy(String text) => Clipboard.setData(ClipboardData(text: text));
 
-  /// TODO(D3-0): `main_sense_install_options()` — the projects of the employee WITH their panel
-  /// locations (`GET /api/device-group/accessible` `sense.locations`, plan B1 / E1). Until the
-  /// native side has it, the project list of today is read; its items have no locations, so
-  /// the details step shows "Bu projede yer tanımlı değil" and the install can not go on.
+  /// `main_sense_install_options()`: the projects of the employee WITH their panel locations
+  /// (`GET /api/device-group/accessible` `sense.locations`).
   @override
   Future<SenseInstallOptions> installOptions() async =>
-      SenseInstallOptions.fromJson(await bind.installSenseProjects());
+      SenseInstallOptions.fromJson(await bind.mainSenseInstallOptions());
 
   @override
   Future<bool> folderNotEmpty(String path) async {
