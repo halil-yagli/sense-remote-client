@@ -1,0 +1,581 @@
+{
+  "v": 1,
+  "description": "Sense Remote kisi yetki zarfi (grants) ortak test vektoru (panel packages/shared ve istemci src/sense/testdata). Zarf bicimi strategy zarfiyla ayni ({k,p,s}, Ed25519, ayni panel anahtari) ama imza alani ayri: imzalanan veri = prefix (ASCII) || base64url_decode(p). Cihaz seq sayacina dokunmaz. Dogrulama sirasi: zarf bicimi -> k listede -> p/s cozumu (s 64 bayt) -> imza (grants oneki) -> JSON + sema (bilinmeyen alan yok; typ grants; perms app_permissions icinden, tekrarsiz; 0 < exp - iat <= max_lifetime_s) -> iss -> did ve duuid -> email = oturum e-postasi (harf duyarsiz) -> iat - clock_skew_s <= now_s <= exp + clock_skew_s -> rev >= last_rev. Gecerli zarfta istemci perms ve rev'i saklar; gecersizde saklamaz ve elde gecerli zarf yoksa butun uygulama yetkilerini kapali sayar. Her vakada tek kusur vardir. Gizli anahtar hicbir yerde yok.",
+  "prefix": "sense-remote/grants/v1\n",
+  "clock_skew_s": 300,
+  "max_lifetime_s": 43200,
+  "app_permissions": [
+    "connect",
+    "control",
+    "file_transfer",
+    "record_session",
+    "privacy_mode",
+    "restart_remote",
+    "terminal_tunnel",
+    "install_device"
+  ],
+  "keys": [
+    {
+      "k": "5900e551303c4869",
+      "public_key": "DMZ3mGX-FMFd6wvo5M2AM16zbcU1y3fWnE-nyt-iTdY"
+    },
+    {
+      "k": "228327c2676d3645",
+      "public_key": "Bj94YRHEoWNGKSjjir1hgvXcb60iZJnMFTWabr-5Gxg"
+    }
+  ],
+  "cases": [
+    {
+      "name": "ok_technical",
+      "description": "Gecerli: dort uygulama yetkisi, rev 7, saklı rev 6",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "ok",
+      "perms": ["connect", "control", "file_transfer", "restart_remote"],
+      "rev": 7
+    },
+    {
+      "name": "ok_all_app_permissions",
+      "description": "Gecerli: sekiz uygulama yetkisinin hepsi (Yonetici)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlY29yZF9zZXNzaW9uIiwicHJpdmFjeV9tb2RlIiwicmVzdGFydF9yZW1vdGUiLCJ0ZXJtaW5hbF90dW5uZWwiLCJpbnN0YWxsX2RldmljZSJdLCJyZXYiOjcsInR5cCI6ImdyYW50cyIsInVpZCI6InVzcl8wMTkyZjNhNC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "s": "LqkrqY2IQTCRnJ82tKC4H5WwM9ywTY7HlQ5TiYeUFgur2vZj_64u3Knc8067l5iRKpombxplcmRWyhpZLbwwDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "ok",
+      "perms": [
+        "connect",
+        "control",
+        "file_transfer",
+        "record_session",
+        "privacy_mode",
+        "restart_remote",
+        "terminal_tunnel",
+        "install_device"
+      ],
+      "rev": 7
+    },
+    {
+      "name": "ok_no_permissions",
+      "description": "Gecerli: bos yetki listesi (hepsi kapali; zarf yine gecerli)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbXSwicmV2Ijo3LCJ0eXAiOiJncmFudHMiLCJ1aWQiOiJ1c3JfMDE5MmYzYTQtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwidiI6MX0",
+        "s": "JGtX_zL_gRIBDP5piJB9YZy4yjumc0kRdHedv0CttHO9tuVdAFtqaTe2Xfg0aJwd2mWStTF2ZI-fdVX3PRrcCQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "ok",
+      "perms": [],
+      "rev": 7
+    },
+    {
+      "name": "ok_same_rev",
+      "description": "rev = saklı rev (ayni yetkiler, yenilenmis exp) kabul",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 7
+      },
+      "result": "ok",
+      "perms": ["connect", "control", "file_transfer", "restart_remote"],
+      "rev": 7
+    },
+    {
+      "name": "ok_first_grants",
+      "description": "Hic zarf saklanmamis: last_rev 0",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 0
+      },
+      "result": "ok",
+      "perms": ["connect", "control", "file_transfer", "restart_remote"],
+      "rev": 7
+    },
+    {
+      "name": "ok_email_case",
+      "description": "Oturum e-postasi buyuk harfli; karsilastirma harf duyarsiz",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "CALISAN@EXAMPLE.TEST",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "ok",
+      "perms": ["connect", "control", "file_transfer", "restart_remote"],
+      "rev": 7
+    },
+    {
+      "name": "ok_second_key",
+      "description": "Listedeki ikinci anahtarla imzali (anahtar dondurme)",
+      "envelope": {
+        "k": "228327c2676d3645",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "43uhfwKJJg5J6kI1WDrf4n6neBFapKe8BP5ANTEQTE7mgTdG2GbQkoAqya5a-NpoBLxu4U3jBt-d58OngAExCA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "ok",
+      "perms": ["connect", "control", "file_transfer", "restart_remote"],
+      "rev": 7
+    },
+    {
+      "name": "ok_max_lifetime",
+      "description": "exp - iat = max_lifetime_s (sinir dahil)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwNDMyMDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "xu521IKYbpWz-WSM7LvPHfkn2aLBRcuxE7Wx_dVOJa22bEJjukda3e9uhFJvx55ML5XiKl8l1lfL-piUz-efBg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "ok",
+      "perms": ["connect", "control", "file_transfer", "restart_remote"],
+      "rev": 7
+    },
+    {
+      "name": "ok_iat_boundary",
+      "description": "now_s = iat - clock_skew_s (sinir dahil)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1799999700,
+        "last_rev": 6
+      },
+      "result": "ok",
+      "perms": ["connect", "control", "file_transfer", "restart_remote"],
+      "rev": 7
+    },
+    {
+      "name": "ok_exp_boundary",
+      "description": "now_s = exp + clock_skew_s (sinir dahil)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800029100,
+        "last_rev": 6
+      },
+      "result": "ok",
+      "perms": ["connect", "control", "file_transfer", "restart_remote"],
+      "rev": 7
+    },
+    {
+      "name": "malformed_extra_field",
+      "description": "Zarfta k/p/s disinda alan",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ",
+        "x": "1"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "malformed_padded_s",
+      "description": "s dolgulu base64url",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ=="
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "unknown_key",
+      "description": "Listede olmayan anahtarla imzali",
+      "envelope": {
+        "k": "ab38959a06e7ade0",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "m_pi7BFzJawxkm2icsPfiV57wUgHbGtrKfiMmMo7aWNNbauT_pBN06pTsY-R41E-xDPHYUAVMW2F7VhqbiIlDw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "unknown_key"
+    },
+    {
+      "name": "bad_signature_payload_bit",
+      "description": "p'nin ilk baytinda bir bit degisti",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eiJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_envelope_prefix",
+      "description": "Gecerli grants yuku ama strategy zarfi onekiyle imzali (imza alani ayrimi: zarf yerine gecemez)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "RZe1KYOyIvc0kd4rHryaVTanTsPBf2ohCaBloXUFnjK4pJhOtgVuxT-BoVNEBl2eOO_akG3NZji4m9WDKtgTCA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_payload_strategy_envelope",
+      "description": "Strategy yukunu grants onekiyle imzalamak: imza gecer ama yuk grants semasina uymaz",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJib2R5Ijp7ImNvbmZpZ19vcHRpb25zIjp7fSwicmV2aXNpb24iOjF9LCJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAyODgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibmJmIjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJzZXEiOjUsInR5cCI6InN0cmF0ZWd5IiwidiI6MX0",
+        "s": "JzmpvRwY1RqLuPf-IeXjMFMkUGeRmi242GOpe6AkIK45Sdi9uYoy_Q-vgTn-ArC6Ra1Fz3YgeRXk4eVsGt_ADg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_unknown_permission",
+      "description": "perms icinde katalog disi yetki (team_manage panel yetkisidir)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJ0ZWFtX21hbmFnZSJdLCJyZXYiOjcsInR5cCI6ImdyYW50cyIsInVpZCI6InVzcl8wMTkyZjNhNC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "s": "FdFsRfn2XgzY_7ayBJgATXKOwu-YXzCBSNecNdGaxkmF74Wvb4tCpAeUGWJ1Y0jrcWYs_TAz530hBp8P5s-LCg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_duplicate_permission",
+      "description": "perms tekrarli",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb25uZWN0Il0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "TePU3m_UnWInf5SEixfWCoLUZ9BtfbW86-YRgrV4hg-Q6ufrwqEJCkwqF4cwLE8rrf1F76YtbYdLFIhZQMJuCA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_lifetime_too_long",
+      "description": "exp - iat = max_lifetime_s + 1",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwNDMyMDEsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "xy-Yl0cAZ_QYhCfudTRqOuAAsQe9CGC7AoBl3xUVbau7Vlex0jI8TojWBPyB5-hM38clUW_JjP8pbp6R4NyBDA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_exp_before_iat",
+      "description": "exp = iat",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMDAwMDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "MeYpE18CF5p9UaCTs56_JH6SOztYXu3Eeb7Xo86B8YhbGVb9ipudNjsBTYcsf9M52gELJtu01H3b5g3yOlKXAA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_unknown_field",
+      "description": "Yukte bilinmeyen ust duzey alan",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6Nywic2VxIjoxLCJ0eXAiOiJncmFudHMiLCJ1aWQiOiJ1c3JfMDE5MmYzYTQtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwidiI6MX0",
+        "s": "svN24b3SBXsEir3RDRguH5YdY0m-eoOWYUr_QzL8WpmHmdoUMXnsSIa7ZtdeZ5Xs3Zf_pPnOuEuYKVoe-ygxBA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_zero_rev",
+      "description": "rev 0 (pozitif olmali)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6MCwidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "aEWt3NHy76rJSFN4HIUdM5blfXxaFPi3UBroVoKMaaBWRH_o-qGV4hR-gVpmtVHGNhfB8RKUrg2jgG4ysYk1BA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 0
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "wrong_issuer",
+      "description": "iss baska alan adi",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoiZXZpbC5leGFtcGxlLnRlc3QiLCJwZXJtcyI6WyJjb25uZWN0IiwiY29udHJvbCIsImZpbGVfdHJhbnNmZXIiLCJyZXN0YXJ0X3JlbW90ZSJdLCJyZXYiOjcsInR5cCI6ImdyYW50cyIsInVpZCI6InVzcl8wMTkyZjNhNC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "s": "bUs02RvG605Ej3gDPn9-_khbnWjsxiA49googy8IZrGuxj7KwHoc4n3-iu4pnkLRNd8vg_7VAG-PYAV7oow0CA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "wrong_issuer"
+    },
+    {
+      "name": "wrong_device_did",
+      "description": "did baska cihaz",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiI5ODc2NTQzMjEiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "6QfQNmTZMH4Hqt56hIOhnY2Hau9No14-r8B0dGD-LDFvWDxXr5FHoT4_2CNtO1DNZlyMaWdr9DBRH4-DpW8vBA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "wrong_device"
+    },
+    {
+      "name": "wrong_device_duuid",
+      "description": "did dogru, duuid baska",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6IlltRnphMkV0ZFhWcFpBIiwiZW1haWwiOiJjYWxpc2FuQGV4YW1wbGUudGVzdCIsImV4cCI6MTgwMDAyODgwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwicGVybXMiOlsiY29ubmVjdCIsImNvbnRyb2wiLCJmaWxlX3RyYW5zZmVyIiwicmVzdGFydF9yZW1vdGUiXSwicmV2Ijo3LCJ0eXAiOiJncmFudHMiLCJ1aWQiOiJ1c3JfMDE5MmYzYTQtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwidiI6MX0",
+        "s": "3sIYSciQgAioscULWsJpIoRrvJIRNzRS12yujISN7wlsJomFHcKGhUssHH5MYC7TwTInUQGphVcwk4iUYOR5AQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "wrong_device"
+    },
+    {
+      "name": "wrong_user",
+      "description": "Zarf baska kisinin e-postasina (ayni cihazda baska hesapla oturum)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiYmFza2FzaUBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "7rOb0rwE88_Xr1Fv6o6ey_SwTtTX9IIQBras0x8Iw2FUvUudKVCHkFUr9m23HFlSyPuP-nxfOpcNOGP3gHw4Bg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 6
+      },
+      "result": "wrong_user"
+    },
+    {
+      "name": "not_yet_valid",
+      "description": "now_s = iat - clock_skew_s - 1",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1799999699,
+        "last_rev": 6
+      },
+      "result": "not_yet_valid"
+    },
+    {
+      "name": "expired",
+      "description": "now_s = exp + clock_skew_s + 1",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800029101,
+        "last_rev": 6
+      },
+      "result": "expired"
+    },
+    {
+      "name": "replayed_older_rev",
+      "description": "rev < saklı rev (eski zarf geri sarma)",
+      "envelope": {
+        "k": "5900e551303c4869",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImVtYWlsIjoiY2FsaXNhbkBleGFtcGxlLnRlc3QiLCJleHAiOjE4MDAwMjg4MDAsImlhdCI6MTgwMDAwMDAwMCwiaXNzIjoicmVtb3RlLmV4YW1wbGUudGVzdCIsInBlcm1zIjpbImNvbm5lY3QiLCJjb250cm9sIiwiZmlsZV90cmFuc2ZlciIsInJlc3RhcnRfcmVtb3RlIl0sInJldiI6NywidHlwIjoiZ3JhbnRzIiwidWlkIjoidXNyXzAxOTJmM2E0LTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInYiOjF9",
+        "s": "vE9ssYYoOP_eloVAu8FeuHXStoskfPsnQ6YRdiIppJj2QmjIBaPtwBje0vMbHLYtk_ohM9Wh8ZPS7w9-aojHDQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "email": "calisan@example.test",
+        "now_s": 1800000060,
+        "last_rev": 8
+      },
+      "result": "replayed"
+    }
+  ]
+}

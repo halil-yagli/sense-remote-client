@@ -12,6 +12,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../../../../models/platform_model.dart' show bind;
+
 enum SenseGrantsState { ok, missing, expired, invalid }
 
 /// App permissions (panel `APP_PERMISSIONS`).
@@ -89,16 +91,11 @@ abstract class SenseGrantsBackend {
 class SenseGrantsBridge implements SenseGrantsBackend {
   const SenseGrantsBridge();
 
-  // TODO(D3a): main_sense_grants. Until the bridge lands the Controller works as
-  // before Sürüm 4: every app permission is open here and the panel's own
-  // refusals (lists, peer-status, connection) are the only limit.
   @override
-  Future<String> grants() async =>
-      jsonEncode({'state': 'ok', 'perms': SensePerm.all, 'email': '', 'rev': 0});
+  Future<String> grants() => bind.mainSenseGrants();
 
-  // TODO(D3a): main_sense_grants_refresh
   @override
-  Future<void> refresh() async {}
+  Future<void> refresh() => bind.mainSenseGrantsRefresh();
 }
 
 /// Keeps the grants fresh while the Controller list is open: every [interval]

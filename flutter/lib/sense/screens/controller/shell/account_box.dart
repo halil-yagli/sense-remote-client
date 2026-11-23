@@ -59,8 +59,11 @@ class SenseAccountBridge implements SenseAccountBackend {
     } catch (_) {
       // The session is removed here whatever the panel answered.
     } finally {
-      // TODO(D3a): also drop the stored grants (grants.json) of this person.
       await gFFI.userModel.reset(resetOther: true);
+      // The token is gone now: the core deletes this person's grants (grants.json).
+      try {
+        await bind.mainSenseGrantsRefresh();
+      } catch (_) {}
     }
   }
 }

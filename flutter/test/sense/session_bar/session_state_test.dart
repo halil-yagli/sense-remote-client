@@ -121,8 +121,8 @@ void main() {
       }
     });
 
-    test('bridge not there yet: nothing locked', () {
-      expect(senseReadSessionGrants().allows(SenseGrant.privacyMode), isTrue);
+    test('without the bridge (tests, old core) nothing is locked by the person', () {
+      expect(const SenseSessionGrants.unavailable().allows(SenseGrant.privacyMode), isTrue);
     });
   });
 

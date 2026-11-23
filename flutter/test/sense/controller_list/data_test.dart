@@ -197,6 +197,75 @@ void main() {
     });
   });
 
+  group('health from the panel list (panel #84)', () {
+    final groups = [_group('Müze', 'prj_m', 'a0')];
+    PeerPayload item(String id, Map<String, dynamic> extra) => PeerPayload.fromJson({
+          'id': id,
+          'info': {'device_name': 'PC $id'},
+          'status': 1,
+          'sense': {
+            'device_id': 'dev_$id',
+            'online': true,
+            'projects': [{'project_id': 'prj_m', 'sort_key': 'a'}],
+            ...extra,
+          },
+        });
+
+    test('health_level drives the LED, health the box lines', () {
+      final p = item('1', {
+        'health_level': 'hot',
+        'last_seen_at': 1800000000,
+        'health': {'cpu_pct': 97, 'mem_used_mb': 7000, 'mem_total_mb': 8000},
+      });
+      final o = SensePanelOrder.build(groups, [p])!;
+      expect(o.extras['1']!.healthLevel, 'hot');
+      final c = senseComputerOf(PeerPayload.toPeer(p), o);
+      expect(c.listHealth!.level, SenseLevel.hot);
+      expect(c.listHealth!.lastSeenAt, 1800000000);
+      expect(c.listHealth!.lines, isNotEmpty);
+      expect(c.listHealth!.lines.any((l) => l.value != null), isTrue);
+    });
+
+    test('levels: none is the hollow ring, unknown words and old panels give no value', () {
+      expect(senseLevelFromPanel('ok'), SenseLevel.ok);
+      expect(senseLevelFromPanel('warn'), SenseLevel.warn);
+      expect(senseLevelFromPanel('none'), SenseLevel.unknown);
+      expect(senseLevelFromPanel('purple'), isNull);
+      expect(senseLevelFromPanel(null), isNull);
+      final old = item('2', {});
+      final o = SensePanelOrder.build(groups, [old])!;
+      expect(senseComputerOf(PeerPayload.toPeer(old), o).listHealth, isNull);
+      final noBrief = item('3', {'health_level': 'ok'});
+      final c = senseComputerOf(PeerPayload.toPeer(noBrief), SensePanelOrder.build(groups, [noBrief])!);
+      expect(c.listHealth!.level, SenseLevel.ok);
+      expect(c.listHealth!.lines, isEmpty);
+    });
+
+    test('"Dikkat isteyen" counts the list levels; the cache skips listed computers', () async {
+      final ps = [
+        item('1', {'health_level': 'warn'}),
+        item('2', {'health_level': 'ok'}),
+        item('3', {'health_level': 'hot'}),
+        item('4', {}),
+      ];
+      final o = SensePanelOrder.build(groups, ps)!;
+      final projects =
+          senseProjectsFrom(projectNames: ['Müze'], peers: ps.map(PeerPayload.toPeer).toList(), order: o);
+      final counts = senseCountsOf(projects, const {});
+      expect(counts.attention, 2);
+      expect(counts.attentionLevel, SenseLevel.hot);
+
+      final fake = FakePeers()..status['4'] = okJson();
+      final cache = SenseHealthCache(fake, gap: Duration.zero)..seed(senseUnique(projects));
+      expect(cache.of('3')!.level, SenseLevel.hot);
+      expect(cache.levels['1'], SenseLevel.warn);
+      cache.want(['1', '2', '3', '4']);
+      await pumpEventQueue();
+      expect(fake.asked, ['4'], reason: 'peer-status only where the list said nothing');
+      cache.dispose();
+    });
+  });
+
   group('grants', () {
     test('ok answer opens only its permissions', () {
       final g = SenseGrants.parse(jsonEncode({'state': 'ok', 'perms': ['connect', 'bogus'], 'email': 'a@b.c', 'rev': 4}));
@@ -234,12 +303,6 @@ void main() {
       expect(w.grants.ok, isFalse);
       expect(n, 2);
       w.dispose();
-    });
-
-    test('until D3a the bridge opens every permission (panel still refuses)', () async {
-      final g = SenseGrants.parse(await const SenseGrantsBridge().grants());
-      expect(g.ok, isTrue);
-      expect(g.perms, SensePerm.all.toSet());
     });
   });
 }

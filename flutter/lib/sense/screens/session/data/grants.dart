@@ -2,7 +2,10 @@
 // A session button works only when both the person (panel envelope, `main_sense_grants`)
 // and the computer (RustDesk permission) allow it; a button the person may not use is
 // shown locked, not hidden ("Yetkin yok · panelden").
+import 'dart:async';
 import 'dart:convert';
+
+import '../../../../models/platform_model.dart' show bind;
 
 /// Person right keys (plan §2.1, `packages/shared/src/permissions.ts`).
 abstract final class SenseGrant {
@@ -69,7 +72,37 @@ class SenseSessionGrants {
   }
 }
 
-/// Reads the person's rights for the session buttons.
-// TODO(D3a): main_sense_grants — call `bind.mainSenseGrants()` and [SenseSessionGrants.parse]
-// once the bridge has it; until then nothing is locked by the person's rights.
-SenseSessionGrants senseReadSessionGrants() => const SenseSessionGrants.unavailable();
+/// Reads the person's rights for the session buttons (`main_sense_grants`, checked in Rust).
+/// The bridge answers asynchronously; the buttons read the last answer and a new read starts
+/// at most every [_SenseSessionGrantsCache.every]. Until the first answer everything is closed
+/// (missing), like a missing envelope; the session backend repaints often (link meter), so the
+/// answer shows within a second.
+SenseSessionGrants senseReadSessionGrants() => _SenseSessionGrantsCache.read();
+
+abstract final class _SenseSessionGrantsCache {
+  static const Duration every = Duration(seconds: 5);
+  static SenseSessionGrants _value = const SenseSessionGrants(SenseGrantsState.missing, {});
+  static DateTime? _askedAt;
+  static bool _asking = false;
+
+  static SenseSessionGrants read() {
+    final now = DateTime.now();
+    final asked = _askedAt;
+    if (!_asking && (asked == null || now.difference(asked) >= every)) {
+      _asking = true;
+      _askedAt = now;
+      unawaited(_ask());
+    }
+    return _value;
+  }
+
+  static Future<void> _ask() async {
+    try {
+      _value = SenseSessionGrants.parse(await bind.mainSenseGrants());
+    } catch (_) {
+      _value = const SenseSessionGrants(SenseGrantsState.invalid, {});
+    } finally {
+      _asking = false;
+    }
+  }
+}

@@ -1,7 +1,9 @@
 // Sense Remote: data of the Controller list (YH C2; prototype `pcsView`).
 // Source: the panel's client lists (`/api/device-group/accessible` +
-// `/api/peers` with the `sense` extension, read by the device group model) and,
-// per computer, `GET /api/sense/peer-status` (health for the LED, last seen).
+// `/api/peers` with the `sense` extension, read by the device group model:
+// online, busy, LED level `health_level`, last seen, short health values) and,
+// only for a panel that does not send those yet, per computer
+// `GET /api/sense/peer-status`.
 // The personal drag-and-drop order goes to `POST /api/sense/device-order`.
 //
 // Pure functions build what the screen shows; the backend is the only part that
@@ -13,7 +15,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../../../../common.dart' show getHttpHeaders;
-import '../../../../common/hbbs/hbbs.dart' show SensePanelOrder;
+import '../../../../common/hbbs/hbbs.dart' show SensePanelOrder, SensePeerExtra;
 import '../../../../models/peer_model.dart' show Peer;
 import '../../../../models/platform_model.dart' show bind;
 import '../../../../utils/http_service.dart' as http;
@@ -36,6 +38,7 @@ class SenseComputer {
     this.displayCount,
     this.busyBy,
     this.lastSeenAt,
+    this.listHealth,
   });
 
   /// Connection ID (what Bağlan uses).
@@ -59,6 +62,10 @@ class SenseComputer {
   /// Unix seconds, when known.
   final int? lastSeenAt;
 
+  /// LED level and box values the panel sent with the list (`/api/peers`
+  /// `sense.health_level`, `sense.health`); null = not sent.
+  final SenseComputerHealth? listHealth;
+
   bool get busy => busyBy != null;
 
   SenseComputer copyWith({int? lastSeenAt}) => SenseComputer(
@@ -71,6 +78,7 @@ class SenseComputer {
         displayCount: displayCount,
         busyBy: busyBy,
         lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+        listHealth: listHealth,
       );
 }
 
@@ -133,6 +141,7 @@ SenseComputer senseComputerOf(Peer peer, SensePanelOrder? order) {
     // A computer that is not online is never "busy" (panel rule, S8).
     busyBy: (extra?.online ?? peer.online) ? extra?.busyBy : null,
     lastSeenAt: extra?.lastSeenAt,
+    listHealth: senseListHealthOf(extra),
   );
 }
 
@@ -217,9 +226,10 @@ class SenseCounts {
 /// `DeviceListSummary`: the tiles do not move while typing).
 SenseCounts senseCountsOf(List<SenseProject> projects, Map<String, SenseLevel> levels) {
   final all = senseUnique(projects);
+  SenseLevel? levelOf(SenseComputer c) => levels[c.id] ?? c.listHealth?.level;
   final bad = [
     for (final c in all)
-      if (levels[c.id] == SenseLevel.warn || levels[c.id] == SenseLevel.hot) levels[c.id]!,
+      if (levelOf(c) == SenseLevel.warn || levelOf(c) == SenseLevel.hot) levelOf(c)!,
   ];
   return SenseCounts(
     total: all.length,
@@ -326,6 +336,37 @@ SenseComputerHealth senseHealthOf(SensePeerStatusFull full) {
   return SenseComputerHealth(level: view.level, lines: lines, at: full.health!.at, lastSeenAt: seen);
 }
 
+/// LED level from the panel list (`sense.health_level`; the panel's own
+/// "attention" rule). `none` (offline / no data) is the hollow ring; an unknown
+/// word is no value.
+SenseLevel? senseLevelFromPanel(String? word) => switch (word) {
+      'ok' => SenseLevel.ok,
+      'warn' => SenseLevel.warn,
+      'hot' => SenseLevel.hot,
+      'none' => SenseLevel.unknown,
+      _ => null,
+    };
+
+/// What the list item tells about a computer's health: the LED is the panel's
+/// `health_level`; the box lines come from `sense.health`, read the same way as
+/// the peer-status `health` (same field names). Null when the panel sent no
+/// level (older panel: the cache then asks peer-status).
+SenseComputerHealth? senseListHealthOf(SensePeerExtra? extra) {
+  final level = senseLevelFromPanel(extra?.healthLevel);
+  if (extra == null || level == null) return null;
+  final brief = extra.health;
+  var lines = const <SenseHealthLine>[];
+  if (brief != null) {
+    final full = SensePeerStatusFull.parse(jsonEncode({
+      'online': extra.online ?? true,
+      if (extra.lastSeenAt != null) 'last_seen_at': extra.lastSeenAt,
+      'health': brief,
+    }));
+    if (full != null && full.health != null) lines = senseHealthOf(full).lines;
+  }
+  return SenseComputerHealth(level: level, lines: lines, lastSeenAt: extra.lastSeenAt);
+}
+
 /// Head of the LED box.
 String senseHealthTitle(SenseLevel level, {required bool online}) {
   if (!online) return SenseControllerStrings.healthNone;
@@ -408,6 +449,7 @@ class SenseHealthCache extends ChangeNotifier {
   final int Function() _now;
 
   final Map<String, SenseComputerHealth> _data = {};
+  final Map<String, SenseComputerHealth> _list = {};
   final Map<String, int> _fetchedAt = {};
   final List<String> _queue = [];
   bool _running = false;
@@ -415,10 +457,27 @@ class SenseHealthCache extends ChangeNotifier {
 
   int now() => _now();
 
-  SenseComputerHealth? of(String id) => _data[id];
+  /// The panel list's value first (it is the panel's own LED level and comes
+  /// every list refresh); peer-status only for computers the list says nothing
+  /// about.
+  SenseComputerHealth? of(String id) => _list[id] ?? _data[id];
 
   /// Levels for the "Dikkat isteyen" tile (known computers only).
-  Map<String, SenseLevel> get levels => {for (final e in _data.entries) e.key: e.value.level};
+  Map<String, SenseLevel> get levels => {
+        for (final e in _data.entries) e.key: e.value.level,
+        for (final e in _list.entries) e.key: e.value.level,
+      };
+
+  /// Takes the health the panel sent with the list (call with every list
+  /// build; no notification, the caller is building already).
+  void seed(Iterable<SenseComputer> computers) {
+    _list
+      ..clear()
+      ..addAll({
+        for (final c in computers)
+          if (c.listHealth != null) c.id: c.listHealth!,
+      });
+  }
 
   bool _fresh(String id) {
     final at = _fetchedAt[id];
@@ -429,7 +488,7 @@ class SenseHealthCache extends ChangeNotifier {
   void want(Iterable<String> ids, {bool first = false}) {
     var added = false;
     for (final id in ids) {
-      if (_fresh(id) || _queue.contains(id)) continue;
+      if (_list.containsKey(id) || _fresh(id) || _queue.contains(id)) continue;
       first ? _queue.insert(0, id) : _queue.add(id);
       added = true;
     }
