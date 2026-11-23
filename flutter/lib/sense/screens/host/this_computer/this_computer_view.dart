@@ -8,6 +8,7 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/widgets.dart';
 
 import '../../../sense.dart';
@@ -304,9 +305,17 @@ class _SenseThisComputerViewState extends State<SenseThisComputerView> {
           SenseStatGrid(children: [
             _HostTile(
               label: SenseHostStrings.id,
-              child: Row(children: [
-                Flexible(child: Text(widget.deviceId, key: const Key('sense-host-id'), style: _valueStyle(null))),
-                const SizedBox(width: SenseUi.iconGap),
+              // Wrap: the ID itself never breaks; in a narrow column Kopyala drops below it.
+              child: Wrap(
+                  spacing: SenseUi.iconGap,
+                  runSpacing: SenseUi.iconGap,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                Text(widget.deviceId,
+                    key: const Key('sense-host-id'),
+                    maxLines: 1,
+                    softWrap: false,
+                    style: _valueStyle(null)),
                 SenseCopyButton(
                     key: const Key('sense-host-copy-id'),
                     text: widget.deviceId.replaceAll(' ', ''),
@@ -512,9 +521,9 @@ class _PenText extends StatelessWidget {
           const SizedBox(width: SenseUi.iconGap),
           Opacity(
             opacity: s.hovered || s.focused ? 1 : 0,
-            child: Text('✎',
-                style: SenseTextStyles.of(
-                    size: SenseFontSize.hint, color: s.hovered ? SenseColors.text : SenseColors.textDim)),
+            child: Icon(Icons.edit_outlined,
+                size: SenseFontSize.hint,
+                color: s.hovered ? SenseColors.text : SenseColors.textMuted),
           ),
         ]),
       ),

@@ -192,7 +192,7 @@ extension _SenseInstallMacSteps on _SenseInstallWizardState {
             Text(permission.label,
                 style: SenseTextStyles.of(weight: SenseFontWeight.bold)),
             Text(_t('perm-${permission.textKey}-desc'),
-                style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textDim)),
+                style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textMuted)),
           ]),
         ),
         const SizedBox(width: _L.gap),

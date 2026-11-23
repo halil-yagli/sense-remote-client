@@ -9,6 +9,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show setEquals, visibleForTesting;
+import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/widgets.dart';
 
 import '../../../sense.dart';
@@ -245,7 +246,7 @@ class SenseRoleCategoryBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SenseHostMeta(SenseHostStrings.roleHint, color: SenseColors.textDim),
+              const SenseHostMeta(SenseHostStrings.roleHint, color: SenseColors.textMuted),
               const SizedBox(height: SenseUi.rowPadV - 1),
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
@@ -432,8 +433,7 @@ class SenseRoleCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(_kCheckRadius),
                 ),
                 child: selected
-                    ? Text('✓',
-                        style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.bg))
+                    ? const Icon(Icons.check, size: SenseFontSize.hint, color: SenseColors.bg)
                     : null,
               ),
             ]),

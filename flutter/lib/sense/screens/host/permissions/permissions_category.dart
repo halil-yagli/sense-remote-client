@@ -24,7 +24,7 @@ class SensePermissionsCategoryBody extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SenseHostMeta(SenseHostStrings.permissionsHint, color: SenseColors.textDim),
+          const SenseHostMeta(SenseHostStrings.permissionsHint, color: SenseColors.textMuted),
           for (var i = 0; i < kSenseHostPermissions.length; i++)
             SenseToggleRow(
               key: Key('sense-perm-$i'),

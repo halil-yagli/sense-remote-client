@@ -391,7 +391,7 @@ class _SenseComputersViewState extends State<SenseComputersView> {
             padding: const EdgeInsets.only(right: _kLocGap - 2),
             child: Text(senseUpperTr(SenseControllerStrings.location),
                 style: SenseTextStyles.of(
-                    size: SenseFontSize.hint, color: SenseColors.textDim, letterSpacingEm: SenseLetterSpacing.caps)),
+                    size: SenseFontSize.hint, color: SenseColors.textMuted, letterSpacingEm: SenseLetterSpacing.caps)),
           ),
           _LocationChip(
             key: const Key('sense-loc-all'),
@@ -456,7 +456,7 @@ class _LocationChip extends StatelessWidget {
                     text: ' $count',
                     style: SenseTextStyles.of(
                         size: SenseFontSize.hintLarge,
-                        color: SenseColors.textDim)),
+                        color: SenseColors.textMuted)),
             ])),
           ),
         ),

@@ -24,6 +24,7 @@ Future<List<String>> _pumpList(
   void Function(SenseProject, List<String>)? onTileOrder,
   void Function(List<String>)? onGroupOrder,
   VoidCallback? onRetry,
+  String? ledOpenId,
 }) async {
   final connected = <String>[];
   setWindow(tester, const Size(1180, 1400));
@@ -37,6 +38,7 @@ Future<List<String>> _pumpList(
     connectingId: connecting,
     onConnect: connected.add,
     onRetry: onRetry,
+    ledOpenId: ledOpenId,
     onTileOrder: onTileOrder,
     onGroupOrder: onGroupOrder,
   ))));
@@ -219,6 +221,21 @@ void main() {
       await tester.tap(find.byKey(const Key('sense-list-error-id')));
       await tester.pump();
       expect(find.byKey(const Key('sense-id-box')), findsOneWidget);
+    });
+
+    testWidgets('error: Yeniden dene is the primary (enabled) button', (tester) async {
+      await _pumpList(tester, projects: const [], state: SenseListState.error, onRetry: () {});
+      final retry = tester.widget<SenseButton>(find.byKey(const Key('sense-list-retry')));
+      expect(retry.kind, SenseButtonKind.primary);
+      expect(retry.onPressed, isNotNull);
+    });
+
+    testWidgets('a02: the LED box opens without a pointer (initial state of the golden)', (tester) async {
+      await _pumpList(tester, health: exampleHealth(), ledOpenId: '482913207');
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Dikkat gerekiyor'), findsOneWidget);
+      expect(find.textContaining('Son veri'), findsWidgets);
     });
 
     testWidgets('empty', (tester) async {

@@ -92,7 +92,7 @@ class _SenseLoginPageState extends State<SenseLoginPage> {
           child: Text(SenseControllerStrings.loginWithoutAccount,
               style: SenseTextStyles.of(
                 size: SenseFontSize.hintSmall,
-                color: s.hovered ? SenseColors.textSecondary : SenseColors.textDim,
+                color: s.hovered ? SenseColors.textSecondary : SenseColors.textMuted,
               ).copyWith(decoration: s.hovered ? TextDecoration.underline : TextDecoration.none)),
         ),
       ),

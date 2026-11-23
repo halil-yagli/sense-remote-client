@@ -276,7 +276,7 @@ class _SenseAboutViewState extends State<SenseAboutView> {
             const SizedBox(height: kSensePageGap),
             Text(SenseAboutStrings.copyright(widget.year ?? DateTime.now().year),
                 key: const Key('sense-about-copyright'),
-                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim)),
+                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted)),
           ],
         ),
       ),

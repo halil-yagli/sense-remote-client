@@ -48,7 +48,7 @@ class SenseField extends StatelessWidget {
         ),
         child: Row(children: [
           if (search) ...[
-            const Icon(Icons.search, size: _kIcon, color: SenseColors.textDim),
+            const Icon(Icons.search, size: _kIcon, color: SenseColors.textMuted),
             const SizedBox(width: _kFieldGap),
           ],
           Expanded(
@@ -70,7 +70,7 @@ class SenseField extends StatelessWidget {
                 border: InputBorder.none,
                 hintText: hint,
                 hintMaxLines: 1,
-                hintStyle: SenseTextStyles.of(size: SenseFontSize.bodySmall, color: SenseColors.textDim),
+                hintStyle: SenseTextStyles.of(size: SenseFontSize.bodySmall, color: SenseColors.textMuted),
               ),
               ),
             ),
@@ -155,7 +155,7 @@ class SenseHint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(text,
-      style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim, height: 1.5));
+      style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted, height: 1.5));
 }
 
 /// Kimlikle bağlan, in place (not a window): ID field + Bağlan + explanation.
