@@ -11,6 +11,8 @@
 //   role change, `SenseCommonStrings.splashRoleChange`).
 //
 // Only dark theme (T1), only Turkish (T2). main.dart is not touched by B or C.
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 import 'screens/controller/sense_home_strings.dart' show SenseHomeRole;
@@ -136,6 +138,7 @@ class SenseSplashGate extends StatefulWidget {
 class _SenseSplashGateState extends State<SenseSplashGate>
     with SingleTickerProviderStateMixin {
   late final AnimationController _out;
+  Timer? _hold;
   SenseSplashRequest? _shown;
   int _serial = 0;
 
@@ -143,7 +146,8 @@ class _SenseSplashGateState extends State<SenseSplashGate>
   void initState() {
     super.initState();
     _out = AnimationController(
-        vsync: this, duration: SenseMotion.layerFade.duration);
+        vsync: this, duration: SenseMotion.layerFade.duration)
+      ..addStatusListener(_onFade);
     senseSplashRequest.addListener(_onRequest);
     if (widget.showAtStart || widget.updatingToVersion != null) {
       _show(SenseSplashRequest(updatingToVersion: widget.updatingToVersion));
@@ -156,22 +160,29 @@ class _SenseSplashGateState extends State<SenseSplashGate>
   }
 
   void _show(SenseSplashRequest r) {
-    final serial = ++_serial;
+    _hold?.cancel();
     _out.value = 0;
-    setState(() => _shown = r);
-    Future.delayed(SenseMotion.breatheFast.duration, () async {
-      if (!mounted || serial != _serial) return;
-      await _out.forward();
-      if (!mounted || serial != _serial) return;
-      setState(() => _shown = null);
-      if (identical(senseSplashRequest.value, r)) {
-        senseSplashRequest.value = null;
-      }
+    setState(() {
+      _serial++;
+      _shown = r;
     });
+    _hold = Timer(SenseMotion.breatheFast.duration, () {
+      if (mounted) _out.forward();
+    });
+  }
+
+  void _onFade(AnimationStatus status) {
+    if (status != AnimationStatus.completed || !mounted) return;
+    final r = _shown;
+    setState(() => _shown = null);
+    if (r != null && identical(senseSplashRequest.value, r)) {
+      senseSplashRequest.value = null;
+    }
   }
 
   @override
   void dispose() {
+    _hold?.cancel();
     senseSplashRequest.removeListener(_onRequest);
     _out.dispose();
     super.dispose();
