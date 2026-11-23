@@ -58,6 +58,14 @@ void main() {
     expect(find.byKey(const Key('sense-controller-nav-thisComputer')), findsOneWidget);
   });
 
+  testWidgets('Host + Controller: "Bu bilgisayar" stays on one line next to the badge', (tester) async {
+    await _pumpShell(tester, role: SenseHomeRole.both);
+    final title = tester.getSize(find.byKey(const Key('sense-controller-rail-title')));
+    final oneLine = tester.getSize(find.text('Hakkında')).height;
+    expect(title.height, lessThanOrEqualTo(oneLine + 1), reason: 'etiket kırılmamalı');
+    expect(find.byKey(const Key('sense-controller-role-chip')), findsOneWidget);
+  });
+
   testWidgets('signed out: only the role chip, no menu, no name', (tester) async {
     await _pumpShell(tester, signedIn: false);
     expect(find.text('Controller'), findsOneWidget);

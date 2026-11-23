@@ -294,6 +294,28 @@ void main() {
       expect(b.writes, isEmpty);
     });
 
+    testWidgets('IP access (security) and direct connection (network) are told apart', (tester) async {
+      final b = _FakeBackend()..stores[SenseOptionStore.main]!.addAll({'direct-server': 'N'});
+      await _pump(tester, b, open: SenseSettingsCategory.security);
+      expect(find.text(SenseSettingsStrings.directIp), findsOneWidget);
+      expect(find.text(SenseSettingsStrings.directIpHint), findsOneWidget);
+      expect(find.text('Doğrudan IP erişimi'), findsNothing);
+      // The relay-less path stays "açık" while IP access is closed: two different settings.
+      expect(SenseSettingsStrings.sumNetwork(true), contains('doğrudan bağlantı açık'));
+      expect(SenseSettingsStrings.directIp, isNot(contains('Doğrudan')));
+    });
+
+    testWidgets('Bağlantılar: shortcut hint follows decision 71 (Ctrl+Alt+Shift, no arrows)', (tester) async {
+      final b = _FakeBackend();
+      await _pump(tester, b, open: SenseSettingsCategory.connections);
+      final hint = SenseSettingsStrings.shortcutsHint;
+      expect(find.text(hint), findsOneWidget);
+      expect(hint, contains('Ctrl+Alt+Shift+B'));
+      expect(hint, contains('Ctrl+Alt+Shift+Q'));
+      expect(hint, isNot(contains('Ctrl+Alt+F')));
+      expect(RegExp('[←→↑↓]').hasMatch(hint), isFalse);
+    });
+
     testWidgets('hardware decoder (main store)', (tester) async {
       final b = _FakeBackend();
       await _pump(tester, b, open: SenseSettingsCategory.performance);
@@ -448,7 +470,7 @@ void main() {
           ..stores[SenseOptionStore.main]!.addAll({'custom-rendezvous-server': 'x', 'api-server': 'y'});
         await _pump(tester, b, open: e.value, size: const Size(1450, 1000));
         await expectLater(find.byType(SenseSettingsView), matchesGoldenFile(goldenPath(e.key)));
-      }, skip: goldenSkip(e.key));
+      }, skip: goldenSkip(e.key), tags: const ['golden']);
     }
   });
 }

@@ -53,7 +53,7 @@ abstract final class SenseHostStrings {
   static const String errInvalid = 'Ad 1–64 karakter olmalı.';
   static const String errNetwork = 'Panele ulaşılamadı; değişiklik kaydedilmedi. Yeniden dene.';
   static const String errLocation = 'Bu yer bu bilgisayarın projesinde yok.';
-  static const String errUnavailable = 'Bu sürümde henüz değiştirilemiyor.';
+  static const String errUnavailable = 'Servis yanıt vermiyor; birazdan yeniden dene.';
   static const String errOther = 'Kaydedilemedi. Yeniden dene.';
 
   /// Minutes / hours of a connection ("14 dk", "1 sa 5 dk").
@@ -104,6 +104,8 @@ abstract final class SenseHostStrings {
   static const String passwordInSettingsHint =
       'Şifre ekibin şifre yöneticisinde durur; burada gösterilmez.';
   static const String openInSettings = "Ayarlar'da aç";
+  static const String openRow = 'Aç';
+  static const String closeRow = 'Kapat';
 
   // Live password rules (YH H2; same rule as the service, src/sense/password/rule.rs).
   static const String ruleLength = '12–64 karakter';

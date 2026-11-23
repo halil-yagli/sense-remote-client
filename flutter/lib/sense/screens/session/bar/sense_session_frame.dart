@@ -175,7 +175,11 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
                 top: hidden ? 0 : SenseSizes.sessionToolbarHeight - 1,
                 left: 0,
                 right: 0,
-                child: Center(
+                // Prototype: the handle is not drawn while a list is open (it would sit on
+                // the list's first rows).
+                child: open != null && !hidden
+                    ? const SizedBox.shrink(key: ValueKey('sense-island-gone'))
+                    : Center(
                   child: SenseIsland(
                     barHidden: hidden,
                     onTap: () {

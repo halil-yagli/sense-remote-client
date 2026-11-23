@@ -18,6 +18,7 @@ import 'package:flutter_hbb/sense/screens/shared/chat/chat_call.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_composer.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_controller.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_entry.dart';
+import 'package:flutter_hbb/sense/screens/shared/chat/data/call.dart';
 import 'package:flutter_hbb/sense/strings/host_live.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -452,12 +453,24 @@ void main() {
           SenseCallPhase.idle);
     });
 
-    test('Host calling and Host files wait for the bridge (D3d2)', () async {
-      expect(SenseHostChatCall.canStart, isFalse);
-      expect(SenseHostChatFiles.available, isFalse);
-      final files = SenseHostChatFiles(connId: 1);
-      expect(await files.send(['a.txt']), isEmpty);
-      expect(await files.jobs(), isEmpty);
+    test('Host calling and Host files are on the bridge (D3d2)', () async {
+      expect(SenseHostChatCall.canStart, isTrue);
+      expect(SenseHostChatFiles.available, isTrue);
+      // Nothing to send starts nothing (no bridge call).
+      expect(await SenseHostChatFiles(connId: 1).send(const []), isEmpty);
+    });
+
+    test('sound outputs and microphone level from the bridge (D3d2)', () {
+      final o = senseParseSoundOutputs(
+          '{"outputs":["Hoparlör","Kulaklık"],"output":"Kulaklık"}');
+      expect(o.outputs, ['Hoparlör', 'Kulaklık']);
+      expect(o.output, 'Kulaklık');
+      // A chosen output that is gone shows as the system default.
+      expect(senseParseSoundOutputs('{"outputs":["Hoparlör"],"output":"USB"}').output, '');
+      expect(senseParseSoundOutputs('nope').outputs, isEmpty);
+      expect(senseCallLevel(-1), isNull);
+      expect(senseCallLevel(0.4), 0.4);
+      expect(senseCallLevel(3), 1.0);
     });
 
     test('the card shows the waiting, then the live connection', () {

@@ -3,6 +3,8 @@
 // The Host card (C5) gives its own [SenseChatCall] (cm_* functions, D3d2 for
 // "Host'tan Ara").
 
+import 'dart:convert';
+
 import '../../../../../common.dart' show SessionID;
 import '../../../../../models/platform_model.dart';
 
@@ -55,9 +57,30 @@ abstract class SenseChatCall {
   Future<double?> level();
 }
 
+/// Sound outputs from `main_sense_sound_outputs` (`{outputs: [..], output}`).
+/// Broken input gives "system default only", never an exception.
+({List<String> outputs, String output}) senseParseSoundOutputs(String raw) {
+  try {
+    final data = jsonDecode(raw);
+    if (data is Map) {
+      final list = data['outputs'];
+      final outputs = list is List ? [for (final o in list) if (o is String) o] : <String>[];
+      final output = data['output'] is String ? data['output'] as String : '';
+      return (outputs: outputs, output: outputs.contains(output) ? output : '');
+    }
+  } catch (_) {}
+  return (outputs: const <String>[], output: '');
+}
+
+/// `session_sense_call_level`: 0..1, below 0 = unknown (no call / not measured).
+double? senseCallLevel(double raw) => raw < 0 ? null : raw.clamp(0.0, 1.0).toDouble();
+
 /// Controller side of one connection: RustDesk's voice call
 /// (`session_request_voice_call`, `session_close_voice_call`) and its voice
-/// call input device (`flutter_ffi.rs` set/get_voice_call_input_device).
+/// call input device (`flutter_ffi.rs` set/get_voice_call_input_device). A
+/// call the Host starts (D3d2) is answered with [start] and refused with [end].
+/// Microphone off, level and sound output: `session_sense_call_*`,
+/// `main_sense_*` (D3d2, plan Ek).
 class SenseSessionChatCall implements SenseChatCall {
   SenseSessionChatCall({required this.sessionId});
 
@@ -74,9 +97,9 @@ class SenseSessionChatCall implements SenseChatCall {
   Future<SenseAudioDevices> devices() async {
     final inputs = (await bind.mainGetSoundInputs()).toList();
     final input = await bind.getVoiceCallInputDevice(isCm: false);
-    // TODO(D3d1): sound output list and choice — RustDesk plays the call on the
-    // system default output and has no bridge function for it.
-    return SenseAudioDevices(inputs: inputs, input: input);
+    final out = senseParseSoundOutputs(await bind.mainSenseSoundOutputs());
+    return SenseAudioDevices(
+        inputs: inputs, input: input, outputs: out.outputs, output: out.output);
   }
 
   @override
@@ -84,21 +107,14 @@ class SenseSessionChatCall implements SenseChatCall {
       bind.setVoiceCallInputDevice(isCm: false, device: device);
 
   @override
-  Future<void> setOutput(String device) async {
-    // TODO(D3d1): output device of the voice call (no bridge function yet).
-  }
+  Future<void> setOutput(String device) =>
+      bind.mainSenseSetCallOutput(device: device);
 
   @override
-  Future<bool> setMuted(bool muted) async {
-    // TODO(D3d1): microphone off during a call — RustDesk has no "mute" for the
-    // voice call; choosing an unknown device falls back to the default one, so
-    // it cannot be faked safely. Report "not done" until the bridge has it.
-    return false;
-  }
+  Future<bool> setMuted(bool muted) =>
+      bind.sessionSenseCallSetMuted(sessionId: sessionId, muted: muted);
 
   @override
-  Future<double?> level() async {
-    // TODO(D3d1): microphone level of the voice call (no bridge function yet).
-    return null;
-  }
+  Future<double?> level() async =>
+      senseCallLevel(await bind.sessionSenseCallLevel(sessionId: sessionId));
 }

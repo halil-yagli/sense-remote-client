@@ -1,5 +1,7 @@
 // Sense Remote: text of the connection layers (YH O13, O14, O15). Turkish only (T2).
 
+import '../popups/status/status_format.dart' show sensePctDecimal;
+
 abstract final class SenseLayerStrings {
   // O13 — connection problem.
   static const String weakTitle = 'Bağlantı zayıf';
@@ -14,7 +16,8 @@ abstract final class SenseLayerStrings {
   static const String frames = 'görüntü';
   static const String noValue = '—';
   static String ms(int v) => '$v ms';
-  static String percent(double v) => '%${v.toStringAsFixed(1)}';
+  /// Turkish: percent sign first, decimal comma, "%100" / "%5,1".
+  static String percent(double v) => sensePctDecimal(v);
   static String fps(int v) => '$v fps';
   static const String betterPath = 'Daha iyi yol aranıyor (doğrudan / aktarma)…';
   static String reconnecting(int attempt, int closeIn) =>

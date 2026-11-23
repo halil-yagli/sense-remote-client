@@ -212,7 +212,9 @@ class SenseChatController extends ChangeNotifier {
   // ---- call ----
 
   Future<void> startCall() async {
-    if (_phase != SenseCallPhase.idle) return;
+    // From "incoming" it answers the other side's call (D3d2: the Host calls
+    // the Controller); the call side starts it the same way.
+    if (_phase != SenseCallPhase.idle && _phase != SenseCallPhase.incoming) return;
     _setPhase(SenseCallPhase.calling);
     await call.start();
   }

@@ -31,7 +31,7 @@ Map<String, Object?> fullJson() => {
       ],
       'network': [
         {'name': 'Wi-Fi', 'kind': 'wifi', 'ipv4': ['172.16.4.118'], 'up': true},
-        {'name': 'Ethernet', 'kind': 'ethernet', 'ipv4': ['192.168.10.42', '10.0.0.5'],
+        {'name': 'Ethernet', 'kind': 'ethernet', 'ipv4': ['192.168.10.42/24', '10.0.0.5/8'],
           'ipv6': ['fe80::1c2a:9bff:fe31:7d10'], 'up': true},
       ],
       'health': {
@@ -43,8 +43,8 @@ Map<String, Object?> fullJson() => {
         'mem_used_mb': 14438,
         'mem_total_mb': 32768,
         'disks': [
-          {'mount': 'C:', 'used_pct': 62, 'total_gb': 931},
-          {'mount': 'D:', 'used_pct': 96, 'total_gb': 1820},
+          {'mount': 'C:', 'label': 'Sistem', 'used_pct': 62, 'total_gb': 931},
+          {'mount': 'D:', 'label': 'İçerik', 'used_pct': 96, 'total_gb': 1820},
         ],
         'uptime_s': 274000,
         'cpu_mhz': 4050,

@@ -106,6 +106,8 @@ pub struct Remote<T: InvokeUiSession> {
     trusted_device: crate::trusted_devices::client::Session,
     // Sense Remote (S10, O13): last frame age and loss estimate.
     sense_link: crate::sense::link_quality::LinkMeter,
+    // Sense Remote (H4, O11): time stamp of a call the Host started, until it is answered here.
+    sense_call_in: Option<i64>,
 }
 
 #[derive(Default)]
@@ -161,6 +163,7 @@ impl<T: InvokeUiSession> Remote<T> {
             cursor_dedupe: Default::default(),
             trusted_device: Default::default(),
             sense_link: Default::default(),
+            sense_call_in: None,
         }
     }
 
@@ -576,6 +579,12 @@ impl<T: InvokeUiSession> Remote<T> {
                 }
             }
         }
+        // Sense Remote (O12): result of a chat file.
+        crate::sense::chat_file::on_status(
+            self.handler.lc.read().unwrap().session_id,
+            id,
+            err.as_deref(),
+        );
         if let Some(err) = err {
             self.handler.job_error(id, err, file_num);
         } else {
@@ -1350,6 +1359,16 @@ impl<T: InvokeUiSession> Remote<T> {
                 self.elevation_requested = true;
             }
             Data::NewVoiceCall => {
+                // Sense Remote (H4, O11): "Ara" while the Host is calling answers that call.
+                if let Some(ts) = self.sense_call_in.take() {
+                    allow_err!(
+                        peer.send(&crate::client::new_voice_call_response(ts, true))
+                            .await
+                    );
+                    self.handler.on_voice_call_started();
+                    self.stop_voice_call_sender = self.start_voice_call();
+                    return true;
+                }
                 let msg = new_voice_call_request(true);
                 // Save the voice call request timestamp for the further validation.
                 self.voice_call_request_timestamp = Some(
@@ -1360,6 +1379,15 @@ impl<T: InvokeUiSession> Remote<T> {
                 self.handler.on_voice_call_waiting();
             }
             Data::CloseVoiceCall => {
+                // Sense Remote (H4, O11): ending a call the Host is still ringing refuses it.
+                if let Some(ts) = self.sense_call_in.take() {
+                    allow_err!(
+                        peer.send(&crate::client::new_voice_call_response(ts, false))
+                            .await
+                    );
+                    self.handler.on_voice_call_closed("");
+                    return true;
+                }
                 self.stop_voice_call();
                 let msg = new_voice_call_request(false);
                 self.handler
@@ -1414,6 +1442,12 @@ impl<T: InvokeUiSession> Remote<T> {
         let speed = (transferred - last_transferred) as f64 / (elapsed as f64 / 1000.);
         let file_num = job.file_num() - 1;
         handler.job_progress(job.id(), file_num, speed, job.finished_size() as f64);
+        // Sense Remote (O12): progress of a chat file.
+        crate::sense::chat_file::on_progress(
+            handler.lc.read().unwrap().session_id,
+            job.id(),
+            job.finished_size(),
+        );
     }
 
     fn update_jobs_status(&mut self) {
@@ -1462,6 +1496,21 @@ impl<T: InvokeUiSession> Remote<T> {
     }
 
     pub async fn sync_jobs_status_to_local(&mut self) -> bool {
+        // Sense Remote (O12, S12): chat files cut by the drop wait in memory and resume at the
+        // next login of this session; a remote session writes no transfer list to the peer's
+        // config.
+        if self.handler.is_default() {
+            let live: Vec<(i32, i32)> = self
+                .read_jobs
+                .iter()
+                .map(|j| (j.id(), j.file_num()))
+                .collect();
+            crate::sense::chat_file::on_link_lost(
+                self.handler.lc.read().unwrap().session_id,
+                &live,
+            );
+            return false;
+        }
         if !self.is_connected {
             return false;
         }
@@ -1777,6 +1826,14 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         self.handler.handle_peer_info(pi);
+                        // Sense Remote (O12): resume the chat files a dropped link cut, from
+                        // where they stopped (same session only).
+                        if self.handler.is_default() {
+                            let sid = self.handler.lc.read().unwrap().session_id;
+                            for d in crate::sense::chat_file::on_connected(sid) {
+                                self.sender.send(d).ok();
+                            }
+                        }
                         #[cfg(all(target_os = "windows", not(feature = "flutter")))]
                         self.check_clipboard_file_context();
                         if self.handler.is_default() {
@@ -2481,6 +2538,22 @@ impl<T: InvokeUiSession> Remote<T> {
                     Some(misc::Union::FollowCurrentDisplay(d_idx)) => {
                         self.handler.set_current_display(d_idx);
                     }
+                    // Sense Remote (S5): a file the Host offers in the chat is pulled into the
+                    // incoming folder over this session (no second connection, S8).
+                    Some(misc::Union::PluginRequest(p))
+                        if p.id == crate::sense::chat_file::OFFER_REQUEST =>
+                    {
+                        if self.handler.is_default() {
+                            let sid = self.handler.lc.read().unwrap().session_id;
+                            if let Some(d) = crate::sense::chat_file::on_offer(
+                                sid,
+                                &self.handler.get_id(),
+                                &p.content,
+                            ) {
+                                self.sender.send(d).ok();
+                            }
+                        }
+                    }
                     _ => {}
                 },
                 Some(message::Union::TestDelay(t)) => {
@@ -2551,6 +2624,18 @@ impl<T: InvokeUiSession> Remote<T> {
                 Some(message::Union::VoiceCallRequest(request)) => {
                     if request.is_connect {
                         // TODO: maybe we will do a voice call from the peer in the future.
+                        // Sense Remote (H4, O11): the Host calls; "Ara" here answers, ending
+                        // refuses. Only in a remote session without a call already.
+                        if self.handler.is_default()
+                            && self.stop_voice_call_sender.is_none()
+                            && self.voice_call_request_timestamp.is_none()
+                        {
+                            self.sense_call_in = Some(request.req_timestamp);
+                            self.handler.on_voice_call_incoming();
+                        }
+                    } else if self.sense_call_in.take().is_some() {
+                        // Sense Remote (H4): the Host stopped calling before an answer.
+                        self.handler.on_voice_call_closed("");
                     } else {
                         log::debug!("The remote has requested to close the voice call");
                         if let Some(sender) = self.stop_voice_call_sender.take() {

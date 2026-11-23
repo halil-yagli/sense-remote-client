@@ -51,19 +51,26 @@ Widget _list({
       now: kNow,
       health: exampleHealth(),
       onConnect: (_) {},
+      onRetry: () {},
       initialLocation: location,
       ledOpenId: ledOpen,
       initialIdOpen: idOpen,
       initialQuery: query,
     );
 
-Future<void> _shot(WidgetTester tester, String name, Widget child) async {
+/// [overlay]: the picture is the whole screen, because the LED box is an overlay entry
+/// above the page (outside the `golden` boundary).
+Future<void> _shot(WidgetTester tester, String name, Widget child, {bool overlay = false}) async {
   setWindow(tester, const Size(1180, 720));
   await tester.pumpWidget(app(Align(alignment: Alignment.topLeft, child: child)));
   await tester.pump();
   await tester.pump();
   expect(tester.takeException(), isNull);
-  await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile(name)));
+  if (overlay) {
+    expect(find.text('Dikkat gerekiyor'), findsOneWidget);
+  }
+  await expectLater(
+      overlay ? find.byType(MaterialApp) : find.byKey(const Key('golden')), matchesGoldenFile(goldenFile(name)));
 }
 
 void main() {
@@ -71,27 +78,27 @@ void main() {
     final c = SenseLoginController(FakeLogin());
     await _shot(tester, 'login_a05', _window(SenseLoginPage(controller: c, onConnect: (_) {}), signedIn: false));
     c.dispose();
-  }, skip: goldenSkip('login_a05'));
+  }, skip: goldenSkip('login_a05'), tags: const ['golden']);
 
   testWidgets('a01: Bilgisayarlar', (tester) async {
     await _shot(tester, 'list_a01', _window(_list()));
-  }, skip: goldenSkip('list_a01'));
+  }, skip: goldenSkip('list_a01'), tags: const ['golden']);
 
   testWidgets('a02: LED box of a red computer', (tester) async {
-    await _shot(tester, 'list_a02_led', _window(_list(ledOpen: '482913207')));
-  }, skip: goldenSkip('list_a02_led'));
+    await _shot(tester, 'list_a02_led', _window(_list(ledOpen: '482913207')), overlay: true);
+  }, skip: goldenSkip('list_a02_led'), tags: const ['golden']);
 
   testWidgets('a06: account box open', (tester) async {
     await _shot(tester, 'list_a06_account', _window(_list(), accountOpen: true));
-  }, skip: goldenSkip('list_a06_account'));
+  }, skip: goldenSkip('list_a06_account'), tags: const ['golden']);
 
   testWidgets('a12: location filter Lobi', (tester) async {
     await _shot(tester, 'list_a12_location', _window(_list(location: 'Lobi')));
-  }, skip: goldenSkip('list_a12_location'));
+  }, skip: goldenSkip('list_a12_location'), tags: const ['golden']);
 
   testWidgets('Host + Controller menu, Kimlikle bağlan open', (tester) async {
     await _shot(tester, 'list_both_id', _window(_list(idOpen: true), role: SenseHomeRole.both));
-  }, skip: goldenSkip('list_both_id'));
+  }, skip: goldenSkip('list_both_id'), tags: const ['golden']);
 
   testWidgets('states: loading, error, empty, no result', (tester) async {
     setWindow(tester, const Size(1180, 900));
@@ -116,5 +123,5 @@ void main() {
     await tester.pump();
     expect(tester.takeException(), isNull);
     await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('list_states')));
-  }, skip: goldenSkip('list_states'));
+  }, skip: goldenSkip('list_states'), tags: const ['golden']);
 }

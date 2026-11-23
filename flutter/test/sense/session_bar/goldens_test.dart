@@ -10,9 +10,9 @@ import 'fake_backend.dart';
 import 'harness.dart';
 
 Future<void> shot(WidgetTester tester, String name, FakeBackend b,
-    {Size size = const Size(1440, 900), SenseBarMenu? open, List<String> taps = const []}) async {
+    {Size size = const Size(1440, 900), SenseBarMenu? open, List<String> taps = const [], bool chatIcon = false}) async {
   setWindow(tester, size);
-  await tester.pumpWidget(frameApp(b));
+  await tester.pumpWidget(frameApp(b, chatIcon: chatIcon));
   if (open != null) {
     await tester.tap(find.byKey(ValueKey('sense-bar-menu-${open.name}')));
     await tester.pump();
@@ -35,7 +35,7 @@ void main() {
   testWidgets('bar at 1280 × 720 (T9)',
       (t) => shot(t, 'bar_1280', FakeBackend()..recordingOn = true, size: const Size(1280, 720)),
       skip: goldenSkip('bar_1280'), tags: const ['golden']);
-  testWidgets('c10 bar hidden, island at the top', (t) => shot(t, 'island_hidden_c10', FakeBackend()..barHidden = true),
+  testWidgets('c10 bar hidden, island at the top', (t) => shot(t, 'island_hidden_c10', FakeBackend()..barHidden = true, chatIcon: true),
       skip: goldenSkip('island_hidden_c10'), tags: const ['golden']);
   testWidgets('c02 Ekranlar', (t) => shot(t, 'list_screens_c02', FakeBackend(), open: SenseBarMenu.screens),
       skip: goldenSkip('list_screens_c02'), tags: const ['golden']);
@@ -46,7 +46,7 @@ void main() {
       (t) => shot(t, 'list_display_s09', FakeBackend(), open: SenseBarMenu.display, taps: ['Özel kalite']),
       skip: goldenSkip('list_display_s09'), tags: const ['golden']);
   testWidgets('c04 Klavye ve fare, Fare ve imleç open',
-      (t) => shot(t, 'list_keyboard_c04', FakeBackend(facts: const SensePeerFacts(os: SensePeerOs.mac, sasEnabled: false)),
+      (t) => shot(t, 'list_keyboard_c04', FakeBackend(facts: const SensePeerFacts(os: SensePeerOs.mac, sasEnabled: false, displaysCount: 3)),
           open: SenseBarMenu.keyboard, taps: ['Fare ve imleç']),
       skip: goldenSkip('list_keyboard_c04'), tags: const ['golden']);
   testWidgets('n10 Klavye ve fare, Kısayollar open',

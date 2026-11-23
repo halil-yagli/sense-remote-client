@@ -173,7 +173,7 @@ class _SensePasswordCategoryBodyState extends State<SensePasswordCategoryBody> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title, style: SenseTextStyles.of(weight: SenseFontWeight.medium)),
-          SenseHostMeta(hint, color: SenseColors.textDim),
+          SenseHostMeta(hint, color: SenseColors.textMuted),
         ],
       );
 
@@ -245,12 +245,7 @@ class _SensePasswordCategoryBodyState extends State<SensePasswordCategoryBody> {
       for (final l in sensePasswordRuleLines(c.password.text, c.repeat.text, _id))
         Padding(
           padding: const EdgeInsets.only(bottom: 4),
-          child: Text('${l.met == null ? '·' : (l.met! ? '✓' : '✕')} ${l.text}',
-              style: SenseTextStyles.of(
-                  size: SenseFontSize.hint,
-                  color: l.met == null
-                      ? SenseColors.textDim
-                      : (l.met! ? SenseColors.ok : SenseColors.dangerTextSoft))),
+          child: _RuleLine(met: l.met, text: l.text),
         ),
       const SizedBox(height: SenseUi.iconGap),
       SenseHostActions([
@@ -310,7 +305,7 @@ class _SensePasswordField extends StatelessWidget {
         cursorColor: SenseColors.text,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: SenseTextStyles.of(size: SenseFontSize.bodySmall, color: SenseColors.textDim),
+          hintStyle: SenseTextStyles.of(size: SenseFontSize.bodySmall, color: SenseColors.textMuted),
           counterText: '',
           isDense: true,
           filled: true,
@@ -322,5 +317,30 @@ class _SensePasswordField extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// One live password rule: a drawn mark (nothing typed = dot, met = tick, not met = cross) + text.
+class _RuleLine extends StatelessWidget {
+  const _RuleLine({required this.met, required this.text});
+  final bool? met;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = met == null
+        ? SenseColors.textMuted
+        : (met! ? SenseColors.ok : SenseColors.dangerTextSoft);
+    final icon = met == null ? Icons.circle : (met! ? Icons.check : Icons.close);
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.only(top: 1, right: 6),
+        child: Icon(icon,
+            key: Key('sense-rule-mark-${met == null ? 'none' : (met! ? 'ok' : 'bad')}'),
+            size: met == null ? SenseFontSize.capsSmall / 2 : SenseFontSize.hint,
+            color: color),
+      ),
+      Expanded(child: Text(text, style: SenseTextStyles.of(size: SenseFontSize.hint, color: color))),
+    ]);
   }
 }

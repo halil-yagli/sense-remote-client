@@ -376,8 +376,11 @@ class SenseInventory {
 // ---------------------------------------------------------------- health
 
 class SenseHealthDisk {
-  const SenseHealthDisk({required this.mount, required this.usedPct, this.totalGb});
+  const SenseHealthDisk({required this.mount, required this.usedPct, this.totalGb, this.label});
   final String mount;
+
+  /// Volume name ("Sistem", "İçerik") when the peer sends one (optional field `label`).
+  final String? label;
   final double usedPct;
   final double? totalGb;
 
@@ -387,7 +390,8 @@ class SenseHealthDisk {
     final used = _pct(m?['used_pct']);
     if (m == null || mount == null || used == null) return null;
     final total = _num(m['total_gb']);
-    return SenseHealthDisk(mount: mount, usedPct: used, totalGb: total != null && total > 0 ? total : null);
+    return SenseHealthDisk(
+        mount: mount, usedPct: used, totalGb: total != null && total > 0 ? total : null, label: _str(m['label']));
   }
 }
 

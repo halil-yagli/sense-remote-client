@@ -32,7 +32,7 @@ abstract final class SenseSettingsStrings {
   static const String keepAwake = 'Bağlantı sürerken bu bilgisayarı uyanık tut';
   static const String syncClipboard = 'Sekmeler arasında panoyu eşitle';
   static const String shortcuts = 'Uzak oturumda klavye kısayolları';
-  static const String shortcutsHint = 'Ctrl+Alt+F tam ekran, Ctrl+Alt+← önceki ekran.';
+  static const String shortcutsHint = 'Ctrl+Alt+Shift+B çubuğu gizler / gösterir, Ctrl+Alt+Shift+Q bağlantıyı bitirir (Mac: Cmd+Option+Shift). Tüm liste oturumda Klavye › Kısayollar.';
   static const String passThrough = 'Kısayolları karşı tarafa ilet';
   static const String sumTabs = 'sekmede aç';
   static const String sumWindows = 'ayrı pencere';
@@ -74,7 +74,12 @@ abstract final class SenseSettingsStrings {
   static const String idleDisconnect = 'Hareketsiz bağlantıyı kes';
   static String idleMinutes(int m) => '$m dk sonra';
   static const String lanDiscovery = 'Yerel ağda keşfedilme';
-  static const String directIp = 'Doğrudan IP erişimi';
+  // Two different settings: this one accepts connections made to the computer's IP + port
+  // (`direct-server`); "Ağ ve sunucu › Doğrudan bağlantı" is the relay-less path
+  // (`force-always-relay`). The names and the hint keep them apart (golden review, C3).
+  static const String directIp = 'IP adresiyle erişim';
+  static const String directIpHint =
+      'Bu bilgisayara IP ve portla gelen bağlantılar. Ağ ve sunucu’daki doğrudan bağlantıdan ayrıdır.';
   static String directIpPort(String port) => 'Açık · port $port';
   static const String login = 'Giriş';
   static const String loginValue = 'Sense Google hesabı + iki adımlı doğrulama';

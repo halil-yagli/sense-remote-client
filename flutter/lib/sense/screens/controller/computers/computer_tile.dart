@@ -156,13 +156,13 @@ class SenseComputerTile extends StatelessWidget {
             top: _kTagTop,
             child: Text(SenseControllerStrings.offTag,
                 style: SenseTextStyles.of(
-                    size: SenseFontSize.capsSmall, color: SenseColors.textDim, letterSpacingEm: SenseLetterSpacing.caps)),
+                    size: SenseFontSize.capsSmall, color: SenseColors.textMuted, letterSpacingEm: SenseLetterSpacing.caps)),
           ),
         if (c.os.isNotEmpty)
           Positioned(
             left: _kEdge,
             bottom: _kOsBottom,
-            child: Text(c.os, style: SenseTextStyles.of(size: SenseFontSize.capsSmall, color: SenseColors.textDim)),
+            child: Text(c.os, style: SenseTextStyles.of(size: SenseFontSize.capsSmall, color: SenseColors.textMuted)),
           ),
         Positioned(
           right: _kLedInset - _kLedHit,
@@ -203,7 +203,7 @@ class SenseComputerTile extends StatelessWidget {
             Text(sub,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim)),
+                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted)),
           const SizedBox(height: _kBodyGap),
           Row(children: [
             Expanded(
@@ -418,7 +418,7 @@ class SenseHealthBox extends StatelessWidget {
                   textAlign: TextAlign.right,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim)),
+                  style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted)),
             ),
           ]),
           const SizedBox(height: SenseUi.iconGap),
@@ -430,11 +430,11 @@ class SenseHealthBox extends StatelessWidget {
               last: i == lines.length - 1,
             ),
           if (note != null)
-            Text(note, style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim, height: 1.5)),
+            Text(note, style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted, height: 1.5)),
           if (footer != null) ...[
             const SizedBox(height: SenseUi.iconGap),
             Text(SenseControllerStrings.healthFooter(footer),
-                style: SenseTextStyles.of(size: SenseFontSize.capsSmall, color: SenseColors.textDim)),
+                style: SenseTextStyles.of(size: SenseFontSize.capsSmall, color: SenseColors.textMuted)),
           ],
         ],
       ),
