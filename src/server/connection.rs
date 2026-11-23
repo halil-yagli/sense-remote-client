@@ -383,6 +383,8 @@ pub struct Connection {
     // Sense Remote (S5): (offer id, real path) of the files the Host card offered on this
     // connection — the only Host files the Controller may read.
     sense_offers: Vec<(i32, String)>,
+    // Sense Remote (S5): offers the Controller is reading; an offer leaves the list when its read ends.
+    sense_offers_reading: Vec<i32>,
     // Sense Remote (H4, O11): time stamp of a call the Host started, until the Controller answers.
     sense_call_out: Option<i64>,
     trusted_device: Option<crate::trusted_devices::host::Attempt>,
@@ -584,6 +586,7 @@ impl Connection {
             sense_recording_since: None,
             sense_chat: Default::default(),
             sense_offers: Vec::new(),
+            sense_offers_reading: Vec::new(),
             sense_call_out: None,
             trusted_device: None,
             // Defer display enumeration until login succeeds. Monitor login replaces this
@@ -1210,6 +1213,15 @@ impl Connection {
                         }
                     }
                     conn.file_remove_log_control.on_timer().drain(..).map(|x| conn.send_to_cm(x)).count();
+                    // Sense Remote (S5): an offer whose read ended leaves the white list.
+                    if !conn.sense_offers_reading.is_empty() {
+                        let (read_jobs, cm_ids) = (&conn.read_jobs, &conn.cm_read_job_ids);
+                        crate::sense::chat_file::prune_offers(
+                            &mut conn.sense_offers,
+                            &mut conn.sense_offers_reading,
+                            |id| read_jobs.iter().any(|j| j.id() == id) || cm_ids.contains(&id),
+                        );
+                    }
                     // Sense Remote (O11): microphone level for the Host card during a call.
                     if conn.voice_calling {
                         if let Some(level) = crate::sense::chat_file::level_for_cm() {
@@ -3646,6 +3658,10 @@ impl Connection {
                             crate::sense::chat_file::HostAction::Offer(path) => {
                                 if let Some(file_action::Union::Send(s)) = fa.union.as_mut() {
                                     s.path = path;
+                                    crate::sense::chat_file::offer_reading(
+                                        &mut self.sense_offers_reading,
+                                        s.id,
+                                    );
                                 }
                                 handle_fa = true;
                                 sense_chat_file = true;
@@ -4250,6 +4266,9 @@ impl Connection {
                             NonZeroI64::new(request.req_timestamp)
                                 .unwrap_or(NonZeroI64::new(get_time()).unwrap()),
                         );
+                        // Sense Remote (H4): both sides called at once; the Controller's call wins
+                        // (it ignores ours), answering it ends our request.
+                        self.sense_call_out = None;
                         // Notify the connection manager.
                         self.send_to_cm(Data::VoiceCallIncoming);
                     } else {
@@ -5077,12 +5096,17 @@ impl Connection {
     // Sense Remote (H4, O11): "Ara" on the Host card. The Controller answers with its own call
     // buttons (`VoiceCallResponse`, see `sense_call_answered`).
     async fn sense_start_call(&mut self) {
-        if self.voice_calling || self.sense_call_out.is_some() {
+        if self.voice_calling {
             return;
         }
-        // The Controller is calling at this moment: "Ara" answers it.
+        // The Controller is calling at this moment (also when both sides pressed "Ara" at
+        // once): "Ara" answers that call; our own request is dropped.
         if self.voice_call_request_timestamp.is_some() {
+            self.sense_call_out = None;
             self.handle_voice_call(true).await;
+            return;
+        }
+        if self.sense_call_out.is_some() {
             return;
         }
         if !self.authorized || !self.is_remote() {

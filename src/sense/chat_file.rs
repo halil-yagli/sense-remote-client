@@ -348,6 +348,8 @@ struct Job {
     /// File of the job to continue from.
     file_num: i32,
     state: State,
+    /// Why it ended with an error ("" while none): shown to the person, never sent anywhere.
+    error: &'static str,
 }
 
 #[derive(Debug)]
@@ -435,6 +437,7 @@ pub fn ffi_send_files(sid: u64, peer: &str, paths: &[String], send: impl Fn(Data
                 done: 0,
                 file_num: 0,
                 state: State::Run,
+                error: "",
             },
         );
         send(Data::SendFiles((
@@ -462,7 +465,7 @@ pub fn ffi_file_jobs(sid: u64) -> String {
                 } else {
                     j.done.min(j.total)
                 };
-                job_json(
+                let mut row = job_json(
                     j.id,
                     &j.name,
                     j.incoming,
@@ -470,7 +473,9 @@ pub fn ffi_file_jobs(sid: u64) -> String {
                     j.total,
                     j.state,
                     if j.incoming { j.local.as_str() } else { "" },
-                )
+                );
+                row["error"] = json!(j.error);
+                row
             })
             .collect::<Vec<_>>()
     })
@@ -543,18 +548,50 @@ pub fn on_status(sid: u64, id: i32, err: Option<&str>) {
         Some(e) => {
             log::warn!("sense chat file {} failed: {e}", j.id);
             j.state = State::Err;
+            j.error = ERR_FAILED;
         }
     });
 }
 
+/// `error` of a transfer the other side or the disk ended.
+pub const ERR_FAILED: &str = "failed";
+/// `error` of a file from the Host cut by a dropped link: it does not continue (the Host forgets
+/// its offers with the connection); the half-written file is removed, the Host offers it again.
+pub const ERR_LINK_LOST: &str = "link_lost_not_resumed";
+
+/// Removes what a cut download from the Host left at `local`: the half-written `.download`
+/// (and its `.digest`) of a file, or the folder this offer created. Only paths of an
+/// unfinished incoming job reach here; the folder name was free when the offer came.
+pub fn discard_partial(local: &Path) {
+    let with = |ext: &str| {
+        let mut p = local.as_os_str().to_owned();
+        p.push(ext);
+        PathBuf::from(p)
+    };
+    for p in [with(".download"), with(".digest")] {
+        if p.is_file() {
+            if let Err(e) = std::fs::remove_file(&p) {
+                log::warn!("sense chat file: half-written file not removed: {e}");
+            }
+        }
+    }
+    if local.is_dir() {
+        if let Err(e) = std::fs::remove_dir_all(local) {
+            log::warn!("sense chat file: half-written folder not removed: {e}");
+        }
+    }
+}
+
 /// `io_loop`: the link dropped. Running jobs wait to resume; `live` gives the file each live
-/// read job was at. A file the Host offered ends with an error: the Host forgets its offers
-/// with the connection (white list of that connection only).
+/// read job was at. A file the Host offered does not continue ([`ERR_LINK_LOST`]): its
+/// half-written file is removed so nothing incomplete stays in the incoming folder.
 pub fn on_link_lost(sid: u64, live: &[(i32, i32)]) {
     with_session(sid, |s| {
         for j in s.jobs.iter_mut().filter(|j| j.state == State::Run) {
             if j.incoming {
                 j.state = State::Err;
+                j.error = ERR_LINK_LOST;
+                discard_partial(Path::new(&j.local));
                 continue;
             }
             if let Some((_, n)) = live.iter().find(|(id, _)| *id == j.id) {
@@ -863,6 +900,32 @@ pub fn conn_offer(raw: &str) -> Option<(i32, String, Vec<u8>)> {
     Some((id, path.to_owned(), content.into_bytes()))
 }
 
+/// Connection: the Controller started reading offer `id` (white list entry in use).
+pub fn offer_reading(reading: &mut Vec<i32>, id: i32) {
+    if !reading.contains(&id) {
+        reading.push(id);
+    }
+}
+
+/// Connection: an offer whose read ended (done, failed or cancelled: `still_reading` false)
+/// leaves the white list; it cannot be read a second time.
+pub fn prune_offers(
+    offers: &mut Vec<(i32, String)>,
+    reading: &mut Vec<i32>,
+    still_reading: impl Fn(i32) -> bool,
+) {
+    let ended: Vec<i32> = reading
+        .iter()
+        .copied()
+        .filter(|id| !still_reading(*id))
+        .collect();
+    if ended.is_empty() {
+        return;
+    }
+    reading.retain(|id| !ended.contains(id));
+    offers.retain(|(id, _)| !ended.contains(id));
+}
+
 /// The message that tells the Controller about an offer.
 pub fn offer_message(content: Vec<u8>) -> base::message_proto::Message {
     use base::message_proto::{Message, Misc, PluginRequest};
@@ -927,6 +990,7 @@ fn on_offer_into(sid: u64, peer: &str, content: &[u8], dir: &Path) -> Option<Dat
             done: 0,
             file_num: 0,
             state: State::Run,
+            error: "",
         },
     );
     log::info!("sense chat file from the Host to the incoming folder");
@@ -1589,6 +1653,31 @@ mod tests {
     }
 
     #[test]
+    fn offer_leaves_the_white_list_when_its_read_ends() {
+        let (a, b, c) = (OFFER_FIRST + 40, OFFER_FIRST + 41, OFFER_FIRST + 42);
+        let mut offers = vec![
+            (a, "/h/a.txt".to_owned()),
+            (b, "/h/b.txt".to_owned()),
+            (c, "/h/c.txt".to_owned()),
+        ];
+        let mut reading = Vec::new();
+        offer_reading(&mut reading, a);
+        offer_reading(&mut reading, b);
+        offer_reading(&mut reading, a);
+        assert_eq!(reading, vec![a, b]);
+        // a still reads, b ended; c was never read and stays offered.
+        prune_offers(&mut offers, &mut reading, |id| id == a);
+        assert_eq!(reading, vec![a]);
+        assert_eq!(offers.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![a, c]);
+        // The ended offer cannot be read again.
+        let mark = offer_source(b, "b.txt");
+        assert_eq!(host_file_action(true, &send(b, &mark), &offers), HostAction::Ignore);
+        prune_offers(&mut offers, &mut reading, |_| false);
+        assert_eq!(offers.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![c]);
+        assert!(reading.is_empty());
+    }
+
+    #[test]
     fn offer_travels_without_the_host_path() {
         let host_dir = temp_dir("offer-host");
         let file = host_dir.join("plan.pdf");
@@ -1656,9 +1745,16 @@ mod tests {
         assert_eq!(file_count(sid), 1);
         on_progress(sid, id, 1024);
         assert_eq!(parse(&ffi_file_jobs(sid))[0]["done"], 1024);
-        // A drop ends it (the Host forgot the offer); it is not resumed.
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["error"], "");
+        // A drop ends it (the Host forgot the offer); it is not resumed, and the half-written
+        // file does not stay in the incoming folder.
+        let part = in_dir.join("plan (1).pdf.download");
+        std::fs::write(&part, b"half").unwrap();
         on_link_lost(sid, &[]);
         assert_eq!(parse(&ffi_file_jobs(sid))[0]["state"], "err");
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["error"], ERR_LINK_LOST);
+        assert!(!part.exists());
+        assert_eq!(std::fs::read(in_dir.join("plan.pdf")).unwrap(), b"old");
         assert!(on_connected(sid).is_empty());
         forget_closed(|s, _| s != sid);
 
@@ -1670,6 +1766,42 @@ mod tests {
             .any(|r| r["id"] == json!(id.to_string())));
         std::fs::remove_dir_all(&host_dir).ok();
         std::fs::remove_dir_all(&in_dir).ok();
+    }
+
+    #[test]
+    fn discard_partial_removes_only_the_cut_download() {
+        let dir = temp_dir("discard");
+        // A file: its ".download" and ".digest" go, a finished neighbour stays.
+        std::fs::write(dir.join("a.bin.download"), b"x").unwrap();
+        std::fs::write(dir.join("a.bin.digest"), b"{}").unwrap();
+        std::fs::write(dir.join("b.bin"), b"done").unwrap();
+        discard_partial(&dir.join("a.bin"));
+        assert!(!dir.join("a.bin.download").exists());
+        assert!(!dir.join("a.bin.digest").exists());
+        assert!(dir.join("b.bin").exists());
+        // A folder this offer created goes with what is in it.
+        std::fs::create_dir_all(dir.join("Proje (1)").join("alt")).unwrap();
+        std::fs::write(dir.join("Proje (1)").join("alt").join("x.download"), b"x").unwrap();
+        discard_partial(&dir.join("Proje (1)"));
+        assert!(!dir.join("Proje (1)").exists());
+        // Nothing there: nothing happens.
+        discard_partial(&dir.join("yok.txt"));
+        assert!(dir.join("b.bin").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn failed_job_has_its_reason() {
+        let dir = temp_dir("reason");
+        let file = dir.join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let sid = 0xB003;
+        let ids = parse(&ffi_send_files(sid, "p", &[file.to_string_lossy().into_owned()], |_| {}));
+        let id: i32 = ids[0].as_str().unwrap().parse().unwrap();
+        on_status(sid, id, Some("disk full"));
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["error"], ERR_FAILED);
+        forget_closed(|s, _| s != sid);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
