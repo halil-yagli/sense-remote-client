@@ -2643,13 +2643,34 @@ pub fn main_sense_set_incoming_dir(path: String) {
 }
 
 pub fn session_sense_send_files(session_id: SessionID, paths: Vec<String>) -> String {
-    let _ = session_id;
-    crate::sense::chat_file::ffi_send_files(&paths)
+    sense_chat_forget_closed();
+    let Some(session) = sessions::get_session_by_session_id(&session_id) else {
+        return "[]".to_owned();
+    };
+    let sid = session.lc.read().unwrap().session_id;
+    let peer = crate::client::Interface::get_id(&*session);
+    // The open session's own channel: no second connection (S8).
+    crate::sense::chat_file::ffi_send_files(sid, &peer, &paths, |d| {
+        crate::client::Interface::send(&*session, d)
+    })
 }
 
 pub fn session_sense_file_jobs(session_id: SessionID) -> String {
-    let _ = session_id;
-    crate::sense::chat_file::ffi_file_jobs()
+    sense_chat_forget_closed();
+    match sessions::get_session_by_session_id(&session_id) {
+        Some(session) => {
+            crate::sense::chat_file::ffi_file_jobs(session.lc.read().unwrap().session_id)
+        }
+        None => "[]".to_owned(),
+    }
+}
+
+// S12: the file list of a closed (or replaced) remote session is dropped from memory.
+fn sense_chat_forget_closed() {
+    crate::sense::chat_file::forget_closed(|sid, peer| {
+        sessions::get_session_by_peer_id(peer.to_owned(), ConnType::DEFAULT_CONN)
+            .map_or(false, |s| s.lc.read().unwrap().session_id == sid)
+    });
 }
 
 // S5 / O11 (D3d2): Host side of chat files and the voice call; call controls (Ek).

@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../../common.dart' show SessionID;
+import '../../../../../models/platform_model.dart';
 import '../chat_entry.dart';
 
 /// What the chat needs from the file side.
@@ -61,20 +62,15 @@ class SenseSessionChatFiles implements SenseChatFiles {
   @override
   Future<List<String>> send(List<String> paths) async {
     if (paths.isEmpty) return const [];
-    // TODO(D3d1): session_sense_send_files(session_id, paths) — the bridge
-    // function does not exist yet (D3-0 signatures, D3d1 body). When it lands:
-    //   return senseParseJobIds(await bind.sessionSenseSendFiles(
-    //       sessionId: sessionId, paths: paths));
-    return const [];
+    // Goes over the open remote connection; the Host writes it into its
+    // incoming folder under a free name (D3d1).
+    return senseParseJobIds(
+        await bind.sessionSenseSendFiles(sessionId: sessionId, paths: paths));
   }
 
   @override
-  Future<List<SenseFileJob>> jobs() async {
-    // TODO(D3d1): session_sense_file_jobs(session_id) — see [send].
-    //   return senseParseFileJobs(await bind.sessionSenseFileJobs(
-    //       sessionId: sessionId));
-    return const [];
-  }
+  Future<List<SenseFileJob>> jobs() async =>
+      senseParseFileJobs(await bind.sessionSenseFileJobs(sessionId: sessionId));
 
   @override
   Future<void> reveal(String path) async {

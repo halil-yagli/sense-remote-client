@@ -1099,6 +1099,16 @@ async fn handle_fs(
             total_size,
             conn_id,
         } => {
+            // Sense Remote (S5, O12): a chat file goes to the incoming folder (Downloads when
+            // that cannot be written to) under a free name; nothing is overwritten, nobody asked.
+            let busy: Vec<PathBuf> = write_jobs
+                .iter()
+                .filter_map(|j| match &j.data_source {
+                    fs::DataSource::FilePath(p) => Some(p.clone()),
+                    _ => None,
+                })
+                .collect();
+            let path = crate::sense::chat_file::host_resolve(path, &mut files, file_num, &busy);
             // Convert files to FileEntry
             let file_entries: Vec<FileEntry> = files
                 .drain(..)
