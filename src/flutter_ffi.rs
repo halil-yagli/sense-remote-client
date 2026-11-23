@@ -2643,10 +2643,10 @@ pub fn session_sense_send_files(session_id: SessionID, paths: Vec<String>) -> St
         return "[]".to_owned();
     };
     let sid = session.lc.read().unwrap().session_id;
-    let peer = crate::client::Interface::get_id(&session);
+    let peer = crate::client::Interface::get_id(&*session);
     // The open session's own channel: no second connection (S8).
     crate::sense::chat_file::ffi_send_files(sid, &peer, &paths, |d| {
-        crate::client::Interface::send(&session, d)
+        crate::client::Interface::send(&*session, d)
     })
 }
 
