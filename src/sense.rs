@@ -763,6 +763,14 @@ pub mod mac_state;
 pub mod server;
 // Sense Remote: maintenance curtain of ghost mode; privacy mode turns it on (wave 3 I10).
 pub mod curtain;
+// Sense Remote (S8): one Controller at a time.
+pub mod single_conn;
+// Sense Remote (S10): connection quality the app shows (last frame age, loss estimate).
+pub mod link_quality;
+// Sense Remote: design values used on the Rust side (T1).
+pub mod tokens;
+// Sense Remote (S9-b): ghost mode status notes instead of dialogs.
+pub mod privacy_note;
 
 #[cfg(test)]
 mod tests {

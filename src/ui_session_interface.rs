@@ -1767,6 +1767,9 @@ pub trait InvokeUiSession: Send + Sync + Clone + 'static + Sized + Default {
     fn printer_request(&self, id: i32, path: String);
     fn handle_screenshot_resp(&self, sid: String, msg: String);
     fn handle_terminal_response(&self, response: TerminalResponse);
+    // Sense Remote (S9-b): a short ghost-mode status note instead of a privacy mode dialog;
+    // `code` is one of `sense::privacy_note`, `details` the Host's reason (may be empty).
+    fn sense_privacy_note(&self, _code: &str, _details: &str) {}
 }
 
 impl<T: InvokeUiSession> Deref for Session<T> {
