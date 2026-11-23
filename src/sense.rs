@@ -785,6 +785,23 @@ pub mod link_quality;
 pub mod tokens;
 // Sense Remote (S9-b): ghost mode status notes instead of dialogs.
 pub mod privacy_note;
+// Sense Remote (Sürüm 4, plan 2026-11-23 §2.6, D3-0): modules behind the new bridge functions.
+// Skeletons for now (valid empty JSON / `unsupported`); D3a–D3e fill them. Only the Flutter
+// bridge calls them, so elsewhere they are used by their tests alone.
+#[allow(dead_code)]
+pub mod chat_file;
+#[allow(dead_code)]
+pub mod grants;
+#[allow(dead_code)]
+pub mod host_recent;
+#[allow(dead_code)]
+pub mod identity_set;
+#[allow(dead_code)]
+pub mod option_lock;
+#[allow(dead_code)]
+pub mod role_change;
+#[allow(dead_code)]
+pub mod tray_menu;
 
 #[cfg(test)]
 mod tests {

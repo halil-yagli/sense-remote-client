@@ -5,7 +5,8 @@
 //! 1. `login_start` signs in through the panel's OIDC flow with `sense.purpose = "install"`;
 //!    the token stays in memory (`remember_me = false`). `login_status` gives the wizard the
 //!    state, the approval URL and the 6-digit pairing code, never the token.
-//! 2. `projects` lists the projects this employee can see (`/api/device-group/accessible`).
+//! 2. `projects` / `install_options` list the projects this employee can see, each with its panel
+//!    locations (`/api/device-group/accessible`, Sürüm 4 `sense.locations`).
 //! 3. `sense::install` runs `install_me`; then `enroll` registers the computer
 //!    (`POST /api/sense/enroll`) with this computer's RustDesk ID, UUID and public key.
 //! 4. Host: the token is dropped here and from the app's saved sign-in (the panel revokes it
@@ -35,12 +36,16 @@ const PROJECTS_PATH: &str = "/api/device-group/accessible";
 const PROJECTS_PAGE_SIZE: usize = 100;
 const PROJECTS_MAX_PAGES: usize = 10;
 /// Panel error codes (contract `EnrollErrorCode`); the wizard translates them.
-const ENROLL_ERRORS: [&str; 10] = [
+const ENROLL_ERRORS: [&str; 12] = [
     "token_invalid",
     "install_scope",
     "device_mismatch",
+    // Sürüm 4 (K4), HTTP 403: the installer's "Bilgisayar kurma" permission is off.
+    "permission_denied",
     "validation",
     "project_not_found",
+    // Sürüm 4 (S2), HTTP 404: the location is not one of the chosen projects' locations.
+    "location_not_found",
     "uuid_mismatch",
     "rate_limited",
     "retry",
@@ -134,10 +139,28 @@ fn login_status_value(result: &AuthResult, api_server: &str) -> Value {
 struct Project {
     id: String,
     name: String,
+    /// Sürüm 4 (S2): the project's panel locations; empty from an older panel.
+    locations: Vec<Location>,
 }
 
-/// JSON for the wizard: `{"ok": true, "projects": [{id, name}]}` (panel order) or
-/// `{"ok": false, "error": "token_invalid" | "network" | "retry"}`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct Location {
+    id: String,
+    name: String,
+}
+
+/// Most locations read per project (the wizard shows them as chips).
+const MAX_LOCATIONS_PER_PROJECT: usize = 200;
+
+/// Sense Remote (Sürüm 4, B1 K4): the install wizard's project and location lists for the
+/// signed-in installer (the panel answers only the projects this employee is a member of).
+/// Same JSON as `projects`.
+pub fn install_options() -> String {
+    projects()
+}
+
+/// JSON for the wizard: `{"ok": true, "projects": [{id, name, locations: [{id, name}]}]}` (panel
+/// order) or `{"ok": false, "error": "token_invalid" | "network" | "retry"}`.
 pub fn projects() -> String {
     let Some(token) = OidcSession::sense_access_token() else {
         return json!({ "ok": false, "error": "token_invalid" }).to_string();
@@ -202,25 +225,70 @@ fn parse_projects_page(body: &str) -> Option<(usize, Vec<Project>)> {
         .iter()
         .filter_map(|item| {
             let name = item.get("name")?.as_str()?.trim();
-            let id = item.get("sense")?.get("project_id")?.as_str()?;
-            (is_project_id(id) && !name.is_empty() && !name.chars().any(char::is_control)).then(
-                || Project {
-                    id: id.to_owned(),
-                    name: name.to_owned(),
-                },
-            )
+            let sense = item.get("sense")?;
+            let id = sense.get("project_id")?.as_str()?;
+            (is_project_id(id) && is_shown_name(name)).then(|| Project {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                locations: parse_locations(sense.get("locations")),
+            })
         })
         .collect();
     Some((total, items))
 }
 
-/// Contract `ProjectId`: `prj_[0-9A-Za-z-]+`, at most 64 characters.
-fn is_project_id(id: &str) -> bool {
+fn is_shown_name(name: &str) -> bool {
+    !name.is_empty() && !name.chars().any(char::is_control)
+}
+
+/// `sense.locations` of one project (`[{location_id, name}]`); bad items are skipped, a missing
+/// list (older panel) is empty.
+fn parse_locations(value: Option<&Value>) -> Vec<Location> {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Location> = Vec::new();
+    for item in items {
+        let (Some(id), Some(name)) = (
+            item.get("location_id").and_then(Value::as_str),
+            item.get("name").and_then(Value::as_str).map(str::trim),
+        ) else {
+            continue;
+        };
+        if is_location_id(id)
+            && is_shown_name(name)
+            && name.chars().count() <= MAX_LOCATION_CHARS
+            && !out.iter().any(|l| l.id == id)
+        {
+            out.push(Location {
+                id: id.to_owned(),
+                name: name.to_owned(),
+            });
+            if out.len() >= MAX_LOCATIONS_PER_PROJECT {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Contract IDs: `<prefix>[0-9A-Za-z-]+`, at most 64 characters.
+fn is_prefixed_id(id: &str, prefix: &str) -> bool {
     let allowed = |b: u8| b.is_ascii_alphanumeric() || b == b'-';
     id.len() <= 64
         && id
-            .strip_prefix("prj_")
+            .strip_prefix(prefix)
             .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(allowed))
+}
+
+/// Contract `ProjectId`: `prj_[0-9A-Za-z-]+`, at most 64 characters.
+fn is_project_id(id: &str) -> bool {
+    is_prefixed_id(id, "prj_")
+}
+
+/// Contract `LocationId` (Sürüm 4, S2): `loc_[0-9A-Za-z-]+`, at most 64 characters.
+fn is_location_id(id: &str) -> bool {
+    is_prefixed_id(id, "loc_")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -234,6 +302,10 @@ pub struct EnrollInput {
     pub name: String,
     #[serde(default)]
     pub location: String,
+    /// Sürüm 4 (S2): the chosen panel location (`loc_…`); empty when none was chosen. The panel
+    /// uses it before the name in `location`.
+    #[serde(default)]
+    pub location_id: String,
     #[serde(default)]
     pub note: String,
     #[serde(default)]
@@ -270,6 +342,10 @@ fn tr_lower(value: &str) -> String {
 fn enroll_body(input: &EnrollInput, role: SenseRole, me: &Identity) -> Result<Value, &'static str> {
     let name = clean_name(&input.name)?;
     let location = clean_text(&input.location, MAX_LOCATION_CHARS, "invalid-location")?;
+    let location_id = input.location_id.trim();
+    if !location_id.is_empty() && !is_location_id(location_id) {
+        return Err("invalid-location");
+    }
     let note = clean_text(&input.note, MAX_NOTE_CHARS, "invalid-note")?;
     let mut project_ids: Vec<String> = Vec::new();
     for id in &input.project_ids {
@@ -301,7 +377,7 @@ fn enroll_body(input: &EnrollInput, role: SenseRole, me: &Identity) -> Result<Va
     if me.public_key.len() != 32 {
         return Err("identity");
     }
-    Ok(json!({
+    let mut body = json!({
         "v": 1,
         "id": me.id,
         "uuid": me.uuid,
@@ -314,7 +390,12 @@ fn enroll_body(input: &EnrollInput, role: SenseRole, me: &Identity) -> Result<Va
         "project_ids": project_ids,
         "new_projects": new_projects,
         "device_pk": URL_SAFE_NO_PAD.encode(&me.public_key),
-    }))
+    });
+    // Optional in the contract (an older client sends the name only).
+    if !location_id.is_empty() {
+        body["location_id"] = json!(location_id);
+    }
+    Ok(body)
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -331,6 +412,16 @@ struct EnrollResponse {
     device_id: String,
     token_revoked: bool,
     projects: Vec<EnrolledProject>,
+    /// Sürüm 4 (S2): the registered location (K7 "proje · yer"); an older panel leaves it out.
+    #[serde(default)]
+    location: Option<EnrolledLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+struct EnrolledLocation {
+    #[serde(default, skip_serializing)]
+    location_id: String,
+    name: String,
 }
 
 /// Panel answer → result or an error code (`ENROLL_ERRORS`). The panel never answers 5xx on
@@ -420,7 +511,11 @@ pub fn enroll(input_json: &str) -> String {
             } else {
                 forget_sign_in();
             }
-            json!({ "ok": true, "projects": answer.projects }).to_string()
+            let mut result = json!({ "ok": true, "projects": answer.projects });
+            if let Some(location) = answer.location {
+                result["location"] = json!(location);
+            }
+            result.to_string()
         }
         Err(code) => {
             log::warn!("Sense Remote: registration refused: {code} (HTTP {status})");
@@ -434,14 +529,15 @@ pub fn enroll(input_json: &str) -> String {
 /// panel codes keep the wizard's own mapping (`default`).
 /// Panel G3-1: `device_closed` -> `skip` (no retry: "Kaydı atla" + ask a panel admin);
 /// `reinstall_not_allowed` -> `permit_retry` (an admin grants the reinstall permission in the
-/// panel, then "Yeniden dene" works).
+/// panel, then "Yeniden dene" works). Sürüm 4: `permission_denied` -> `permit_retry` (an admin
+/// turns "Bilgisayar kurma" on); `location_not_found` -> `edit` (pick another location).
 pub fn error_action(code: &str) -> &'static str {
     match code {
         "device_closed" => "skip",
-        "reinstall_not_allowed" => "permit_retry",
+        "reinstall_not_allowed" | "permission_denied" => "permit_retry",
         "build" | "identity" | "identity-store" | "not-installed" => "none",
         "validation" | "invalid-name" | "invalid-location" | "invalid-note"
-        | "invalid-project" => "edit",
+        | "invalid-project" | "location_not_found" => "edit",
         "network" | "retry" | "rate_limited" => "retry",
         _ => "default",
     }
@@ -504,6 +600,7 @@ mod tests {
         EnrollInput {
             name: "  Galeri kioskı ".to_owned(),
             location: "Galeri 1".to_owned(),
+            location_id: " loc_01JX-a ".to_owned(),
             note: " 2 ekran ".to_owned(),
             project_ids: vec!["prj_a1".to_owned(), "prj_a1".to_owned(), "prj_B-2".to_owned()],
             new_projects: vec![
@@ -531,6 +628,9 @@ mod tests {
         // Panel G3-1: a retry alone never helps.
         assert_eq!(error_action("device_closed"), "skip");
         assert_eq!(error_action("reinstall_not_allowed"), "permit_retry");
+        // Sürüm 4: an admin turns "Bilgisayar kurma" on; another location fixes the other.
+        assert_eq!(error_action("permission_denied"), "permit_retry");
+        assert_eq!(error_action("location_not_found"), "edit");
         // Panel codes the wizard already maps keep its mapping.
         for code in ["token_invalid", "install_scope", "device_mismatch", "uuid_mismatch", "x"] {
             assert_eq!(error_action(code), "default", "{code}");
@@ -542,8 +642,8 @@ mod tests {
         let body = enroll_body(&input(), SenseRole::Both, &me()).unwrap();
         let keys: Vec<&str> = body.as_object().unwrap().keys().map(String::as_str).collect();
         let mut expected = vec![
-            "v", "id", "uuid", "role", "platform", "app_version", "name", "location", "note",
-            "project_ids", "new_projects", "device_pk",
+            "v", "id", "uuid", "role", "platform", "app_version", "name", "location", "location_id",
+            "note", "project_ids", "new_projects", "device_pk",
         ];
         let mut keys_sorted = keys.clone();
         keys_sorted.sort_unstable();
@@ -557,6 +657,7 @@ mod tests {
         assert_eq!(body["app_version"], 1);
         assert_eq!(body["name"], "Galeri kioskı");
         assert_eq!(body["location"], "Galeri 1");
+        assert_eq!(body["location_id"], "loc_01JX-a");
         assert_eq!(body["note"], "2 ekran");
         assert_eq!(body["project_ids"], json!(["prj_a1", "prj_B-2"]));
         // Same name in other case (Turkish rules, like the panel) is sent once.
@@ -625,6 +726,26 @@ mod tests {
     }
 
     #[test]
+    fn location_id_is_optional_and_checked() {
+        // An older wizard (or no location chosen) sends the name only: no `location_id` key.
+        let mut no_id = input();
+        no_id.location_id = "  ".to_owned();
+        let body = enroll_body(&no_id, SenseRole::Host, &me()).unwrap();
+        assert!(body.get("location_id").is_none());
+        let too_long = format!("loc_{}", "a".repeat(61));
+        for id in ["prj_1", "loc_", "loc_a b", "loc_ä", "LOC_1", too_long.as_str()] {
+            let mut bad = input();
+            bad.location_id = id.to_owned();
+            assert_eq!(enroll_body(&bad, SenseRole::Host, &me()), Err("invalid-location"), "{id}");
+        }
+        let input: EnrollInput = serde_json::from_str(
+            r#"{"name":"K","location":"Galeri","location_id":"loc_7","note":"","project_ids":["prj_1"]}"#,
+        )
+        .unwrap();
+        assert_eq!(input.location_id, "loc_7");
+    }
+
+    #[test]
     fn no_project_is_allowed() {
         let mut none = input();
         none.project_ids.clear();
@@ -658,8 +779,22 @@ mod tests {
         // The wizard gets names only (project IDs are not needed on screen).
         let shown = serde_json::to_value(&answer.projects).unwrap();
         assert_eq!(shown[0], json!({"name": "Örnek Müze", "created": false}));
+        assert!(answer.location.is_none());
         assert_eq!(parse_enroll_answer(200, "not json"), Err("retry"));
         assert_eq!(parse_enroll_answer(200, r#"{"device_id":"dev_1"}"#), Err("retry"));
+    }
+
+    #[test]
+    fn registered_location_is_passed_on_by_name() {
+        let answer = parse_enroll_answer(
+            200,
+            r#"{"device_id":"dev_1","token_revoked":false,"projects":[],
+                "location":{"location_id":"loc_1","name":"Giriş holü"}}"#,
+        )
+        .unwrap();
+        let location = answer.location.unwrap();
+        assert_eq!(location.location_id, "loc_1");
+        assert_eq!(serde_json::to_value(&location).unwrap(), json!({"name": "Giriş holü"}));
     }
 
     #[test]
@@ -668,8 +803,10 @@ mod tests {
             (401, "token_invalid"),
             (403, "install_scope"),
             (403, "device_mismatch"),
+            (403, "permission_denied"),
             (400, "validation"),
             (404, "project_not_found"),
+            (404, "location_not_found"),
             (409, "uuid_mismatch"),
             (409, "device_closed"),
             (409, "reinstall_not_allowed"),
@@ -700,7 +837,14 @@ mod tests {
     fn project_pages_are_read() {
         let (total, items) = parse_projects_page(
             r#"{"total":3,"data":[
-                {"name":"Örnek Müze","sense":{"project_id":"prj_1","sort_key":"V"}},
+                {"name":"Örnek Müze","sense":{"project_id":"prj_1","sort_key":"V","locations":[
+                    {"location_id":"loc_1","name":" Galeri 1 "},
+                    {"location_id":"loc_1","name":"Aynı kimlik"},
+                    {"location_id":"prj_9","name":"Yanlış önek"},
+                    {"location_id":"loc_2","name":""},
+                    {"location_id":"loc_3","name":"a\u0007b"},
+                    {"name":"Kimliksiz"},
+                    {"location_id":"loc_4","name":"Depo"}]}},
                 {"name":"Upstream group"},
                 {"name":"  ","sense":{"project_id":"prj_2","sort_key":"W"}},
                 {"name":"Kötü","sense":{"project_id":"x_3","sort_key":"X"}},
@@ -711,9 +855,23 @@ mod tests {
         assert_eq!(
             items,
             vec![
-                Project { id: "prj_1".to_owned(), name: "Örnek Müze".to_owned() },
-                Project { id: "prj_4".to_owned(), name: "Ekip".to_owned() },
+                Project {
+                    id: "prj_1".to_owned(),
+                    name: "Örnek Müze".to_owned(),
+                    locations: vec![
+                        Location { id: "loc_1".to_owned(), name: "Galeri 1".to_owned() },
+                        Location { id: "loc_4".to_owned(), name: "Depo".to_owned() },
+                    ],
+                },
+                // An older panel sends no locations.
+                Project { id: "prj_4".to_owned(), name: "Ekip".to_owned(), locations: vec![] },
             ]
+        );
+        // The wizard reads `{id, name, locations: [{id, name}]}`.
+        assert_eq!(
+            serde_json::to_value(&items[0]).unwrap(),
+            json!({"id": "prj_1", "name": "Örnek Müze", "locations": [
+                {"id": "loc_1", "name": "Galeri 1"}, {"id": "loc_4", "name": "Depo"}]})
         );
         assert_eq!(parse_projects_page("[]"), None);
         assert_eq!(
