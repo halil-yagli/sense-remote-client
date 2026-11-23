@@ -39,9 +39,14 @@ Widget desk(List<Widget> children) => app(
         key: const Key('golden'),
         child: SizedBox.fromSize(
           size: stage,
-          child: Stack(children: [
-            const Positioned.fill(child: SenseGlowScene(style: SenseGlowStyle.scene)),
-            ...children,
+          // Own Overlay: the Mikrofon list (overlay) is in the image too.
+          child: Overlay(initialEntries: [
+            OverlayEntry(
+              builder: (_) => Stack(children: [
+                const Positioned.fill(child: SenseGlowScene(style: SenseGlowStyle.scene)),
+                ...children,
+              ]),
+            ),
           ]),
         ),
       ),
@@ -119,7 +124,7 @@ void main() {
     await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('h04_edge')));
   }, skip: goldenSkip('h04_edge'), tags: const ['golden']);
 
-  testWidgets('h05: card in a voice call, a file going out', (tester) async {
+  testWidgets('h05: card in a voice call, Mikrofon list open, a file going out', (tester) async {
     setWindow(tester, stage);
     final chat = c08Controller(call: FakeCall(levelValue: 0.46));
     chat.applyJobs([
@@ -127,6 +132,10 @@ void main() {
     ]);
     chat.setPhase(SenseCallPhase.active);
     await tester.pumpWidget(desk([card(halil(), chat)]));
+    await tester.pump(const Duration(milliseconds: 400));
+    // Mikrofon list open (golden report: devices, level, output, Mikrofonu kapat).
+    await tester.tap(find.byKey(const Key('sense-mic-button')));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('h05_call')));
   }, skip: goldenSkip('h05_call'), tags: const ['golden']);

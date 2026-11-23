@@ -3,6 +3,8 @@
 // çevrimiçi · Ara" / "● Görüşmede · 01:35 · Aramayı bitir"; in a call, the
 // Mikrofon button and its list (onaylı `.cbtn`, `.dm`, `.lvl`, `.offit`):
 // connected microphones, Ses seviyesi bar, Ses çıkışı, red "Mikrofonu kapat".
+// An incoming call (#73) is the `.ringin` box: green frame, pulsing dot,
+// "… sesli arıyor", Reddet / Kabul et — same on the Controller and the Host.
 
 import 'dart:async';
 
@@ -28,6 +30,77 @@ abstract final class SenseChatCallSize {
   static const double rowEstimate = 31;
   static const double menuExtra = 110;
   static const Duration levelEvery = Duration(milliseconds: 150);
+
+  // `.ringin` (incoming call).
+  static const EdgeInsets ringPadding = EdgeInsets.symmetric(horizontal: 10, vertical: 8);
+  static const double ringGap = 8;
+  static const double ringDot = 9;
+  static const double ringBorderOpacity = 0.4;
+  static const double ringFillOpacity = 0.06;
+}
+
+/// `.ringin`: green frame, pulsing dot, "<who> sesli arıyor", Reddet / Kabul
+/// et (#73). [onAnswer] gets true for Kabul et. [keyPrefix] names the keys
+/// (`<prefix>-incoming`, `<prefix>-call-reject`, `<prefix>-call-accept`).
+class SenseIncomingCallBox extends StatelessWidget {
+  const SenseIncomingCallBox({
+    super.key,
+    required this.text,
+    required this.onAnswer,
+    this.keyPrefix = 'sense-chat',
+  });
+
+  final String text;
+  final ValueChanged<bool> onAnswer;
+  final String keyPrefix;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: text,
+      child: Container(
+        key: Key('$keyPrefix-incoming'),
+        padding: SenseChatCallSize.ringPadding,
+        decoration: BoxDecoration(
+          color: SenseColors.ok.withOpacity(SenseChatCallSize.ringFillOpacity),
+          border: Border.all(color: SenseColors.ok.withOpacity(SenseChatCallSize.ringBorderOpacity)),
+          borderRadius: BorderRadius.circular(SenseRadii.categoryLarge),
+        ),
+        child: Row(children: [
+          const SenseBlink(
+            spec: SenseMotion.blinkFast,
+            child: SenseStatusDot(color: SenseColors.ok, size: SenseChatCallSize.ringDot),
+          ),
+          const SizedBox(width: SenseChatCallSize.ringGap),
+          Expanded(
+            child: ExcludeSemantics(
+              child: Text(
+                text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold),
+              ),
+            ),
+          ),
+          const SizedBox(width: SenseChatCallSize.ringGap),
+          SenseButton(
+            key: Key('$keyPrefix-call-reject'),
+            label: SenseChatStrings.reject,
+            onPressed: () => onAnswer(false),
+          ),
+          const SizedBox(width: SenseChatCallSize.ringGap),
+          SenseButton(
+            key: Key('$keyPrefix-call-accept'),
+            label: SenseChatStrings.accept,
+            kind: SenseButtonKind.on,
+            onPressed: () => onAnswer(true),
+          ),
+        ]),
+      ),
+    );
+  }
 }
 
 /// "● Sahadaki kişi çevrimiçi [Ara]" / "● Aranıyor… [Aramayı bitir]" /
@@ -264,7 +337,8 @@ class _SenseMicButtonState extends State<SenseMicButton> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text('▾', style: SenseTextStyles.hint.copyWith(color: SenseColors.textDim)),
+                    const SenseGlyph(SenseGlyphKind.caretDown,
+                        size: SenseFontSize.caps, color: SenseColors.textDim),
                   ]),
                 ),
               );

@@ -15,7 +15,8 @@ import 'chat_entry.dart';
 import 'data/call.dart';
 import 'data/files.dart';
 
-/// Voice call phase (O11). [incoming] is the Host card's "sesli arıyor".
+/// Voice call phase (O11). [incoming] = the other side calls: "… sesli arıyor ·
+/// Reddet / Kabul et" on both sides (#73).
 enum SenseCallPhase { idle, calling, incoming, active }
 
 /// A new message or file from the other side, for the notification card.
@@ -231,6 +232,12 @@ class SenseChatController extends ChangeNotifier {
   void _setPhase(SenseCallPhase p) {
     if (p == _phase) return;
     _phase = p;
+    // #73: an incoming call must be seen to be answered — the chat opens from
+    // its icon (the Host card keeps its own open state, set right after).
+    if (p == SenseCallPhase.incoming) {
+      _open = true;
+      _unread = 0;
+    }
     _callStart = p == SenseCallPhase.active ? _now() : (p == SenseCallPhase.idle ? null : _callStart);
     _changed();
   }

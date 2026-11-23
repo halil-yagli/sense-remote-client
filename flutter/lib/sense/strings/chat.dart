@@ -22,6 +22,10 @@ abstract final class SenseChatStrings {
   static const String calling = 'Aranıyor…';
   static String inCall(String mmss) => 'Görüşmede · $mmss';
 
+  // Incoming call (H4, #73: the other side calls; voice only, #67).
+  static const String accept = 'Kabul et';
+  static const String reject = 'Reddet';
+
   static const String microphone = 'Mikrofon';
   static const String micOff = 'kapalı';
   static const String micsHeader = 'Mikrofonlar · bu bilgisayara bağlı';
@@ -63,6 +67,7 @@ class SenseChatLabels {
     required this.subtitle,
     required this.peer,
     required this.peerOnline,
+    required this.incomingCall,
   });
 
   /// Controller window (O10): "Sohbet · Sahadaki kişiyle".
@@ -70,6 +75,7 @@ class SenseChatLabels {
     subtitle: 'Sahadaki kişiyle',
     peer: 'Sahadaki kişi',
     peerOnline: 'Sahadaki kişi çevrimiçi',
+    incomingCall: 'Sahadaki kişi sesli arıyor',
   );
 
   /// Host card (H4): "Sense Department ile sohbet".
@@ -77,6 +83,7 @@ class SenseChatLabels {
     subtitle: 'Sense Department ile',
     peer: 'Sense Department',
     peerOnline: 'Sense Department ile sohbet',
+    incomingCall: 'Sense Department sesli arıyor',
   );
 
   /// Grey text next to "Sohbet".
@@ -87,4 +94,7 @@ class SenseChatLabels {
 
   /// Status row when no call is running.
   final String peerOnline;
+
+  /// Green "… sesli arıyor" box of an incoming call (#73).
+  final String incomingCall;
 }

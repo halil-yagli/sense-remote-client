@@ -66,11 +66,8 @@ abstract final class SenseHostCardSize {
   static const double titleGap = 8;
   static const double metaGap = 4;
   static const double recDot = 8;
-  static const double callDot = 9;
   static const double recBorderOpacity = 0.45;
   static const double recFillOpacity = 0.08;
-  static const double callBorderOpacity = 0.4;
-  static const double callFillOpacity = 0.06;
 }
 
 class SenseHostCard extends StatefulWidget {
@@ -192,8 +189,14 @@ class _SenseHostCardState extends State<SenseHostCard> {
                       )
                     else
                       _ConnectedBox(whoLine: widget.whoLine, onEnd: widget.actions.onEnd),
-                    if (live && c.phase == SenseCallPhase.incoming)
-                      _IncomingCall(onAnswer: widget.actions.onAnswerCall),
+                    if (live && c.phase == SenseCallPhase.incoming) ...[
+                      SenseIncomingCallBox(
+                        text: SenseChatLabels.host.incomingCall,
+                        keyPrefix: 'sense-host',
+                        onAnswer: widget.actions.onAnswerCall,
+                      ),
+                      const SizedBox(height: SenseHostCardSize.boxGap),
+                    ],
                     if (live) ...[
                       SenseCallTicker(
                         controller: c,
@@ -506,53 +509,3 @@ class _EndedBox extends StatelessWidget {
   }
 }
 
-/// `.ringin`: green frame, pulsing dot, "Sense Department sesli arıyor",
-/// Reddet / Kabul et.
-class _IncomingCall extends StatelessWidget {
-  const _IncomingCall({required this.onAnswer});
-
-  final ValueChanged<bool> onAnswer;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      key: const Key('sense-host-incoming'),
-      margin: const EdgeInsets.only(bottom: SenseHostCardSize.boxGap),
-      padding: SenseHostCardSize.boxPadding,
-      decoration: BoxDecoration(
-        color: SenseColors.ok.withOpacity(SenseHostCardSize.callFillOpacity),
-        border: Border.all(color: SenseColors.ok.withOpacity(SenseHostCardSize.callBorderOpacity)),
-        borderRadius: BorderRadius.circular(SenseRadii.categoryLarge),
-      ),
-      child: Row(children: [
-        const SenseBlink(
-          spec: SenseMotion.blinkFast,
-          child: SenseStatusDot(color: SenseColors.ok, size: SenseHostCardSize.callDot),
-        ),
-        const SizedBox(width: SenseHostCardSize.titleGap),
-        Expanded(
-          child: Text(
-            SenseHostLiveStrings.incomingCall,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: SenseTextStyles.of(
-                size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold),
-          ),
-        ),
-        const SizedBox(width: SenseHostCardSize.boxGap),
-        SenseButton(
-          key: const Key('sense-host-call-reject'),
-          label: SenseHostLiveStrings.reject,
-          onPressed: () => onAnswer(false),
-        ),
-        const SizedBox(width: SenseHostCardSize.boxGap),
-        SenseButton(
-          key: const Key('sense-host-call-accept'),
-          label: SenseHostLiveStrings.accept,
-          kind: SenseButtonKind.on,
-          onPressed: () => onAnswer(true),
-        ),
-      ]),
-    );
-  }
-}
