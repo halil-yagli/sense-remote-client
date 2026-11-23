@@ -117,16 +117,11 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
       // Rebuild on tab changes and selection.
       widget.controller.state.value.selected;
       final cur = _current();
-      if (cur == null) {
-        return Column(children: [
-          const SizedBox(height: SenseSizes.sessionToolbarHeight, child: ColoredBox(color: SenseColors.bg)),
-          Expanded(child: widget.child),
-        ]);
-      }
+      // One layout for every state (no session yet, tab switches): the remote pages never
+      // change place in the tree, so RemotePage is built once and never rebuilt.
       return SenseSessionFrame(
-        key: ValueKey('sense-frame-${cur.backend.peerId}'),
-        backend: cur.backend,
-        popups: cur.popups,
+        backend: cur?.backend,
+        popups: cur?.popups,
         onDragStart: () => startDragging(false),
         onDoubleTap: () => toggleMaximize(false).then((v) => stateGlobal.setMaximized(v)),
         child: widget.child,

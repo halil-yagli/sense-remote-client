@@ -23,16 +23,18 @@ const double kSenseListBottomGap = 12;
 class SenseSessionFrame extends StatefulWidget {
   const SenseSessionFrame({
     super.key,
-    required this.backend,
-    required this.popups,
+    this.backend,
+    this.popups,
     required this.child,
     this.menus,
     this.onDragStart,
     this.onDoubleTap,
   });
 
-  final SenseSessionBackend backend;
-  final SenseBarPopups popups;
+  /// Null while the selected tab's session is not built yet: the frame is drawn with an
+  /// empty bar, in the same layout, so the remote page is never moved or rebuilt.
+  final SenseSessionBackend? backend;
+  final SenseBarPopups? popups;
 
   /// The remote screen.
   final Widget child;
@@ -64,57 +66,62 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
   void initState() {
     super.initState();
     _menus.addListener(_onMenus);
-    widget.popups.addListener(_onPopups);
+    widget.popups?.addListener(_onPopups);
   }
 
   @override
   void didUpdateWidget(SenseSessionFrame old) {
     super.didUpdateWidget(old);
+    if (old.backend != widget.backend) _menus.close();
     if (old.popups != widget.popups) {
-      old.popups.removeListener(_onPopups);
-      widget.popups.addListener(_onPopups);
+      old.popups?.removeListener(_onPopups);
+      widget.popups?.addListener(_onPopups);
     }
   }
 
   @override
   void dispose() {
     _menus.removeListener(_onMenus);
-    widget.popups.removeListener(_onPopups);
+    widget.popups?.removeListener(_onPopups);
     _own?.dispose();
     super.dispose();
   }
 
   void _onMenus() {
     final open = _menus.openMenu;
-    if (open != null && open != _lastOpen) widget.backend.refresh();
-    if ((open == null) != (_lastOpen == null)) widget.popups.onMenu(open != null);
+    if (open != null && open != _lastOpen) widget.backend?.refresh();
+    if ((open == null) != (_lastOpen == null)) widget.popups?.onMenu(open != null);
     _lastOpen = open;
   }
 
   /// Another popup (chat, status) took the one place: the list closes (T7).
   void _onPopups() {
-    if (!widget.popups.menuAllowed && _menus.openMenu != null) _menus.close();
+    final popups = widget.popups;
+    if (popups != null && !popups.menuAllowed && _menus.openMenu != null) _menus.close();
   }
 
   @override
   Widget build(BuildContext context) {
     final b = widget.backend;
+    final popups = widget.popups;
     return SenseToastHost(
       child: Builder(builder: (context) {
         return ListenableBuilder(
-          listenable: Listenable.merge([b, _menus]),
+          listenable: Listenable.merge([if (b != null) b, _menus]),
           builder: (context, _) {
-            final hidden = b.barHidden;
+            final hidden = b?.barHidden ?? false;
             final motion = SenseMotion.toolbarHide;
             final open = _menus.openMenu;
-            final bar = SenseSessionBar(
-              backend: b,
-              menus: _menus,
-              popups: widget.popups,
-              links: _links,
-              onDragStart: widget.onDragStart,
-              onDoubleTap: widget.onDoubleTap,
-            );
+            final Widget bar = b == null || popups == null
+                ? const ColoredBox(key: ValueKey('sense-bar-empty'), color: SenseColors.bg)
+                : SenseSessionBar(
+                    backend: b,
+                    menus: _menus,
+                    popups: popups,
+                    links: _links,
+                    onDragStart: widget.onDragStart,
+                    onDoubleTap: widget.onDoubleTap,
+                  );
             return Stack(key: _area, children: [
               Column(children: [
                 AnimatedContainer(
@@ -135,7 +142,7 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
                   child: LayoutBuilder(builder: (context, c) {
                     return Stack(children: [
                       Positioned.fill(child: widget.child),
-                      if (b.ghostOn)
+                      if (b != null && b.ghostOn)
                         const Positioned(
                           key: ValueKey('sense-ghost-line'),
                           top: 0,
@@ -146,7 +153,7 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
                             child: DecoratedBox(decoration: BoxDecoration(gradient: SenseGradients.glow)),
                           ),
                         ),
-                      if (open != null && !hidden) ...[
+                      if (open != null && !hidden && b != null) ...[
                         Positioned.fill(
                           child: GestureDetector(
                             key: const ValueKey('sense-list-barrier'),
@@ -177,7 +184,7 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
                 right: 0,
                 // Prototype: the handle is not drawn while a list is open (it would sit on
                 // the list's first rows).
-                child: open != null && !hidden
+                child: b == null || (open != null && !hidden)
                     ? const SizedBox.shrink(key: ValueKey('sense-island-gone'))
                     : Center(
                   child: SenseIsland(

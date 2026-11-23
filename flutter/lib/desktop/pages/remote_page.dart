@@ -658,7 +658,14 @@ class _RemotePageState extends State<RemotePage>
 
   @override
   Future<void> dispose() async {
-    final closeSession = closeSessionOnDispose.remove(widget.id) ?? true;
+    // Sense Remote: a page whose tab is still in the controller and was not marked for a
+    // tab move is only being rebuilt by the tree (not closed): keep the session and its
+    // shared state for the next instance instead of deleting them.
+    final explicitClose = closeSessionOnDispose.remove(widget.id);
+    final treeChurn = explicitClose == null &&
+        (widget.tabController?.state.value.tabs.any((t) => t.key == widget.id) ??
+            false);
+    final closeSession = explicitClose ?? !treeChurn;
 
     // https://github.com/flutter/flutter/issues/64935
     if (isMacOS) {
@@ -704,6 +711,7 @@ class _RemotePageState extends State<RemotePage>
           overlays: SystemUiOverlay.values);
     }
     WakelockManager.disable(_uniqueKey);
+    if (treeChurn) return; // Sense Remote: not a close, keep shared state.
     await Get.delete<FFI>(tag: widget.id);
     removeSharedStates(widget.id);
     // Sense Remote: drop the connection window's Sense state (timers, data).
