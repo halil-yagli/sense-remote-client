@@ -88,6 +88,10 @@ class PeerPayload {
   // Sense Remote: screen count of the peer (`sense.display_count`, optional;
   // review K3-3). Null when the panel does not send it.
   int? senseDisplayCount;
+  // Sense Remote (B3, YH C2): panel device id (`sense.device_id`, used by the
+  // personal order), the panel's online state and "Meşgul · kişi"
+  // (`sense.busy.by`, S8). Null when the panel does not send them.
+  SensePeerExtra? senseExtra;
 
   PeerPayload.fromJson(Map<String, dynamic> json)
       : id = json['id'] ?? '',
@@ -98,7 +102,8 @@ class PeerPayload {
         device_group_name = json['device_group_name'] ?? '',
         note = json['note'] ?? '',
         senseProjects = SenseProjectRef.listFromSense(json['sense']),
-        senseDisplayCount = senseDisplayCountFrom(json['sense']);
+        senseDisplayCount = senseDisplayCountFrom(json['sense']),
+        senseExtra = SensePeerExtra.fromSense(json['sense']);
 
   static Peer toPeer(PeerPayload p) {
     return Peer.fromJson({
@@ -343,6 +348,36 @@ class SenseProjectRef {
   }
 }
 
+/// Sense Remote (B3, YH C2, S8): the rest of a peer's `sense` object the
+/// Controller list reads. Every field is optional; a value of the wrong type is
+/// simply missing (no guess on the tile).
+class SensePeerExtra {
+  final String deviceId;
+  final bool? online;
+  final String? busyBy;
+
+  /// Unix seconds; only when the panel sends it in the list (else peer-status).
+  final int? lastSeenAt;
+
+  const SensePeerExtra(
+      {this.deviceId = '', this.online, this.busyBy, this.lastSeenAt});
+
+  static SensePeerExtra? fromSense(dynamic sense) {
+    if (sense is! Map) return null;
+    final id = sense['device_id'];
+    final online = sense['online'];
+    final busy = sense['busy'];
+    final by = busy is Map ? busy['by'] : null;
+    final seen = sense['last_seen_at'];
+    return SensePeerExtra(
+      deviceId: id is String ? id : '',
+      online: online is bool ? online : null,
+      busyBy: by is String && by.trim().isNotEmpty ? by.trim() : null,
+      lastSeenAt: seen is int && seen > 0 ? seen : null,
+    );
+  }
+}
+
 /// Sense Remote: `sense.display_count` of a peer list item: a whole number
 /// from 1 to 64, otherwise null (no guess on the card).
 int? senseDisplayCountFrom(dynamic sense) {
@@ -366,7 +401,15 @@ class SensePanelOrder {
   /// Sense Remote: peer id -> screen count (`sense.display_count`, K3-3).
   final Map<String, int> displayCounts;
 
-  SensePanelOrder._(this._peerIndex, this._peerKeys, this.displayCounts);
+  /// Sense Remote (B3): peer id -> the rest of its `sense` object.
+  final Map<String, SensePeerExtra> extras;
+
+  /// Sense Remote (B3): project (group) name -> panel project id (personal
+  /// order, `POST /api/sense/device-order`).
+  final Map<String, String> projectIds;
+
+  SensePanelOrder._(this._peerIndex, this._peerKeys, this.displayCounts,
+      [this.extras = const {}, this.projectIds = const {}]);
 
   /// True when any device group came with the `sense` extension.
   static bool groupsHaveSense(List<DeviceGroupPayload> groups) =>
@@ -404,6 +447,11 @@ class SensePanelOrder {
     return SensePanelOrder._(peerIndex, peerKeys, {
       for (final p in peers)
         if (p.senseDisplayCount != null) p.id: p.senseDisplayCount!
+    }, {
+      for (final p in peers)
+        if (p.senseExtra != null) p.id: p.senseExtra!
+    }, {
+      for (final e in groupNameById.entries) e.value: e.key
     });
   }
 

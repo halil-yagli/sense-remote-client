@@ -10,8 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart' show isMacOS; // Sense Remote (Mac M3)
 import 'package:flutter_hbb/common/sense_theme.dart' show senseRoleInstalled; // Sense Remote (U7)
-import 'package:flutter_hbb/sense/screens/controller/sense_home_about.dart' show kSenseVersionOption; // Sense Remote
-import 'package:flutter_hbb/sense/screens/controller/sense_home_strings.dart' show senseVersionFrom, kSenseVersionDefine; // Sense Remote
+import 'package:flutter_hbb/sense/screens/controller/sense_home_strings.dart' show senseVersionFrom, kSenseVersionDefine, kSenseVersionOption; // Sense Remote
 import 'package:flutter_hbb/sense/screens/install/data/install_bridge.dart';
 import 'package:flutter_hbb/sense/screens/install/sense_install_wizard.dart';
 import 'package:flutter_hbb/sense/sense.dart' show SenseColors, senseTheme;

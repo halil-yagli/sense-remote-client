@@ -17,11 +17,7 @@ final _rules = <String, RegExp>{
 
 /// Count per legacy file on 2026-11-23 (A2a). Only lower is allowed.
 const _legacy = <String, int>{
-  'lib/sense/screens/controller/sense_home_about.dart': 4,
-  'lib/sense/screens/controller/sense_home_connect_id.dart': 1,
-  'lib/sense/screens/controller/sense_home_controller.dart': 6,
   'lib/sense/screens/controller/sense_update_view.dart': 1,
-  'lib/sense/screens/host/sense_home_host.dart': 2,
   'lib/sense/screens/host/sense_home_mac.dart': 1,
   'lib/sense/screens/host/sense_password_page.dart': 1,
   'lib/sense/screens/host_live/sense_cm_panel.dart': 35,
