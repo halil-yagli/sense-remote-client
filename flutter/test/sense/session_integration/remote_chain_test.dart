@@ -39,16 +39,37 @@ class _FakeBind extends Fake implements RustdeskImpl {
   }
 }
 
-class _Pages extends StatelessWidget {
+/// The page view of DesktopTab (tabbar_widget.dart _buildPageView), same list handling: on an
+/// added tab the previous list object is reused, so the existing pages are not rebuilt.
+class _Pages extends StatefulWidget {
   const _Pages(this.controller);
   final DesktopTabController controller;
 
   @override
+  State<_Pages> createState() => _PagesState();
+}
+
+class _PagesState extends State<_Pages> {
+  List<Widget> _tabWidgets = [];
+
+  @override
   Widget build(BuildContext context) {
+    final state = widget.controller.state;
     return Obx(() => PageView(
-          controller: controller.state.value.pageController,
+          controller: state.value.pageController,
           physics: const NeverScrollableScrollPhysics(),
-          children: [for (final t in controller.state.value.tabs) t.page],
+          children: () {
+            final tabLen = state.value.tabs.length;
+            if (tabLen == _tabWidgets.length) {
+              return _tabWidgets;
+            } else if (_tabWidgets.isNotEmpty && tabLen == _tabWidgets.length + 1) {
+              _tabWidgets.add(state.value.tabs.last.page);
+              return _tabWidgets;
+            } else {
+              _tabWidgets = state.value.tabs.map((v) => v.page).toList();
+              return _tabWidgets;
+            }
+          }(),
         ));
   }
 }
