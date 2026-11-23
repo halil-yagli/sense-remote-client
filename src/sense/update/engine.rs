@@ -8,6 +8,9 @@
 //! - Never install during a connection: "idle" = no active connection for at least `IDLE_S`
 //!   without a break, checked again after the download and right before the installation.
 //!   Neither the user nor the panel can make an exception.
+//! - Sense Remote: window `now` (panel order only, no user confirmation) skips idle time, the
+//!   night window and the random delay; the platform side closes open sessions first
+//!   (`update::now`).
 //! - Window: `idle` = as soon as idle; `night` = local hour in
 //!   `NIGHT_START_HOUR..NIGHT_END_HOUR` and idle. "Güncelle" in the app is `idle` only when
 //!   no panel order is held; it keeps a held order's `night` window (the panel's choice is
@@ -587,7 +590,12 @@ fn on_order(s: &mut State, order: Order, ctx: &Ctx, actions: &mut Vec<Action>) {
     }
     s.source = Some(UpdateSource::Panel);
     clear_error(s);
-    let jitter = i64::try_from(ctx.jitter_s.min(MAX_JITTER_S)).unwrap_or(0);
+    // Sense Remote (`now`): the operator wants it at once, no random delay.
+    let jitter = if s.window() == Window::Now {
+        0
+    } else {
+        i64::try_from(ctx.jitter_s.min(MAX_JITTER_S)).unwrap_or(0)
+    };
     s.not_before_s = Some(ctx.now_s + jitter);
     s.phase = UpdateState::Scheduled;
     try_start(s, ctx, actions);
@@ -659,6 +667,11 @@ fn attempts_left(s: &State, now_s: i64) -> bool {
 }
 
 fn blocked_by(s: &State, ctx: &Ctx) -> Option<Blocked> {
+    // Sense Remote (`now`): an order signed by the panel for "now" waits for nothing; the
+    // runner closes the open sessions (with a notice) right before the installer.
+    if s.window() == Window::Now {
+        return None;
+    }
     if ctx.idle_s < IDLE_S {
         return Some(Blocked::SessionActive);
     }

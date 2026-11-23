@@ -129,6 +129,31 @@ pub fn new_for_test() -> ServerPtr {
     }))
 }
 
+// Sense Remote (`now` update): the server that holds the incoming connections of this process.
+static SENSE_INCOMING: std::sync::Mutex<Option<ServerPtrWeak>> = std::sync::Mutex::new(None);
+
+/// Sense Remote: remembers the server of the incoming connections (`create_tcp_connection`).
+pub fn sense_remember_incoming(server: &ServerPtr) {
+    let mut slot = SENSE_INCOMING.lock().unwrap_or_else(|e| e.into_inner());
+    if !slot.as_ref().is_some_and(|known| known.ptr_eq(&Arc::downgrade(server))) {
+        *slot = Some(Arc::downgrade(server));
+    }
+}
+
+/// Sense Remote (`now` update): tells every incoming connection to close with `reason`.
+/// Returns how many were told (0 when there is no server yet).
+pub fn sense_close_incoming(reason: &str) -> usize {
+    let server = SENSE_INCOMING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(Weak::upgrade);
+    match server {
+        Some(server) => server.write().unwrap().sense_close_with_reason(reason),
+        None => 0,
+    }
+}
+
 pub fn new() -> ServerPtr {
     let mut server = Server {
         connections: HashMap::new(),
@@ -220,6 +245,7 @@ pub async fn create_tcp_connection(
     let mut stream = stream;
     // The address the connection layer keys on, whitelist and admission alike.
     let addr = hbb_common::try_into_v4(addr);
+    sense_remember_incoming(&server);
     let id = server.write().unwrap().get_new_id();
     // Admitted before the identity handshake, so a peer that stalls in it, or after it without
     // logging in, holds its place the whole time; an address over its share is turned away.
@@ -503,6 +529,19 @@ impl Server {
         // Sense Remote (S7-a): a closed connection watches nothing.
         #[cfg(windows)]
         self.sense_update_watched();
+    }
+
+    // Sense Remote (`now` update): tells every connection why it ends; the Controller shows
+    // `reason` and closes. Returns how many were told.
+    pub fn sense_close_with_reason(&mut self, reason: &str) -> usize {
+        for c in self.connections.values_mut() {
+            let mut misc = Misc::new();
+            misc.set_close_reason(reason.to_owned());
+            let mut msg = Message::new();
+            msg.set_misc(misc);
+            c.send(Arc::new(msg));
+        }
+        self.connections.len()
     }
 
     pub fn close_connections(&mut self) {
@@ -1096,5 +1135,24 @@ mod windows_gui_startup_tests {
             Some(CHILD_SUCCESS_EXIT_CODE),
             "GUI subprocess did not complete the startup assertions"
         );
+    }
+}
+
+#[cfg(test)]
+mod sense_now_tests {
+    use super::*;
+
+    // Sense Remote (`now` update): the close call reaches the remembered server and tells
+    // exactly the connections it holds (none here); without a server it tells nobody.
+    #[test]
+    fn close_call_finds_the_remembered_server() {
+        let server = new_for_test();
+        sense_remember_incoming(&server);
+        sense_remember_incoming(&server); // twice: no change
+        assert_eq!(sense_close_incoming("Güncelleme kuruluyor, bağlantı kapanıyor"), 0);
+        assert_eq!(server.write().unwrap().sense_close_with_reason("x"), 0);
+        drop(server);
+        // The server is gone: nobody to tell.
+        assert_eq!(sense_close_incoming("x"), 0);
     }
 }

@@ -194,7 +194,9 @@ pub fn classify(
         | SenseUpdateIpc::InstallRequest { .. }
         | SenseUpdateIpc::InstallAnswer(_)
         | SenseUpdateIpc::DaemonStatus(_)
-        | SenseUpdateIpc::CancelAnswer(_) => None,
+        | SenseUpdateIpc::CancelAnswer(_)
+        // Sense Remote (`now`): only the `--server` takes it, on the main channel.
+        | SenseUpdateIpc::CloseSessions => None,
     }
 }
 

@@ -223,6 +223,7 @@ impl Runner {
                 size: release.size,
                 source: self.state.source.unwrap_or(UpdateSource::Local),
                 oid: self.state.order.as_ref().map(|o| o.oid.clone()),
+                now: self.state.order.as_ref().is_some_and(|o| o.window == crate::sense::update::order::Window::Now),
             }),
         })
     }
@@ -305,6 +306,10 @@ fn perform(job: Job) {
         }
         Job::Install(job) => {
             tokio::task::spawn_blocking(move || {
+                // Sense Remote: a `now` order tells the open sessions, then lifts the check.
+                if job.now {
+                    super::now::prepare();
+                }
                 // Never during a connection: asked once more right before the installer.
                 if !crate::updater::has_no_active_conns() {
                     step(Event::Failed(UpdateError::Busy));
