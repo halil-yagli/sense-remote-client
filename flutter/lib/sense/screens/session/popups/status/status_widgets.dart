@@ -290,11 +290,11 @@ List<Widget> senseRowViews(List<SenseStatusRow> rows, {VoidCallback? onCopied}) 
     final r = rows[i];
     final next = i + 1 < rows.length ? rows[i + 1] : null;
     out.add(switch (r) {
-      SenseStatusLine() => SenseLineRowView(row: r, last: next is! SenseStatusLine),
-      SenseStatusMeter() => SenseMeterRowView(row: r),
-      SenseStatusGroup() => SenseGroupTitleView(title: r.title),
-      SenseStatusNote() => SenseHintView(text: r.text),
-      SenseStatusCard() => SenseStatusCardView(card: r, onCopied: onCopied),
+      SenseStatusLine l => SenseLineRowView(row: l, last: next is! SenseStatusLine),
+      SenseStatusMeter m => SenseMeterRowView(row: m),
+      SenseStatusGroup g => SenseGroupTitleView(title: g.title),
+      SenseStatusNote n => SenseHintView(text: n.text),
+      SenseStatusCard c => SenseStatusCardView(card: c, onCopied: onCopied),
       SenseStatusUnreadable() => Padding(
           padding: const EdgeInsets.symmetric(vertical: _kRowPadV),
           child: Text(SenseStatusStrings.unreadable, style: _valueStyle(null, null)),
