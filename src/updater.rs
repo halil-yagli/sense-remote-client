@@ -422,6 +422,11 @@ async fn query_no_active_conns_ipc() -> ResultType<bool> {
             // serves a connection there (e.g. a Controller-only Mac): idle. Any other failure
             // still defers.
             Err(err) if crate::sense::update::idle_ipc::no_listener(&err) => {
+                // Sense Remote (B1): no `--server`, but the user may be in an outgoing session.
+                if crate::sense::update::outgoing::uid_has_outgoing(uid) {
+                    log::info!("[root-update] uid {uid} has an open Controller session; deferring");
+                    return Ok(false);
+                }
                 log::info!("[root-update] no main IPC listener for uid {uid}; no connection there");
                 continue;
             }

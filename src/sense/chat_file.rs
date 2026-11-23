@@ -1157,12 +1157,32 @@ pub fn call_output_device(host: &cpal::Host) -> Option<cpal::Device> {
     found
 }
 
+/// Runs `work` on its own thread and waits at most `limit` for its answer; empty on time-out.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn within(
+    limit: std::time::Duration,
+    work: impl FnOnce() -> Vec<String> + Send + 'static,
+) -> Vec<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    if std::thread::Builder::new()
+        .name("sense-sound-outputs".to_owned())
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .is_err()
+    {
+        return Vec::new();
+    }
+    rx.recv_timeout(limit).unwrap_or_default()
+}
+
 /// Names of this computer's sound outputs.
 fn output_names() -> Vec<String> {
     #[cfg(not(target_os = "linux"))]
     {
-        // Not on the UI thread (same as `get_sound_inputs`).
-        std::thread::spawn(|| {
+        // Sense Remote (B7): counting the devices is a driver call that can hang; wait a few
+        // seconds, then answer with no devices (the thread is left behind).
+        within(std::time::Duration::from_secs(3), || {
             use cpal::traits::{DeviceTrait, HostTrait};
             let mut out = Vec::new();
             if let Ok(devices) = cpal::default_host().output_devices() {
@@ -1179,8 +1199,6 @@ fn output_names() -> Vec<String> {
             }
             out
         })
-        .join()
-        .unwrap_or_default()
     }
     #[cfg(target_os = "linux")]
     {
@@ -1248,6 +1266,20 @@ pub fn ffi_call_level() -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hanging_device_listing_gives_up() {
+        use std::time::{Duration, Instant};
+        let started = Instant::now();
+        let out = within(Duration::from_millis(100), || {
+            std::thread::sleep(Duration::from_secs(30));
+            vec!["x".to_owned()]
+        });
+        assert!(out.is_empty());
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let out = within(Duration::from_secs(5), || vec!["a".to_owned()]);
+        assert_eq!(out, vec!["a".to_owned()]);
+    }
+
     use super::*;
     use base::message_proto::{
         FileRemoveFile, FileTransferCancel, FileTransferReceiveRequest,

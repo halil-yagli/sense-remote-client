@@ -321,8 +321,7 @@ fn perform(job: Job) {
             if let Some(thread) = download_thread().take() {
                 let _ = thread.join();
             }
-            let _ = std::fs::remove_file(part);
-            log::info!("Sense Remote: update download cancelled");
+            crate::sense::update::cancel_log::removed(std::fs::remove_file(&part));
         }
         Job::Verify { file, sha256, size } => spawn("sense-update-verify", move || {
             step(match download::verify_file(&file, size, &sha256) {

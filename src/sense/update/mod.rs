@@ -81,6 +81,7 @@ pub mod apply_mac;
 pub mod apply_win;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod daemon_mac;
+pub mod cancel_log;
 pub mod download;
 pub mod engine;
 pub mod guard;
@@ -91,6 +92,9 @@ pub mod keys;
 pub mod manifest;
 pub mod manual;
 pub mod order;
+// Sense Remote (B1): open Controller session marker for the macOS root updater.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub mod outgoing;
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub mod runner;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
