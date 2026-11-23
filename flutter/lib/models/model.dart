@@ -10,6 +10,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
+// Sense Remote: ghost mode notes for the session bar (S9-b).
+import 'package:flutter_hbb/sense/screens/session/data/session_state.dart'
+    show SenseSessionEvents;
 import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
@@ -476,6 +479,8 @@ class FfiModel with ChangeNotifier {
         if (action is String) {
           parent.target?.shortcutModel.onTriggered(action);
         }
+      } else if (SenseSessionEvents.handle(peerId, evt)) {
+        // Sense Remote: ghost mode notes (`sense_privacy_note`, S9-b).
       } else {
         debugPrint('Event is not handled in the fixed branch: $name');
       }

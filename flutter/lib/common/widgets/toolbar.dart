@@ -12,6 +12,9 @@ import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/shortcut_model.dart';
+// Sense Remote: session menu differences (TK9 §3, decisions 2 and S9-b).
+import 'package:flutter_hbb/sense/screens/session/sense_remote_strings.dart'
+    show kSenseRemoteWindow;
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -692,7 +695,9 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
         actionId: kShortcutActionToggleBlockInput));
   }
   // switchSides
-  if (isDefaultConn &&
+  // Sense Remote: no "Switch Sides"; it conflicts with the role lock (decision 2).
+  if (!kSenseRemoteWindow &&
+      isDefaultConn &&
       isDesktop &&
       ffiModel.keyboard &&
       pi.platform != kPeerPlatformAndroid &&
@@ -1155,7 +1160,9 @@ Future<List<TToggleMenu>> toolbarDisplayToggle(
       (privacyModeState.isEmpty ||
           allowDisplaySwitchInPrivacyMode(pi, privacyModeState.value)) &&
       pi.displaysCount.value > 1 &&
-      bind.mainGetUserDefaultOption(key: kKeyShowMonitorsToolbar) == 'Y') {
+      // Sense Remote: offered without the monitors-toolbar condition (TK9 §3).
+      (kSenseRemoteWindow ||
+          bind.mainGetUserDefaultOption(key: kKeyShowMonitorsToolbar) == 'Y')) {
     final value =
         bind.sessionGetDisplaysAsIndividualWindows(sessionId: ffi.sessionId) ==
             'Y';
@@ -1246,8 +1253,11 @@ List<TToggleMenu> toolbarPrivacyMode(
             !bind.sessionIsMultiUiSession(sessionId: sessionId))) {
       return true;
     }
-    msgBox(sessionId, 'custom-nook-nocancel-hasclose', 'info',
-        'Please switch to Display 1 first', '', ffi.dialogManager);
+    // Sense Remote: no window for ghost mode (S9-b); the session bar says it in place.
+    if (!kSenseRemoteWindow) {
+      msgBox(sessionId, 'custom-nook-nocancel-hasclose', 'info',
+          'Please switch to Display 1 first', '', ffi.dialogManager);
+    }
     return false;
   }
 

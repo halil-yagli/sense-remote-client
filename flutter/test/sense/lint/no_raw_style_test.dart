@@ -17,11 +17,7 @@ final _rules = <String, RegExp>{
 
 /// Count per legacy file on 2026-11-23 (A2a). Only lower is allowed.
 const _legacy = <String, int>{
-  'lib/sense/screens/controller/sense_home_about.dart': 4,
-  'lib/sense/screens/controller/sense_home_connect_id.dart': 1,
-  'lib/sense/screens/controller/sense_home_controller.dart': 6,
   'lib/sense/screens/controller/sense_update_view.dart': 1,
-  'lib/sense/screens/host/sense_home_host.dart': 2,
   'lib/sense/screens/host/sense_home_mac.dart': 1,
   'lib/sense/screens/host/sense_password_page.dart': 1,
   'lib/sense/screens/host_live/sense_cm_panel.dart': 35,
@@ -36,10 +32,7 @@ const _legacy = <String, int>{
   'lib/sense/screens/install/sense_install_steps_mac.dart': 18,
   'lib/sense/screens/install/sense_install_steps_upgrade.dart': 6,
   'lib/sense/screens/install/sense_install_wizard.dart': 16,
-  'lib/sense/screens/session/sense_remote_chat.dart': 20,
-  'lib/sense/screens/session/sense_remote_display_info.dart': 20,
   'lib/sense/screens/session/sense_remote_map.dart': 16,
-  'lib/sense/screens/session/sense_remote_status.dart': 21,
   'lib/sense/screens/session/sense_remote_strings.dart': 1,
   'lib/sense/screens/session/sense_remote_window.dart': 12,
 };

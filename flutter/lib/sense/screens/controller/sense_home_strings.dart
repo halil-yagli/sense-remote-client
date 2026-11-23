@@ -119,3 +119,7 @@ const kSenseVersionDefine = String.fromEnvironment('SENSE_VERSION');
 /// Turkish upper case for small caps labels (i -> İ, ı -> I).
 String senseHomeUpper(String s) =>
     s.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
+
+/// Built-in option the build may carry with the Sense version number (moved
+/// here from the old About file, B3).
+const kSenseVersionOption = 'sense-version';
