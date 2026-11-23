@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import '../tokens/sense_tokens.dart';
 import 'blink.dart';
+import 'caret.dart';
 
 /// One category.
 class SenseAccordionItem {
@@ -245,16 +246,9 @@ class _SenseCategoryState extends State<SenseCategory> {
                 ? const EdgeInsets.symmetric(horizontal: 12, vertical: 11)
                 : const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: Row(children: [
-              ExcludeSemantics(
-                child: Text(
-                  widget.open ? '▼' : '▶',
-                  style: const TextStyle(
-                    fontFamily: SenseFont.family,
-                    fontSize: SenseCategory.caretSize,
-                    color: SenseColors.textDim,
-                    height: 1,
-                  ),
-                ),
+              SenseCaret(
+                direction: widget.open ? SenseCaretDirection.down : SenseCaretDirection.right,
+                size: SenseCategory.caretSize,
               ),
               const SizedBox(width: 8),
               ConstrainedBox(
