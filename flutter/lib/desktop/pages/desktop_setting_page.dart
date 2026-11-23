@@ -28,6 +28,9 @@ import 'package:url_launcher/url_launcher_string.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 import '../../sense/screens/controller/sense_home_about.dart'; // Sense Remote
+import '../../sense/screens/controller/about/sense_about_page.dart' as sense_about; // Sense Remote: C4
+import '../../sense/screens/controller/settings/sense_settings_page.dart'; // Sense Remote: C3
+import '../../sense/tokens/sense_tokens.dart' show SenseColors; // Sense Remote
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -43,6 +46,12 @@ const double _kContentFontSize = 15;
 const Color _accentColor = MyTheme.accent;
 const String _kSettingPageControllerTag = 'settingPageController';
 const String _kSettingPageTabKeyTag = 'settingPageTabKey';
+
+/// Sense Remote: which Sense page the settings tab shows. A Host (incoming
+/// only) gets About whatever tab was asked for, so no path leads a Host to the
+/// settings (H1). Pure, covered by tests.
+Widget senseSettingsTabPage({required bool about, required bool incomingOnly}) =>
+    about || incomingOnly ? const sense_about.SenseAboutPage() : const SenseSettingsPage();
 
 class _TabInfo {
   late final SettingsTabKey key;
@@ -277,6 +286,23 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    // Sense Remote: the settings tab shows the Sense pages (YH C3, C4): About for
+    // the About tab, the Sense settings page for every other tab. A Host never
+    // reaches settings (H1, TK9 Risk H1): it only gets About.
+    if (!isWeb) {
+      return Scaffold(
+        backgroundColor: SenseColors.bg,
+        // Same guard as before: while someone is connected in, the page is
+        // blocked so the remote side cannot change this computer's settings.
+        body: _buildBlock(children: [
+          Expanded(
+            child: Obx(() => senseSettingsTabPage(
+                about: selectedTab.value == SettingsTabKey.about,
+                incomingOnly: bind.isIncomingOnly())),
+          ),
+        ]),
+      );
+    }
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       body: _buildBlock(

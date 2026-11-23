@@ -1,21 +1,18 @@
-// Sense Remote: update strip, version label, About line and macOS warning
-// (update plan 2026-11-21, §6, package U6). Pure texts for every GuiStatus
-// state, the install button and its answers, and golden images.
+// Sense Remote: update strip, About update box and the macOS second step
+// (update plan 2026-11-21, section 6; YH C4). Pure texts for every GuiStatus
+// state, the install button and its answers, the in-place macOS step, goldens.
 
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_hbb/sense/screens/controller/sense_home_about.dart';
-import 'package:flutter_hbb/sense/screens/controller/sense_home_controller.dart';
-import 'package:flutter_hbb/sense/screens/host/sense_home_host.dart';
-import 'package:flutter_hbb/sense/screens/controller/sense_home_strings.dart';
-import 'package:flutter_hbb/sense/screens/controller/sense_update_model.dart';
-import 'package:flutter_hbb/sense/screens/controller/sense_update_strings.dart';
-import 'package:flutter_hbb/sense/screens/controller/sense_update_view.dart';
 import 'package:flutter_hbb/sense/components/sense_version_chip.dart';
+import 'package:flutter_hbb/sense/screens/controller/update/sense_update_model.dart';
+import 'package:flutter_hbb/sense/screens/controller/update/sense_update_view.dart';
+import 'package:flutter_hbb/sense/strings/update.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support.dart';
 
 SenseUpdateStatus _s(Map<String, Object?> json) =>
     SenseUpdateStatus.parse(jsonEncode({'current': 3, 'supported': true, ...json}));
@@ -37,8 +34,20 @@ const _available = {
   'checked_at': 1000,
 };
 
-class _FakeBackend implements SenseUpdateBackend {
-  _FakeBackend(this.json, {this.answer = ''});
+class _FakeBackend extends SenseUpdateBackend {
+  _FakeBackend(this.json, {this.answer = '', this.cancellable = false});
+  final bool cancellable;
+  int cancels = 0;
+
+  @override
+  bool get canCancel => cancellable;
+
+  @override
+  Future<void> cancel() async {
+    cancels++;
+    json = {..._available};
+  }
+
   Map<String, Object?> json;
   String answer;
   String seen = '';
@@ -68,18 +77,13 @@ class _FakeBackend implements SenseUpdateBackend {
 Widget _watch(_FakeBackend backend) => SenseUpdateWatch(
       backend: backend,
       interval: const Duration(hours: 1),
+      showSplash: false,
       builder: (_, strip) => SizedBox(
           width: 760, child: strip ?? const Text('no strip', key: Key('none'))),
     );
 
-Future<void> _pump(WidgetTester tester, Widget child,
-    {Size size = const Size(1000, 700)}) async {
-  tester.view.physicalSize = size;
-  tester.view.devicePixelRatio = 1;
-  addTearDown(tester.view.reset);
-  await tester.pumpWidget(MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(backgroundColor: Colors.black, body: child)));
+Future<void> _pump(WidgetTester tester, Widget child, {Size size = const Size(1000, 700)}) async {
+  await pumpSense(tester, child, size: size, center: false);
   await tester.pumpAndSettle();
 }
 
@@ -143,7 +147,7 @@ void main() {
       const ui = SenseUpdateUiState(requested: true);
       final json = {...(_available), 'blocked': 'session_active'};
       expect(_text(json, ui),
-          'Bağlantı sürüyor. Güncelleme bağlantı bitince kurulacak.');
+          'Bağlantı sürüyor; Sürüm 4 bağlantı bitince kurulacak.');
       expect(_actions(json, ui), isEmpty);
       // Before pressing, the offer stays.
       expect(_text(json), 'Yeni sürüm hazır: Sürüm 4');
@@ -155,7 +159,7 @@ void main() {
             'source': 'local',
             'blocked': 'session_active'
           }),
-          'Bağlantı sürüyor. Güncelleme bağlantı bitince kurulacak.');
+          'Bağlantı sürüyor; Sürüm 4 bağlantı bitince kurulacak.');
     });
 
     test('scheduled by the panel', () {
@@ -187,11 +191,11 @@ void main() {
     test('downloading, verifying, installing', () {
       expect(
           _text({'state': 'downloading', 'target': 4, 'progress_pct': 42}),
-          'Sürüm 4 indiriliyor… %42');
+          'Sürüm 4 indiriliyor · %42');
       expect(_text({'state': 'downloading', 'target': 4}),
           'Sürüm 4 indiriliyor…');
       expect(_text({'state': 'verifying', 'target': 4}),
-          'Sürüm 4 doğrulanıyor…');
+          'Sürüm 4 doğrulanıyor (imza + SHA-256)…');
       expect(_text({'state': 'installing', 'target': 4}),
           'Sürüm 4 kuruluyor. Sense Remote birkaç saniye kapanıp açılacak.');
       for (final st in ['downloading', 'verifying', 'installing']) {
@@ -206,7 +210,7 @@ void main() {
         'state': 'idle',
         'last_result': {'state': 'installed', 'from': 3, 'to': 4, 'at': 77}
       };
-      expect(_text(json), 'Sense Remote güncellendi: Sürüm 4');
+      expect(_text(json), 'Güncellendi: Sürüm 4');
       expect(_actions(json), [SenseUpdateAction.close]);
       expect(senseInstalledNoticeKey(_s(json)), '4:77');
       expect(_text(json, const SenseUpdateUiState(seenInstalled: '4:77')),
@@ -219,7 +223,7 @@ void main() {
           }),
           isNull);
       expect(_text({'current': 4, 'state': 'installed'}),
-          'Sense Remote güncellendi: Sürüm 4');
+          'Güncellendi: Sürüm 4');
     });
 
     test('failed: reason in Turkish, no internal detail, Tekrar dene', () {
@@ -230,7 +234,7 @@ void main() {
         'error_detail': 'sha256_differs'
       };
       expect(_text(json),
-          'Güncelleme yapılamadı: indirilen dosya doğrulanamadı. Bilgisayar Sürüm 3 ile çalışmaya devam ediyor.');
+          'Güncelleme yapılamadı: indirilen dosya doğrulanamadı. Sürüm 3 ile çalışmaya devam ediliyor.');
       expect(_text(json), isNot(contains('sha256')));
       expect(_actions(json), [SenseUpdateAction.retry]);
       expect(_text({'state': 'failed', 'error': 'something_new'}),
@@ -258,7 +262,6 @@ void main() {
       ];
       for (final e in errors) {
         expect(kSenseUpdateTr.containsKey('err_$e'), isTrue, reason: e);
-        expect(kSenseUpdateEn.containsKey('err_$e'), isTrue, reason: e);
         expect(senseUpdateReason(e), isNot(senseUpdateText('err_unknown')));
       }
     });
@@ -318,15 +321,15 @@ void main() {
       expect(senseAgoText(0, 3 * 86400), '3 gün önce');
     });
 
-    test('every Turkish text has an English twin', () {
-      expect(kSenseUpdateEn.keys.toSet(), kSenseUpdateTr.keys.toSet());
+    test('Turkish only (YH T2): no English table any more', () {
+      expect(File('lib/sense/strings/update.dart').readAsStringSync(), isNot(contains('kSenseUpdateEn')));
     });
 
     test('no upstream product name in the update screens', () {
       const files = [
-        'lib/sense/screens/controller/sense_update_model.dart',
-        'lib/sense/screens/controller/sense_update_view.dart',
-        'lib/sense/screens/controller/sense_update_strings.dart',
+        'lib/sense/screens/controller/update/sense_update_model.dart',
+        'lib/sense/screens/controller/update/sense_update_view.dart',
+        'lib/sense/strings/update.dart',
         'lib/sense/components/sense_version_chip.dart',
       ];
       final banned = RegExp('rust' 'desk', caseSensitive: false);
@@ -334,7 +337,7 @@ void main() {
         expect(banned.hasMatch(File(path).readAsStringSync()), isFalse,
             reason: path);
       }
-      for (final t in [...kSenseUpdateTr.values, ...kSenseUpdateEn.values]) {
+      for (final t in kSenseUpdateTr.values) {
         expect(banned.hasMatch(t), isFalse, reason: t);
       }
     });
@@ -350,7 +353,7 @@ void main() {
       await tester.tap(find.byKey(const Key('sense-update-update')));
       await tester.pumpAndSettle();
       expect(b.installs, [4]);
-      expect(find.text(senseUpdateText('session_active')), findsOneWidget);
+      expect(find.text(senseUpdateText('session_active', {'n': '4'})), findsOneWidget);
       expect(find.byKey(const Key('sense-update-update')), findsNothing);
     });
 
@@ -393,7 +396,7 @@ void main() {
       };
       await tester.pumpWidget(const SizedBox());
       await _pump(tester, _watch(b));
-      expect(find.text('Sense Remote güncellendi: Sürüm 4'), findsOneWidget);
+      expect(find.text('Güncellendi: Sürüm 4'), findsOneWidget);
       await tester.tap(find.byKey(const Key('sense-update-close')));
       await tester.pumpAndSettle();
       expect(b.seen, '4:9');
@@ -404,7 +407,7 @@ void main() {
       expect(find.byKey(const Key('none')), findsOneWidget);
     });
 
-    testWidgets('macOS Host: warning first; Vazgeç does not update',
+    testWidgets('macOS: the warning is the second step of the strip; Vazgeç does not update',
         (tester) async {
       final b =
           _FakeBackend({..._available, 'mac_permission_warning': true});
@@ -412,13 +415,13 @@ void main() {
       await tester.tap(find.byKey(const Key('sense-update-update')));
       await tester.pumpAndSettle();
       expect(find.text(senseUpdateText('mac_body')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('sense-update-mac-cancel')));
+      await tester.tap(find.byKey(const Key('sense-update-macCancel')));
       await tester.pumpAndSettle();
       expect(b.installs, isEmpty);
 
       await tester.tap(find.byKey(const Key('sense-update-update')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('sense-update-mac-go')));
+      await tester.tap(find.byKey(const Key('sense-update-macGo')));
       await tester.pumpAndSettle();
       expect(b.installs, [4]);
     });
@@ -448,55 +451,107 @@ void main() {
     });
   });
 
-  group('golden images (Windows + macOS)', () {
-    // Images are rendered on the Linux CI runner (`PR kontrolu`), with the
-    // bundled Poppins; "Windows" / "macOS" are the platform variants of the UI.
+  group('strip: download cancel, splash, done frame', () {
+    test('Vazgeç only when the backend can stop the download', () {
+      final json = {'state': 'downloading', 'target': 4, 'progress_pct': 10};
+      expect(_actions(json), isEmpty);
+      expect(_actions(json, const SenseUpdateUiState(canCancel: true)), [SenseUpdateAction.cancel]);
+    });
 
-    SenseUpdateStripView strip(Map<String, Object?> json,
-            [SenseUpdateUiState ui = const SenseUpdateUiState()]) =>
+    test('the bridge offers no Vazgeç until the core can cancel', () {
+      expect(SenseUpdateBridge().canCancel, isFalse);
+    });
+
+    testWidgets('Vazgeç stops the download', (tester) async {
+      final b = _FakeBackend({'state': 'downloading', 'target': 4, 'progress_pct': 42}, cancellable: true);
+      await _pump(tester, _watch(b));
+      expect(find.byKey(const Key('sense-update-progress')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-update-cancel')));
+      await tester.pumpAndSettle();
+      expect(b.cancels, 1);
+      expect(find.text('Yeni sürüm hazır: Sürüm 4'), findsOneWidget);
+    });
+
+    testWidgets('installing covers the screen with the splash', (tester) async {
+      final b = _FakeBackend({'state': 'installing', 'target': 4});
+      await pumpSense(
+          tester,
+          SenseUpdateWatch(
+              backend: b,
+              interval: const Duration(hours: 1),
+              builder: (_, strip) => strip ?? const SizedBox()),
+          center: false);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Sürüm 4 kuruluyor · Sense Remote yeniden açılıyor'), findsOneWidget);
+    });
+
+    test('updated notice has the green frame; failed the red one', () {
+      final done = senseUpdateStrip(_s({
+        'current': 4,
+        'last_result': {'state': 'installed', 'from': 3, 'to': 4, 'at': 1}
+      }))!;
+      expect(done.done, isTrue);
+      expect(senseUpdateStrip(_s({'state': 'failed', 'target': 4}))!.problem, isTrue);
+    });
+
+    test('macOS step: only while an update can be asked for', () {
+      const ui = SenseUpdateUiState(askingMac: true);
+      final ask = senseUpdateStrip(_s({..._available, 'mac_permission_warning': true}), ui)!;
+      expect(ask.asking, isTrue);
+      expect(ask.text, senseUpdateText('mac_body'));
+      expect(ask.actions, [SenseUpdateAction.macCancel, SenseUpdateAction.macGo]);
+      expect(senseUpdateStrip(_s({'state': 'verifying', 'target': 4}), ui)!.asking, isFalse);
+    });
+  });
+
+  group('About box', () {
+    test('Güncel only after a check; ready with Güncelle', () {
+      final cur = senseAboutUpdateBox(_s({'state': 'idle', 'checked_at': 1000}), 1240, host: false);
+      expect(cur.title, 'Güncel');
+      expect(cur.current, isTrue);
+      expect(cur.body, 'Son denetim 4 dk önce · panelden otomatik');
+      expect(cur.action, SenseAboutUpdateAction.check);
+
+      final never = senseAboutUpdateBox(_s({'state': 'idle'}), 0, host: false);
+      expect(never.current, isFalse);
+      expect(never.title, isNot('Güncel'));
+
+      final ready = senseAboutUpdateBox(_s(_available), 1000, host: false);
+      expect(ready.title, 'Yeni sürüm hazır: Sürüm 4');
+      expect(ready.body, contains('onayınla kurulur'));
+      expect(ready.action, SenseAboutUpdateAction.update);
+      expect(senseAboutUpdateBox(_s(_available), 1000, host: true).body, contains('bağlantı yokken'));
+
+      final unsupported =
+          senseAboutUpdateBox(SenseUpdateStatus.parse(jsonEncode({'current': 3, ..._available})), 1000, host: false);
+      expect(unsupported.action, SenseAboutUpdateAction.check);
+    });
+  });
+
+  group('golden images', () {
+    SenseUpdateStripView strip(Map<String, Object?> json, [SenseUpdateUiState ui = const SenseUpdateUiState()]) =>
         SenseUpdateStripView(
             strip: senseUpdateStrip(_s(json), ui)!,
-            progressPct: _s(json).state == SenseUpdateState.downloading
-                ? _s(json).progressPct
-                : null,
+            progressPct: _s(json).state == SenseUpdateState.downloading ? _s(json).progressPct : null,
             onAction: (_) {});
-
-    Widget host(Widget? updateStrip) => SingleChildScrollView(
-          child: SizedBox(
-            width: 280,
-            child: SenseHostHomeView(
-              name: 'Galeri kioskı',
-              location: 'Galeri 1',
-              deviceId: '',
-              state: SenseHostState.ready,
-              versionChip: SenseVersionChip(version: 3, onTap: () {}),
-              updateStrip: updateStrip,
-            ),
-          ),
-        );
 
     testWidgets('every strip state', (tester) async {
       final states = <Widget>[
         strip(_available),
-        strip({..._available, 'blocked': 'session_active'},
-            const SenseUpdateUiState(requested: true)),
+        strip({..._available, 'mac_permission_warning': true}, const SenseUpdateUiState(askingMac: true)),
+        strip({..._available, 'blocked': 'session_active'}, const SenseUpdateUiState(requested: true)),
         strip({'state': 'scheduled', 'target': 4, 'source': 'panel'}),
-        strip({
-          'state': 'scheduled',
-          'target': 4,
-          'source': 'panel',
-          'blocked': 'night_window'
-        }),
-        strip({'state': 'downloading', 'target': 4, 'progress_pct': 42}),
+        strip({'state': 'scheduled', 'target': 4, 'source': 'panel', 'blocked': 'night_window'}),
+        strip({'state': 'downloading', 'target': 4, 'progress_pct': 42}, const SenseUpdateUiState(canCancel: true)),
         strip({'state': 'verifying', 'target': 4}),
         strip({'state': 'installing', 'target': 4}),
         strip({
           'current': 4,
           'last_result': {'state': 'installed', 'from': 3, 'to': 4, 'at': 1}
         }),
-        strip({'state': 'failed', 'target': 4, 'error': 'disk_space'}),
+        strip({'state': 'failed', 'target': 4, 'error': 'download_failed'}),
         strip({'state': 'rolled_back', 'target': 4}),
-        strip(_available, const SenseUpdateUiState(supported: false)),
       ];
       await _pump(
           tester,
@@ -506,110 +561,39 @@ void main() {
               key: const Key('golden'),
               child: Container(
                 color: Colors.black,
-                width: 800,
+                width: 900,
                 padding: const EdgeInsets.all(20),
                 child: Column(children: [
-                  for (final s in states)
-                    Padding(
-                        padding: const EdgeInsets.only(bottom: 10), child: s),
+                  for (final s in states) Padding(padding: const EdgeInsets.only(bottom: 10), child: s),
                 ]),
               ),
             ),
           ),
-          size: const Size(800, 900));
-      await expectLater(find.byKey(const Key('golden')),
-          matchesGoldenFile('../../goldens/controller/sense_update_strip_states.png'));
-    });
+          size: const Size(900, 900));
+      await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenPath('update_strip_states')));
+    }, skip: goldenSkip('update_strip_states'));
 
-    testWidgets('Host home, Windows', (tester) async {
+    testWidgets('narrow strip (Host window 280 px), macOS step', (tester) async {
       await _pump(
           tester,
           Align(
-              alignment: Alignment.topLeft,
-              child: RepaintBoundary(
-                  key: const Key('golden'), child: host(strip(_available)))),
-          size: const Size(280, 520));
-      await expectLater(find.byKey(const Key('golden')),
-          matchesGoldenFile('../../goldens/controller/sense_update_host_windows.png'));
-    });
-
-    testWidgets('Host home, macOS: night strip and the warning',
-        (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      try {
-        await _pump(
-            tester,
-            Align(
-                alignment: Alignment.topLeft,
-                child: RepaintBoundary(
-                    key: const Key('golden'),
-                    child: host(strip({
-                      'state': 'scheduled',
-                      'target': 4,
-                      'source': 'panel',
-                      'blocked': 'night_window'
-                    })))),
-            size: const Size(280, 520));
-        await expectLater(find.byKey(const Key('golden')),
-            matchesGoldenFile('../../goldens/controller/sense_update_host_mac.png'));
-
-        await _pump(
-            tester,
-            Center(
-                child: RepaintBoundary(
-                    key: const Key('golden-dialog'),
-                    child: SenseMacUpdateWarningDialog(onAnswer: (_) {}))),
-            size: const Size(520, 300));
-        await expectLater(find.byKey(const Key('golden-dialog')),
-            matchesGoldenFile('../../goldens/controller/sense_update_mac_warning.png'));
-      } finally {
-        debugDefaultTargetPlatformOverride = null;
-      }
-    });
-
-    testWidgets('Controller home with the strip', (tester) async {
-      await _pump(
-          tester,
-          RepaintBoundary(
-            key: const Key('golden'),
-            child: SenseControllerHomeView(
-              projectNames: const [],
-              peers: const [],
-              onConnect: (_) {},
-              onRefresh: () {},
-              versionChip: SenseVersionChip(version: 3, onTap: () {}),
-              updateStrip: strip({
-                'state': 'downloading',
-                'target': 4,
-                'progress_pct': 42
-              }),
+            alignment: Alignment.topLeft,
+            child: RepaintBoundary(
+              key: const Key('golden'),
+              child: Container(
+                color: Colors.black,
+                width: 280,
+                padding: const EdgeInsets.all(10),
+                child: Column(children: [
+                  strip(_available),
+                  const SizedBox(height: 10),
+                  strip({..._available, 'mac_permission_warning': true}, const SenseUpdateUiState(askingMac: true)),
+                ]),
+              ),
             ),
           ),
-          size: const Size(1000, 360));
-      await expectLater(find.byKey(const Key('golden')),
-          matchesGoldenFile('../../goldens/controller/sense_update_controller_windows.png'));
-    });
-
-    testWidgets('About with the update line', (tester) async {
-      await _pump(
-          tester,
-          RepaintBoundary(
-            key: const Key('golden'),
-            child: SenseAboutView(
-              version: 3,
-              role: SenseHomeRole.host,
-              account: '',
-              year: 2026,
-              onOpenUrl: (_) {},
-              updateText: senseAboutUpdateText(_s(_available), 1120),
-            ),
-          ),
-          size: const Size(600, 520));
-      expect(find.text('Sürüm 4 hazır · Son denetim: 2 dk önce'), findsOneWidget);
-      await expectLater(find.byKey(const Key('golden')),
-          matchesGoldenFile('../../goldens/controller/sense_update_about.png'));
-    });
-    // Sense Remote: the goldens are rendered on the Linux runner; text
-    // rasterises differently on macOS/Windows, so compare them only on Linux.
-  }, skip: !Platform.isLinux);
+          size: const Size(280, 400));
+      await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenPath('update_strip_narrow')));
+    }, skip: goldenSkip('update_strip_narrow'));
+  });
 }
