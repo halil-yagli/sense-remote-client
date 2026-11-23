@@ -359,8 +359,19 @@ class SensePeerExtra {
   /// Unix seconds; only when the panel sends it in the list (else peer-status).
   final int? lastSeenAt;
 
+  /// Sense Remote (D3a, panel #84): LED level `ok` / `warn` / `hot` / `none`
+  /// (`sense.health_level`) and the short health values for the LED box
+  /// (`sense.health`); null when the panel did not send them.
+  final String? healthLevel;
+  final Map<String, dynamic>? health;
+
   const SensePeerExtra(
-      {this.deviceId = '', this.online, this.busyBy, this.lastSeenAt});
+      {this.deviceId = '',
+      this.online,
+      this.busyBy,
+      this.lastSeenAt,
+      this.healthLevel,
+      this.health});
 
   static SensePeerExtra? fromSense(dynamic sense) {
     if (sense is! Map) return null;
@@ -369,11 +380,15 @@ class SensePeerExtra {
     final busy = sense['busy'];
     final by = busy is Map ? busy['by'] : null;
     final seen = sense['last_seen_at'];
+    final level = sense['health_level'];
+    final health = sense['health'];
     return SensePeerExtra(
       deviceId: id is String ? id : '',
       online: online is bool ? online : null,
       busyBy: by is String && by.trim().isNotEmpty ? by.trim() : null,
       lastSeenAt: seen is int && seen > 0 ? seen : null,
+      healthLevel: level is String ? level : null,
+      health: health is Map ? Map<String, dynamic>.from(health) : null,
     );
   }
 }

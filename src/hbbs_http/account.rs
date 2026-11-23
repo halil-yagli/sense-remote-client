@@ -110,6 +110,10 @@ pub struct UserInfo {
     pub login_device_whitelist: Vec<WhitelistItem>,
     #[serde(default)]
     pub other: HashMap<String, String>,
+    // Sense Remote (S11, D3a): the signed per-person grants envelope the panel sends with the
+    // sign-in (`user.info.sense_grants`); checked and kept by `crate::sense::grants`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sense_grants: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -376,6 +380,16 @@ impl OidcSession {
                                     "status": auth_body.user.status
                                 })
                                 .to_string(),
+                            );
+                            // Sense Remote (S11, D3a): note the grants envelope of this sign-in.
+                            crate::sense::grants::on_sign_in(
+                                auth_body
+                                    .user
+                                    .email
+                                    .as_deref()
+                                    .filter(|email| !email.is_empty())
+                                    .unwrap_or(&auth_body.user.name),
+                                auth_body.user.info.sense_grants.as_ref(),
                             );
                         }
                     }

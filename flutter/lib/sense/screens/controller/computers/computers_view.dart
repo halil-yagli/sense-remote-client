@@ -156,6 +156,8 @@ class _SenseComputersViewState extends State<SenseComputersView> {
   @override
   Widget build(BuildContext context) {
     final all = widget.projects;
+    // Sense Remote (D3a, panel #84): LED and "Dikkat isteyen" from the list's health_level.
+    widget.health?.seed(senseUnique(all));
     final levels = widget.health?.levels ?? const <String, SenseLevel>{};
     final counts = senseCountsOf(all, levels);
     final ready = widget.state == SenseListState.ready || all.isNotEmpty;
