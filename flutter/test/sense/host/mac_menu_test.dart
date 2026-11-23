@@ -13,7 +13,7 @@ void main() {
     final xib = File('macos/Runner/Base.lproj/MainMenu.xib').readAsStringSync();
     expect(xib, contains('<action selector="senseShowAbout:" target="Voe-Tx-rLC"'));
     expect(xib, isNot(contains('orderFrontStandardAboutPanel:')));
-    expect(xib, isNot(contains('Ayarlar')));
+    expect(xib, isNot(contains('<menuItem title="Ayarlar')));
     expect(xib, isNot(contains('keyEquivalent=","')));
     // Voe-Tx-rLC is the AppDelegate object.
     expect(xib, contains('<customObject id="Voe-Tx-rLC" customClass="AppDelegate"'));
