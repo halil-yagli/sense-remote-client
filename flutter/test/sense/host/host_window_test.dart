@@ -12,6 +12,7 @@ import 'package:flutter_hbb/sense/screens/host/data/host_status.dart';
 import 'package:flutter_hbb/sense/screens/host/data/identity.dart';
 import 'package:flutter_hbb/sense/screens/install/sense_install_model.dart' show SenseLoginStatus;
 import 'package:flutter_hbb/sense/screens/host/host_format.dart';
+import 'package:flutter_hbb/sense/screens/host/password/password_about_row.dart';
 import 'package:flutter_hbb/sense/screens/host/password/password_category.dart';
 import 'package:flutter_hbb/sense/screens/host/password/password_rules.dart';
 import 'package:flutter_hbb/sense/screens/host/permissions/permissions_category.dart';
@@ -194,6 +195,15 @@ void main() {
   });
 
   group('status box (H1, six states)', () {
+    testWidgets('narrow column: the ID stays on one line (Kopyala drops below)', (tester) async {
+      setWindow(tester, const Size(1180, 900));
+      await tester.pumpWidget(app(page(width: 360, _view())));
+      final id = tester.getSize(find.byKey(const Key('sense-host-id')));
+      expect(id.height, lessThan(SenseFontSize.body * 2));
+      expect(tester.widget<Text>(find.byKey(const Key('sense-host-id'))).softWrap, isFalse);
+      expect(find.text('482 913 207'), findsOneWidget);
+    });
+
     testWidgets('each state: title, text and its one button', (tester) async {
       setWindow(tester, const Size(1180, 900));
       final taps = <String>[];
@@ -404,6 +414,26 @@ void main() {
     });
   });
 
+  group('permanent password row in Ayarlar › Güvenlik (T7: in place, no window)', () {
+    testWidgets('Aç opens the body under the row, Kapat closes it; never a dialog', (tester) async {
+      setWindow(tester, const Size(1180, 1200));
+      final fake = FakePassword();
+      await tester.pumpWidget(app(page(SensePasswordAboutRow(backend: fake, deviceId: '482 913 207'))));
+      await tester.pump();
+      expect(find.byKey(const Key('sense-pw-inline')), findsNothing);
+      await tester.tap(find.byKey(const Key('sense-pw-open')));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const Key('sense-pw-inline')), findsOneWidget);
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.text('Kapat'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-pw-open')));
+      await tester.pump();
+      expect(find.byKey(const Key('sense-pw-inline')), findsNothing);
+      expect(find.text('Aç'), findsOneWidget);
+    });
+  });
+
   group('permanent password in the category (H2)', () {
     testWidgets('Değiştir → code + QR + countdown → Vazgeç', (tester) async {
       setWindow(tester, const Size(1180, 1200));
@@ -487,12 +517,16 @@ void main() {
       expect(save().onPressed, isNull);
       await tester.enterText(find.byKey(const Key('sense-pw-new')), 'x482913207abcQ!');
       await tester.pump();
-      expect(find.text('✕ Kimliği içermiyor'), findsOneWidget);
-      expect(find.text('· İki şifre aynı'), findsOneWidget);
+      expect(find.text('Kimliği içermiyor'), findsOneWidget);
+      expect(find.byKey(const Key('sense-rule-mark-bad')), findsOneWidget);
+      expect(find.text('İki şifre aynı'), findsOneWidget);
+      expect(find.byKey(const Key('sense-rule-mark-none')), findsWidgets);
       await tester.enterText(find.byKey(const Key('sense-pw-new')), 'Mavi-Kapi_47!tuz');
       await tester.enterText(find.byKey(const Key('sense-pw-repeat')), 'Mavi-Kapi_47!tuz');
       await tester.pump();
-      expect(find.text('✓ İki şifre aynı'), findsOneWidget);
+      expect(find.text('İki şifre aynı'), findsOneWidget);
+      expect(find.byKey(const Key('sense-rule-mark-ok')), findsWidgets);
+      expect(find.byKey(const Key('sense-rule-mark-bad')), findsNothing);
       expect(save().onPressed, isNotNull);
       await tester.tap(find.byKey(const Key('sense-pw-save')));
       await tester.pump();

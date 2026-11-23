@@ -199,7 +199,7 @@ class _SenseAccountBoxState extends State<SenseAccountBox> {
                     key: const Key('sense-account-email'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim)),
+                    style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted)),
               ),
               const SizedBox(height: _kGap),
               if (_asking)

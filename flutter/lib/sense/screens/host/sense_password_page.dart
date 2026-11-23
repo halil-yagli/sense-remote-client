@@ -1,8 +1,8 @@
 // Sense Remote: "Kalıcı şifre" page (permanent password plan 2026-11-21, §4,
 // package U13). Locked by default; "Kilidi aç" verifies a Sense employee with
 // the same pairing code + QR sign-in as the setup wizard; for 5 minutes the
-// password can then be set or changed. It opens as a dialog from About ›
-// Güvenlik (no full-screen window; the Host home only has one line).
+// password can then be set or changed. The Settings › Güvenlik row opens the
+// in-place body (password/password_about_row.dart, T7); this panel is kept for its tests.
 //
 // [SensePasswordPanel] is the view of a [SensePasswordController]; the
 // controller talks to the app through [SensePasswordBackend], so tests drive
@@ -16,7 +16,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../host_live/sense_cm_style.dart';
 import '../host_live/sense_cm_widgets.dart';
-import '../controller/sense_home_strings.dart' show senseHomeUpper;
 import '../install/sense_install_strings.dart'
     show formatSensePairingCode, spokenSensePairingCode;
 import 'sense_password_model.dart';
@@ -33,54 +32,6 @@ String _t(String key, [Map<String, String> args = const {}]) =>
 DateTime? _changed(SensePasswordStatus s) => s.changedAt == null
     ? null
     : DateTime.fromMillisecondsSinceEpoch(s.changedAt! * 1000);
-
-/// The page as a dialog. Closing it while verifying or unlocked gives the
-/// grant back (the controller's dispose).
-class SensePasswordDialog extends StatefulWidget {
-  const SensePasswordDialog(
-      {super.key,
-      this.backend = const SensePasswordBridge(),
-      this.interval = const Duration(seconds: 1)});
-  final SensePasswordBackend backend;
-  final Duration interval;
-
-  @override
-  State<SensePasswordDialog> createState() => _SensePasswordDialogState();
-}
-
-class _SensePasswordDialogState extends State<SensePasswordDialog> {
-  late final SensePasswordController _c =
-      SensePasswordController(widget.backend, interval: widget.interval);
-
-  @override
-  void initState() {
-    super.initState();
-    _c.load();
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Dialog(
-        backgroundColor: _T.black,
-        insetPadding: const EdgeInsets.all(12),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(_T.radiusCard),
-            side: const BorderSide(color: _T.border)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: SensePasswordPanel(
-                controller: _c, onClose: () => Navigator.of(context).pop()),
-          ),
-        ),
-      );
-}
 
 /// View of the controller: one block per stage (§4 table).
 class SensePasswordPanel extends StatelessWidget {
@@ -355,85 +306,6 @@ class SensePasswordPanel extends StatelessWidget {
               borderSide: const BorderSide(color: _T.soft)),
         ),
       );
-}
-
-/// About › Güvenlik: "Kalıcı şifre" row with its state and "Aç".
-class SensePasswordAboutView extends StatelessWidget {
-  const SensePasswordAboutView(
-      {super.key, required this.summary, required this.onOpen});
-  final String summary;
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(senseHomeUpper(_t('security')),
-              style:
-                  _T.text(size: 9, color: _T.muted).copyWith(letterSpacing: 1.6)),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.fromLTRB(18, 10, 10, 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(_T.radiusCard),
-              border: Border.all(color: _T.line),
-            ),
-            child: Row(children: [
-              SizedBox(
-                  width: 130,
-                  child: Text(_t('title'),
-                      style: _T.text(size: 12, color: _T.muted))),
-              Expanded(
-                  child: Text(summary,
-                      key: const Key('sense-pw-summary'),
-                      style: _T.text(size: 12))),
-              SenseCmTextButton(
-                  key: const Key('sense-pw-open'),
-                  label: _t('open'),
-                  strong: true,
-                  onTap: onOpen),
-            ]),
-          ),
-        ],
-      );
-}
-
-/// Binds the About row: reads the status and opens the dialog.
-class SensePasswordAboutRow extends StatefulWidget {
-  const SensePasswordAboutRow(
-      {super.key, this.backend = const SensePasswordBridge()});
-  final SensePasswordBackend backend;
-
-  @override
-  State<SensePasswordAboutRow> createState() => _SensePasswordAboutRowState();
-}
-
-class _SensePasswordAboutRowState extends State<SensePasswordAboutRow> {
-  SensePasswordStatus _status = SensePasswordStatus.none;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final s = SensePasswordStatus.parse(await widget.backend.status());
-    if (mounted) setState(() => _status = s);
-  }
-
-  Future<void> _open() async {
-    await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => SensePasswordDialog(backend: widget.backend));
-    await _load();
-  }
-
-  @override
-  Widget build(BuildContext context) => SensePasswordAboutView(
-      summary: sensePasswordSummary(_status, _changed(_status)),
-      onOpen: _open);
 }
 
 /// Host home: one line with a lock; a tap opens About (where the page is).

@@ -571,6 +571,31 @@ void main() {
       expect(find.text(t('install-note')), findsOneWidget);
     });
 
+    testWidgets('e-mail tile: one line with an ellipsis, never broken mid-word', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      final value = tester.widget<Text>(find.byKey(Key('sense-tile-value-${t('sum-account')}')));
+      expect(value.maxLines, 1);
+      expect(value.overflow, TextOverflow.ellipsis);
+      // A value with spaces (project names) still wraps.
+      final projects = tester.widget<Text>(find.byKey(Key('sense-tile-value-${t('sum-projects')}')));
+      expect(projects.maxLines, isNull);
+    });
+
+    testWidgets('Gelişmiş: the printer switch can be scrolled into view and used', (tester) async {
+      final backend = FakeBackend();
+      await pumpWizard(tester, backend);
+      await toSummary(tester, backend);
+      await tap(tester, 'sense-advanced');
+      final printer = find.byKey(const Key('sense-printer'));
+      await tester.ensureVisible(printer);
+      await tester.pump();
+      expect(printer, findsOneWidget);
+      await tapToggle(tester, 'sense-printer');
+      expect(find.textContaining(t('advanced-printer')), findsWidgets);
+    });
+
     testWidgets('Gelişmiş: closed category with folder and three switches', (tester) async {
       final backend = FakeBackend();
       String? asked;
