@@ -100,8 +100,10 @@ impl<T: Subscriber + From<ConnInner>> Service for ServiceTmpl<T> {
     }
 
     fn is_subed(&self, id: i32) -> bool {
-        self.0.read().unwrap().subscribes.get(&id).is_some()
-            || self.0.read().unwrap().new_subscribes.get(&id).is_some()
+        // Sense Remote (B4): one read guard. Two in one expression (the first lives until the end
+        // of the statement) can deadlock against a waiting writer (the video thread, each frame).
+        let lock = self.0.read().unwrap();
+        lock.subscribes.contains_key(&id) || lock.new_subscribes.contains_key(&id)
     }
 
     fn on_subscribe(&self, sub: ConnInner) {
@@ -354,5 +356,78 @@ impl<T: Subscriber + From<ConnInner>> ServiceSwap<T> {
 impl<T: Subscriber + From<ConnInner>> Drop for ServiceSwap<T> {
     fn drop(&mut self) {
         (self.0).0.write().unwrap().swap_new_subscribes();
+    }
+}
+
+#[cfg(test)]
+mod sense_tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct TestSub(i32);
+
+    impl Subscriber for TestSub {
+        fn id(&self) -> i32 {
+            self.0
+        }
+        fn send(&mut self, _msg: Arc<Message>) {}
+    }
+
+    impl From<ConnInner> for TestSub {
+        fn from(_: ConnInner) -> Self {
+            unreachable!("not used in these tests")
+        }
+    }
+
+    fn service() -> ServiceTmpl<TestSub> {
+        let mut inner = ServiceInner::<TestSub>::default();
+        inner.subscribes.insert(1, TestSub(1));
+        inner.new_subscribes.insert(2, TestSub(2));
+        ServiceTmpl(Arc::new(RwLock::new(inner)))
+    }
+
+    #[test]
+    fn is_subed_sees_both_maps() {
+        let s = service();
+        assert!(s.is_subed(1));
+        assert!(s.is_subed(2));
+        assert!(!s.is_subed(3));
+    }
+
+    // B4: `is_subed` for an unknown id next to a writer that keeps taking the lock (the video
+    // thread) must never hang.
+    #[test]
+    fn is_subed_does_not_deadlock_against_a_writer() {
+        let s = Arc::new(service());
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer = {
+            let (s, stop) = (s.clone(), stop.clone());
+            thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    drop(s.0.write().unwrap());
+                }
+            })
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let readers: Vec<_> = (0..4)
+            .map(|_| {
+                let (s, tx) = (s.clone(), tx.clone());
+                thread::spawn(move || {
+                    for _ in 0..200_000 {
+                        assert!(!s.is_subed(99));
+                    }
+                    let _ = tx.send(());
+                })
+            })
+            .collect();
+        for _ in 0..4 {
+            rx.recv_timeout(time::Duration::from_secs(60))
+                .expect("is_subed hung against a writer");
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        writer.join().unwrap();
+        for r in readers {
+            r.join().unwrap();
+        }
     }
 }

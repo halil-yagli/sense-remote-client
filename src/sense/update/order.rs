@@ -37,10 +37,13 @@ pub const ORDER_TTL_S: i64 = 2 * 86_400;
 
 wire_enum!(
     /// `UpdateWindow`: `idle` = as soon as no connection is active; `night` = 03:00–05:00 local
-    /// time and no connection. "Güncelle" in the app is always `idle`.
+    /// time and no connection. "Güncelle" in the app is always `idle`. Sense Remote: `now` = at
+    /// once, open sessions are closed first; the panel sends it only to a computer whose
+    /// heartbeat has `update_now` (older builds refuse an unknown window).
     Window {
         Idle => "idle",
         Night => "night",
+        Now => "now",
     }
 );
 
@@ -200,6 +203,9 @@ mod tests {
     fn window_names() {
         assert_eq!(Window::parse("idle"), Some(Window::Idle));
         assert_eq!(Window::Night.as_str(), "night");
-        assert_eq!(Window::parse("now"), None);
+        assert_eq!(Window::parse("now"), Some(Window::Now));
+        assert_eq!(Window::Now.as_str(), "now");
+        assert_eq!(Window::parse("later"), None);
+        assert_eq!(Window::parse(""), None);
     }
 }

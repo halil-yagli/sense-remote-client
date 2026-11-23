@@ -1024,6 +1024,7 @@ mod win {
             size: 0,
             source: UpdateSource::Manual,
             oid: None,
+            now: false,
         };
         let mut armed = Armed::new(&job);
         if let Err(err) = prepare(&mut armed, &job, installed, None, Some(&own_dir)) {
@@ -1062,6 +1063,7 @@ mod tests {
             size: 1,
             source: UpdateSource::Panel,
             oid: Some("upd_0123456789abcdef".to_owned()),
+            now: false,
         }
     }
 

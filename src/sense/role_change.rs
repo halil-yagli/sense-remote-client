@@ -41,6 +41,9 @@ const CHANGE_PATH: &str = "/api/sense/role-change";
 const LOGIN_WINDOW_S: i64 = 180;
 /// After the panel's answer: the heartbeat (≤ 15 s) and a `--server` restart; then `timeout`.
 const APPLY_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg_attr(not(feature = "flutter"), allow(dead_code))]
+/// Sense Remote (B9): longest the request to the panel may run before the change is dropped.
+const VERIFY_LIMIT: Duration = Duration::from_secs(90);
 /// `begin` waits this long for the pairing code.
 #[cfg_attr(not(feature = "flutter"), allow(dead_code))]
 const PAIRING_WAIT: Duration = Duration::from_secs(10);
@@ -113,11 +116,17 @@ impl Stage {
 struct State {
     stage: Stage,
     attempts: u64,
+    /// Sense Remote (B9): when the request to the panel started (`Stage::Verifying`).
+    verifying_since: Option<Instant>,
+    /// Sense Remote (B9): how the background request ended, told once by the next status poll.
+    error: Option<&'static str>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
     stage: Stage::Idle,
     attempts: 0,
+    verifying_since: None,
+    error: None,
 });
 
 #[cfg_attr(not(feature = "flutter"), allow(dead_code))]
@@ -296,6 +305,12 @@ fn applying_step(
         return Err("timeout");
     }
     Ok(Stage::Applying { target, since })
+}
+
+#[cfg_attr(not(feature = "flutter"), allow(dead_code))]
+/// Sense Remote (B9): has the request to the panel run for too long?
+fn verify_expired(since: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(since) >= VERIFY_LIMIT
 }
 
 /// `main_sense_role_change_status` answer.
@@ -479,6 +494,18 @@ mod ui {
                     }
                 }
             }
+            Stage::Verifying { target } => {
+                // The request runs on its own thread; this poll only reads the state.
+                let expired = with_state(|s| s.verifying_since.map_or(false, |t| verify_expired(t, Instant::now())));
+                if expired {
+                    log::warn!("Sense Remote: role change request to the panel timed out");
+                    set_if_current(&Stage::Verifying { target }, Stage::Idle);
+                    (Stage::Idle, Some("network"))
+                } else {
+                    (Stage::Verifying { target }, None)
+                }
+            }
+            Stage::Idle => (Stage::Idle, with_state(|s| s.error.take())),
             other => (other, None),
         };
         change_status_value(&stage, error).to_string()
@@ -516,6 +543,8 @@ mod ui {
                     let current = s.stage == login;
                     if current {
                         s.stage = Stage::Verifying { target };
+                        s.verifying_since = Some(Instant::now());
+                        s.error = None;
                     }
                     current
                 });
@@ -526,36 +555,58 @@ mod ui {
                 let token = OidcSession::sense_access_token();
                 // The token leaves memory whatever happens next (single use on the panel too).
                 OidcSession::sense_forget_auth();
-                let id = crate::ui_interface::get_id();
-                let uuid = crate::ui_interface::get_uuid();
-                let result = request_change(token, &id, &uuid, target, &crate::sense::api_server(), post_json)
-                    .and_then(|envelope| {
-                        let iss = crate::sense::envelope::expected_issuer();
-                        let expect = Expect {
-                            iss: &iss,
-                            did: &id,
-                            duuid: &uuid,
-                            now_s: now_s(),
-                            last_seq: 0,
-                        };
-                        check_envelope(&envelope, target, crate::sense::envelope_keys::trusted_keys(), &expect)
-                    });
+                // Sense Remote (B9): the request (own runtime, retries) runs on its own thread; a
+                // status poll never waits for the network. `change_status` shows "applying".
                 let verifying = Stage::Verifying { target };
-                match result {
-                    Ok(seq) => {
-                        log::info!("Sense Remote: role change signed by the panel (seq {seq}), waiting for the service");
-                        let next = Stage::Applying {
-                            target,
-                            since: Instant::now(),
-                        };
-                        set_if_current(&verifying, next.clone());
-                        (next, None)
-                    }
-                    Err(code) => {
-                        set_if_current(&verifying, Stage::Idle);
-                        (Stage::Idle, Some(code))
-                    }
+                let spawned = std::thread::Builder::new()
+                    .name("sense-role-change".to_owned())
+                    .spawn(move || {
+                        let id = crate::ui_interface::get_id();
+                        let uuid = crate::ui_interface::get_uuid();
+                        let result = request_change(token, &id, &uuid, target, &crate::sense::api_server(), post_json)
+                            .and_then(|envelope| {
+                                let iss = crate::sense::envelope::expected_issuer();
+                                let expect = Expect {
+                                    iss: &iss,
+                                    did: &id,
+                                    duuid: &uuid,
+                                    now_s: now_s(),
+                                    last_seq: 0,
+                                };
+                                check_envelope(&envelope, target, crate::sense::envelope_keys::trusted_keys(), &expect)
+                            });
+                        match result {
+                            Ok(seq) => {
+                                log::info!("Sense Remote: role change signed by the panel (seq {seq}), waiting for the service");
+                                set_if_current(
+                                    &Stage::Verifying { target },
+                                    Stage::Applying {
+                                        target,
+                                        since: Instant::now(),
+                                    },
+                                );
+                            }
+                            Err(code) => {
+                                // Only when this request is still the running one (not timed out).
+                                let current = with_state(|s| {
+                                    let current = s.stage == Stage::Verifying { target };
+                                    if current {
+                                        s.stage = Stage::Idle;
+                                        s.error = Some(code);
+                                    }
+                                    current
+                                });
+                                if !current {
+                                    log::info!("Sense Remote: role change answer came too late: {code}");
+                                }
+                            }
+                        }
+                    });
+                if spawned.is_err() {
+                    set_if_current(&verifying, Stage::Idle);
+                    return (Stage::Idle, Some("network"));
                 }
+                (verifying, None)
             }
         }
     }
@@ -724,6 +775,16 @@ mod tests {
                 Err("busy")
             );
         }
+    }
+
+    #[test]
+    fn verify_request_has_a_time_limit() {
+        let start = Instant::now();
+        assert!(!verify_expired(start, start));
+        assert!(!verify_expired(start, start + VERIFY_LIMIT - Duration::from_secs(1)));
+        assert!(verify_expired(start, start + VERIFY_LIMIT));
+        // A clock that went back never expires it.
+        assert!(!verify_expired(start + VERIFY_LIMIT, start));
     }
 
     #[test]

@@ -71,6 +71,14 @@ static STARTED: AtomicBool = AtomicBool::new(false);
 /// Sense Remote (D3e, #68): the running download task, for "Vazgeç".
 static DOWNLOAD: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
 
+/// Sense Remote (B2): the cleanup of a cancelled download (waits for the task, removes `.part`).
+/// A new download first waits for it, or it would delete the new download's file.
+static CANCEL_CLEANUP: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
+
+fn cancel_cleanup() -> MutexGuard<'static, Option<tokio::task::JoinHandle<()>>> {
+    CANCEL_CLEANUP.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn download_task() -> MutexGuard<'static, Option<tokio::task::JoinHandle<()>>> {
     DOWNLOAD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -215,6 +223,7 @@ impl Runner {
                 size: release.size,
                 source: self.state.source.unwrap_or(UpdateSource::Local),
                 oid: self.state.order.as_ref().map(|o| o.oid.clone()),
+                now: self.state.order.as_ref().is_some_and(|o| o.window == crate::sense::update::order::Window::Now),
             }),
         })
     }
@@ -247,7 +256,11 @@ fn perform(job: Job) {
             }
         }
         Job::Download(mut request) => {
+            let pending_cleanup = cancel_cleanup().take();
             let task = tokio::spawn(async move {
+                if let Some(cleanup) = pending_cleanup {
+                    let _ = cleanup.await;
+                }
                 // The folder is made safe (ACL, owner, no reparse point) once per download;
                 // every other step only computes its path.
                 let prepared = tokio::task::spawn_blocking(apply::prepare_download_dir).await;
@@ -273,15 +286,15 @@ fn perform(job: Job) {
         }
         Job::AbortDownload(part) => {
             let task = download_task().take();
-            tokio::spawn(async move {
+            let cleanup = tokio::spawn(async move {
                 if let Some(task) = task {
                     task.abort();
                     // Wait until the task let go of the file before removing it.
                     let _ = task.await;
                 }
-                let _ = std::fs::remove_file(part);
-                log::info!("Sense Remote: update download cancelled");
+                super::cancel_log::removed(std::fs::remove_file(&part));
             });
+            *cancel_cleanup() = Some(cleanup);
         }
         Job::Verify { file, sha256, size } => {
             tokio::task::spawn_blocking(move || {
@@ -293,6 +306,10 @@ fn perform(job: Job) {
         }
         Job::Install(job) => {
             tokio::task::spawn_blocking(move || {
+                // Sense Remote: a `now` order tells the open sessions, then lifts the check.
+                if job.now {
+                    super::now::prepare();
+                }
                 // Never during a connection: asked once more right before the installer.
                 if !crate::updater::has_no_active_conns() {
                     step(Event::Failed(UpdateError::Busy));
