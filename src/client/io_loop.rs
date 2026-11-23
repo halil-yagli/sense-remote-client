@@ -67,7 +67,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
 };
 
@@ -91,9 +91,12 @@ pub struct Remote<T: InvokeUiSession> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     initial_clipboard_pending: bool,
     first_frame: bool,
-    // Sense Remote (karar #84): the Host sent its peer info (login succeeded); a session that ends
-    // after this and before the first frame sends the logs to the panel.
+    // Sense Remote (karar #84, #86): the diagnostic record of this connection round. `sense_sid`
+    // is the session id the `--server` knows it by (taken when the round ends); the two flags say
+    // how far the round got: the Host sent its peer info (login succeeded) / a picture arrived.
+    sense_sid: Mutex<Option<String>>,
     sense_logged_in: bool,
+    sense_got_frame: bool,
     #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
     client_conn_id: i32, // used for file clipboard
     data_count: Arc<AtomicUsize>,
@@ -150,7 +153,9 @@ impl<T: InvokeUiSession> Remote<T> {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             initial_clipboard_pending: false,
             first_frame: false,
+            sense_sid: Mutex::new(None),
             sense_logged_in: false,
+            sense_got_frame: false,
             #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
             client_conn_id: 0,
             data_count: Arc::new(AtomicUsize::new(0)),
@@ -204,6 +209,14 @@ impl<T: InvokeUiSession> Remote<T> {
         } else {
             ConnType::default()
         };
+
+        // Sense Remote (karar #86): a new connection round starts its diagnostic record.
+        self.sense_logged_in = false;
+        self.sense_got_frame = false;
+        if self.handler.is_default() {
+            let sid = crate::sense::log_upload::controller_started(&self.handler.get_id());
+            *self.sense_sid.lock().unwrap_or_else(|e| e.into_inner()) = sid;
+        }
 
         match Client::start(
             &self.handler.get_id(),
@@ -293,6 +306,7 @@ impl<T: InvokeUiSession> Remote<T> {
                 let mut status_timer =
                     crate::rustdesk_interval(time::interval(Duration::new(1, 0)));
                 let mut fps_instant = Instant::now();
+                let mut sense_metric_ticks: u32 = 0;
 
                 let _keep_it = client::hc_connection(feedback, rendezvous_server, token).await;
                 let mut last_recv_time = Instant::now();
@@ -427,6 +441,22 @@ impl<T: InvokeUiSession> Remote<T> {
                             };
                             // Sense Remote (S10, O13).
                             let link = self.sense_link.tick(fps.values().sum());
+                            // Sense Remote (karar #86): a connection measurement line every ten
+                            // seconds, for the session record (fps, speed, codec, path, loss).
+                            sense_metric_ticks = sense_metric_ticks.wrapping_add(1);
+                            if sense_metric_ticks % 10 == 0 {
+                                log::info!(
+                                    target: "sense-metrics",
+                                    "fps={} speed={} codec={:?} chroma={:?} last_frame_ms={:?} loss={:?} path={}",
+                                    fps.values().sum::<i32>(),
+                                    speed,
+                                    codec_format,
+                                    chroma,
+                                    link.last_frame_ms,
+                                    link.loss_est,
+                                    if direct { "direct" } else { "relay" }
+                                );
+                            }
                             self.handler.update_quality_status(QualityStatus {
                                 speed: Some(speed),
                                 fps,
@@ -440,13 +470,6 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                 }
                 log::debug!("Exit io_loop of id={}", self.handler.get_id());
-                // Sense Remote (karar #84): logged in but no picture ever came.
-                if self.handler.is_default() && self.sense_logged_in && !self.first_frame {
-                    crate::sense::log_upload::controller_closed(
-                        crate::sense::log_upload::Reason::ConnNoVideo,
-                        &self.handler.get_id(),
-                    );
-                }
                 // Stop client audio server.
                 if let Some(s) = self.stop_voice_call_sender.take() {
                     s.send(()).ok();
@@ -466,13 +489,6 @@ impl<T: InvokeUiSession> Remote<T> {
             }
             Err(err) => {
                 self.handler.on_establish_connection_error(err.to_string());
-                // Sense Remote (karar #84): the session could not be set up.
-                if self.handler.is_default() {
-                    crate::sense::log_upload::controller_closed(
-                        crate::sense::log_upload::Reason::ConnFailed,
-                        &self.handler.get_id(),
-                    );
-                }
             }
         }
         self.handle_disconnected(round);
@@ -491,7 +507,31 @@ impl<T: InvokeUiSession> Remote<T> {
         }
     }
 
+    /// Sense Remote (karar #84, #86): this connection round is over; its record goes to the panel
+    /// (through the `--server` process). A round that never logged in is a failed connection,
+    /// one that logged in but got no picture is marked, every other one is a plain record.
+    fn sense_session_end(&self) {
+        use crate::sense::log_upload::Reason;
+        let Some(sid) = self
+            .sense_sid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        else {
+            return;
+        };
+        let reason = if !self.sense_logged_in {
+            Reason::ConnFailed
+        } else if !self.sense_got_frame {
+            Reason::ConnNoVideo
+        } else {
+            Reason::Session
+        };
+        crate::sense::log_upload::controller_ended(&sid, reason, &self.handler.get_id());
+    }
+
     fn handle_disconnected(&self, round: u32) {
+        self.sense_session_end();
         // set_disconnected_ok is used to check if new connection round is started.
         let _set_disconnected_ok = self
             .handler
@@ -1771,6 +1811,7 @@ impl<T: InvokeUiSession> Remote<T> {
         if let Ok(msg_in) = Message::parse_from_bytes(&data) {
             match msg_in.union {
                 Some(message::Union::VideoFrame(vf)) => {
+                    self.sense_got_frame = true;
                     if !self.first_frame {
                         self.first_frame = true;
                         self.handler.close_success();

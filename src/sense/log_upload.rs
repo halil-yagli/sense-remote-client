@@ -1,30 +1,42 @@
-//! Sense Remote (karar #84): the computer sends its own logs to the panel when something went
-//! wrong, so that the team can read them per computer without asking anyone to collect files.
+//! Sense Remote (karar #84, #86): every computer keeps a developer diagnostic record of each
+//! connection and sends it to the panel when the connection ends, so the team can read both
+//! sides of a connection per computer, whether or not anything went wrong.
+//!
+//! What is recorded: the Rust log in detail (the log files already run at debug level) plus the
+//! Dart / Flutter errors and `debugPrint` lines ([`dart_line`], written into the same log by every
+//! window) plus a measurement line every ten seconds on the Controller (`sense-metrics`: fps,
+//! speed, codec, path, loss). Nothing is recorded or sent outside a connection.
 //!
 //! When it sends (only after the panel announced `logs_v1` in the heartbeat answer):
-//! 1. a Host connection that closed before the first video frame went out ([`host_closed`],
-//!    called from `src/server/connection.rs`);
-//! 2. a Controller session that closed before the first video frame arrived, or that could not
-//!    be established ([`controller_closed`], called from `src/client/io_loop.rs`; the UI process
-//!    only tells the `--server` process over the main IPC, see [`SenseLogIpc`]);
-//! 3. an update that ended in `failed` ([`on_update_state`], from the heartbeat);
+//! 1. a Host desktop connection ends ([`host_started`] / [`host_closed`], from
+//!    `src/server/connection.rs`), whatever happened; `conn_no_video` when no frame went out;
+//! 2. a Controller session ends ([`controller_started`] / [`controller_ended`], from
+//!    `src/client/io_loop.rs`): `session`, `conn_no_video`, or `conn_failed`. The UI process only
+//!    tells the `--server` process over the main IPC (see [`SenseLogIpc`]);
+//! 3. an update ended in `failed` ([`on_update_state`], from the heartbeat);
 //! 4. the panel asked for it (`sense_log_request` in the heartbeat answer, [`on_answer`]).
+//!
+//! The record of a connection is what the log files got after it started: the `--server` notes
+//! the file positions when the connection starts ([`snapshot_offsets`]) and reads from there when
+//! it ends. It carries what ties both sides together: this side's session id, the other
+//! computer's id, start and end, version, platform, role (`Meta`).
 //!
 //! Everything below runs in the `--server` process: it is the one that holds the device key
 //! (Windows: SYSTEM) and can read the logs of the service profile and of the user profiles. The
 //! UI process never sends a path: it only names the peer and the reason, and the `--server`
 //! decides what is read.
 //!
-//! What is sent: the tail (at most 256 KB each, 1 MB together) of the server, cm, UI, update
-//! logs, **cleaned first** ([`sanitize`]): passwords, tokens, keys, `Authorization`, long
-//! secret-looking values and e-mail addresses are masked. The body is signed with the device
-//! key (`sense-remote/client-log/v1\n`, contract `client-api/client-log.ts`); the signature
-//! covers the SHA-256 of every file text. At most three automatic sends per hour per computer
-//! (kept in the local config, so a restart loop cannot get past it).
+//! Size: every file at most 1 MB, 2 MB together (a request the panel takes up to 2 MB of text).
+//! Everything is **cleaned first** ([`sanitize`]): passwords, tokens, keys, `Authorization`, long
+//! secret-looking values, e-mail addresses and user folder names are masked. The body is signed
+//! with the device key (`sense-remote/client-log/v1\n`, contract `client-api/client-log.ts`); the
+//! signature covers the SHA-256 of every file text. At most 30 connection records and three
+//! error-triggered sends per hour per computer (kept in the local config, so a restart loop
+//! cannot get past it).
 //!
 //! Logs can still hold customer computer details (names, addresses): the panel stores them
-//! encrypted, shows them to the Administrator only and deletes them after 14 days. Nothing here
-//! logs a log line, a key or a path of another user.
+//! encrypted, shows them to the system administrator only (hidden developer page) and deletes
+//! them after 30 days. Nothing here logs a log line, a key or a path of another user.
 
 use hbb_common::{
     base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _},
@@ -36,6 +48,7 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     fs,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -57,11 +70,13 @@ pub const PANEL_CAP_LOGS: &str = "logs_v1";
 pub const SUPPORTED: bool = cfg!(any(windows, target_os = "macos"));
 
 /// Contract: every file at most 256 KB, together 1 MB, at most 8 files.
-pub const MAX_FILE_BYTES: usize = 256 * 1024;
-pub const MAX_TOTAL_BYTES: usize = 1024 * 1024;
+pub const MAX_FILE_BYTES: usize = 1024 * 1024;
+pub const MAX_TOTAL_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_FILES: usize = 8;
-/// Automatic sends per computer and hour.
+/// Error-triggered sends (update failed) per computer and hour.
 pub const AUTO_PER_HOUR: usize = 3;
+/// Session records (one per connection, whatever happened) per computer and hour.
+pub const SESSION_PER_HOUR: usize = 30;
 const WINDOW_S: i64 = 3600;
 /// A panel request that failed is tried again no sooner than this.
 const MANUAL_RETRY_S: i64 = 60;
@@ -70,6 +85,7 @@ const RECENT_S: u64 = 3 * 86_400;
 /// Local config (`--server` process): Unix seconds of the automatic sends in the last hour,
 /// comma separated; `ts` of the last request (the panel refuses a `ts` it has seen).
 const OPTION_SENT: &str = "sense-log-sent";
+const OPTION_SESSIONS: &str = "sense-log-sessions";
 const OPTION_TS: &str = "sense-log-ts";
 /// User profiles read next to the service profile (Windows).
 #[cfg(windows)]
@@ -95,6 +111,8 @@ static OPTIONS: Mutex<()> = Mutex::new(());
 /// Contract `ClientLogReason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reason {
+    /// A connection ended (whatever happened): the session record.
+    Session,
     Manual,
     ConnNoVideo,
     ConnFailed,
@@ -104,6 +122,7 @@ pub enum Reason {
 impl Reason {
     pub fn as_str(self) -> &'static str {
         match self {
+            Reason::Session => "session",
             Reason::Manual => "manual",
             Reason::ConnNoVideo => "conn_no_video",
             Reason::ConnFailed => "conn_failed",
@@ -111,9 +130,10 @@ impl Reason {
         }
     }
 
-    /// What the UI process may ask for: only the two connection reasons.
+    /// What the UI process may name when a Controller session ends: the three connection reasons.
     fn from_ipc(name: &str) -> Option<Reason> {
         match name {
+            "session" => Some(Reason::Session),
             "conn_no_video" => Some(Reason::ConnNoVideo),
             "conn_failed" => Some(Reason::ConnFailed),
             _ => None,
@@ -121,12 +141,15 @@ impl Reason {
     }
 }
 
-/// `Data::SenseLog` (src/ipc.rs): UI process -> `--server`, no answer. The message carries no
-/// path and no text: the `--server` checks the two values and decides what it reads.
+/// `Data::SenseLog` (src/ipc.rs): UI process -> `--server`, no answer. The messages carry no
+/// path and no text: the `--server` checks the values and decides what it reads. The Controller
+/// session lives in the UI process; the logs and the device key are the `--server`'s, so the UI
+/// tells it when a session starts (the log positions are noted then) and when it ends.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum SenseLogIpc {
-    Controller { reason: String, peer: String },
+    ControllerStart { sid: String, peer: String },
+    ControllerEnd { sid: String, peer: String, reason: String },
 }
 
 /// Contract `conn_peer_id`: 1–64 characters; here only the characters an id can have.
@@ -498,6 +521,20 @@ pub struct LogFile {
     pub text: String,
 }
 
+/// What ties the request to a connection (contract `ClientLogUpload`): the other computer, this
+/// side's own session id, start and end (Unix s), version, platform and role. Every field may be
+/// missing; the signature covers all of them (`null` when missing).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Meta {
+    pub peer: Option<String>,
+    pub session_id: Option<String>,
+    pub started: Option<i64>,
+    pub ended: Option<i64>,
+    pub app_version: Option<u32>,
+    pub platform: Option<String>,
+    pub role: Option<String>,
+}
+
 /// Contract `ClientLogFile.name`: 1–64 characters of `A-Za-z0-9._-`.
 pub fn is_file_name(name: &str) -> bool {
     !name.is_empty()
@@ -511,14 +548,15 @@ fn sha256_hex(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))
 }
 
-/// The bytes the device signs: prefix ‖ JCS({id, uuid, ts, reason, conn_peer_id, files:[{name,
-/// sha256}]}). `conn_peer_id` is `null` without a peer.
+/// The bytes the device signs: prefix ‖ JCS({id, uuid, ts, reason, conn_peer_id, session_id,
+/// started_at, ended_at, app_version, platform, role, files:[{name, sha256}]}); a missing
+/// field is `null`.
 pub fn signed_bytes(
     id: &str,
     uuid: &str,
     ts: i64,
     reason: &str,
-    peer: Option<&str>,
+    meta: &Meta,
     files: &[LogFile],
 ) -> Vec<u8> {
     let mut object = Map::new();
@@ -526,7 +564,13 @@ pub fn signed_bytes(
     object.insert("uuid".to_owned(), json!(uuid));
     object.insert("ts".to_owned(), json!(ts));
     object.insert("reason".to_owned(), json!(reason));
-    object.insert("conn_peer_id".to_owned(), json!(peer));
+    object.insert("conn_peer_id".to_owned(), json!(meta.peer));
+    object.insert("session_id".to_owned(), json!(meta.session_id));
+    object.insert("started_at".to_owned(), json!(meta.started));
+    object.insert("ended_at".to_owned(), json!(meta.ended));
+    object.insert("app_version".to_owned(), json!(meta.app_version));
+    object.insert("platform".to_owned(), json!(meta.platform));
+    object.insert("role".to_owned(), json!(meta.role));
     let digests: Vec<Value> = files
         .iter()
         .map(|f| json!({ "name": f.name, "sha256": sha256_hex(&f.text) }))
@@ -544,21 +588,31 @@ pub fn signed_body(
     uuid: &str,
     ts: i64,
     reason: &str,
-    peer: Option<&str>,
+    meta: &Meta,
     files: &[LogFile],
     secret_key: &[u8],
 ) -> Option<Value> {
     let secret_key = sign::SecretKey::from_slice(secret_key)?;
     sodiumoxide::init().ok()?;
-    let signature = sign::sign_detached(&signed_bytes(id, uuid, ts, reason, peer, files), &secret_key);
+    let signature = sign::sign_detached(&signed_bytes(id, uuid, ts, reason, meta, files), &secret_key);
     let mut body = Map::new();
     body.insert("id".to_owned(), json!(id));
     body.insert("uuid".to_owned(), json!(uuid));
     body.insert("ts".to_owned(), json!(ts));
     body.insert("reason".to_owned(), json!(reason));
-    if let Some(peer) = peer {
-        body.insert("conn_peer_id".to_owned(), json!(peer));
-    }
+    // Fields the computer has not got are left out (the panel's schema takes them as optional).
+    let put = |body: &mut Map<String, Value>, name: &str, value: Value| {
+        if !value.is_null() {
+            body.insert(name.to_owned(), value);
+        }
+    };
+    put(&mut body, "conn_peer_id", json!(meta.peer));
+    put(&mut body, "session_id", json!(meta.session_id));
+    put(&mut body, "started_at", json!(meta.started));
+    put(&mut body, "ended_at", json!(meta.ended));
+    put(&mut body, "app_version", json!(meta.app_version));
+    put(&mut body, "platform", json!(meta.platform));
+    put(&mut body, "role", json!(meta.role));
     let list: Vec<Value> = files
         .iter()
         .map(|f| json!({ "name": f.name, "text": f.text }))
@@ -568,7 +622,7 @@ pub fn signed_body(
     Some(Value::Object(body))
 }
 
-/// Per-file byte budget for `count` files: 256 KB, less when 1 MB would not hold them.
+/// Per-file byte budget for `count` files: 1 MB, less when 2 MB would not hold them.
 pub fn per_file_budget(count: usize) -> usize {
     MAX_FILE_BYTES.min(MAX_TOTAL_BYTES / count.max(1))
 }
@@ -579,14 +633,22 @@ pub fn per_file_budget(count: usize) -> usize {
 
 /// Where each kind of log lives under a profile's log directory (`core_main`: the directory is
 /// named after the first command-line switch; the main UI writes into the directory itself).
-const SOURCES: [(&str, &str); 6] = [
+/// Dart errors and `debugPrint` lines are written into these same files by `dart_line`, as
+/// lines with the `dart` target, by whichever process the Flutter window runs in.
+const SOURCES: [(&str, &str); 9] = [
     ("server", "server"),
     ("service", "service"),
     ("cm", "cm"),
     ("ui", ""),
     ("flutter", "flutter_ffi"),
+    ("window", "multi-window"),
+    ("connect", "connect"),
+    ("tray", "tray"),
     ("update", "sense-update-guard"),
 ];
+
+/// Log file positions at one moment (`path -> length`): a session reads what was written after.
+pub type Offsets = HashMap<PathBuf, u64>;
 
 /// A real directory, not a link (a link in a folder a user can write would send this process
 /// somewhere else).
@@ -637,8 +699,10 @@ fn read_tail(path: &Path, len: u64, max: usize) -> Option<Vec<u8>> {
 }
 
 /// Recent text of a log directory, oldest line first, at most `budget` bytes: the newest file's
-/// tail, and when it is short (the log just rotated) the end of the one before.
-fn read_recent(dir: &Path, budget: usize, now: SystemTime) -> Option<String> {
+/// tail, and when it is short (the log just rotated) the end of the one before. With `since`
+/// only what was written after those positions is read (a file the positions do not know, or
+/// that is shorter than before, is read from its start).
+fn read_recent(dir: &Path, budget: usize, now: SystemTime, since: Option<&Offsets>) -> Option<String> {
     if !is_plain_dir(dir) {
         return None;
     }
@@ -648,9 +712,17 @@ fn read_recent(dir: &Path, budget: usize, now: SystemTime) -> Option<String> {
         if remaining == 0 {
             break;
         }
-        // One byte more than the budget: a longer file is cut, and `tail_text` then moves the cut
-        // to a line start.
-        let Some(bytes) = read_tail(&path, len, remaining + 1) else {
+        let from = since
+            .and_then(|offsets| offsets.get(&path).copied())
+            .filter(|offset| *offset <= len)
+            .unwrap_or(0);
+        let span = (len - from) as usize;
+        if span == 0 {
+            continue;
+        }
+        // One byte more than the budget: a longer span is cut, and `tail_text` then moves the
+        // cut to a line start.
+        let Some(bytes) = read_tail(&path, len, span.min(remaining + 1)) else {
             continue;
         };
         let text = tail_text(&bytes, remaining);
@@ -699,21 +771,44 @@ fn log_roots() -> Vec<(String, PathBuf)> {
     roots
 }
 
-/// The files of this request: cleaned, within the budgets, at most [`MAX_FILES`].
-pub fn collect_files(now: SystemTime) -> Vec<LogFile> {
-    let mut raw: Vec<(String, String)> = Vec::new();
-    for (tag, root) in log_roots() {
-        for (label, sub) in SOURCES {
+/// The directories to read, `(file name, directory)`, most useful first (a kind of log in every
+/// profile before the next kind), within the first [`MAX_FILES`].
+fn log_dirs() -> Vec<(String, PathBuf)> {
+    let roots = log_roots();
+    let mut dirs = Vec::new();
+    for (label, sub) in SOURCES {
+        for (tag, root) in &roots {
             let dir = if sub.is_empty() { root.clone() } else { root.join(sub) };
-            if let Some(text) = read_recent(&dir, MAX_FILE_BYTES, now) {
-                raw.push((format!("{label}-{tag}.log"), text));
-            }
-            if raw.len() >= MAX_FILES {
-                break;
-            }
+            dirs.push((format!("{label}-{tag}.log"), dir));
         }
+    }
+    dirs
+}
+
+/// Where every log file is now (a session started): the session later reads what came after.
+pub fn snapshot_offsets(now: SystemTime) -> Offsets {
+    let mut offsets = Offsets::new();
+    for (_, dir) in log_dirs() {
+        if !is_plain_dir(&dir) {
+            continue;
+        }
+        for (path, len) in recent_log_files(&dir, now) {
+            offsets.insert(path, len);
+        }
+    }
+    offsets
+}
+
+/// The files of this request: cleaned, within the budgets, at most [`MAX_FILES`]. With `since`
+/// only what was written after a session started.
+pub fn collect_files(now: SystemTime, since: Option<&Offsets>) -> Vec<LogFile> {
+    let mut raw: Vec<(String, String)> = Vec::new();
+    for (name, dir) in log_dirs() {
         if raw.len() >= MAX_FILES {
             break;
+        }
+        if let Some(text) = read_recent(&dir, MAX_FILE_BYTES, now, since) {
+            raw.push((name, text));
         }
     }
     let budget = per_file_budget(raw.len());
@@ -727,6 +822,113 @@ pub fn collect_files(now: SystemTime) -> Vec<LogFile> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Sessions (`--server`)
+// ---------------------------------------------------------------------------------------------
+
+/// One connection being recorded: the other computer, when it started, which role this
+/// computer had and where the log files were then.
+struct Session {
+    peer: Option<String>,
+    started_s: i64,
+    role: Option<String>,
+    offsets: Offsets,
+}
+
+static SESSIONS: Mutex<Option<HashMap<String, Session>>> = Mutex::new(None);
+/// Most sessions open at once (a leftover entry is dropped, oldest first).
+const MAX_SESSIONS: usize = 32;
+
+/// The connection key of a Host connection (its connection id) and of a Controller session
+/// (the id the UI process made): separate name spaces.
+fn host_key(conn_id: i32) -> String {
+    format!("h{conn_id}")
+}
+
+fn controller_key(sid: &str) -> String {
+    format!("c{sid}")
+}
+
+/// This computer's role as the contract names it.
+fn own_role() -> Option<String> {
+    super::installed_role().map(|role| role.as_str().to_owned())
+}
+
+/// `windows-x64` / `macos-arm64` like the release platforms; anything else `linux`.
+pub fn platform_name() -> &'static str {
+    if cfg!(windows) {
+        "windows-x64"
+    } else if cfg!(target_os = "macos") {
+        "macos-arm64"
+    } else {
+        "linux"
+    }
+}
+
+fn session_started(key: String, peer: Option<String>) {
+    if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) {
+        return;
+    }
+    let now = SystemTime::now();
+    let session = Session {
+        peer,
+        started_s: now_s(),
+        role: own_role(),
+        offsets: snapshot_offsets(now),
+    };
+    let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(HashMap::new);
+    if map.len() >= MAX_SESSIONS {
+        if let Some(oldest) = map
+            .iter()
+            .min_by_key(|(_, s)| s.started_s)
+            .map(|(key, _)| key.clone())
+        {
+            map.remove(&oldest);
+        }
+    }
+    map.insert(key, session);
+}
+
+/// The connection is over: its record (the logs written since it started) goes to the panel.
+/// A session whose start was not noted (the panel did not take logs then) sends nothing.
+fn session_ended(key: &str, reason: Reason, peer: Option<String>) {
+    let session = SESSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+        .and_then(|map| map.remove(key));
+    let Some(session) = session else {
+        return;
+    };
+    if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) {
+        return;
+    }
+    let ended = now_s();
+    let meta = Meta {
+        peer: peer.or(session.peer),
+        session_id: Some(key.to_owned()),
+        started: Some(session.started_s),
+        ended: Some(ended.max(session.started_s)),
+        app_version: Some(super::update::current_version()),
+        platform: Some(platform_name().to_owned()),
+        role: session.role,
+    };
+    let offsets = session.offsets;
+    let spawned = std::thread::Builder::new()
+        .name("sense-log-upload".to_owned())
+        .spawn(move || {
+            if take_slot(OPTION_SESSIONS, SESSION_PER_HOUR, now_s()) {
+                send_blocking(reason, meta, Some(&offsets));
+            } else {
+                log::info!("Sense Remote: session log skipped, {SESSION_PER_HOUR} an hour is the limit");
+            }
+        });
+    if let Err(err) = spawned {
+        log::warn!("Sense Remote: session log not started: {err}");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Sending (`--server`)
 // ---------------------------------------------------------------------------------------------
 
@@ -737,14 +939,15 @@ fn now_s() -> i64 {
         .unwrap_or(0)
 }
 
-/// Takes one of the hour's automatic slots (stored before sending, so a crash loop is counted).
-fn take_auto_slot(now: i64) -> bool {
+/// Takes one of the hour's slots of the limiter kept under `option` (stored before sending, so a
+/// crash loop is counted).
+fn take_slot(option: &str, per_hour: usize, now: i64) -> bool {
     let _lock = OPTIONS.lock().unwrap_or_else(|e| e.into_inner());
-    let sent = parse_sent(&config::LocalConfig::get_option(OPTION_SENT));
-    if !auto_allowed(&sent, now) {
+    let sent = parse_sent(&config::LocalConfig::get_option(option));
+    if recent(&sent, now).len() >= per_hour {
         return false;
     }
-    config::LocalConfig::set_option(OPTION_SENT.to_owned(), join_sent(&record_send(&sent, now)));
+    config::LocalConfig::set_option(option.to_owned(), join_sent(&record_send(&sent, now)));
     true
 }
 
@@ -771,12 +974,21 @@ impl Drop for Flight {
     }
 }
 
-/// Read, clean, sign and send. Blocking; runs on its own thread.
-fn send_blocking(reason: Reason, peer: Option<String>) {
-    let Some(_flight) = Flight::begin() else {
+/// Read, clean, sign and send. Blocking; runs on its own thread. Sessions of two connections
+/// that end together wait for each other (one send at a time).
+fn send_blocking(reason: Reason, meta: Meta, since: Option<&Offsets>) {
+    let mut flight = Flight::begin();
+    for _ in 0..30 {
+        if flight.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(2));
+        flight = Flight::begin();
+    }
+    let Some(_flight) = flight else {
         return;
     };
-    let files = collect_files(SystemTime::now());
+    let files = collect_files(SystemTime::now(), since);
     if files.is_empty() {
         log::info!("Sense Remote: no log to send ({})", reason.as_str());
         return;
@@ -785,8 +997,7 @@ fn send_blocking(reason: Reason, peer: Option<String>) {
     let uuid = crate::encode64(hbb_common::get_uuid());
     let (secret_key, _) = config::Config::get_key_pair();
     let ts = next_ts();
-    let Some(body) = signed_body(&id, &uuid, ts, reason.as_str(), peer.as_deref(), &files, &secret_key)
-    else {
+    let Some(body) = signed_body(&id, &uuid, ts, reason.as_str(), &meta, &files, &secret_key) else {
         log::warn!("Sense Remote: logs not sent, no device key");
         return;
     };
@@ -811,20 +1022,26 @@ fn send_blocking(reason: Reason, peer: Option<String>) {
     }
 }
 
-/// An automatic send (`--server` process): the panel takes logs, the hour's slots are not used
-/// up, and nothing else is being sent. Never blocks the caller.
+/// An error-triggered send (`--server` process): the panel takes logs, the hour's slots are not
+/// used up. Never blocks the caller.
 pub fn trigger_auto(reason: Reason, peer: Option<String>) {
     if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) || reason == Reason::Manual {
         return;
     }
-    if SENDING.load(Ordering::SeqCst) {
-        return;
-    }
+    let meta = Meta {
+        peer,
+        started: Some(now_s()),
+        ended: Some(now_s()),
+        app_version: Some(super::update::current_version()),
+        platform: Some(platform_name().to_owned()),
+        role: own_role(),
+        ..Meta::default()
+    };
     let spawned = std::thread::Builder::new()
         .name("sense-log-upload".to_owned())
         .spawn(move || {
-            if take_auto_slot(now_s()) {
-                send_blocking(reason, peer);
+            if take_slot(OPTION_SENT, AUTO_PER_HOUR, now_s()) {
+                send_blocking(reason, meta, None);
             } else {
                 log::info!("Sense Remote: log send skipped, {AUTO_PER_HOUR} an hour is the limit");
             }
@@ -845,9 +1062,17 @@ fn trigger_manual() {
         return;
     }
     LAST_MANUAL.store(now, Ordering::SeqCst);
+    let meta = Meta {
+        started: Some(now),
+        ended: Some(now),
+        app_version: Some(super::update::current_version()),
+        platform: Some(platform_name().to_owned()),
+        role: own_role(),
+        ..Meta::default()
+    };
     let spawned = std::thread::Builder::new()
         .name("sense-log-upload".to_owned())
-        .spawn(|| send_blocking(Reason::Manual, None));
+        .spawn(move || send_blocking(Reason::Manual, meta, None));
     if let Err(err) = spawned {
         log::warn!("Sense Remote: log send not started: {err}");
     }
@@ -873,13 +1098,20 @@ pub fn on_answer(panel_caps: Option<&[String]>, log_request: bool) {
     }
 }
 
-/// A Host connection closed (`src/server/connection.rs`): `remote` = an authorized desktop
-/// connection (not file transfer, port forward, terminal), `video_sent` = a video frame went
-/// out. Without a frame the Controller saw nothing, so the log goes to the panel.
-pub fn host_closed(remote: bool, video_sent: bool, peer_id: &str) {
-    if remote && !video_sent {
-        trigger_auto(Reason::ConnNoVideo, clean_peer(peer_id));
+/// A Host desktop connection was authorized (`src/server/connection.rs`): its record starts.
+pub fn host_started(conn_id: i32, peer_id: &str) {
+    session_started(host_key(conn_id), clean_peer(peer_id));
+}
+
+/// A Host connection closed: `remote` = an authorized desktop connection (not file transfer,
+/// port forward, terminal), `video_sent` = a video frame went out. Every desktop connection
+/// leaves its record; one that closed without a frame is marked `conn_no_video`.
+pub fn host_closed(conn_id: i32, remote: bool, video_sent: bool, peer_id: &str) {
+    if !remote {
+        return;
     }
+    let reason = if video_sent { Reason::Session } else { Reason::ConnNoVideo };
+    session_ended(&host_key(conn_id), reason, clean_peer(peer_id));
 }
 
 /// Every heartbeat (`update::extend_heartbeat`): the send happens when the update turns `failed`.
@@ -893,19 +1125,41 @@ pub fn on_update_state(failed: bool) {
     }
 }
 
-/// UI process (`src/client/io_loop.rs`): a Controller session closed without a picture, or could
-/// not be set up. Tells the `--server` process; never blocks, never sends a path.
-pub fn controller_closed(reason: Reason, peer_id: &str) {
-    if !SUPPORTED || reason == Reason::Manual {
+/// UI process (`src/client/io_loop.rs`): a Controller session starts. Returns the session id the
+/// end call needs; tells the `--server` process (which notes the log positions). Never blocks,
+/// never sends a path.
+pub fn controller_started(peer_id: &str) -> Option<String> {
+    if !SUPPORTED {
+        return None;
+    }
+    let peer = clean_peer(peer_id)?;
+    static COUNTER: AtomicI64 = AtomicI64::new(0);
+    let sid = format!("{}-{}", now_s(), COUNTER.fetch_add(1, Ordering::Relaxed));
+    let message = SenseLogIpc::ControllerStart {
+        sid: sid.clone(),
+        peer,
+    };
+    send_in_thread(message);
+    Some(sid)
+}
+
+/// UI process: the Controller session `sid` ended for `reason` (`session`, `conn_no_video` or
+/// `conn_failed`).
+pub fn controller_ended(sid: &str, reason: Reason, peer_id: &str) {
+    if !SUPPORTED || !matches!(reason, Reason::Session | Reason::ConnNoVideo | Reason::ConnFailed) {
         return;
     }
     let Some(peer) = clean_peer(peer_id) else {
         return;
     };
-    let message = SenseLogIpc::Controller {
-        reason: reason.as_str().to_owned(),
+    send_in_thread(SenseLogIpc::ControllerEnd {
+        sid: sid.to_owned(),
         peer,
-    };
+        reason: reason.as_str().to_owned(),
+    });
+}
+
+fn send_in_thread(message: SenseLogIpc) {
     let _ = std::thread::Builder::new()
         .name("sense-log-ipc".to_owned())
         .spawn(move || send_to_server(message));
@@ -930,17 +1184,60 @@ async fn send_to_server(message: SenseLogIpc) {
     let _ = conn.send(&crate::ipc::Data::SenseLog(message)).await;
 }
 
-/// Main IPC handler (`ipc::handle`): acts only in the `--server` process, and only on the two
-/// connection reasons with a clean peer id. No answer.
+/// Main IPC handler (`ipc::handle`): acts only in the `--server` process, only on clean ids and
+/// the three connection reasons. No answer.
 pub fn on_main_ipc(message: SenseLogIpc) {
     if !crate::is_server() {
         return;
     }
-    let SenseLogIpc::Controller { reason, peer } = message;
-    let (Some(reason), Some(peer)) = (Reason::from_ipc(&reason), clean_peer(&peer)) else {
+    match message {
+        SenseLogIpc::ControllerStart { sid, peer } => {
+            let (Some(sid), Some(peer)) = (clean_peer(&sid), clean_peer(&peer)) else {
+                return;
+            };
+            session_started(controller_key(&sid), Some(peer));
+        }
+        SenseLogIpc::ControllerEnd { sid, peer, reason } => {
+            let (Some(sid), Some(peer), Some(reason)) =
+                (clean_peer(&sid), clean_peer(&peer), Reason::from_ipc(&reason))
+            else {
+                return;
+            };
+            session_ended(&controller_key(&sid), reason, Some(peer));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Dart lines
+// ---------------------------------------------------------------------------------------------
+
+/// Lines a window may send per second (a runaway `debugPrint` loop must not fill the disk).
+const DART_LINES_PER_S: u32 = 300;
+static DART_WINDOW: Mutex<(i64, u32)> = Mutex::new((0, 0));
+
+fn dart_line_allowed(now: i64) -> bool {
+    let mut window = DART_WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+    if window.0 != now {
+        *window = (now, 0);
+    }
+    window.1 += 1;
+    window.1 <= DART_LINES_PER_S
+}
+
+/// `main_sense_dart_log` (FFI): a Dart error or `debugPrint` line goes into this process's Rust
+/// log, which is where the session record reads it from. `level` is `error`, `warn` or anything
+/// else (debug). At most 4000 characters per line.
+pub fn dart_line(level: &str, line: &str) {
+    if !dart_line_allowed(now_s()) {
         return;
-    };
-    trigger_auto(reason, Some(peer));
+    }
+    let line: String = line.chars().take(4000).collect();
+    match level {
+        "error" => log::error!(target: "dart", "{line}"),
+        "warn" => log::warn!(target: "dart", "{line}"),
+        _ => log::debug!(target: "dart", "{line}"),
+    }
 }
 
 #[cfg(test)]
@@ -1099,7 +1396,8 @@ connected peer 123456789
     fn budgets_follow_the_contract() {
         assert_eq!(per_file_budget(0), MAX_FILE_BYTES);
         assert_eq!(per_file_budget(1), MAX_FILE_BYTES);
-        assert_eq!(per_file_budget(4), MAX_FILE_BYTES);
+        assert_eq!(per_file_budget(2), MAX_FILE_BYTES);
+        assert_eq!(per_file_budget(4), MAX_TOTAL_BYTES / 4);
         assert_eq!(per_file_budget(8), MAX_TOTAL_BYTES / 8);
         for count in 1..=MAX_FILES {
             assert!(per_file_budget(count) * count <= MAX_TOTAL_BYTES);
@@ -1154,6 +1452,13 @@ connected peer 123456789
 
     // ---- request body ----
 
+    fn peer(id: &str) -> Meta {
+        Meta {
+            peer: Some(id.to_owned()),
+            ..Meta::default()
+        }
+    }
+
     fn files() -> Vec<LogFile> {
         vec![
             LogFile { name: "server-sunucu.log".to_owned(), text: "line \"1\"\nş\n".to_owned() },
@@ -1163,7 +1468,7 @@ connected peer 123456789
 
     #[test]
     fn signed_bytes_are_the_documented_object() {
-        let bytes = signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_failed", Some("987654321"), &files());
+        let bytes = signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_failed", &peer("987654321"), &files());
         let text = String::from_utf8(bytes).unwrap();
         let rest = text.strip_prefix("sense-remote/client-log/v1\n").unwrap();
         let object: Value = serde_json::from_str(rest).unwrap();
@@ -1173,10 +1478,10 @@ connected peer 123456789
         assert_eq!(object["files"][0]["name"], "server-sunucu.log");
         assert_eq!(object["files"][0]["sha256"], sha256_hex("line \"1\"\nş\n"));
         // Keys sorted, no spaces (JCS), and the text itself is not in the signed bytes.
-        assert!(rest.starts_with("{\"conn_peer_id\":"));
+        assert!(rest.starts_with("{\"app_version\":null,\"conn_peer_id\":"));
         assert!(!rest.contains("line"));
         // No peer: null.
-        let none = signed_bytes("1", "u", 1, "manual", None, &[]);
+        let none = signed_bytes("1", "u", 1, "manual", &Meta::default(), &[]);
         let none = String::from_utf8(none).unwrap();
         assert!(none.contains("\"conn_peer_id\":null"));
         assert!(none.contains("\"files\":[]"));
@@ -1198,7 +1503,7 @@ connected peer 123456789
     fn signed_body_verifies_with_the_device_key() {
         sodiumoxide::init().unwrap();
         let (pk, sk) = sign::gen_keypair();
-        let body = signed_body("123456789", "dXVpZA", 1_795_000_000, "conn_no_video", Some("987654321"), &files(), &sk.0)
+        let body = signed_body("123456789", "dXVpZA", 1_795_000_000, "conn_no_video", &peer("987654321"), &files(), &sk.0)
             .unwrap();
         let keys: Vec<&String> = body.as_object().unwrap().keys().collect();
         assert_eq!(keys.len(), 7);
@@ -1210,25 +1515,25 @@ connected peer 123456789
         let sig = body["sig"].as_str().unwrap();
         assert_eq!(sig.len(), 86);
         let pk = URL_SAFE_NO_PAD.encode(pk.0);
-        let good = signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_no_video", Some("987654321"), &files());
+        let good = signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_no_video", &peer("987654321"), &files());
         assert!(verify(&pk, &good, sig));
         // Another text, reason, peer or time: the signature no longer holds.
         let mut changed = files();
         changed[0].text.push('x');
         for other in [
-            signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_no_video", Some("987654321"), &changed),
-            signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_failed", Some("987654321"), &files()),
-            signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_no_video", None, &files()),
-            signed_bytes("123456789", "dXVpZA", 1_795_000_001, "conn_no_video", Some("987654321"), &files()),
+            signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_no_video", &peer("987654321"), &changed),
+            signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_failed", &peer("987654321"), &files()),
+            signed_bytes("123456789", "dXVpZA", 1_795_000_000, "conn_no_video", &Meta::default(), &files()),
+            signed_bytes("123456789", "dXVpZA", 1_795_000_001, "conn_no_video", &peer("987654321"), &files()),
         ] {
             assert!(!verify(&pk, &other, sig));
         }
         // No peer: the field is left out (the panel's schema is strict about unknown names only).
-        let body = signed_body("1", "u", 1, "manual", None, &[], &sk.0).unwrap();
+        let body = signed_body("1", "u", 1, "manual", &Meta::default(), &[], &sk.0).unwrap();
         assert!(body.get("conn_peer_id").is_none());
         // No key, no body.
-        assert_eq!(signed_body("1", "u", 1, "manual", None, &[], &[]), None);
-        assert_eq!(signed_body("1", "u", 1, "manual", None, &[], &[0u8; 32]), None);
+        assert_eq!(signed_body("1", "u", 1, "manual", &Meta::default(), &[], &[]), None);
+        assert_eq!(signed_body("1", "u", 1, "manual", &Meta::default(), &[], &[0u8; 32]), None);
     }
 
     // ---- gates ----
@@ -1242,25 +1547,105 @@ connected peer 123456789
     }
 
     #[test]
-    fn ipc_takes_only_the_two_connection_reasons() {
+    fn ipc_takes_only_the_three_connection_reasons() {
+        assert_eq!(Reason::from_ipc("session"), Some(Reason::Session));
         assert_eq!(Reason::from_ipc("conn_no_video"), Some(Reason::ConnNoVideo));
         assert_eq!(Reason::from_ipc("conn_failed"), Some(Reason::ConnFailed));
         for other in ["manual", "update_failed", "crash", "", "CONN_FAILED"] {
             assert_eq!(Reason::from_ipc(other), None, "{other}");
         }
+        assert_eq!(Reason::Session.as_str(), "session");
         assert_eq!(Reason::ConnNoVideo.as_str(), "conn_no_video");
         assert_eq!(Reason::UpdateFailed.as_str(), "update_failed");
     }
 
     #[test]
-    fn ipc_message_round_trips_and_carries_no_path() {
-        let message = SenseLogIpc::Controller {
-            reason: "conn_failed".to_owned(),
-            peer: "987654321".to_owned(),
+    fn ipc_messages_round_trip_and_carry_no_path() {
+        for message in [
+            SenseLogIpc::ControllerStart {
+                sid: "1795000000-0".to_owned(),
+                peer: "987654321".to_owned(),
+            },
+            SenseLogIpc::ControllerEnd {
+                sid: "1795000000-0".to_owned(),
+                peer: "987654321".to_owned(),
+                reason: "session".to_owned(),
+            },
+        ] {
+            let json = serde_json::to_string(&message).unwrap();
+            assert_eq!(serde_json::from_str::<SenseLogIpc>(&json).unwrap(), message);
+            assert!(!json.contains('\') && !json.contains('/'));
+        }
+    }
+
+    #[test]
+    fn session_keys_do_not_collide() {
+        assert_eq!(host_key(7), "h7");
+        assert_eq!(controller_key("1795-0"), "c1795-0");
+        assert_ne!(host_key(1), controller_key("1"));
+    }
+
+    #[test]
+    fn platform_names_are_release_platforms() {
+        let name = platform_name();
+        assert!(["windows-x64", "macos-arm64", "linux"].contains(&name));
+        assert!(name.len() <= 32);
+    }
+
+    #[test]
+    fn dart_lines_are_limited_per_second() {
+        let now = 1_795_000_000;
+        let mut taken = 0;
+        for _ in 0..DART_LINES_PER_S + 50 {
+            if dart_line_allowed(now) {
+                taken += 1;
+            }
+        }
+        assert_eq!(taken, DART_LINES_PER_S);
+        // The next second starts over.
+        assert!(dart_line_allowed(now + 1));
+    }
+
+    #[test]
+    fn session_request_carries_all_fields_and_the_signature_covers_them() {
+        sodiumoxide::init().unwrap();
+        let (pk, sk) = sign::gen_keypair();
+        let meta = Meta {
+            peer: Some("987654321".to_owned()),
+            session_id: Some("h12".to_owned()),
+            started: Some(1_795_000_000),
+            ended: Some(1_795_000_090),
+            app_version: Some(6),
+            platform: Some("windows-x64".to_owned()),
+            role: Some("host".to_owned()),
         };
-        let json = serde_json::to_string(&message).unwrap();
-        assert_eq!(serde_json::from_str::<SenseLogIpc>(&json).unwrap(), message);
-        assert!(!json.contains('\\') && !json.contains('/'));
+        let body = signed_body("1", "u", 1_795_000_100, "session", &meta, &files(), &sk.0).unwrap();
+        for (key, want) in [
+            ("session_id", json!("h12")),
+            ("started_at", json!(1_795_000_000)),
+            ("ended_at", json!(1_795_000_090)),
+            ("app_version", json!(6)),
+            ("platform", json!("windows-x64")),
+            ("role", json!("host")),
+            ("conn_peer_id", json!("987654321")),
+            ("reason", json!("session")),
+        ] {
+            assert_eq!(body[key], want, "{key}");
+        }
+        let sig = body["sig"].as_str().unwrap();
+        let pk = URL_SAFE_NO_PAD.encode(pk.0);
+        let good = signed_bytes("1", "u", 1_795_000_100, "session", &meta, &files());
+        assert!(verify(&pk, &good, sig));
+        // Every one of the fields is covered.
+        let mut other = meta.clone();
+        other.role = Some("controller".to_owned());
+        assert!(!verify(&pk, &signed_bytes("1", "u", 1_795_000_100, "session", &other, &files()), sig));
+        let mut other = meta.clone();
+        other.ended = Some(1_795_000_091);
+        assert!(!verify(&pk, &signed_bytes("1", "u", 1_795_000_100, "session", &other, &files()), sig));
+        let mut other = meta;
+        other.session_id = None;
+        assert!(!verify(&pk, &signed_bytes("1", "u", 1_795_000_100, "session", &other, &files()), sig));
     }
 
     // ---- reading ----
@@ -1281,18 +1666,18 @@ connected peer 123456789
         let dir = temp_dir("recent");
         fs::write(dir.join("server_rCURRENT.log"), "one\ntwo\nthree\n").unwrap();
         fs::write(dir.join("notes.txt"), "not a log").unwrap();
-        let text = read_recent(&dir, 1000, SystemTime::now()).unwrap();
+        let text = read_recent(&dir, 1000, SystemTime::now(), None).unwrap();
         assert_eq!(text, "one\ntwo\nthree\n");
         // Budget smaller than the file: the end, whole lines only.
-        let text = read_recent(&dir, 12, SystemTime::now()).unwrap();
+        let text = read_recent(&dir, 12, SystemTime::now(), None).unwrap();
         assert_eq!(text, "two\nthree\n");
         // Nothing recent: files older than the window are not about this problem.
         let far = SystemTime::now() + Duration::from_secs(RECENT_S + 3600);
-        assert_eq!(read_recent(&dir, 1000, far), None);
+        assert_eq!(read_recent(&dir, 1000, far, None), None);
         // A directory that does not exist, or is empty.
-        assert_eq!(read_recent(&dir.join("none"), 1000, SystemTime::now()), None);
+        assert_eq!(read_recent(&dir.join("none"), 1000, SystemTime::now(), None), None);
         let empty = temp_dir("empty");
-        assert_eq!(read_recent(&empty, 1000, SystemTime::now()), None);
+        assert_eq!(read_recent(&empty, 1000, SystemTime::now(), None), None);
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&empty);
     }
@@ -1304,7 +1689,7 @@ connected peer 123456789
         // Make the second one newer.
         std::thread::sleep(Duration::from_millis(1100));
         fs::write(dir.join("a_rCURRENT.log"), "new1\n").unwrap();
-        let text = read_recent(&dir, 1000, SystemTime::now()).unwrap();
+        let text = read_recent(&dir, 1000, SystemTime::now(), None).unwrap();
         assert_eq!(text, "old1\nold2\n\nnew1\n");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1316,11 +1701,39 @@ connected peer 123456789
         let secret = temp_dir("secret");
         fs::write(secret.join("passwd.log"), "root:x:0:0\n").unwrap();
         std::os::unix::fs::symlink(secret.join("passwd.log"), dir.join("evil.log")).unwrap();
-        assert_eq!(read_recent(&dir, 1000, SystemTime::now()), None);
+        assert_eq!(read_recent(&dir, 1000, SystemTime::now(), None), None);
         let linked_dir = temp_dir("linkdir").join("server");
         std::os::unix::fs::symlink(&secret, &linked_dir).unwrap();
-        assert_eq!(read_recent(&linked_dir, 1000, SystemTime::now()), None);
+        assert_eq!(read_recent(&linked_dir, 1000, SystemTime::now(), None), None);
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&secret);
+    }
+
+    #[test]
+    fn a_session_reads_only_what_came_after_its_start() {
+        let dir = temp_dir("since");
+        let old = dir.join("server_rCURRENT.log");
+        fs::write(&old, "before 1\nbefore 2\n").unwrap();
+        let mut offsets = Offsets::new();
+        for (path, len) in recent_log_files(&dir, SystemTime::now()) {
+            offsets.insert(path, len);
+        }
+        assert_eq!(offsets.get(&old), Some(&18));
+        // Nothing written yet: nothing to read.
+        assert_eq!(read_recent(&dir, 1000, SystemTime::now(), Some(&offsets)), None);
+        // Appended during the session, and a file that did not exist at the start.
+        let mut file = fs::OpenOptions::new().append(true).open(&old).unwrap();
+        std::io::Write::write_all(&mut file, b"during 1\nduring 2\n").unwrap();
+        fs::write(dir.join("server_r2026-11-24.log"), "rotated 1\n").unwrap();
+        let text = read_recent(&dir, 1000, SystemTime::now(), Some(&offsets)).unwrap();
+        assert!(text.contains("during 1\nduring 2\n"), "{text}");
+        assert!(text.contains("rotated 1"), "{text}");
+        assert!(!text.contains("before"), "{text}");
+        // A file now shorter than at the start (replaced): read from its start.
+        let mut stale = Offsets::new();
+        stale.insert(old.clone(), 10_000);
+        let text = read_recent(&dir, 1000, SystemTime::now(), Some(&stale)).unwrap();
+        assert!(text.contains("before 1"), "{text}");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

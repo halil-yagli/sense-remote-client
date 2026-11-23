@@ -38,13 +38,28 @@ import 'sense/screens/controller/sense_home_strings.dart' // Sense Remote (A2c)
     show SenseHomeRole, senseHomeRoleFrom;
 import 'sense/screens/controller/sense_update_model.dart'; // Sense Remote (A2c)
 import 'sense/strings/common.dart'; // Sense Remote (A2c)
+import 'sense/diag_log.dart'; // Sense Remote (karar #86)
 
 /// Basic window and launch properties.
 int? kWindowId;
 WindowType? kWindowType;
 late List<String> kBootArgs;
 
+/// Sense Remote (karar #86): every window (the multi-window engines run `main` too) records its
+/// Flutter errors, uncaught errors, `debugPrint` and `print` lines into the process log, where
+/// the connection record reads them.
 Future<void> main(List<String> args) async {
+  await runZonedGuarded(
+    () async {
+      senseInstallDiagLog();
+      await _senseMain(args);
+    },
+    senseDiagZoneError,
+    zoneSpecification: senseDiagZoneSpec(),
+  );
+}
+
+Future<void> _senseMain(List<String> args) async {
   earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
 

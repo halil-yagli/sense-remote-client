@@ -2619,6 +2619,12 @@ pub fn main_sense_role_reopen() -> String {
     crate::sense::role_change::ffi_role_reopen()
 }
 
+// Sense Remote (karar #86): Dart errors and `debugPrint` lines go into the Rust log of this
+// process, from where the connection record reads them.
+pub fn main_sense_dart_log(level: String, line: String) {
+    crate::sense::log_upload::dart_line(&level, &line);
+}
+
 // S3 / H1 (D3c): name and location changed on the Host.
 pub fn main_sense_identity() -> String {
     crate::sense::identity_set::ffi_identity()

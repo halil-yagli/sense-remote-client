@@ -1297,8 +1297,10 @@ impl Connection {
         conn.sense_set_recording(false);
         // Sense Remote (H2): the connection goes into the Host's "Son bağlantılar" list.
         crate::sense::host_recent::ended(conn.inner.id());
-        // Sense Remote (karar #84): no picture ever went out -> the logs go to the panel.
+        // Sense Remote (karar #84, #86): every desktop connection leaves its record for the
+        // panel; one where no picture ever went out is marked.
         crate::sense::log_upload::host_closed(
+            conn.inner.id(),
             conn.is_authed_remote_conn(),
             conn.sense_video_sent,
             &conn.lr.my_id,
@@ -2011,6 +2013,8 @@ impl Connection {
         // Sense Remote (H2): the Host's "Son bağlantılar" list keeps remote connections.
         if auth_conn_type == AuthConnType::Remote {
             crate::sense::host_recent::started(self.inner.id(), &self.lr.my_name);
+            // Sense Remote (karar #86): the connection record starts (log positions are noted).
+            crate::sense::log_upload::host_started(self.inner.id(), &self.lr.my_id);
         }
         self.session_last_recv_time = SESSIONS
             .lock()
