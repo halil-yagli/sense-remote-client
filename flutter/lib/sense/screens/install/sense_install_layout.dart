@@ -481,7 +481,7 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
             // instead of breaking in the middle of a word (K5).
             Text(value,
                 key: Key('sense-tile-value-$label'),
-                maxLines: value.contains(RegExp(r's')) ? null : 1,
+                maxLines: value.contains(RegExp(r'\s')) ? null : 1,
                 overflow: TextOverflow.ellipsis,
                 style: SenseTextStyles.of(
                     size: valueSize,
