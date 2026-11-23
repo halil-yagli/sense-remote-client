@@ -1251,6 +1251,8 @@ impl Connection {
 
         // Sense Remote (S7-b): a recording ends with its connection.
         conn.sense_set_recording(false);
+        // Sense Remote (H2): the connection goes into the Host's "Son bağlantılar" list.
+        crate::sense::host_recent::ended(conn.inner.id());
         // Sense Remote (S12): counts only, never the chat text or file names.
         conn.post_conn_audit(json!({
             "action": "close",
@@ -1956,6 +1958,10 @@ impl Connection {
             self.lr.clone(),
         ));
         drop(sense_admission);
+        // Sense Remote (H2): the Host's "Son bağlantılar" list keeps remote connections.
+        if auth_conn_type == AuthConnType::Remote {
+            crate::sense::host_recent::started(self.inner.id(), &self.lr.my_name);
+        }
         self.session_last_recv_time = SESSIONS
             .lock()
             .unwrap()
@@ -4786,6 +4792,11 @@ impl Connection {
             lock.subscribe(&old_service_name, self.inner.clone(), false);
         }
         lock.subscribe(&new_service_name, self.inner.clone(), true);
+        // Sense Remote (H2): most screens watched at once, for "Son bağlantılar".
+        crate::sense::host_recent::screens(
+            self.inner.id(),
+            lock.get_subbed_displays_count(self.inner.id()),
+        );
         self.display_idx = display_idx;
         true
     }
@@ -4870,7 +4881,10 @@ impl Connection {
             } else {
                 lock.capture_displays(self.inner.clone(), video_source, &valid_set, true, true);
             }
-            self.multi_ui_session = lock.get_subbed_displays_count(self.inner.id()) > 1;
+            let subbed = lock.get_subbed_displays_count(self.inner.id());
+            self.multi_ui_session = subbed > 1;
+            // Sense Remote (H2): most screens watched at once, for "Son bağlantılar".
+            crate::sense::host_recent::screens(self.inner.id(), subbed);
             if self.follow_remote_window {
                 lock.subscribe(
                     NAME_WINDOW_FOCUS,
