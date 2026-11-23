@@ -432,6 +432,13 @@ class FfiModel with ChangeNotifier {
         parent.target?.chatModel.onVoiceCallIncoming();
       } else if (name == 'update_voice_call_state') {
         parent.target?.serverModel.updateVoiceCallState(evt);
+      } else if (name == 'sense_recording') {
+        // Sense Remote (YH H3, H4): the Controller started / stopped recording.
+        final id = int.tryParse(evt['id']?.toString() ?? '');
+        if (id != null) {
+          parent.target?.serverModel
+              .senseUpdateRecording(id, evt['on']?.toString() == 'true');
+        }
       } else if (name == 'fingerprint') {
         FingerprintState.find(peerId).value = evt['fingerprint'] ?? '';
       } else if (name == "sync_peer_hash_password_to_personal_ab") {

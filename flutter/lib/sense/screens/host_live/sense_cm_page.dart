@@ -236,9 +236,8 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
             recording: selected.senseRecording ? _clock.recordingFor(selected.id) : null,
             canAccept: serverModel.approveMode != 'password',
             canCall: SenseHostChatCall.canStart,
-            // TODO(D3d2): ataç and drop (main_sense_host_offer_files) once
-            // SenseHostChatFiles.available; then pass the system file chooser.
-            pickFiles: null,
+            // Ataç and drop: main_sense_host_offer_files (D3d2).
+            pickFiles: SenseHostChatFiles.available ? senseHostPickFiles : null,
             from: SenseCm.anchor.bottom ? SensePopupFrom.bottom : SensePopupFrom.top,
             actions: SenseHostCardActions(
               onMinimize: SenseCm.closePanel,

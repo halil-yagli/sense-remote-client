@@ -380,6 +380,13 @@ pub struct Connection {
     sense_recording_since: Option<Instant>,
     // Sense Remote (S12): chat messages and chat files of this connection, for the closing audit.
     sense_chat: crate::sense::chat_file::ConnCounts,
+    // Sense Remote (S5): (offer id, real path) of the files the Host card offered on this
+    // connection — the only Host files the Controller may read.
+    sense_offers: Vec<(i32, String)>,
+    // Sense Remote (S5): offers the Controller is reading; an offer leaves the list when its read ends.
+    sense_offers_reading: Vec<i32>,
+    // Sense Remote (H4, O11): time stamp of a call the Host started, until the Controller answers.
+    sense_call_out: Option<i64>,
     trusted_device: Option<crate::trusted_devices::host::Attempt>,
     keyboard: bool,
     clipboard: bool,
@@ -578,6 +585,9 @@ impl Connection {
             awaiting_2fa: false,
             sense_recording_since: None,
             sense_chat: Default::default(),
+            sense_offers: Vec::new(),
+            sense_offers_reading: Vec::new(),
+            sense_call_out: None,
             trusted_device: None,
             // Defer display enumeration until login succeeds. Monitor login replaces this
             // with the primary index returned with the refreshed display snapshot.
@@ -994,6 +1004,14 @@ impl Connection {
                         ipc::Data::VoiceCallResponse(accepted) => {
                             conn.handle_voice_call(accepted).await;
                         }
+                        // Sense Remote (H4, O11): "Ara" on the Host card.
+                        ipc::Data::StartVoiceCall => {
+                            conn.sense_start_call().await;
+                        }
+                        // Sense Remote (S5, O11): file offers and call settings of the Host card.
+                        ipc::Data::Config((name, value)) => {
+                            conn.sense_cm_config(&name, value).await;
+                        }
                         ipc::Data::CloseVoiceCall(_reason) => {
                             log::debug!("Close the voice call from the ipc.");
                             conn.close_voice_call().await;
@@ -1013,11 +1031,13 @@ impl Connection {
                         }
                         ipc::Data::FileReadDone { id, file_num, conn_id } => {
                             if conn_id == conn.inner.id() {
+                                conn.sense_offer_end(id, true); // Sense Remote (S5)
                                 conn.handle_file_read_done(id, file_num).await;
                             }
                         }
                         ipc::Data::FileReadError { id, file_num, err, conn_id } => {
                             if conn_id == conn.inner.id() {
+                                conn.sense_offer_end(id, false); // Sense Remote (S5)
                                 conn.handle_file_read_error(id, file_num, err).await;
                             }
                         }
@@ -1193,6 +1213,21 @@ impl Connection {
                         }
                     }
                     conn.file_remove_log_control.on_timer().drain(..).map(|x| conn.send_to_cm(x)).count();
+                    // Sense Remote (S5): an offer whose read ended leaves the white list.
+                    if !conn.sense_offers_reading.is_empty() {
+                        let (read_jobs, cm_ids) = (&conn.read_jobs, &conn.cm_read_job_ids);
+                        crate::sense::chat_file::prune_offers(
+                            &mut conn.sense_offers,
+                            &mut conn.sense_offers_reading,
+                            |id| read_jobs.iter().any(|j| j.id() == id) || cm_ids.contains(&id),
+                        );
+                    }
+                    // Sense Remote (O11): microphone level for the Host card during a call.
+                    if conn.voice_calling {
+                        if let Some(level) = crate::sense::chat_file::level_for_cm() {
+                            conn.send_to_cm(ipc::Data::Config((crate::sense::chat_file::CM_CALL_LEVEL.to_owned(), Some(level))));
+                        }
+                    }
                     #[cfg(feature = "hwcodec")]
                     conn.update_supported_encoding();
                 }
@@ -3607,13 +3642,27 @@ impl Connection {
                     // second (file transfer) connection is opened. Only the upload into the incoming
                     // folder and its confirm / cancel; browsing and reading the Host stay off. The
                     // one-way rule below still applies.
+                    // A file the Host card offered is read only through its offer id (white list).
+                    let mut fa = fa;
                     let mut sense_chat_file = false;
                     if !handle_fa {
                         match crate::sense::chat_file::host_file_action(
                             self.sense_chat_files_enabled(),
                             &fa,
+                            &self.sense_offers,
                         ) {
                             crate::sense::chat_file::HostAction::Handle => {
+                                handle_fa = true;
+                                sense_chat_file = true;
+                            }
+                            crate::sense::chat_file::HostAction::Offer(path) => {
+                                if let Some(file_action::Union::Send(s)) = fa.union.as_mut() {
+                                    s.path = path;
+                                    crate::sense::chat_file::offer_reading(
+                                        &mut self.sense_offers_reading,
+                                        s.id,
+                                    );
+                                }
                                 handle_fa = true;
                                 sense_chat_file = true;
                             }
@@ -3851,6 +3900,11 @@ impl Connection {
                                             return true;
                                         }
                                     }
+                                }
+                                // Sense Remote (S12): an offered chat file is counted once; a
+                                // resume of the same offer is not a new file.
+                                if sense_chat_file && s.file_num == 0 {
+                                    self.sense_chat.add_file();
                                 }
                                 self.file_transferred = true;
                             }
@@ -4212,6 +4266,9 @@ impl Connection {
                             NonZeroI64::new(request.req_timestamp)
                                 .unwrap_or(NonZeroI64::new(get_time()).unwrap()),
                         );
+                        // Sense Remote (H4): both sides called at once; the Controller's call wins
+                        // (it ignores ours), answering it ends our request.
+                        self.sense_call_out = None;
                         // Notify the connection manager.
                         self.send_to_cm(Data::VoiceCallIncoming);
                     } else {
@@ -4220,6 +4277,14 @@ impl Connection {
                 }
                 Some(message::Union::VoiceCallResponse(_response)) => {
                     // TODO: Maybe we can do a voice call from cm directly.
+                    // Sense Remote (H4, O11): the Controller answers a call the Host card
+                    // started; only the answer to our own request counts.
+                    if self.sense_call_out.is_some()
+                        && self.sense_call_out == Some(_response.req_timestamp)
+                    {
+                        self.sense_call_out = None;
+                        self.sense_call_answered(_response.accepted);
+                    }
                 }
                 Some(message::Union::ScreenshotRequest(request)) => {
                     if let Some(tx) = self.inner.tx.clone() {
@@ -5028,7 +5093,129 @@ impl Connection {
         }
     }
 
+    // Sense Remote (H4, O11): "Ara" on the Host card. The Controller answers with its own call
+    // buttons (`VoiceCallResponse`, see `sense_call_answered`).
+    async fn sense_start_call(&mut self) {
+        if self.voice_calling {
+            return;
+        }
+        // The Controller is calling at this moment (also when both sides pressed "Ara" at
+        // once): "Ara" answers that call; our own request is dropped.
+        if self.voice_call_request_timestamp.is_some() {
+            self.sense_call_out = None;
+            self.handle_voice_call(true).await;
+            return;
+        }
+        if self.sense_call_out.is_some() {
+            return;
+        }
+        if !self.authorized || !self.is_remote() {
+            log::info!("sense call: not started (no remote session, or a call already)");
+            self.send_to_cm(Data::CloseVoiceCall("".to_owned()));
+            return;
+        }
+        let msg = new_voice_call_request(true);
+        self.sense_call_out = Some(msg.voice_call_request().req_timestamp);
+        self.send(msg).await;
+    }
+
+    // Sense Remote (H4, O11): same as an accepted / refused Controller call (`handle_voice_call`),
+    // without a response to send.
+    fn sense_call_answered(&mut self, accepted: bool) {
+        if accepted {
+            crate::audio_service::set_voice_call_input_device(
+                crate::get_default_sound_input(),
+                false,
+            );
+            self.send_to_cm(Data::StartVoiceCall);
+        } else {
+            self.send_to_cm(Data::CloseVoiceCall("".to_owned()));
+        }
+        self.voice_calling = accepted;
+        if self.is_authed_view_camera_conn() {
+            if let Some(s) = self.server.upgrade() {
+                s.write().unwrap().subscribe(
+                    super::audio_service::NAME,
+                    self.inner.clone(),
+                    self.audio_enabled() && accepted,
+                );
+            }
+        }
+    }
+
+    // Sense Remote (S5, O11): a message of the Host card on the CM channel.
+    async fn sense_cm_config(&mut self, name: &str, value: Option<String>) {
+        if name == crate::sense::chat_file::CM_OFFER {
+            let offer = value
+                .as_deref()
+                .and_then(crate::sense::chat_file::conn_offer)
+                .filter(|_| self.authorized && self.is_remote());
+            match offer {
+                Some((id, path, content)) if self.sense_chat_files_enabled() => {
+                    if !self.sense_offers.iter().any(|(o, _)| *o == id) {
+                        self.sense_offers.push((id, path));
+                    }
+                    self.send(crate::sense::chat_file::offer_message(content)).await;
+                }
+                Some((id, _, _)) => {
+                    log::info!("sense chat file offer: files are not allowed on this connection");
+                    self.sense_offer_failed(id);
+                }
+                None => {
+                    if let Some(id) = value
+                        .as_deref()
+                        .and_then(|v| serde_json::from_str::<Value>(v).ok())
+                        .and_then(|v| v["id"].as_i64())
+                    {
+                        self.sense_offer_failed(id as i32);
+                    }
+                }
+            }
+            return;
+        }
+        crate::sense::chat_file::conn_call_setting(name, value.as_deref());
+    }
+
+    // Sense Remote (S5): an offered file is one of this connection's offers.
+    fn sense_is_offer(&self, id: i32) -> bool {
+        self.sense_offers.iter().any(|(o, _)| *o == id)
+    }
+
+    // Sense Remote (S5): the path an offered file is shown under to the Controller (its mark).
+    fn sense_dir_path(&self, id: i32, path: String) -> String {
+        match self.sense_offers.iter().find(|(o, _)| *o == id) {
+            Some((_, real)) => {
+                let name = std::path::Path::new(real)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                crate::sense::chat_file::offer_source(id, &name)
+            }
+            None => path,
+        }
+    }
+
+    // Sense Remote (S5): the Host card's row of an offer ends (Windows: the CM read it).
+    fn sense_offer_end(&mut self, id: i32, ok: bool) {
+        if self.sense_is_offer(id) {
+            self.send_to_cm(ipc::Data::Config((
+                crate::sense::chat_file::CM_OFFER_END.to_owned(),
+                Some(json!({ "id": id, "ok": ok }).to_string()),
+            )));
+        }
+    }
+
+    // Sense Remote (S5): an offer that was not sent ends with an error on the Host card.
+    fn sense_offer_failed(&mut self, id: i32) {
+        self.send_to_cm(ipc::Data::Config((
+            crate::sense::chat_file::CM_OFFER_END.to_owned(),
+            Some(json!({ "id": id, "ok": false }).to_string()),
+        )));
+    }
+
     pub async fn close_voice_call(&mut self) {
+        // Sense Remote (H4): a call the Host started and the Controller did not answer yet ends too.
+        self.sense_call_out = None;
         crate::audio_service::set_voice_call_input_device(None, true);
         // Notify the connection manager that the voice call has been closed.
         self.send_to_cm(Data::CloseVoiceCall("".to_owned()));
@@ -5495,6 +5682,7 @@ impl Connection {
         match result {
             Err(error) => {
                 self.cm_read_job_ids.remove(&id);
+                self.sense_offer_end(id, false); // Sense Remote (S5)
                 self.send(fs::new_error(id, error, 0)).await;
             }
             Ok(dir_bytes) => {
@@ -5510,13 +5698,19 @@ impl Connection {
                     }
                 };
 
-                let path_str = dir.path.clone();
+                // Sense Remote (S5): an offered file is named by its mark, not its Host path.
+                let path_str = self.sense_dir_path(id, dir.path.clone());
                 let file_entries: Vec<FileEntry> = dir.entries.into();
 
                 // Send file directory to client
                 self.send(fs::new_dir(id, path_str.clone(), file_entries.clone()))
                     .await;
 
+                // Sense Remote (S12): an offered chat file is only counted, its name is not sent.
+                if self.sense_is_offer(id) {
+                    self.file_transferred = true;
+                    return;
+                }
                 // Post audit for file transfer
                 self.post_file_audit(
                     FileAuditType::RemoteSend,
@@ -5637,7 +5831,10 @@ impl Connection {
     async fn process_new_read_job(&mut self, mut job: fs::TransferJob, path: String) {
         let files = job.files().to_owned();
         let job_type = job.r#type;
-        self.send(fs::new_dir(job.id, path.clone(), files.clone()))
+        let job_id = job.id;
+        // Sense Remote (S5): an offered file is named by its mark, not its Host path.
+        let dir_path = self.sense_dir_path(job_id, path.clone());
+        self.send(fs::new_dir(job.id, dir_path, files.clone()))
             .await;
         job.is_remote = true;
         job.conn_id = self.inner.id();
@@ -5648,6 +5845,10 @@ impl Connection {
         } else {
             path
         };
+        // Sense Remote (S12): an offered chat file is only counted, its name is not sent.
+        if self.sense_is_offer(job_id) {
+            return;
+        }
         self.post_file_audit(
             FileAuditType::RemoteSend,
             &audit_path,
