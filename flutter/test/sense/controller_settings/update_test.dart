@@ -479,7 +479,7 @@ void main() {
           SenseUpdateWatch(
               backend: b,
               interval: const Duration(hours: 1),
-              builder: (_, strip) => strip ?? const SizedBox()),
+              builder: (_, strip) => SizedBox(width: 1000, height: 600, child: strip)),
           center: false);
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));

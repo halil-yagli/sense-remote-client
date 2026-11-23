@@ -193,6 +193,8 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
           options: options,
           value: _raw(k),
           locked: locked,
+          // Prototype `.aseg`: own width on the right of the row.
+          expand: false,
           semanticLabel: label,
           onChanged: locked ? null : (v) => _setChoice(k, v),
         ),
