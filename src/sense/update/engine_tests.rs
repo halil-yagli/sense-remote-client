@@ -616,3 +616,51 @@ fn installed_by_hand_meanwhile_drops_the_job() {
     assert_eq!(state.phase, UpdateState::Idle);
     assert_eq!(state.release, None);
 }
+
+// Sense Remote (D3e, #68): "Vazgeç" while downloading.
+#[test]
+fn cancel_stops_the_users_own_download_and_does_not_count() {
+    let c = ctx();
+    let (downloading, _) = next(available(4), Event::InstallRequested { version: 4 }, &c);
+    let (downloading, _) = next(downloading, Event::DownloadProgress(40), &c);
+    assert_eq!(check_cancel(&downloading), Ok(()));
+    let (state, actions) = next(downloading, Event::CancelRequested, &c);
+    assert_eq!(state.phase, UpdateState::Available);
+    assert_eq!(state.source, None);
+    assert_eq!(state.progress_pct, None);
+    assert_eq!(state.attempts, 0);
+    assert_eq!(state.first_attempt_s, None);
+    assert_eq!(actions, vec![Action::Persist, Action::AbortDownload]);
+    // Nothing starts again by itself...
+    let (state, actions) = next(state, Event::Tick, &c);
+    assert_eq!(state.phase, UpdateState::Available);
+    assert!(actions.is_empty());
+    // ...a late progress or "downloaded" of the stopped task changes nothing...
+    let (state, actions) = run(state, vec![Event::DownloadProgress(90), Event::Downloaded], &c);
+    assert_eq!(state.phase, UpdateState::Available);
+    assert!(actions.is_empty());
+    // ...and "Güncelle" works again at once.
+    assert_eq!(check_install(&state, 4, &c), Ok(()));
+    let (state, actions) = next(state, Event::InstallRequested { version: 4 }, &c);
+    assert_eq!(state.phase, UpdateState::Downloading);
+    assert_eq!(actions, vec![Action::Persist, Action::Download]);
+}
+
+#[test]
+fn cancel_answers_and_never_stops_a_panel_order_or_an_installation() {
+    let c = ctx();
+    assert_eq!(check_cancel(&State::default()), Err(NOT_DOWNLOADING));
+    assert_eq!(check_cancel(&available(4)), Err(NOT_DOWNLOADING));
+    let (ordered, _) = next(available(4), Event::Order(Ok(order(OID, 4, Window::Idle))), &c);
+    assert_eq!(ordered.phase, UpdateState::Downloading);
+    assert_eq!(check_cancel(&ordered), Err(PANEL_ORDER));
+    let (same, actions) = next(ordered.clone(), Event::CancelRequested, &c);
+    assert_eq!(same, ordered);
+    assert!(actions.is_empty());
+    let (local, _) = next(available(4), Event::InstallRequested { version: 4 }, &c);
+    let (verifying, _) = next(local, Event::Downloaded, &c);
+    assert_eq!(check_cancel(&verifying), Err(NOT_DOWNLOADING));
+    let (same, actions) = next(verifying.clone(), Event::CancelRequested, &c);
+    assert_eq!(same, verifying);
+    assert!(actions.is_empty());
+}

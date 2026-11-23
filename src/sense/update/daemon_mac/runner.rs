@@ -195,6 +195,11 @@ impl Daemon {
         if let Action::DropFile { file } = action {
             return download::is_plain_file_name(&file).then(|| Job::DropFile(dir.join(file)));
         }
+        // Sense Remote (D3e): the daemon takes no "Vazgeç" (`classify`), so the engine never asks
+        // it to stop a download; never let it fall through to the installation below.
+        if let Action::AbortDownload = action {
+            return None;
+        }
         let release = self.state.release.as_ref()?;
         let file = dir.join(&release.file);
         Some(match action {

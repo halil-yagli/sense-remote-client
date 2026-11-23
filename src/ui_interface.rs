@@ -545,6 +545,11 @@ pub fn get_socks() -> Vec<String> {
 
 #[inline]
 pub fn set_socks(proxy: String, username: String, password: String) {
+    // Sense Remote (decision #68 (5)): the proxy is "Panelden yönetilir", never set from the app.
+    if crate::sense::SOCKS_LOCKED {
+        log::warn!("Sense Remote: proxy settings are locked, not changed");
+        return;
+    }
     let socks = config::Socks5Server {
         proxy,
         username,

@@ -677,7 +677,11 @@ pub fn token_for_rendezvous(_access_token: &str) -> String {
 /// envelopes) and the upstream updater stays off.
 /// Sense Remote (2026-11-21): the ID server, relay server and key are our own (`server`), so
 /// the client never talks to RustDesk's public server.
-pub fn security_overwrite_settings() -> [(&'static str, &'static str); 8] {
+/// Sense Remote (2026-11-23, decision #68 (5)): LAN discovery and direct IP access are off for
+/// real (the settings show them as "Panelden yönetilir"). The proxy is locked too, but not here:
+/// any `proxy-url` in `OVERWRITE_SETTINGS`, even an empty one, makes RustDesk use a SOCKS proxy
+/// (`Config::get_network_type`), so it is locked in `ui_interface::set_socks` (`SOCKS_LOCKED`).
+pub fn security_overwrite_settings() -> [(&'static str, &'static str); 11] {
     [
         (keys::OPTION_API_SERVER, API_SERVER),
         (keys::OPTION_CUSTOM_RENDEZVOUS_SERVER, server::RENDEZVOUS_SERVER),
@@ -687,8 +691,27 @@ pub fn security_overwrite_settings() -> [(&'static str, &'static str); 8] {
         (OPTION_ALLOW_HIDE_CM, "N"),
         (keys::OPTION_ALLOW_REMOTE_CONFIG_MODIFICATION, "N"),
         (keys::OPTION_ALLOW_AUTO_UPDATE, "N"),
+        (OPTION_ENABLE_LAN_DISCOVERY, "N"),
+        (keys::OPTION_DIRECT_SERVER, "N"),
+        // Empty = RustDesk's default port, which is not listened on while `direct-server` is off.
+        (OPTION_DIRECT_ACCESS_PORT, ""),
     ]
 }
+
+/// Read by `lan.rs` and `rendezvous_mediator.rs` (no shared constants for them).
+const OPTION_ENABLE_LAN_DISCOVERY: &str = "enable-lan-discovery";
+const OPTION_DIRECT_ACCESS_PORT: &str = "direct-access-port";
+
+/// Sense Remote (decision #68 (5)): the proxy ("Vekil") can not be set from the app; the
+/// settings show it as "Panelden yönetilir". Checked by `ui_interface::set_socks`.
+pub const SOCKS_LOCKED: bool = true;
+
+/// Proxy keys the settings page shows; locked by `SOCKS_LOCKED`, not by `OVERWRITE_SETTINGS`.
+pub const SOCKS_OPTION_KEYS: [&str; 3] = [
+    keys::OPTION_PROXY_URL,
+    keys::OPTION_PROXY_USERNAME,
+    keys::OPTION_PROXY_PASSWORD,
+];
 
 /// Read by `hbb_common::password_security` (no shared constant for it).
 const OPTION_ALLOW_HIDE_CM: &str = "allow-hide-cm";
@@ -934,6 +957,32 @@ mod tests {
             assert!(!config::option2bool(key, &overwrite[key]), "{key}");
             // The panel can not send them either.
             assert!(envelope::ALLOWED_OPTIONS.iter().all(|(k, _)| *k != key), "{key}");
+        }
+    }
+
+    #[test]
+    fn lan_discovery_and_direct_ip_are_pinned_off() {
+        let mut overwrite = HashMap::from([
+            ("enable-lan-discovery".to_owned(), "Y".to_owned()),
+            ("direct-server".to_owned(), "Y".to_owned()),
+            ("direct-access-port".to_owned(), "21118".to_owned()),
+        ]);
+        apply_security_to(&mut overwrite);
+        // As `lan.rs` and `rendezvous_mediator.rs` read them: off.
+        assert!(!config::option2bool("enable-lan-discovery", &overwrite["enable-lan-discovery"]));
+        assert!(!config::option2bool("direct-server", &overwrite["direct-server"]));
+        assert_eq!(overwrite["direct-access-port"], "");
+        for key in ["enable-lan-discovery", "direct-server", "direct-access-port"] {
+            assert!(envelope::ALLOWED_OPTIONS.iter().all(|(k, _)| *k != key), "{key}");
+        }
+    }
+
+    #[test]
+    fn proxy_is_locked_without_pinning_a_proxy() {
+        assert!(SOCKS_LOCKED);
+        // A pinned `proxy-url` (even "") would switch every connection to SOCKS.
+        for (k, _) in security_overwrite_settings() {
+            assert!(!SOCKS_OPTION_KEYS.contains(&k), "{k}");
         }
     }
 

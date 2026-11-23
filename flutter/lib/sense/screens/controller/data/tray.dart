@@ -5,6 +5,8 @@
 // draws exactly this list; a Host gets only "Sense Remote'u aç".
 import 'dart:convert';
 
+import '../../../../models/platform_model.dart';
+
 abstract final class SenseTrayStrings {
   static const String title = 'Sense Remote';
   static const String ready = 'hazır';
@@ -116,10 +118,9 @@ abstract class SenseTraySource {
 class SenseTrayBridge implements SenseTraySource {
   const SenseTrayBridge();
 
-  // TODO(D3e): main_sense_tray_recent — replace with `bind.mainSenseTrayRecent()`.
-  // Until the core has it, the menu shows no recent connections (nothing made up).
+  /// `main_sense_tray_recent` (D3e): the same list the native tray menu shows.
   @override
-  Future<String> recentJson() async => '[]';
+  Future<String> recentJson() => bind.mainSenseTrayRecent();
 }
 
 /// Reads the recent connections for the menu.

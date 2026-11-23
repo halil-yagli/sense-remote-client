@@ -54,6 +54,8 @@ struct Runner {
 enum Job {
     Persist(State),
     Download(download::Request),
+    /// Sense Remote (D3e, #68): stop the running download, then remove its `.part` file.
+    AbortDownload(PathBuf),
     Verify {
         file: PathBuf,
         sha256: String,
@@ -66,6 +68,12 @@ enum Job {
 
 static RUNNER: Mutex<Option<Runner>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
+/// Sense Remote (D3e, #68): the running download task, for "Vazgeç".
+static DOWNLOAD: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
+
+fn download_task() -> MutexGuard<'static, Option<tokio::task::JoinHandle<()>>> {
+    DOWNLOAD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn lock() -> MutexGuard<'static, Option<Runner>> {
     RUNNER.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -183,6 +191,10 @@ impl Runner {
         }
         let release = self.state.release.as_ref()?;
         let file = dir.join(&release.file);
+        if let Action::AbortDownload = action {
+            let part = format!("{}{}", release.file, download::PART_SUFFIX);
+            return Some(Job::AbortDownload(dir.join(part)));
+        }
         Some(match action {
             Action::Download => Job::Download(download::Request {
                 url: release.url.clone(),
@@ -235,7 +247,7 @@ fn perform(job: Job) {
             }
         }
         Job::Download(mut request) => {
-            tokio::spawn(async move {
+            let task = tokio::spawn(async move {
                 // The folder is made safe (ACL, owner, no reparse point) once per download;
                 // every other step only computes its path.
                 let prepared = tokio::task::spawn_blocking(apply::prepare_download_dir).await;
@@ -253,6 +265,22 @@ fn perform(job: Job) {
                     Err(err) => Event::Failed(err),
                 };
                 step(event);
+            });
+            // Only one download at a time; an older task (already stopped) is dropped.
+            if let Some(old) = download_task().replace(task) {
+                old.abort();
+            }
+        }
+        Job::AbortDownload(part) => {
+            let task = download_task().take();
+            tokio::spawn(async move {
+                if let Some(task) = task {
+                    task.abort();
+                    // Wait until the task let go of the file before removing it.
+                    let _ = task.await;
+                }
+                let _ = std::fs::remove_file(part);
+                log::info!("Sense Remote: update download cancelled");
             });
         }
         Job::Verify { file, sha256, size } => {
@@ -377,6 +405,20 @@ pub fn request_install(version: u32) -> String {
     engine::INSTALL_ACCEPTED.to_owned()
 }
 
+/// "Vazgeç": checked and done under one lock, like `request_install`.
+pub fn request_cancel() -> String {
+    let mut guard = lock();
+    let Some(runner) = guard.as_mut() else {
+        return super::UNSUPPORTED.to_owned();
+    };
+    if let Err(code) = engine::check_cancel(&runner.state) {
+        return code.to_owned();
+    }
+    let ctx = runner.ctx(false);
+    runner.advance(Event::CancelRequested, &ctx);
+    engine::CANCEL_ACCEPTED.to_owned()
+}
+
 /// Main IPC channel in the process that holds the engine.
 pub fn on_ipc(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
     match message {
@@ -389,6 +431,7 @@ pub fn on_ipc(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
         SenseUpdateIpc::InstallRequest { version } => {
             Some(SenseUpdateIpc::InstallAnswer(request_install(version)))
         }
+        SenseUpdateIpc::CancelRequest => Some(SenseUpdateIpc::CancelAnswer(request_cancel())),
         _ => None,
     }
 }

@@ -323,6 +323,10 @@ pub enum SenseUpdateIpc {
     Install { version: u32 },
     /// macOS only, daemon → agent: the daemon's status JSON.
     DaemonStatus(String),
+    /// Sense Remote (D3e, #68): UI → `--server`: "Vazgeç" while downloading.
+    CancelRequest,
+    /// `--server` → UI: the answer to `CancelRequest`, one of `request_cancel`'s codes.
+    CancelAnswer(String),
 }
 
 /// The unsigned hint of every heartbeat answer (`sense_update`, §3.4). It can only drop a
@@ -482,6 +486,11 @@ async fn forward_to_daemon(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
                 _ => None,
             }
         }
+        // Sense Remote (D3e): the daemon does not stop a download yet (its `_service` channel
+        // does not take the request); the app offers no "Vazgeç" on macOS.
+        SenseUpdateIpc::CancelRequest => {
+            Some(SenseUpdateIpc::CancelAnswer(UNSUPPORTED.to_owned()))
+        }
         SenseUpdateIpc::InstallRequest { version } => {
             let asked = daemon_mac::request_daemon(SenseUpdateIpc::Install { version }).await;
             let code = match asked {
@@ -550,6 +559,30 @@ pub fn request_install(version: i32) -> String {
         Some(SenseUpdateIpc::InstallAnswer(code)) if is_install_code(&code) => code,
         _ => IPC_FAILED.to_owned(),
     }
+}
+
+/// FFI `main_sense_update_cancel` ("Vazgeç" while downloading): `""` (stopped),
+/// `not_downloading`, `panel_order`, `ipc_failed` or `unsupported`; sends `CancelRequest` to
+/// `--server`.
+pub fn request_cancel() -> String {
+    if !SUPPORTED {
+        return UNSUPPORTED.to_owned();
+    }
+    match ask_server(SenseUpdateIpc::CancelRequest) {
+        Some(SenseUpdateIpc::CancelAnswer(code)) if is_cancel_code(&code) => code,
+        _ => IPC_FAILED.to_owned(),
+    }
+}
+
+/// The codes `request_cancel` may return.
+pub fn is_cancel_code(code: &str) -> bool {
+    [
+        engine::CANCEL_ACCEPTED,
+        engine::NOT_DOWNLOADING,
+        engine::PANEL_ORDER,
+        UNSUPPORTED,
+    ]
+    .contains(&code)
 }
 
 /// The codes `request_install` may return.
@@ -769,6 +802,8 @@ mod tests {
             offer,
             SenseUpdateIpc::Install { version: 4 },
             SenseUpdateIpc::DaemonStatus("{}".to_owned()),
+            SenseUpdateIpc::CancelRequest,
+            SenseUpdateIpc::CancelAnswer("panel_order".to_owned()),
         ] {
             let text = serde_json::to_string(&message).unwrap();
             assert_eq!(serde_json::from_str::<SenseUpdateIpc>(&text).unwrap(), message);
@@ -782,6 +817,16 @@ mod tests {
         }
         for code in ["ok", "BUSY", " ", "installed"] {
             assert!(!is_install_code(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn cancel_codes() {
+        for code in ["", "not_downloading", "panel_order", "unsupported"] {
+            assert!(is_cancel_code(code), "{code}");
+        }
+        for code in ["ok", "busy", " ", "cancelled"] {
+            assert!(!is_cancel_code(code), "{code}");
         }
     }
 

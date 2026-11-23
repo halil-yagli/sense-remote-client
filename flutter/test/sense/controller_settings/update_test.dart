@@ -456,10 +456,14 @@ void main() {
       final json = {'state': 'downloading', 'target': 4, 'progress_pct': 10};
       expect(_actions(json), isEmpty);
       expect(_actions(json, const SenseUpdateUiState(canCancel: true)), [SenseUpdateAction.cancel]);
+      // A panel order's download is not stopped from the computer (D3e).
+      expect(_actions({...json, 'source': 'panel'}, const SenseUpdateUiState(canCancel: true)), isEmpty);
+      expect(_actions({...json, 'source': 'local'}, const SenseUpdateUiState(canCancel: true)),
+          [SenseUpdateAction.cancel]);
     });
 
-    test('the bridge offers no Vazgeç until the core can cancel', () {
-      expect(SenseUpdateBridge().canCancel, isFalse);
+    test('the bridge offers Vazgeç where the core can cancel (Windows)', () {
+      expect(SenseUpdateBridge().canCancel, Platform.isWindows);
     });
 
     testWidgets('Vazgeç stops the download', (tester) async {
