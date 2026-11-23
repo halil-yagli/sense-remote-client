@@ -1,10 +1,12 @@
-// Sense Remote: Sense setup wizard (prototype Calisma/prototip/kurulum.html).
-// Pure UI: every platform call goes through [SenseInstallBackend], so it runs in widget tests.
+// Sense Remote: the setup wizard (YH K1–K7; prototype SENSE-REMOTE_PROTOTIP.html "Kurulum",
+// images i01–i09). Pure UI: every platform call goes through [SenseInstallBackend], so it runs
+// in widget tests. Built only from the component library (lib/sense/sense.dart); colours,
+// sizes and durations come from the tokens.
 //
-// Wave 3 (I6): step 1 is the Sense sign-in (K-GİRİŞ: the 6-digit pairing code is shown large,
-// the browser opens only on request), the project list comes from the panel, and after the
-// installation the computer is registered with the panel (K-KAYIT: "Yeniden dene", or skip and
-// it shows up in the panel as waiting for approval).
+// Windows: Sense hesabı → Bu bilgisayarın rolü → Bilgisayar bilgisi → Özet ve kurulum → Kuruldu.
+// macOS adds "Uygulamalar klasörü" first and "macOS izinleri" before "Kuruldu".
+// No dialogs (T7): the only windows are the UAC prompt and the macOS password; every error
+// and warning is a box in place.
 
 import 'dart:async';
 import 'dart:ui' show FontFeature;
@@ -13,21 +15,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-import 'sense_install_strings.dart';
-// Sense Remote: model and steps live in separate files (code review K3-6).
+import '../../sense.dart';
+import '../../strings/install.dart';
 import 'sense_install_model.dart';
+
 export 'sense_install_model.dart';
 
 part 'sense_install_layout.dart';
 part 'sense_install_steps_account.dart';
 part 'sense_install_steps_info.dart';
 part 'sense_install_steps_finish.dart';
-// Sense Remote (Mac M3): the two macOS steps (Applications folder, privacy permissions).
 part 'sense_install_steps_mac.dart';
-// Sense Remote (update plan §8, U7): the one-time move from version 2 (no sign-in, no registration).
 part 'sense_install_steps_upgrade.dart';
 
-String _t(String key) => senseInstallText(key);
+String _t(String key, [Map<String, String> args = const {}]) =>
+    senseInstallText(key, args);
+
+/// Window size of the setup file (YH K1).
+const Size kSenseInstallSize = Size(860, 620);
+const Size kSenseInstallMinSize = Size(760, 540);
 
 class SenseInstallWizard extends StatefulWidget {
   const SenseInstallWizard({
@@ -41,8 +47,8 @@ class SenseInstallWizard extends StatefulWidget {
     this.onClose,
     this.onDragStart,
     this.version = '',
-    this.icon,
     this.pollInterval = const Duration(seconds: 1),
+    this.optionsPollInterval = kSenseOptionsPoll,
     this.mac = false,
     this.upgrade,
   });
@@ -56,21 +62,21 @@ class SenseInstallWizard extends StatefulWidget {
   final VoidCallback? onClose;
   final VoidCallback? onDragStart;
 
-  /// Sense version number of this setup file (built-in option `sense-version`). Empty: no
-  /// version line (no made-up number, design review T3-11).
+  /// Sense version number of this setup file (built-in option `sense-version`). Empty: the
+  /// sidebar shows only the system (no made-up number, T3-11).
   final String version;
-  final Widget? icon;
 
-  /// How often the sign-in state (and on macOS the permission state) is read.
+  /// How often the sign-in state (and on macOS the permission state) is read (K6: every second).
   final Duration pollInterval;
 
-  /// Sense Remote (Mac M3): macOS flow. Adds the Applications folder check before the
-  /// sign-in and the privacy permissions after the registration; no Windows install options.
-  /// A parameter (not a platform check) so the wizard stays pure UI and testable anywhere.
+  /// How often the project and location lists are read again on the details step (K4).
+  final Duration optionsPollInterval;
+
+  /// macOS flow (Applications folder, permissions, no Windows options). A parameter, not a
+  /// platform check, so the wizard stays testable anywhere.
   final bool mac;
 
-  /// Sense Remote (update plan §8, U7): set when this computer already has a Sense role. The
-  /// wizard then shows only the upgrade (or "already installed") screen.
+  /// Set when this computer already has a Sense role: only the upgrade screen (K7).
   final SenseUpgrade? upgrade;
 
   @override
@@ -84,50 +90,50 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
           ? SenseInstallStep.applications
           : SenseInstallStep.account;
 
-  // Sign-in.
+  // ---- Sign-in (K2) ----
   SenseLoginStatus _login = SenseLoginStatus.idle;
   Timer? _poll;
   bool _polling = false;
   int _loginAttempt = 0;
-  String? _notice;
+  bool _copied = false;
 
-  // Role and info.
+  // ---- Role (K3) ----
   bool _host = false;
   bool _controller = false;
-  final _name = TextEditingController();
-  final _newProject = TextEditingController();
-  final _location = TextEditingController();
-  final _note = TextEditingController();
-  final _newProjectFocus = FocusNode();
-  List<SenseProject>? _available;
-  bool _projectsLoading = false;
-  String _projectsError = '';
-  final Set<String> _selectedIds = {};
-  final List<String> _newProjects = [];
 
-  // Install and registration.
+  // ---- Details (K4) ----
+  final _name = TextEditingController();
+  final _note = TextEditingController();
+  List<SenseProject>? _projects;
+  String _optionsError = '';
+  bool _optionsLoading = false;
+  Timer? _optionsPoll;
+  int _optionsAttempt = 0;
+  final List<String> _selectedIds = [];
+  String _locationId = '';
+
+  // ---- Summary and install (K5) ----
   late String _path = widget.initialPath;
   late bool _startMenu = widget.initialStartMenu;
   late bool _desktopIcon = widget.initialDesktopIcon;
   late bool _printer = widget.initialPrinter;
-  bool _advanced = false;
+  bool _advancedOpen = false;
+
+  /// Folder shown with the "not empty" warning; pressing Kur again with it installs (T7: the
+  /// second step is in place, no window).
+  String? _pathWarned;
   bool _installing = false;
-  String? _error;
+  String _installError = '';
+  bool _installed = false;
   bool _enrolling = false;
   String _enrollError = '';
   bool _registered = false;
   List<String> _enrolledProjects = const [];
-
-  /// Installed by this wizard: the role is fixed, only sign-in and details can be redone for
-  /// the registration.
-  bool _installed = false;
-
-  /// Seconds left before "Yeniden dene" after `rate_limited` (panel `Retry-After: 60`).
+  String _enrolledLocation = '';
   int _waitLeft = 0;
   Timer? _waitTimer;
 
-  // Sense Remote (Mac M3): state of the macOS steps (sense_install_steps_mac.dart).
-  /// `null` until the first answer; `false` keeps the wizard on the Applications step.
+  // ---- macOS (K1, K6) ----
   bool? _inApplications;
   bool _appsRechecked = false;
   SenseMacPermissions? _permissions;
@@ -137,10 +143,11 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
   bool _permissionsSkipped = false;
   bool _agentRestartFailed = false;
 
-  // Sense Remote (U7): state of the upgrade screen (sense_install_steps_upgrade.dart).
+  // ---- Upgrade (K7) ----
   bool _upgradeRunning = false;
   String _upgradeError = '';
   bool _upgradeNotNewer = false;
+  bool _upgradeDone = false;
 
   @override
   void initState() {
@@ -159,34 +166,37 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
   @override
   void dispose() {
     _poll?.cancel();
+    _optionsPoll?.cancel();
     _waitTimer?.cancel();
     _permissionPoll?.cancel();
     _name.dispose();
-    _newProject.dispose();
-    _location.dispose();
     _note.dispose();
-    _newProjectFocus.dispose();
     super.dispose();
   }
 
   void _refresh() => setState(() {});
 
-  void _go(SenseInstallStep step) => setState(() {
-        _step = step;
-        _error = null;
-        _notice = null;
-      });
+  /// setState for the step builders in the part files (extensions).
+  void _update(VoidCallback fn) => setState(fn);
+
+  void _go(SenseInstallStep step) {
+    if (step != SenseInstallStep.info) _optionsPoll?.cancel();
+    setState(() => _step = step);
+    if (step == SenseInstallStep.info) _startOptionsPoll();
+  }
 
   bool get _busy => _installing || _enrolling || _upgradeRunning;
 
   // ---- Sign-in ----
+
+  bool get _loginAccepted => _login.isDone && senseCompanyEmail(_login.email);
 
   Future<void> _startLogin() async {
     final attempt = ++_loginAttempt;
     _poll?.cancel();
     setState(() {
       _login = const SenseLoginStatus('requesting');
-      _notice = null;
+      _copied = false;
     });
     try {
       await widget.backend.loginStart();
@@ -215,99 +225,124 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
     if (status.isDone || status.isFailed) _poll?.cancel();
     if (status.sameAs(_login)) return;
     setState(() => _login = status);
-    if (status.isDone) unawaited(_loadProjects());
+    // K2: an account outside the company is refused here too (the panel refuses it first);
+    // its sign-in is dropped at once.
+    if (status.isDone && !senseCompanyEmail(status.email)) {
+      unawaited(widget.backend.loginCancel());
+    }
   }
 
-  /// "Vazgeç" while waiting, or "Başka hesapla gir" after signing in.
-  /// `keepProjects`: signing in again for the registration keeps the chosen projects (the
-  /// list is read again after the new sign-in).
-  void _cancelLogin({bool keepProjects = false}) {
+  /// "Vazgeç" while waiting, "Başka hesap" after signing in. Signing in again for the
+  /// registration keeps the chosen projects and location.
+  void _cancelLogin() {
     _loginAttempt++;
     _poll?.cancel();
     unawaited(widget.backend.loginCancel());
     setState(() {
       _login = SenseLoginStatus.idle;
-      _notice = null;
-      _projectsError = '';
-      if (!keepProjects) {
-        _available = null;
+      _copied = false;
+      if (!_installed) {
+        _projects = null;
         _selectedIds.clear();
+        _locationId = '';
       }
     });
   }
 
   Future<void> _copyLink() async {
     try {
-      await Clipboard.setData(ClipboardData(text: _login.url));
+      await widget.backend.copy(_login.url);
     } catch (_) {
       return;
     }
-    if (mounted) setState(() => _notice = _t('link-copied'));
+    if (mounted) setState(() => _copied = true);
   }
 
-  // ---- Projects ----
-
-  Future<void> _loadProjects() async {
-    setState(() {
-      _projectsLoading = true;
-      _projectsError = '';
-    });
-    SenseProjectList list;
-    try {
-      list = await widget.backend.projects();
-    } catch (_) {
-      list = const SenseProjectList.error('retry');
+  void _accountNext() {
+    if (!_loginAccepted) return;
+    if (_installed) {
+      // Signed in again for the registration: straight back to it.
+      _go(SenseInstallStep.summary);
+      unawaited(_enroll());
+    } else {
+      _go(SenseInstallStep.role);
     }
-    if (!mounted) return;
-    setState(() {
-      _projectsLoading = false;
-      if (list.ok) {
-        _available = list.projects;
-        _selectedIds.removeWhere((id) => !list.projects.any((p) => p.id == id));
-      } else {
-        _projectsError = list.error;
-      }
-    });
   }
 
-  int get _projectCount => _selectedIds.length + _newProjects.length;
+  // ---- Projects and locations ----
+
+  void _startOptionsPoll() {
+    _optionsPoll?.cancel();
+    unawaited(_loadOptions());
+    _optionsPoll =
+        Timer.periodic(widget.optionsPollInterval, (_) => _loadOptions());
+  }
+
+  Future<void> _loadOptions() async {
+    if (_optionsLoading) return;
+    final attempt = ++_optionsAttempt;
+    _optionsLoading = true;
+    if (_projects == null) setState(() {});
+    SenseInstallOptions options;
+    try {
+      options = await widget.backend.installOptions();
+    } catch (_) {
+      options = const SenseInstallOptions.error('retry');
+    } finally {
+      _optionsLoading = false;
+    }
+    if (!mounted || attempt != _optionsAttempt) return;
+    setState(() {
+      if (!options.ok) {
+        _optionsError = options.error;
+        return;
+      }
+      _optionsError = '';
+      _projects = options.projects;
+      _selectedIds.removeWhere((id) => !options.projects.any((p) => p.id == id));
+      if (!_locations.any((l) => l.location.id == _locationId)) _locationId = '';
+    });
+  }
 
   List<SenseProject> get _chosenProjects => [
-        for (final p in _available ?? const <SenseProject>[])
-          if (_selectedIds.contains(p.id)) p,
+        for (final id in _selectedIds)
+          for (final p in _projects ?? const <SenseProject>[])
+            if (p.id == id) p,
       ];
+
+  /// Locations of the chosen projects, with their project (K4: the chip names the project
+  /// when more than one project is chosen).
+  List<({SenseProject project, SenseLocation location})> get _locations => [
+        for (final p in _chosenProjects)
+          for (final l in p.locations) (project: p, location: l),
+      ];
+
+  SenseLocation? get _location {
+    for (final l in _locations) {
+      if (l.location.id == _locationId) return l.location;
+    }
+    return null;
+  }
 
   void _toggleProject(SenseProject project) {
     setState(() {
       if (_selectedIds.contains(project.id)) {
         _selectedIds.remove(project.id);
-      } else if (_projectCount < kSenseMaxProjects) {
+      } else if (_selectedIds.length < kSenseMaxProjects) {
         _selectedIds.add(project.id);
       }
+      if (!_locations.any((l) => l.location.id == _locationId)) _locationId = '';
     });
   }
 
-  /// A typed name that matches an existing project selects that project (like the panel,
-  /// K-PROJE) instead of asking for a second one.
-  void _addNewProject() {
-    final value = _newProject.text.trim();
-    if (value.isEmpty) return;
-    setState(() {
-      final key = senseTrLower(value);
-      final existing = (_available ?? const <SenseProject>[])
-          .where((p) => senseTrLower(p.name) == key);
-      if (existing.isNotEmpty) {
-        if (!_selectedIds.contains(existing.first.id) &&
-            _projectCount < kSenseMaxProjects) {
-          _selectedIds.add(existing.first.id);
-        }
-      } else if (!_newProjects.any((p) => senseTrLower(p) == key) &&
-          _projectCount < kSenseMaxProjects) {
-        _newProjects.add(value);
-      }
-      _newProject.clear();
-    });
-    _newProjectFocus.requestFocus();
+  bool get _infoReady =>
+      _name.text.trim().isNotEmpty && _selectedIds.isNotEmpty && _location != null;
+
+  void _infoNext() {
+    if (!_infoReady) return;
+    _go(SenseInstallStep.summary);
+    // Details fixed after a refused registration: register again at once.
+    if (_installed && !_registered) unawaited(_enroll());
   }
 
   // ---- Install and registration ----
@@ -316,7 +351,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
         host: _host,
         controller: _controller,
         name: _name.text.trim(),
-        location: _location.text.trim(),
+        location: _location?.name ?? '',
         path: _path,
         startMenu: _startMenu,
         desktopIcon: _desktopIcon,
@@ -325,43 +360,65 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
 
   SenseEnrollRequest _enrollRequest() => SenseEnrollRequest(
         name: _name.text.trim(),
-        location: _location.text.trim(),
+        locationId: _location?.id ?? '',
+        locationName: _location?.name ?? '',
         note: _note.text.trim(),
-        projectIds: [for (final p in _chosenProjects) p.id],
-        newProjects: List.unmodifiable(_newProjects),
+        projectIds: List.unmodifiable(_selectedIds),
       );
 
+  Future<void> _pickPath() async {
+    final picked = await widget.onPickPath?.call(_path);
+    if (picked == null || !mounted) return;
+    setState(() {
+      _path = picked;
+      _pathWarned = null;
+    });
+    await _checkPath();
+  }
+
+  /// K5: a folder that is not empty gets an orange box in place (no window).
+  Future<bool> _checkPath() async {
+    if (widget.mac) return false;
+    bool notEmpty;
+    try {
+      notEmpty = await widget.backend.folderNotEmpty(_path);
+    } catch (_) {
+      notEmpty = true;
+    }
+    if (!mounted) return false;
+    setState(() {
+      _pathWarned = notEmpty ? _path : null;
+      if (notEmpty) _advancedOpen = true;
+    });
+    return notEmpty;
+  }
+
   Future<void> _install() async {
-    if (_busy) return;
+    if (_busy || _installed) return;
+    if (!widget.mac && _pathWarned != _path) {
+      // First press: check the folder; a warning stops here, the second press installs.
+      if (await _checkPath()) return;
+    }
     setState(() {
       _installing = true;
-      _error = null;
+      _installError = '';
     });
     String result;
     try {
       result = await widget.backend.install(_installRequest());
     } catch (e) {
-      result = e.toString();
+      result = 'failed';
     }
     if (!mounted) return;
     setState(() {
       _installing = false;
       if (result.isEmpty) {
         _installed = true;
-        _step = SenseInstallStep.register;
-      } else if (result == 'cancelled') {
-        _error = _t('error-cancelled');
+      } else if (kSenseInstallTr.containsKey('error-$result')) {
+        _installError = result;
       } else {
-        // Sense Remote (code review K4-9): an unknown result is an internal detail; the
-        // screen shows the general text and the code goes to the log.
-        final key = 'error-$result';
-        final known = _t(key);
-        if (known == key) {
-          debugPrint('Sense Remote: install failed: $result');
-          _error = _t('error-failed');
-        } else {
-          _error = known;
-        }
+        debugPrint('Sense Remote: install failed: $result');
+        _installError = 'failed';
       }
     });
     if (result.isEmpty) await _enroll();
@@ -369,6 +426,7 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
 
   Future<void> _enroll() async {
     if (_enrolling) return;
+    _waitTimer?.cancel();
     setState(() {
       _enrolling = true;
       _enrollError = '';
@@ -385,23 +443,13 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
       if (result.ok) {
         _registered = true;
         _enrolledProjects = result.projects;
-        _step = _afterRegisterStep;
+        _enrolledLocation = result.location;
       } else {
         _enrollError = result.error;
-        if (senseEnrollAction(result.error) == SenseEnrollAction.wait) {
-          _startWait();
-        }
+        if (senseEnrollAction(result.error) == SenseEnrollAction.wait) _startWait();
       }
     });
-    if (result.ok) _enterAfterRegister();
-  }
-
-  /// Sense Remote (Mac M3): macOS asks for the privacy permissions before "Kuruldu".
-  SenseInstallStep get _afterRegisterStep =>
-      widget.mac ? SenseInstallStep.permissions : SenseInstallStep.done;
-
-  void _enterAfterRegister() {
-    if (widget.mac) _startPermissionPoll();
+    if (result.ok) _afterRegister();
   }
 
   void _startWait() {
@@ -414,33 +462,35 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
     });
   }
 
-  /// Registration after installing, from the summary ("Panele kaydet") or a new sign-in.
-  void _registerAgain() {
-    _go(SenseInstallStep.register);
-    unawaited(_enroll());
+  /// macOS asks for the privacy permissions before "Kuruldu".
+  void _afterRegister() {
+    if (widget.mac) {
+      _go(SenseInstallStep.permissions);
+      _startPermissionPoll();
+    } else {
+      _go(SenseInstallStep.done);
+    }
   }
 
-  /// `token_invalid` / `install_scope` / `device_mismatch`: sign in again (new install token for
-  /// this computer's ID), then register.
+  void _skipRegister() {
+    _waitTimer?.cancel();
+    setState(() {
+      _registered = false;
+      _enrollError = '';
+    });
+    _afterRegister();
+  }
+
+  /// `token_invalid` / `install_scope` / `device_mismatch`: a new sign-in for this computer.
   void _reloginForRegister() {
-    _cancelLogin(keepProjects: true);
+    _cancelLogin();
     _go(SenseInstallStep.account);
   }
 
-  /// `validation` / `project_not_found`: fix the details or pick projects again, then register.
+  /// `validation` / `project_not_found` / `location_not_found`: fix the details.
   void _editForRegister() {
-    unawaited(_loadProjects());
+    setState(() => _enrollError = '');
     _go(SenseInstallStep.info);
-  }
-
-  /// The computer is installed; it shows up in the panel as waiting for approval.
-  void _skipRegister() {
-    setState(() {
-      _registered = false;
-      _waitTimer?.cancel();
-      _step = _afterRegisterStep;
-    });
-    _enterAfterRegister();
   }
 
   void _close() {
@@ -454,39 +504,12 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
 
   @override
   Widget build(BuildContext context) {
-    final base = ThemeData(
-      brightness: Brightness.dark,
-      useMaterial3: true,
-      fontFamily: SenseTokens.font,
-      scaffoldBackgroundColor: SenseTokens.black,
-      colorScheme: const ColorScheme.dark(
-        primary: SenseTokens.white,
-        onPrimary: SenseTokens.black,
-        surface: SenseTokens.black,
-        error: SenseTokens.error,
-      ),
-    );
     return Theme(
-      data: base.copyWith(
-        textTheme: base.textTheme.apply(
-          fontFamily: SenseTokens.font,
-          bodyColor: SenseTokens.white,
-          displayColor: SenseTokens.white,
-        ),
-        textSelectionTheme: const TextSelectionThemeData(
-            cursorColor: SenseTokens.white,
-            selectionColor: SenseTokens.accent2),
-      ),
+      data: senseTheme(),
       child: DefaultTextStyle(
-        style: const TextStyle(
-          fontFamily: SenseTokens.font,
-          fontFamilyFallback: SenseTokens.fontFallback,
-          fontWeight: FontWeight.w300,
-          fontSize: 14,
-          color: SenseTokens.white,
-        ),
+        style: SenseTextStyles.body,
         child: Material(
-          color: SenseTokens.black,
+          color: SenseColors.bg,
           child: Column(
             children: [
               _titleBar(),
@@ -494,8 +517,8 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _sidebar(),
-                    Expanded(child: _body()),
+                    _rail(),
+                    Expanded(child: _main()),
                   ],
                 ),
               ),
@@ -505,8 +528,4 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
       ),
     );
   }
-
-
-  /// setState for the step builders in the part files (extensions).
-  void _update(VoidCallback fn) => setState(fn);
 }

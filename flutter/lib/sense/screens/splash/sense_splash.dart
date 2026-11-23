@@ -12,10 +12,16 @@ import '../../strings/common.dart';
 import '../../tokens/sense_tokens.dart';
 
 class SenseSplash extends StatefulWidget {
-  const SenseSplash({super.key, this.updatingToVersion, this.animate = true});
+  const SenseSplash(
+      {super.key, this.updatingToVersion, this.message, this.animate = true});
 
   /// Set while an update is being installed: shows the update text.
   final int? updatingToVersion;
+
+  /// Sense Remote (A2c): any other opening text, e.g. after a role change
+  /// ("Rol uygulanıyor · Sense Remote yeni rolle açılıyor"). Wins over
+  /// [updatingToVersion].
+  final String? message;
 
   /// False draws one still frame (no fade, no breathing, line at rest).
   final bool animate;
@@ -23,9 +29,12 @@ class SenseSplash extends StatefulWidget {
   /// Gap between the mark, the text and the line (`.asplash{gap:16px}`).
   static const double gap = 16;
 
-  static String textFor(int? updatingToVersion) => updatingToVersion == null
-      ? SenseCommonStrings.splashOpening
-      : SenseCommonStrings.splashUpdating(updatingToVersion);
+  static String textFor(int? updatingToVersion, {String? message}) =>
+      (message != null && message.isNotEmpty)
+          ? message
+          : updatingToVersion == null
+              ? SenseCommonStrings.splashOpening
+              : SenseCommonStrings.splashUpdating(updatingToVersion);
 
   @override
   State<SenseSplash> createState() => _SenseSplashState();
@@ -55,7 +64,8 @@ class _SenseSplashState extends State<SenseSplash> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    final text = SenseSplash.textFor(widget.updatingToVersion);
+    final text =
+        SenseSplash.textFor(widget.updatingToVersion, message: widget.message);
     return FadeTransition(
       opacity: _opacity,
       child: SenseGlowScene(
