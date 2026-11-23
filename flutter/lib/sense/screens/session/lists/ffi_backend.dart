@@ -63,10 +63,11 @@ String senseShortcutText(Map<String, Object?> binding, {required bool mac}) {
   parts.add(switch (key) {
     'delete' => 'Del',
     'enter' => 'Enter',
-    'arrow_left' => '←',
-    'arrow_right' => '→',
-    'arrow_up' => '↑',
-    'arrow_down' => '↓',
+    // Words, not arrow glyphs: Poppins has none (G1).
+    'arrow_left' => 'Sol',
+    'arrow_right' => 'Sağ',
+    'arrow_up' => 'Yukarı',
+    'arrow_down' => 'Aşağı',
     _ => key.startsWith('digit') ? key.substring(5) : key.toUpperCase(),
   });
   return parts.join('+');
@@ -868,12 +869,12 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void setClipboardDisabled(bool v) => _set('disable-clipboard', v);
 
-  void _connectWithToken({bool files = false, bool camera = false, bool terminal = false, bool tunnel = false}) {
+  void _connectWithToken({bool files = false, bool terminal = false, bool tunnel = false}) {
     final token = bind.sessionGetConnToken(sessionId: _sid);
     connect(contextOf(), ffi.id,
         loginMethod: bind.sessionGetCommonSync(sessionId: _sid, key: 'login_method', param: '') ?? '',
         isFileTransfer: files,
-        isViewCamera: camera,
+        isViewCamera: false,
         isTerminal: terminal,
         isTcpTunneling: tunnel,
         connToken: token);
@@ -899,9 +900,6 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
 
   @override
   void openTunnel() => _connectWithToken(tunnel: true);
-
-  @override
-  void openCamera() => _connectWithToken(camera: true);
 
   @override
   String get fingerprint => _try(() => FingerprintState.find(ffi.id).value, '');

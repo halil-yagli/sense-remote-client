@@ -302,8 +302,6 @@ class FakeBackend extends SenseSessionBackend {
   @override
   void openTunnel() => _call('tunnel');
   @override
-  void openCamera() => _call('camera');
-  @override
   String fingerprint = 'ab12 cd34';
   @override
   void copyFingerprint() => _call('fingerprint');

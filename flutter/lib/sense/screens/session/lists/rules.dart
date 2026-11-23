@@ -35,6 +35,7 @@ abstract final class SenseRd {
   static const int fpsMax = 120; // kMaxFps
   static const int trackpadMin = 10; // kMinTrackpadSpeed
   static const int trackpadMax = 1000; // kMaxTrackpadSpeed
+  static const int trackpadListMax = 300; // prototype slider range (c04: 10–300)
 }
 
 /// Facts about the running session the rules read.
