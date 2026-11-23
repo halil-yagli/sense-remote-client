@@ -12,10 +12,11 @@ import '../../../../consts.dart' show kRemoteViewStyleAdaptive, kRemoteViewStyle
 import '../../../data/option_keys.dart';
 import '../../../sense.dart';
 import '../../../strings/settings.dart';
+import '../../host/data/role.dart' show SenseRoleBackend, SenseRoleBridge;
+import '../../host/role/role_category.dart' show SenseRoleController, SenseRoleCategoryBody, senseRoleSummary;
 import '../../host/sense_password_page.dart' show SensePasswordAboutRow;
 import '../sense_home_strings.dart' show SenseHomeRole, senseRoleLabel;
 import 'data/settings_backend.dart';
-import 'role_section.dart';
 import 'widgets.dart';
 
 /// `.amain` padding (18 top, 22 sides, 24 bottom).
@@ -58,7 +59,11 @@ class SenseSettingsView extends StatefulWidget {
     this.initialOpen = SenseSettingsCategory.role,
     this.passwordSection,
     this.isWindowsHost,
+    this.roleBackend = const SenseRoleBridge(),
   });
+
+  /// "Bu bilgisayarın rolü" (B2's role component, H2 = C3).
+  final SenseRoleBackend roleBackend;
 
   final SenseSettingsBackend backend;
   final String? initialOpen;
@@ -78,6 +83,11 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
   final Map<String, int> _saved = {};
   String _incoming = '';
   final _scroll = ScrollController();
+  bool _restarting = false;
+  late final SenseRoleController _role = SenseRoleController(widget.roleBackend,
+      onRestart: () {
+    if (mounted) setState(() => _restarting = true);
+  });
 
   SenseSettingsBackend get _b => widget.backend;
 
@@ -85,10 +95,18 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
   void initState() {
     super.initState();
     _loadIncoming();
+    _role.addListener(_onRole);
+    _role.load().catchError((_) {});
+  }
+
+  void _onRole() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _role.removeListener(_onRole);
+    _role.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -400,9 +418,10 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
       SenseAccordionItem(
           id: SenseSettingsCategory.role,
           title: SenseSettingsStrings.catRole,
-          summary: senseRoleSummary(role),
+          summary: senseRoleSummary(_role),
           level: SenseLevel.ok,
-          builder: (_) => SenseRoleSection(role: role)),
+          builder: (_) => SenseRoleCategoryBody(
+              controller: _role, mac: Theme.of(context).platform == TargetPlatform.macOS)),
       if (controller) ...[
         SenseAccordionItem(
             id: SenseSettingsCategory.connections,
@@ -449,6 +468,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
           builder: (_) => column(update)),
     ];
 
+    if (_restarting) return const SenseSplash();
     return ColoredBox(
       color: SenseColors.bg,
       child: SenseScrollbar(

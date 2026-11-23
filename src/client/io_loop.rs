@@ -104,6 +104,8 @@ pub struct Remote<T: InvokeUiSession> {
     sent_close_reason: bool,
     cursor_dedupe: CursorDedupe,
     trusted_device: crate::trusted_devices::client::Session,
+    // Sense Remote (S10, O13): last frame age and loss estimate.
+    sense_link: crate::sense::link_quality::LinkMeter,
 }
 
 #[derive(Default)]
@@ -158,6 +160,7 @@ impl<T: InvokeUiSession> Remote<T> {
             sent_close_reason: false,
             cursor_dedupe: Default::default(),
             trusted_device: Default::default(),
+            sense_link: Default::default(),
         }
     }
 
@@ -415,11 +418,15 @@ impl<T: InvokeUiSession> Remote<T> {
                             } else {
                                 Some(self.video_format.clone())
                             };
+                            // Sense Remote (S10, O13).
+                            let link = self.sense_link.tick(fps.values().sum());
                             self.handler.update_quality_status(QualityStatus {
                                 speed: Some(speed),
                                 fps,
                                 chroma,
                                 codec_format,
+                                last_frame_ms: link.last_frame_ms,
+                                loss_est: link.loss_est,
                                 ..Default::default()
                             });
                         }
@@ -2477,6 +2484,10 @@ impl<T: InvokeUiSession> Remote<T> {
                     _ => {}
                 },
                 Some(message::Union::TestDelay(t)) => {
+                    // Sense Remote (S10): probe timing for the loss estimate.
+                    if !t.from_client {
+                        self.sense_link.on_probe(t.last_delay);
+                    }
                     self.handler.handle_test_delay(t, peer).await;
                 }
                 Some(message::Union::AudioFrame(frame)) => {
@@ -2694,6 +2705,14 @@ impl<T: InvokeUiSession> Remote<T> {
         }
     }
 
+    // Sense Remote (S9-b).
+    fn sense_privacy_note(&self, state: back_notification::PrivacyModeState, details: &str) {
+        if let Some(code) = crate::sense::privacy_note::code(state) {
+            log::info!("ghost mode note: {code} {details}");
+            self.handler.sense_privacy_note(code, details);
+        }
+    }
+
     #[inline(always)]
     fn update_privacy_mode(&mut self, impl_key: String, on: bool) {
         let mut config = self.handler.load_config();
@@ -2730,61 +2749,25 @@ impl<T: InvokeUiSession> Remote<T> {
                 );
                 return false;
             }
-            back_notification::PrivacyModeState::PrvNotSupported => {
-                self.handler
-                    .msgbox("custom-error", "Privacy mode", "Unsupported", "");
-                self.update_privacy_mode(impl_key, false);
-            }
+            // Sense Remote (S9-b): ghost mode shows no dialogs. Turning it on / off is visible in
+            // the session itself; when it fails or ends on its own, the session gets a short
+            // status note (`sense::privacy_note`) instead.
             back_notification::PrivacyModeState::PrvOnSucceeded => {
-                self.handler
-                    .msgbox("custom-nocancel", "Privacy mode", "Enter privacy mode", "");
                 self.update_privacy_mode(impl_key, true);
             }
-            back_notification::PrivacyModeState::PrvOnFailedDenied => {
-                self.handler
-                    .msgbox("custom-error", "Privacy mode", "Peer denied", "");
-                self.update_privacy_mode(impl_key, false);
-            }
-            back_notification::PrivacyModeState::PrvOnFailedPlugin
-            | back_notification::PrivacyModeState::PrvOnFailed => {
-                self.handler.msgbox(
-                    "custom-error",
-                    "Privacy mode",
-                    if details.is_empty() {
-                        "Failed"
-                    } else {
-                        &details
-                    },
-                    "",
-                );
-                self.update_privacy_mode(impl_key, false);
-            }
             back_notification::PrivacyModeState::PrvOffSucceeded => {
-                self.handler
-                    .msgbox("custom-nocancel", "Privacy mode", "Exit privacy mode", "");
-                self.update_privacy_mode(impl_key, false);
-            }
-            back_notification::PrivacyModeState::PrvOffByPeer => {
-                self.handler
-                    .msgbox("custom-error", "Privacy mode", "Peer exit", "");
                 self.update_privacy_mode(impl_key, false);
             }
             back_notification::PrivacyModeState::PrvOffFailed => {
-                self.handler.msgbox(
-                    "custom-error",
-                    "Privacy mode",
-                    if details.is_empty() {
-                        "Failed to turn off"
-                    } else {
-                        &details
-                    },
-                    "",
-                );
+                self.sense_privacy_note(state, &details);
             }
-            back_notification::PrivacyModeState::PrvOffUnknown => {
-                self.handler
-                    .msgbox("custom-error", "Privacy mode", "Turned off", "");
-                // log::error!("Privacy mode is turned off with unknown reason");
+            back_notification::PrivacyModeState::PrvNotSupported
+            | back_notification::PrivacyModeState::PrvOnFailedDenied
+            | back_notification::PrivacyModeState::PrvOnFailedPlugin
+            | back_notification::PrivacyModeState::PrvOnFailed
+            | back_notification::PrivacyModeState::PrvOffByPeer
+            | back_notification::PrivacyModeState::PrvOffUnknown => {
+                self.sense_privacy_note(state, &details);
                 self.update_privacy_mode(impl_key, false);
             }
             _ => {}
@@ -2901,6 +2884,8 @@ impl<T: InvokeUiSession> Remote<T> {
             discard_queue: discard_queue.clone(),
         };
         let handler = self.handler.ui_handler.clone();
+        // Sense Remote (S10): time of the last decoded frame.
+        let sense_frame_clock = self.sense_link.frame_clock();
         crate::client::start_video_thread(
             self.handler.clone(),
             display,
@@ -2914,6 +2899,7 @@ impl<T: InvokeUiSession> Remote<T> {
                   _texture: *mut c_void,
                   pixelbuffer: bool| {
                 *frame_count.write().unwrap() += 1;
+                crate::sense::link_quality::LinkMeter::mark_frame(&sense_frame_clock);
                 if pixelbuffer {
                     handler.on_rgba(display, data);
                 } else {

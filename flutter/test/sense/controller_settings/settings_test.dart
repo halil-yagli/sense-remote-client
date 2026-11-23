@@ -1,6 +1,7 @@
 // Sense Remote: Controller settings (YH C3). Every switch, choice and button
 // writes the real option the core reads (key + store + value, TK9 §4; #2, #66);
 // panel-managed rows cannot be changed (#68 decision 5); no theme category.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,8 @@ import 'package:flutter_hbb/sense/screens/controller/sense_home_strings.dart';
 import 'package:flutter_hbb/sense/screens/controller/settings/data/incoming.dart';
 import 'package:flutter_hbb/sense/screens/controller/settings/data/settings_backend.dart';
 import 'package:flutter_hbb/sense/screens/controller/settings/sense_settings_page.dart';
+import 'package:flutter_hbb/sense/screens/host/data/role.dart';
+import 'package:flutter_hbb/sense/screens/host/role/role_category.dart';
 import 'package:flutter_hbb/sense/strings/common.dart';
 import 'package:flutter_hbb/sense/strings/settings.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -106,6 +109,19 @@ class _FakeBackend extends SenseSettingsBackend {
   SenseHomeRole role() => homeRole;
 }
 
+class _FakeRole implements SenseRoleBackend {
+  _FakeRole(this.roles);
+  final List<String> roles;
+  @override
+  Future<String> status() async => jsonEncode({'roles': roles, 'pending': null, 'error': null});
+  @override
+  Future<String> begin(String target) async => '{"error":"unavailable"}';
+  @override
+  Future<String> changeStatus() async => '{"error":"unavailable"}';
+  @override
+  Future<void> cancel() async {}
+}
+
 Future<void> _pump(WidgetTester tester, _FakeBackend b,
     {String? open, Size size = const Size(1180, 1400), Widget? password}) async {
   await pumpSense(
@@ -118,6 +134,9 @@ Future<void> _pump(WidgetTester tester, _FakeBackend b,
           initialOpen: open,
           isWindowsHost: true,
           passwordSection: password,
+          roleBackend: _FakeRole(b.homeRole == SenseHomeRole.both
+              ? ['host_controller']
+              : [b.homeRole == SenseHomeRole.host ? 'host' : 'controller']),
         ),
       ),
       size: size,
@@ -368,11 +387,11 @@ void main() {
       expect(find.text(SenseSettingsStrings.viewStyle), findsOneWidget);
     });
 
-    testWidgets('role category shows the installed role', (tester) async {
+    testWidgets('role category is the Host role component (H2 = C3)', (tester) async {
       final b = _FakeBackend();
       await _pump(tester, b, open: SenseSettingsCategory.role);
-      expect(find.text(SenseSettingsStrings.roleInstalled), findsOneWidget);
-      expect(find.text(SenseSettingsStrings.roleHint), findsOneWidget);
+      expect(find.byType(SenseRoleCategoryBody), findsOneWidget);
+      expect(find.text('Controller'), findsWidgets);
     });
 
     testWidgets('Host + Controller: password flow and the Host rows', (tester) async {

@@ -70,6 +70,8 @@ pub(crate) struct Layout {
     pub sub_px: i32,
     pub sub_top: i32,
     pub sub_line: i32,
+    /// Sense Remote (H5): blur of the green glow around a watched screen's logo.
+    pub glow: i32,
 }
 
 /// Centered block (mark, title, subtitle), sized for the screen: 1080 px tall (or wide, for a
@@ -101,6 +103,7 @@ pub(crate) fn layout(width: i32, height: i32) -> Layout {
         sub_px,
         sub_top: title_top + title_line + gap_sub,
         sub_line,
+        glow: px(crate::sense::tokens::WATCHED_GLOW_PX),
     }
 }
 
@@ -238,6 +241,116 @@ pub(crate) fn keep_above(own_pid: u32, own_exe: &str, candidates: &[Candidate]) 
         .collect()
 }
 
+// Sense Remote (S7-a, H5): the screens the Controller watches show a green logo.
+
+/// A screen the Controller watches, as the video service knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub struct WatchedDisplay {
+    /// Device name (`\\.\DISPLAY1`), the same as the monitor's `szDevice`.
+    pub name: String,
+    /// Top-left corner, used when the names do not match.
+    pub x: i32,
+    pub y: i32,
+}
+
+static WATCHED: std::sync::Mutex<Vec<WatchedDisplay>> = std::sync::Mutex::new(Vec::new());
+
+/// Sets the watched screens; the curtain (when on) turns their logos green within 0.4 s. An
+/// empty list makes every logo white. Kept while the curtain is off, read when it comes on.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn set_watched(displays: Vec<WatchedDisplay>) {
+    {
+        let mut watched = WATCHED.lock().unwrap();
+        if *watched == displays {
+            return;
+        }
+        *watched = displays;
+    }
+    #[cfg(windows)]
+    win::watched_changed();
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn watched() -> Vec<WatchedDisplay> {
+    WATCHED.lock().unwrap().clone()
+}
+
+/// Which screens (device name, left, top) are watched: a watched display is found by its
+/// device name, or by its top-left corner when no screen has that name.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn watched_flags(screens: &[(String, i32, i32)], watched: &[WatchedDisplay]) -> Vec<bool> {
+    let mut flags = vec![false; screens.len()];
+    for w in watched {
+        let by_name = screens
+            .iter()
+            .position(|(name, _, _)| !w.name.is_empty() && name.eq_ignore_ascii_case(&w.name));
+        let found = by_name.or_else(|| {
+            screens
+                .iter()
+                .position(|(_, x, y)| *x == w.x && *y == w.y)
+        });
+        if let Some(i) = found {
+            flags[i] = true;
+        }
+    }
+    flags
+}
+
+/// Next green level (0 white … 1 green) after `dt_ms`, moving linearly so a full change takes
+/// the design's transition time.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn step_level(level: f32, watched: bool, dt_ms: u32) -> f32 {
+    let target = if watched { 1.0 } else { 0.0 };
+    let step = dt_ms as f32 / crate::sense::tokens::WATCHED_TRANSITION_MS.max(1) as f32;
+    if level < target {
+        (level + step).min(target)
+    } else {
+        (level - step).max(target)
+    }
+}
+
+/// Logo colour at a green level.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn logo_rgb(level: f32) -> (u8, u8, u8) {
+    use crate::sense::tokens::{UNWATCHED_WHITE as W, WATCHED_GREEN as G};
+    let t = level.clamp(0.0, 1.0);
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+    (mix(W.0, G.0), mix(W.1, G.1), mix(W.2, G.2))
+}
+
+/// Opacity of the green glow `dist` px outside the logo circle: a soft blur of `glow` px
+/// (CSS-like, sigma = glow / 2), scaled by the green level.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn halo_alpha(dist: f32, glow: f32, level: f32) -> f32 {
+    const PEAK: f32 = 0.6;
+    if level <= 0.0 || glow <= 0.0 {
+        return 0.0;
+    }
+    let sigma = glow / 2.0;
+    let d = dist.max(0.0);
+    PEAK * level.min(1.0) * (-(d * d) / (2.0 * sigma * sigma)).exp()
+}
+
+/// One premultiplied BGRA pixel of the logo in `tint`, from the icon drawn once on black and
+/// once on white: what changes between the two is the icon's transparency, what it shows on
+/// black is its (premultiplied) colour, which the tint then multiplies (white mark → tint).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn tinted_pixel(on_black: (u8, u8, u8), on_white: (u8, u8, u8), tint: (u8, u8, u8)) -> [u8; 4] {
+    let diff = |b: u8, w: u8| w.saturating_sub(b) as u32;
+    let see_through = diff(on_black.0, on_white.0)
+        .max(diff(on_black.1, on_white.1))
+        .max(diff(on_black.2, on_white.2));
+    let a = 255 - see_through.min(255);
+    let ch = |c: u8, t: u8| ((c as u32 * t as u32 + 127) / 255).min(a) as u8;
+    [
+        ch(on_black.2, tint.2),
+        ch(on_black.1, tint.1),
+        ch(on_black.0, tint.0),
+        a as u8,
+    ]
+}
+
 #[cfg(windows)]
 pub use win::{hide, show};
 
@@ -260,7 +373,7 @@ mod win {
         mem::{size_of, zeroed},
         ptr::{null, null_mut},
         sync::{atomic::Ordering, mpsc, Mutex},
-        time::Duration,
+        time::{Duration, Instant},
     };
     use winapi::{
         shared::{
@@ -274,20 +387,22 @@ mod win {
                 GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, OpenProcess,
             },
             wingdi::{
-                CreateFontW, CreatePen, DeleteObject, GetStockObject, GetTextExtentPoint32W,
-                GetTextFaceW, GetTextMetricsW, RoundRect, SelectObject, SetBkMode,
-                SetBrushOrgEx, SetStretchBltMode, SetTextAlign, SetTextColor, StretchDIBits,
-                TextOutW, BITMAPINFO, BITMAPINFOHEADER, TEXTMETRICW,
+                CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, DeleteDC,
+                DeleteObject, GdiFlush, GetStockObject, GetTextExtentPoint32W, GetTextFaceW,
+                GetTextMetricsW, RoundRect, SelectObject, SetBkMode, SetBrushOrgEx,
+                SetStretchBltMode, SetTextAlign, SetTextColor, StretchDIBits, TextOutW,
+                BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, TEXTMETRICW,
             },
             winnt::{HANDLE, PROCESS_QUERY_LIMITED_INFORMATION},
             winuser::{
                 BeginPaint, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow,
                 DispatchMessageW, DrawIconEx, EndPaint, EnumDisplayMonitors, EnumWindows,
-                GetClientRect, GetMessageW, GetMonitorInfoA, GetTopWindow,
-                GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
-                IsWindowVisible, KillTimer, LoadImageW, PeekMessageW, PostThreadMessageW,
-                RegisterClassExW, SetLayeredWindowAttributes, SetTimer, SetWindowPos, ShowWindow,
-                TranslateMessage, UpdateWindow, MONITORINFO, MSG, PAINTSTRUCT, WNDCLASSEXW,
+                GetClientRect, GetMessageW, GetMonitorInfoW, GetTopWindow, GetWindow,
+                GetWindowLongPtrW, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
+                InvalidateRect, IsWindowVisible, KillTimer, LoadImageW, PeekMessageW,
+                PostThreadMessageW, RegisterClassExW, SetLayeredWindowAttributes, SetTimer,
+                SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, UpdateWindow,
+                MONITORINFO, MONITORINFOEXW, MSG, PAINTSTRUCT, WNDCLASSEXW,
             },
         },
     };
@@ -334,6 +449,14 @@ mod win {
     const BLACK_BRUSH: i32 = 4;
     const DEFAULT_CHARSET: DWORD = 1;
     const CLEARTYPE_QUALITY: DWORD = 5;
+    // Sense Remote (H5): watched-screen logo.
+    const GWLP_USERDATA: i32 = -21;
+    const AC_SRC_OVER: u8 = 0;
+    const AC_SRC_ALPHA: u8 = 1;
+    /// Thread message: the watched screens changed (`set_watched`).
+    const WM_SENSE_WATCHED: UINT = WM_USER + 1;
+    /// Frame time of the white/green transition.
+    const ANIM_MS: UINT = 16;
 
     const CLASS_NAME: &str = "SenseRemoteMaintenanceCurtain";
     const WINDOW_TITLE: &str = "Sense Remote";
@@ -345,6 +468,23 @@ mod win {
     #[link(name = "user32")]
     extern "system" {
         fn SetWindowDisplayAffinity(hwnd: HWND, affinity: DWORD) -> BOOL;
+    }
+
+    #[link(name = "msimg32")]
+    extern "system" {
+        fn AlphaBlend(
+            dest: HDC,
+            x: i32,
+            y: i32,
+            w: i32,
+            h: i32,
+            src: HDC,
+            sx: i32,
+            sy: i32,
+            sw: i32,
+            sh: i32,
+            blend: BLENDFUNCTION,
+        ) -> BOOL;
     }
 
     #[link(name = "kernel32")]
@@ -409,6 +549,15 @@ mod win {
         SHOWN.store(false, Ordering::SeqCst);
     }
 
+    /// Sense Remote (H5): tells a running curtain to re-read the watched screens.
+    pub(super) fn watched_changed() {
+        if let Some(running) = RUNNING.lock().unwrap().as_ref() {
+            unsafe {
+                PostThreadMessageW(running.thread_id, WM_SENSE_WATCHED, 0, 0);
+            }
+        }
+    }
+
     fn run(ready: mpsc::Sender<Result<DWORD, String>>) {
         unsafe {
             let thread_id = GetCurrentThreadId();
@@ -428,8 +577,21 @@ mod win {
             }
             let timer = SetTimer(null_mut(), 0, REFRESH_MS, None);
             while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+                // Sense Remote (H5): the logo transition has its own, faster timer.
+                if msg.hwnd.is_null()
+                    && msg.message == WM_TIMER
+                    && curtain.anim_timer != 0
+                    && msg.wParam == curtain.anim_timer
+                {
+                    curtain.animate();
+                    continue;
+                }
                 if msg.hwnd.is_null() && msg.message == WM_TIMER {
                     curtain.refresh();
+                    continue;
+                }
+                if msg.hwnd.is_null() && msg.message == WM_SENSE_WATCHED {
+                    curtain.update_watched();
                     continue;
                 }
                 TranslateMessage(&msg);
@@ -438,37 +600,55 @@ mod win {
             if timer != 0 {
                 KillTimer(null_mut(), timer);
             }
+            curtain.stop_animation();
             curtain.close();
         }
     }
 
     type MonitorRect = (i32, i32, i32, i32);
 
+    /// A physical screen: its rectangle and device name (`szDevice`).
+    #[derive(Debug, Clone, PartialEq)]
+    struct Screen {
+        rect: MonitorRect,
+        name: String,
+    }
+
     struct Curtain {
         hinst: HINSTANCE,
         windows: Vec<HWND>,
-        rects: Vec<MonitorRect>,
+        screens: Vec<Screen>,
         own_pid: u32,
         own_exe: String,
+        // Sense Remote (H5): per window, the green level shown (0 white, 1 green) and whether
+        // its screen is watched; the transition timer runs only while they differ.
+        levels: Vec<f32>,
+        watched: Vec<bool>,
+        anim_timer: usize,
+        anim_last: Instant,
     }
 
     impl Curtain {
         unsafe fn open() -> ResultType<Self> {
             let hinst = GetModuleHandleW(null());
             register_class(hinst)?;
-            let rects = monitor_rects()?;
-            if rects.is_empty() {
+            let screens = monitor_screens()?;
+            if screens.is_empty() {
                 bail!("no screen found");
             }
-            let windows = create_windows(hinst, &rects)?;
-            // Sense Remote: `restack` takes `&self`, so no `mut` (compiler warning).
-            let curtain = Self {
+            let windows = create_windows(hinst, &screens)?;
+            let mut curtain = Self {
                 hinst,
                 windows,
-                rects,
+                screens,
                 own_pid: GetCurrentProcessId(),
                 own_exe: process_exe(GetCurrentProcess()).unwrap_or_default(),
+                levels: Vec::new(),
+                watched: Vec::new(),
+                anim_timer: 0,
+                anim_last: Instant::now(),
             };
+            curtain.reset_levels();
             curtain.restack();
             if curtain.keep_windows().is_empty() {
                 log::warn!("Sense curtain: no Sense icon window found yet");
@@ -478,15 +658,16 @@ mod win {
 
         /// Follows screen changes and keeps the order: Sense icon, curtain, everything else.
         unsafe fn refresh(&mut self) {
-            match monitor_rects() {
-                Ok(rects) if !rects.is_empty() && rects != self.rects => {
+            match monitor_screens() {
+                Ok(screens) if !screens.is_empty() && screens != self.screens => {
                     // New windows first, so the screens are never uncovered in between.
-                    match create_windows(self.hinst, &rects) {
+                    match create_windows(self.hinst, &screens) {
                         Ok(windows) => {
                             let old = std::mem::replace(&mut self.windows, windows);
-                            self.rects = rects;
+                            self.screens = screens;
                             destroy_windows(&old);
-                            log::info!("Sense curtain: screens changed ({})", self.rects.len());
+                            self.reset_levels();
+                            log::info!("Sense curtain: screens changed ({})", self.screens.len());
                         }
                         Err(e) => log::warn!("Sense curtain: screens changed, {}", e),
                     }
@@ -500,6 +681,84 @@ mod win {
         unsafe fn close(&mut self) {
             destroy_windows(&self.windows);
             self.windows.clear();
+        }
+
+        /// Watched flag of every window, from `set_watched`.
+        fn watched_now(&self) -> Vec<bool> {
+            let screens: Vec<(String, i32, i32)> = self
+                .screens
+                .iter()
+                .map(|s| (s.name.clone(), s.rect.0, s.rect.1))
+                .collect();
+            watched_flags(&screens, &watched())
+        }
+
+        /// New windows start at their final colour (no transition).
+        unsafe fn reset_levels(&mut self) {
+            self.stop_animation();
+            self.watched = self.watched_now();
+            self.levels = final_levels(&self.watched);
+            for (i, &hwnd) in self.windows.iter().enumerate() {
+                set_window_level(hwnd, self.levels.get(i).copied().unwrap_or(0.0));
+            }
+        }
+
+        unsafe fn update_watched(&mut self) {
+            let watched = self.watched_now();
+            if watched == self.watched {
+                return;
+            }
+            self.watched = watched;
+            if self.anim_timer == 0 {
+                self.anim_last = Instant::now();
+                self.anim_timer = SetTimer(null_mut(), 0, ANIM_MS, None);
+                if self.anim_timer == 0 {
+                    // No timer: jump to the final colours.
+                    self.levels = final_levels(&self.watched);
+                    self.repaint_logos();
+                }
+            }
+        }
+
+        unsafe fn animate(&mut self) {
+            let now = Instant::now();
+            let dt = now.duration_since(self.anim_last).as_millis().min(1000) as u32;
+            self.anim_last = now;
+            let mut moving = false;
+            for (i, level) in self.levels.iter_mut().enumerate() {
+                let watched = self.watched.get(i).copied().unwrap_or(false);
+                *level = step_level(*level, watched, dt);
+                moving |= *level != if watched { 1.0 } else { 0.0 };
+            }
+            self.repaint_logos();
+            if !moving {
+                self.stop_animation();
+            }
+        }
+
+        unsafe fn stop_animation(&mut self) {
+            if self.anim_timer != 0 {
+                KillTimer(null_mut(), self.anim_timer);
+                self.anim_timer = 0;
+            }
+        }
+
+        /// Repaints only the logo (with its glow) of every window.
+        unsafe fn repaint_logos(&self) {
+            for (i, &hwnd) in self.windows.iter().enumerate() {
+                set_window_level(hwnd, self.levels.get(i).copied().unwrap_or(0.0));
+                let mut rc: RECT = zeroed();
+                GetClientRect(hwnd, &mut rc);
+                let lay = layout(rc.right - rc.left, rc.bottom - rc.top);
+                let reach = mark_reach(&lay);
+                let area = RECT {
+                    left: lay.mark_x - reach,
+                    top: lay.mark_y - reach,
+                    right: lay.mark_x + lay.mark_size + reach,
+                    bottom: lay.mark_y + lay.mark_size + reach,
+                };
+                InvalidateRect(hwnd, &area, FALSE);
+            }
         }
 
         unsafe fn keep_windows(&self) -> Vec<HWND> {
@@ -589,6 +848,24 @@ mod win {
         TRUE
     }
 
+    fn final_levels(watched: &[bool]) -> Vec<f32> {
+        watched.iter().map(|&w| if w { 1.0 } else { 0.0 }).collect()
+    }
+
+    /// How far the glow reaches outside the logo circle.
+    fn mark_reach(lay: &Layout) -> i32 {
+        lay.glow * 2
+    }
+
+    /// The green level a window paints with, kept on the window (thousandths).
+    unsafe fn set_window_level(hwnd: HWND, level: f32) {
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (level.clamp(0.0, 1.0) * 1000.0).round() as isize);
+    }
+
+    unsafe fn window_level(hwnd: HWND) -> f32 {
+        (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as f32 / 1000.0).clamp(0.0, 1.0)
+    }
+
     unsafe fn has_area(hwnd: HWND) -> bool {
         let mut r: RECT = zeroed();
         FALSE != GetWindowRect(hwnd, &mut r) && r.right > r.left && r.bottom > r.top
@@ -633,7 +910,7 @@ mod win {
         Ok(())
     }
 
-    unsafe fn create_windows(hinst: HINSTANCE, rects: &[MonitorRect]) -> ResultType<Vec<HWND>> {
+    unsafe fn create_windows(hinst: HINSTANCE, screens: &[Screen]) -> ResultType<Vec<HWND>> {
         let class = wide(CLASS_NAME);
         let title = wide(WINDOW_TITLE);
         let ex_style = WS_EX_TOPMOST
@@ -642,7 +919,7 @@ mod win {
             | WS_EX_TRANSPARENT
             | WS_EX_NOACTIVATE;
         let mut windows = Vec::new();
-        for &(left, top, right, bottom) in rects {
+        for &(left, top, right, bottom) in screens.iter().map(|s| &s.rect) {
             let hwnd = CreateWindowExW(
                 ex_style,
                 class.as_ptr(),
@@ -685,19 +962,19 @@ mod win {
         }
     }
 
-    unsafe fn monitor_rects() -> ResultType<Vec<MonitorRect>> {
-        let mut rects: Vec<MonitorRect> = Vec::new();
+    unsafe fn monitor_screens() -> ResultType<Vec<Screen>> {
+        let mut screens: Vec<Screen> = Vec::new();
         if FALSE
             == EnumDisplayMonitors(
                 null_mut(),
                 null(),
                 Some(collect_monitor),
-                &mut rects as *mut Vec<MonitorRect> as LPARAM,
+                &mut screens as *mut Vec<Screen> as LPARAM,
             )
         {
             bail!("EnumDisplayMonitors: {}", Error::last_os_error());
         }
-        Ok(rects)
+        Ok(screens)
     }
 
     unsafe extern "system" fn collect_monitor(
@@ -706,12 +983,22 @@ mod win {
         _rect: *mut RECT,
         lparam: LPARAM,
     ) -> BOOL {
-        let rects = &mut *(lparam as *mut Vec<MonitorRect>);
-        let mut info: MONITORINFO = zeroed();
-        info.cbSize = size_of::<MONITORINFO>() as DWORD;
-        if FALSE != GetMonitorInfoA(hmon, &mut info) {
+        let screens = &mut *(lparam as *mut Vec<Screen>);
+        // Sense Remote (H5): the extended info also gives the device name (`\\.\DISPLAY1`),
+        // which the watched screens are matched by.
+        let mut info: MONITORINFOEXW = zeroed();
+        info.cbSize = size_of::<MONITORINFOEXW>() as DWORD;
+        if FALSE != GetMonitorInfoW(hmon, &mut info as *mut MONITORINFOEXW as *mut MONITORINFO) {
             let r = info.rcMonitor;
-            rects.push((r.left, r.top, r.right, r.bottom));
+            let end = info
+                .szDevice
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(info.szDevice.len());
+            screens.push(Screen {
+                rect: (r.left, r.top, r.right, r.bottom),
+                name: String::from_utf16_lossy(&info.szDevice[..end]),
+            });
         }
         TRUE
     }
@@ -749,7 +1036,10 @@ mod win {
         if w > 0 && h > 0 {
             draw_glow(hdc, w, h);
             let lay = layout(w, h);
-            draw_mark(hdc, &lay);
+            // Sense Remote (H5): green glow + logo on a watched screen.
+            let level = window_level(hwnd);
+            draw_halo(hdc, &lay, level);
+            draw_mark(hdc, &lay, level);
             draw_texts(hdc, &lay);
         }
         EndPaint(hwnd, &ps);
@@ -784,8 +1074,9 @@ mod win {
         );
     }
 
-    /// The Sense mark: the program icon (white mark on black) in a thin rounded box.
-    unsafe fn draw_mark(hdc: HDC, lay: &Layout) {
+    /// The Sense mark: the program icon (white mark on black) in a thin rounded box; on a
+    /// watched screen the mark is green (Sense Remote, H5).
+    unsafe fn draw_mark(hdc: HDC, lay: &Layout, level: f32) {
         let (x, y, size) = (lay.mark_x, lay.mark_y, lay.mark_size);
         let pen = CreatePen(PS_SOLID, lay.border, colorref(BORDER));
         let old_pen = SelectObject(hdc, pen as _);
@@ -811,19 +1102,149 @@ mod win {
             0,
         ) as HICON;
         if !icon.is_null() {
-            DrawIconEx(
-                hdc,
-                x + inset,
-                y + inset,
-                icon,
-                icon_size,
-                icon_size,
-                0,
-                null_mut(),
-                DI_NORMAL,
-            );
+            // Sense Remote (H5): tinted logo; the plain icon when the tint cannot be drawn.
+            if !draw_tinted_icon(hdc, icon, x + inset, y + inset, icon_size, logo_rgb(level)) {
+                DrawIconEx(
+                    hdc,
+                    x + inset,
+                    y + inset,
+                    icon,
+                    icon_size,
+                    icon_size,
+                    0,
+                    null_mut(),
+                    DI_NORMAL,
+                );
+            }
             DestroyIcon(icon);
         }
+    }
+
+    /// A 32-bit top-down DIB section selected into a new memory DC.
+    struct Canvas {
+        dc: HDC,
+        bitmap: winapi::shared::windef::HBITMAP,
+        old: winapi::shared::windef::HGDIOBJ,
+        bits: *mut u32,
+        len: usize,
+    }
+
+    impl Canvas {
+        unsafe fn new(hdc: HDC, w: i32, h: i32) -> Option<Self> {
+            if w <= 0 || h <= 0 {
+                return None;
+            }
+            let mut bmi: BITMAPINFO = zeroed();
+            bmi.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as DWORD;
+            bmi.bmiHeader.biWidth = w;
+            bmi.bmiHeader.biHeight = -h; // top-down
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+            let dc = CreateCompatibleDC(hdc);
+            if dc.is_null() {
+                return None;
+            }
+            let mut bits: *mut winapi::ctypes::c_void = null_mut();
+            let bitmap = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+            if bitmap.is_null() || bits.is_null() {
+                DeleteDC(dc);
+                return None;
+            }
+            let old = SelectObject(dc, bitmap as _);
+            Some(Self {
+                dc,
+                bitmap,
+                old,
+                bits: bits as *mut u32,
+                len: (w * h) as usize,
+            })
+        }
+
+        unsafe fn pixels(&mut self) -> &mut [u32] {
+            std::slice::from_raw_parts_mut(self.bits, self.len)
+        }
+
+        /// Draws this premultiplied-alpha canvas onto `hdc`.
+        unsafe fn blend_onto(&self, hdc: HDC, x: i32, y: i32, w: i32, h: i32) -> bool {
+            let blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER,
+                BlendFlags: 0,
+                SourceConstantAlpha: 255,
+                AlphaFormat: AC_SRC_ALPHA,
+            };
+            FALSE != AlphaBlend(hdc, x, y, w, h, self.dc, 0, 0, w, h, blend)
+        }
+    }
+
+    impl Drop for Canvas {
+        fn drop(&mut self) {
+            unsafe {
+                SelectObject(self.dc, self.old);
+                DeleteObject(self.bitmap as _);
+                DeleteDC(self.dc);
+            }
+        }
+    }
+
+    fn rgb_of(px: u32) -> (u8, u8, u8) {
+        (((px >> 16) & 0xff) as u8, ((px >> 8) & 0xff) as u8, (px & 0xff) as u8)
+    }
+
+    /// The icon in `tint`: drawn once on black and once on white to recover its transparency
+    /// (`tinted_pixel`), then blended onto the screen.
+    unsafe fn draw_tinted_icon(
+        hdc: HDC,
+        icon: HICON,
+        x: i32,
+        y: i32,
+        size: i32,
+        tint: (u8, u8, u8),
+    ) -> bool {
+        let (Some(mut black), Some(mut white)) =
+            (Canvas::new(hdc, size, size), Canvas::new(hdc, size, size))
+        else {
+            return false;
+        };
+        black.pixels().fill(0);
+        white.pixels().fill(0x00ff_ffff);
+        for c in [&black, &white] {
+            if FALSE == DrawIconEx(c.dc, 0, 0, icon, size, size, 0, null_mut(), DI_NORMAL) {
+                return false;
+            }
+        }
+        // GDI may batch the drawing; finish it before reading the pixels.
+        GdiFlush();
+        let on_white: Vec<u32> = white.pixels().to_vec();
+        for (px, w) in black.pixels().iter_mut().zip(on_white) {
+            let [b, g, r, a] = tinted_pixel(rgb_of(*px), rgb_of(w), tint);
+            *px = u32::from_le_bytes([b, g, r, a]);
+        }
+        black.blend_onto(hdc, x, y, size, size)
+    }
+
+    /// The green glow around a watched screen's logo circle (nothing at level 0).
+    unsafe fn draw_halo(hdc: HDC, lay: &Layout, level: f32) {
+        if level <= 0.0 {
+            return;
+        }
+        let reach = mark_reach(lay);
+        let size = lay.mark_size + 2 * reach;
+        let Some(mut canvas) = Canvas::new(hdc, size, size) else {
+            return;
+        };
+        let (r, g, b) = crate::sense::tokens::WATCHED_GREEN;
+        let center = size as f32 / 2.0;
+        let radius = lay.mark_size as f32 / 2.0;
+        let glow = lay.glow as f32;
+        for (i, px) in canvas.pixels().iter_mut().enumerate() {
+            let (cx, cy) = ((i as i32 % size) as f32 + 0.5, (i as i32 / size) as f32 + 0.5);
+            let dist = ((cx - center).powi(2) + (cy - center).powi(2)).sqrt() - radius;
+            let a = halo_alpha(dist, glow, level);
+            let pre = |c: u8| (c as f32 * a).round() as u8;
+            *px = u32::from_le_bytes([pre(b), pre(g), pre(r), (a * 255.0).round() as u8]);
+        }
+        canvas.blend_onto(hdc, lay.mark_x - reach, lay.mark_y - reach, size, size);
     }
 
     unsafe fn draw_texts(hdc: HDC, lay: &Layout) {
@@ -960,7 +1381,7 @@ mod win {
 
     #[cfg(test)]
     pub(super) fn screen_count() -> usize {
-        unsafe { monitor_rects().map(|r| r.len()).unwrap_or(0) }
+        unsafe { monitor_screens().map(|r| r.len()).unwrap_or(0) }
     }
 }
 
@@ -1074,6 +1495,123 @@ mod tests {
         ];
         assert_eq!(keep_above(1, exe, &candidates), vec![0]);
         assert!(keep_above(1, "", &candidates).is_empty());
+    }
+
+    // Sense Remote (S7-a, H5): watched screens.
+    fn wd(name: &str, x: i32, y: i32) -> WatchedDisplay {
+        WatchedDisplay {
+            name: name.to_owned(),
+            x,
+            y,
+        }
+    }
+
+    #[test]
+    fn watched_screens_are_found_by_name_then_corner() {
+        let screens = vec![
+            (r"\\.\DISPLAY1".to_owned(), 0, 0),
+            (r"\\.\DISPLAY2".to_owned(), 1920, 0),
+            (r"\\.\DISPLAY3".to_owned(), -1280, 0),
+        ];
+        assert_eq!(watched_flags(&screens, &[]), vec![false, false, false]);
+        // By name, whatever the corner says (DPI can move it).
+        assert_eq!(
+            watched_flags(&screens, &[wd(r"\\.\display2", 5, 5)]),
+            vec![false, true, false]
+        );
+        // Unknown name: by top-left corner.
+        assert_eq!(
+            watched_flags(&screens, &[wd("", -1280, 0)]),
+            vec![false, false, true]
+        );
+        assert_eq!(
+            watched_flags(&screens, &[wd("other", 0, 0)]),
+            vec![true, false, false]
+        );
+        // "Tümü": every screen.
+        assert_eq!(
+            watched_flags(
+                &screens,
+                &[wd(r"\\.\DISPLAY1", 0, 0), wd(r"\\.\DISPLAY2", 1920, 0), wd(r"\\.\DISPLAY3", -1280, 0)]
+            ),
+            vec![true, true, true]
+        );
+        // A display that is gone matches nothing.
+        assert_eq!(
+            watched_flags(&screens, &[wd(r"\\.\DISPLAY9", 99, 99)]),
+            vec![false, false, false]
+        );
+    }
+
+    #[test]
+    fn logo_turns_green_in_the_design_time() {
+        let ms = crate::sense::tokens::WATCHED_TRANSITION_MS;
+        assert_eq!(ms, 400);
+        assert_eq!(step_level(0.0, true, ms), 1.0);
+        assert_eq!(step_level(1.0, false, ms), 0.0);
+        assert!((step_level(0.0, true, ms / 2) - 0.5).abs() < 1e-6);
+        // Never overshoots, and stays when there.
+        assert_eq!(step_level(0.9, true, ms), 1.0);
+        assert_eq!(step_level(1.0, true, 16), 1.0);
+        assert_eq!(step_level(0.0, false, 16), 0.0);
+        // 16 ms frames reach green in 25 steps (0.4 s).
+        let mut level = 0.0;
+        let mut frames = 0;
+        while level < 1.0 {
+            level = step_level(level, true, 16);
+            frames += 1;
+        }
+        assert!((25..=26).contains(&frames), "{frames}");
+    }
+
+    #[test]
+    fn logo_colour_runs_from_white_to_sense_green() {
+        assert_eq!(logo_rgb(0.0), (0xff, 0xff, 0xff));
+        assert_eq!(logo_rgb(1.0), (0x00, 0xff, 0xb6));
+        assert_eq!(logo_rgb(2.0), (0x00, 0xff, 0xb6));
+        let (r, g, b) = logo_rgb(0.5);
+        assert!(r > 0x70 && r < 0x90 && g == 0xff && b > 0xd0 && b < 0xe0, "{r},{g},{b}");
+    }
+
+    #[test]
+    fn halo_fades_out_and_follows_the_level() {
+        assert_eq!(halo_alpha(0.0, 14.0, 0.0), 0.0);
+        let at_edge = halo_alpha(0.0, 14.0, 1.0);
+        assert!(at_edge > 0.5 && at_edge <= 0.6);
+        assert!(halo_alpha(7.0, 14.0, 1.0) < at_edge);
+        assert!(halo_alpha(28.0, 14.0, 1.0) < 0.01);
+        assert!((halo_alpha(0.0, 14.0, 0.5) - at_edge / 2.0).abs() < 1e-6);
+        // Inside the circle it is as strong as at the edge (the box covers it).
+        assert_eq!(halo_alpha(-5.0, 14.0, 1.0), at_edge);
+    }
+
+    #[test]
+    fn tinted_pixel_keeps_transparency_and_tints_the_white_mark() {
+        let green = (0x00, 0xff, 0xb6);
+        // Opaque white mark → green, opaque.
+        assert_eq!(tinted_pixel((255, 255, 255), (255, 255, 255), green), [0xb6, 0xff, 0x00, 255]);
+        // Opaque black stays black.
+        assert_eq!(tinted_pixel((0, 0, 0), (0, 0, 0), green), [0, 0, 0, 255]);
+        // Fully transparent: nothing.
+        assert_eq!(tinted_pixel((0, 0, 0), (255, 255, 255), green), [0, 0, 0, 0]);
+        // Half-covered white edge: half alpha, premultiplied half green.
+        let [b, g, r, a] = tinted_pixel((128, 128, 128), (255, 255, 255), green);
+        assert_eq!(a, 128);
+        assert_eq!((r, g), (0, 128));
+        assert!(b <= a);
+        // White tint leaves the icon as it is.
+        assert_eq!(
+            tinted_pixel((200, 100, 50), (200, 100, 50), (255, 255, 255)),
+            [50, 100, 200, 255]
+        );
+    }
+
+    #[test]
+    fn set_watched_keeps_the_list() {
+        set_watched(vec![wd(r"\\.\DISPLAY1", 0, 0)]);
+        assert_eq!(watched(), vec![wd(r"\\.\DISPLAY1", 0, 0)]);
+        set_watched(Vec::new());
+        assert!(watched().is_empty());
     }
 
     #[test]

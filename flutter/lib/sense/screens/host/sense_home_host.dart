@@ -1,3 +1,5 @@
+// Sense Remote (B2, 2026-11-23): no longer used by the app; the Host window is
+// shell/host_shell.dart. Kept because other tests still build this view.
 // Sense Remote: Host home (prototype Calisma/prototip/uygulama.html, screen 3,
 // left half only). Host computers sit at the customer's site, so the window
 // stays small: name, location, readiness and the lock note. No settings, no

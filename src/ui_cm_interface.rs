@@ -149,6 +149,8 @@ pub struct Client {
     pub from_switch: bool,
     pub in_voice_call: bool,
     pub incoming_voice_call: bool,
+    // Sense Remote (S7-b): the Controller is recording this connection.
+    pub sense_recording: bool,
     #[serde(skip)]
     #[cfg(not(any(target_os = "ios")))]
     tx: UnboundedSender<Data>,
@@ -198,6 +200,9 @@ pub trait InvokeUiCM: Send + Clone + 'static + Sized {
     fn update_voice_call_state(&self, client: &Client);
 
     fn file_transfer_log(&self, action: &str, log: &str);
+
+    // Sense Remote (S7-b): the Controller started / stopped recording connection `id`.
+    fn sense_recording(&self, _id: i32, _on: bool) {}
 }
 
 impl<T: InvokeUiCM> Deref for ConnectionManager<T> {
@@ -261,6 +266,7 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
             tx,
             in_voice_call: false,
             incoming_voice_call: false,
+            sense_recording: false,
         };
         CLIENTS
             .write()
@@ -319,6 +325,15 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn show_elevation(&self, show: bool) {
         self.ui_handler.show_elevation(show);
+    }
+
+    // Sense Remote (S7-b).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn sense_recording(&self, id: i32, on: bool) {
+        if let Some(client) = CLIENTS.write().unwrap().get_mut(&id) {
+            client.sense_recording = on;
+        }
+        self.ui_handler.sense_recording(id, on);
     }
 
     #[cfg(not(target_os = "ios"))]
@@ -672,6 +687,10 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                 }
                                 Data::CloseVoiceCall(reason) => {
                                     self.cm.voice_call_closed(self.conn_id, reason.as_str());
+                                }
+                                // Sense Remote (S7-b).
+                                Data::SenseRecording(on) => {
+                                    self.cm.sense_recording(self.conn_id, on);
                                 }
                                 #[cfg(target_os = "windows")]
                                 Data::ClipboardNonFile(_) => {

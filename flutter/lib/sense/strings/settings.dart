@@ -116,14 +116,4 @@ abstract final class SenseSettingsStrings {
   // Shared values.
   static const String on = 'Açık';
   static const String off = 'Kapalı';
-
-  // Bu bilgisayarın rolü (placeholder until B2's role component lands).
-  static const String roleHint =
-      'Bu bilgisayara Host ya da Controller eklenebilir, biri kaldırılabilir. '
-      'Değişiklik Sense hesabıyla doğrulanır ve panelin denetim kaydına düşer.';
-  static const String roleHost = 'Host';
-  static const String roleHostBody = 'Ekip bu bilgisayara uzaktan bağlanabilir.';
-  static const String roleController = 'Controller';
-  static const String roleControllerBody = 'Bu bilgisayardan başka bilgisayarlara bağlanırsın.';
-  static const String roleInstalled = 'kurulu';
 }
