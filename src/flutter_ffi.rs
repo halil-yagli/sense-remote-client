@@ -2614,6 +2614,11 @@ pub fn main_sense_role_change_cancel() {
     crate::sense::role_change::ffi_role_change_cancel()
 }
 
+// Sense Remote (D3b): the app starts again with the new role after the splash.
+pub fn main_sense_role_reopen() -> String {
+    crate::sense::role_change::ffi_role_reopen()
+}
+
 // S3 / H1 (D3c): name and location changed on the Host.
 pub fn main_sense_identity() -> String {
     crate::sense::identity_set::ffi_identity()

@@ -5,7 +5,7 @@
 // H1): Hakkında and the version open the Sense About inside this window.
 import 'package:flutter/widgets.dart';
 
-import '../../../router.dart' show senseShowSplash;
+import '../../../router.dart' show senseRoleChangeReopen;
 import '../../../sense.dart';
 import '../../../strings/host.dart';
 import '../../controller/sense_update_view.dart' show SenseUpdateWatch;
@@ -52,8 +52,7 @@ class _SenseHostShellState extends State<SenseHostShell> {
                     role: SenseHomeRole.host,
                     // Sense Remote (D3b): the service stored the new role; the
                     // opening screen covers the window while the app reopens.
-                    onRoleRestart: () =>
-                        senseShowSplash(message: SenseCommonStrings.splashRoleChange),
+                    onRoleRestart: senseRoleChangeReopen,
                   )),
         ),
       );

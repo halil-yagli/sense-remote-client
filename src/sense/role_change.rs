@@ -309,6 +309,42 @@ fn change_status_value(stage: &Stage, error: Option<&str>) -> Value {
     }
 }
 
+/// Seconds the helper waits before starting the app again: this process has ended by then (the
+/// main window is single-instance, a second one would only bring the old one forward).
+const REOPEN_DELAY_S: u32 = 2;
+
+/// The helper that starts this app again after `REOPEN_DELAY_S`: (program, args, raw Windows
+/// command line). No user text goes in; the path is passed as an argument on macOS and quoted
+/// whole on Windows (a Windows path can not contain `"`).
+fn reopen_command(windows: bool, exe: &std::path::Path) -> (String, Vec<String>) {
+    if windows {
+        // `timeout` refuses a redirected stdin; `ping -n N+1` waits N seconds.
+        let line = format!(
+            "ping -n {} 127.0.0.1 >nul & start \"\" \"{}\"",
+            REOPEN_DELAY_S + 1,
+            exe.display()
+        );
+        return ("cmd".to_owned(), vec!["/C".to_owned(), line]);
+    }
+    // macOS: open the bundle (`…/X.app/Contents/MacOS/X`) so it comes forward as an app.
+    let bundle = exe
+        .ancestors()
+        .nth(3)
+        .filter(|p| p.extension().map_or(false, |e| e == "app"));
+    let (script, target) = match bundle {
+        Some(bundle) => ("sleep {d}; exec /usr/bin/open -n \"$0\"", bundle),
+        None => ("sleep {d}; exec \"$0\"", exe),
+    };
+    (
+        "/bin/sh".to_owned(),
+        vec![
+            "-c".to_owned(),
+            script.replace("{d}", &REOPEN_DELAY_S.to_string()),
+            target.display().to_string(),
+        ],
+    )
+}
+
 // ---------------------------------------------------------------------------------------------
 // Side effects (Flutter UI only: the sign-in is `hbbs_http::account`)
 // ---------------------------------------------------------------------------------------------
@@ -523,6 +559,42 @@ mod ui {
         }
     }
 
+    /// Starts the app again (after the splash) so the new role's window opens; only once the
+    /// role is stored. "" = the helper runs and the page ends this process.
+    pub fn reopen() -> String {
+        let restarting = with_state(|s| matches!(s.stage, Stage::Restarting { .. }));
+        if !restarting {
+            return "not_restarting".to_owned();
+        }
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(err) => {
+                log::warn!("Sense Remote: reopen after the role change failed: {err}");
+                return "reopen_failed".to_owned();
+            }
+        };
+        let (program, args) = reopen_command(cfg!(windows), &exe);
+        let mut command = std::process::Command::new(program);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.arg(&args[0]).raw_arg(&args[1]).creation_flags(CREATE_NO_WINDOW);
+        }
+        #[cfg(not(windows))]
+        command.args(&args);
+        match command.spawn() {
+            Ok(_) => {
+                log::info!("Sense Remote: the app reopens with the new role");
+                String::new()
+            }
+            Err(err) => {
+                log::warn!("Sense Remote: reopen after the role change failed: {err}");
+                "reopen_failed".to_owned()
+            }
+        }
+    }
+
     pub fn cancel() {
         // Only the sign-in can be cancelled; once the panel signed, the change goes on.
         let was_login = with_state(|s| {
@@ -567,6 +639,13 @@ pub fn ffi_role_change_status() -> String {
 #[cfg(feature = "flutter")]
 pub fn ffi_role_change_cancel() {
     ui::cancel()
+}
+
+/// `main_sense_role_reopen`: after the splash, starts the app again with the new role → "" (the
+/// page then ends this process) or an error code.
+#[cfg(feature = "flutter")]
+pub fn ffi_role_reopen() -> String {
+    ui::reopen()
 }
 
 #[cfg(test)]
@@ -912,6 +991,37 @@ mod tests {
             applying_step(SenseRole::Both, Some(SenseRole::Both), since, since + APPLY_TIMEOUT * 2),
             Ok(Stage::Restarting { target: SenseRole::Both })
         );
+    }
+
+    // The app starts again by itself after the role change (no user text in the command).
+    #[test]
+    fn reopen_command_per_platform() {
+        let win = std::path::Path::new(r"C:\Program Files\SenseRemote\SenseRemote.exe");
+        let (program, args) = reopen_command(true, win);
+        assert_eq!(program, "cmd");
+        assert_eq!(
+            args,
+            vec![
+                "/C".to_owned(),
+                r#"ping -n 3 127.0.0.1 >nul & start "" "C:\Program Files\SenseRemote\SenseRemote.exe""#
+                    .to_owned()
+            ]
+        );
+        let mac = std::path::Path::new("/Applications/Sense Remote.app/Contents/MacOS/SenseRemote");
+        let (program, args) = reopen_command(false, mac);
+        assert_eq!(program, "/bin/sh");
+        assert_eq!(
+            args,
+            vec![
+                "-c".to_owned(),
+                r#"sleep 2; exec /usr/bin/open -n "$0""#.to_owned(),
+                "/Applications/Sense Remote.app".to_owned()
+            ]
+        );
+        // Not inside a bundle: the program itself.
+        let (_, args) = reopen_command(false, std::path::Path::new("/opt/sense/SenseRemote"));
+        assert_eq!(args[1], r#"sleep 2; exec "$0""#);
+        assert_eq!(args[2], "/opt/sense/SenseRemote");
     }
 
     // TK4: no new privileged IPC, no hand-written role, no saved app sign-in.
