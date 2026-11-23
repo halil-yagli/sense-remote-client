@@ -274,6 +274,8 @@ async fn start_hbbs_sync_async() {
                 // plus the envelope state (applied_seq, envelope_error, clock_skew_s). Not sent
                 // without an installed role.
                 // G2-5: `applied_seq` is left out when the stored seq cannot be read.
+                // Sense Remote (O8): with a session open, health every 8 s (health_v2 panels).
+                crate::sense::health_v2::set_connected(!conns.is_empty());
                 if let Ok(Some((mut sense, applied_seq))) = tokio::task::spawn_blocking(|| {
                     crate::sense::report::heartbeat_base()
                         .map(|sense| (sense, sense_stored_seq().ok()))
@@ -319,6 +321,8 @@ async fn start_hbbs_sync_async() {
                                 answer.ignored
                             );
                         }
+                        // Sense Remote (S6): detailed health data only for a panel that takes it.
+                        crate::sense::health_v2::set_panel_caps(answer.panel_caps.as_deref());
                         sense_report.server_time(answer.server_time, now_s());
                         sense_handle_envelopes(&answer.envelopes, &id, &mut sense_report).await;
                         // Sense Remote (update plan 2026-11-21, §3.4): hint, release notice and

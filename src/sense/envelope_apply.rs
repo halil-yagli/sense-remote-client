@@ -45,6 +45,8 @@ const KEY_SERVER_TIME: &str = "sense_server_time";
 const KEY_UPDATE_HINT: &str = "sense_update";
 const KEY_RELEASE: &str = "sense_release";
 const KEY_UPDATE_ORDER: &str = "sense_update_order";
+/// Sense Remote (S6): capabilities of the panel (`health_v2`), information only.
+const KEY_PANEL_CAPS: &str = "sense_panel_caps";
 
 /// What the sync loop takes from a heartbeat answer. There is deliberately no field for the
 /// upstream `strategy`, `disconnect` or `modified_at`.
@@ -57,6 +59,8 @@ pub struct HeartbeatAnswer {
     /// Sense Remote (update plan 2026-11-21, §3.4): `sense_update`, `sense_release` and
     /// `sense_update_order`, unverified.
     pub update: update::Answer,
+    /// Sense Remote (S6): `sense_panel_caps` (strings); `None` when missing or of another shape.
+    pub panel_caps: Option<Vec<String>>,
     /// Keys that are not acted on (sorted), for the log.
     pub ignored: Vec<String>,
 }
@@ -86,11 +90,28 @@ pub fn parse_answer(body: &str) -> Option<HeartbeatAnswer> {
             },
             KEY_RELEASE if value.is_object() => answer.update.release = Some(value),
             KEY_UPDATE_ORDER if value.is_object() => answer.update.order = Some(value),
+            KEY_PANEL_CAPS => match panel_caps(&value) {
+                Some(caps) => answer.panel_caps = Some(caps),
+                None => answer.ignored.push(key),
+            },
             _ => answer.ignored.push(key),
         }
     }
     answer.ignored.sort();
     Some(answer)
+}
+
+/// Sense Remote (S6): at most 16 strings of at most 32 characters, like `caps`.
+fn panel_caps(value: &Value) -> Option<Vec<String>> {
+    let items = value.as_array()?;
+    let caps: Vec<String> = items
+        .iter()
+        .take(16)
+        .filter_map(Value::as_str)
+        .filter(|c| !c.is_empty() && c.len() <= 32)
+        .map(str::to_owned)
+        .collect();
+    (caps.len() == items.len().min(16)).then_some(caps)
 }
 
 /// Sense Remote (G2-7): the envelope sets every allow-listed key. A partial set would leave the
@@ -430,6 +451,20 @@ mod tests {
         assert_eq!(answer.envelopes.len(), 1);
         assert_eq!(answer.server_time, Some(1_800_000_123));
         assert_eq!(answer.ignored, vec!["disconnect", "modified_at", "strategy"]);
+    }
+
+    /// Sense Remote (S6): `sense_panel_caps` is read; a wrong shape is ignored and logged.
+    #[test]
+    fn panel_caps_are_read() {
+        let answer = parse_answer(&json!({ "sense_panel_caps": ["health_v2"] }).to_string()).unwrap();
+        assert_eq!(answer.panel_caps, Some(vec!["health_v2".to_owned()]));
+        assert!(answer.ignored.is_empty());
+        for bad in [json!("health_v2"), json!([1]), json!(["x".repeat(40)])] {
+            let answer = parse_answer(&json!({ "sense_panel_caps": bad }).to_string()).unwrap();
+            assert_eq!(answer.panel_caps, None);
+            assert_eq!(answer.ignored, vec!["sense_panel_caps"]);
+        }
+        assert_eq!(parse_answer("{}").unwrap().panel_caps, None);
     }
 
     // Update plan 2026-11-21 §3.4 (U0): the three update keys are split off, everything else is
