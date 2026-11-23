@@ -43,7 +43,10 @@ pub enum LoginPurpose {
     Password,
     // Sense Remote (Sürüm 4, S4 / TK4): changing this computer's role from the app; the token is
     // short-lived, single-use and never saved as the app sign-in.
-    Role,
+    // Sense Remote (security review S4-2): the target role goes with the sign-in
+    // (`sense.target_role`); the panel shows it on the approval page and the token then changes
+    // to this role only (another role -> `role_scope`).
+    Role(crate::sense::SenseRole),
 }
 
 impl LoginPurpose {
@@ -52,8 +55,28 @@ impl LoginPurpose {
             Self::App => "app",
             Self::Install => "install",
             Self::Password => "password",
-            Self::Role => "role",
+            Self::Role(_) => "role",
         }
+    }
+
+    /// Sense Remote (S4-2): contract `SenseRole` of the target, only for `Role`.
+    pub fn target_role(self) -> Option<&'static str> {
+        use crate::sense::SenseRole;
+        match self {
+            Self::Role(SenseRole::Host) => Some("host"),
+            Self::Role(SenseRole::Controller) => Some("controller"),
+            Self::Role(SenseRole::Both) => Some("host_controller"),
+            _ => None,
+        }
+    }
+
+    /// Sense Remote: the `sense` part of `POST /api/oidc/auth` (contract `OidcAuthBody.sense`).
+    fn sense_body(self) -> serde_json::Value {
+        let mut sense = serde_json::json!({ "v": 1, "purpose": self.as_str() });
+        if let Some(target) = self.target_role() {
+            sense["target_role"] = serde_json::json!(target);
+        }
+        sense
     }
 }
 
@@ -72,7 +95,7 @@ fn auth_request_body(
         "uuid": uuid,
         "deviceInfo": device_info,
         "apiDomain": api_server,
-        "sense": { "v": 1, "purpose": purpose.as_str() },
+        "sense": purpose.sense_body(),
     })
 }
 
@@ -533,7 +556,6 @@ mod sense_tests {
             (LoginPurpose::App, "app"),
             (LoginPurpose::Install, "install"),
             (LoginPurpose::Password, "password"),
-            (LoginPurpose::Role, "role"),
         ] {
             let body = auth_request_body(
                 "Google",
@@ -549,6 +571,35 @@ mod sense_tests {
             assert_eq!(body["uuid"], "dXVpZA==");
             assert_eq!(body["deviceInfo"]["type"], "client");
             assert_eq!(body["apiDomain"], "https://remote.snsdpt.com");
+        }
+    }
+
+    /// Sense Remote (S4-2): the role sign-in names its target (contract `SenseRole`); the other
+    /// purposes never carry `target_role`.
+    #[test]
+    fn role_sign_in_names_the_target_role() {
+        use crate::sense::SenseRole;
+        for (role, wire) in [
+            (SenseRole::Host, "host"),
+            (SenseRole::Controller, "controller"),
+            (SenseRole::Both, "host_controller"),
+        ] {
+            let body = auth_request_body(
+                "Google",
+                "123456789",
+                "dXVpZA==",
+                serde_json::json!({"os": "windows", "type": "client", "name": "pc"}),
+                "https://remote.snsdpt.com",
+                LoginPurpose::Role(role),
+            );
+            assert_eq!(
+                body["sense"],
+                serde_json::json!({"v": 1, "purpose": "role", "target_role": wire})
+            );
+        }
+        for purpose in [LoginPurpose::App, LoginPurpose::Install, LoginPurpose::Password] {
+            assert_eq!(purpose.target_role(), None);
+            assert!(purpose.sense_body().get("target_role").is_none());
         }
     }
 
