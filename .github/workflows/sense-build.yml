@@ -417,7 +417,7 @@ jobs:
       # bulunmadigi dogrulanir. Golden testler gercek sarmalayiciyi calistirmaz (S4 siyah ekran).
       - name: Startup smoke test
         shell: powershell
-        run: ./tools/smoke/acilis-dumani.ps1 -Exe ./rustdesk/SenseRemote.exe -OutDir smoke-out
+        run: ./tools/smoke/acilis-dumani.ps1 -Exe ./rustdesk/SenseRemote.exe -OutDir smoke-out -Rol both
 
       - name: Upload startup smoke test output
         if: ${{ always() }}

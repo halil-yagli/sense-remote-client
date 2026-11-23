@@ -1,17 +1,25 @@
 # Sense Remote: acilis duman testi (Windows). Paketlenmis SenseRemote.exe'yi kurmadan baslatir,
 # ana pencerenin cizildigini dogrular. Sebep: Surum 4'te ana pencere govdesi siyah kaldi ama
 # butun testler gecti (golden'lar ekranlari gercek sarmalayici olmadan ciziyor).
-# Kullanim: powershell -File tools/smoke/acilis-dumani.ps1 -Exe rustdesk\SenseRemote.exe
+# Sense kabugu (rol ekranlari) YALNIZ kurulu rol varken acilir (src/sense.rs: HKLM\SOFTWARE\SenseRemote\Role
+# -> sert ayarlar -> senseHomeRole). Rolsuz (tasinabilir) calisma stok RustDesk ekranini gosterir ve siyah
+# govde hatasini gormez. Bu yuzden -Rol verilirse betik o kayit degerini yazar, sonda siler.
+# DIKKAT: HKLM'ye yazar; yalniz CI runner'inda calistirilir (GITHUB_ACTIONS yoksa -Zorla ister).
+# Kullanim: powershell -File tools/smoke/acilis-dumani.ps1 -Exe rustdesk\SenseRemote.exe -Rol both
 param(
   [Parameter(Mandatory = $true)][string]$Exe,
   [string]$OutDir = "smoke-out",
   [int]$BeklemeSn = 25,
   [double]$Esik = 0.02,       # basligin altindaki piksellerin en az bu orani koyu olmamali
-  [int]$KoyuLimit = 60        # parlaklik (0-255) bunun altindaysa piksel "koyu"
+  [int]$KoyuLimit = 60,       # parlaklik (0-255) bunun altindaysa piksel "koyu"
+  [ValidateSet('', 'host', 'controller', 'both')][string]$Rol = '',
+  [switch]$Zorla
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @'
 using System; using System.Text; using System.Runtime.InteropServices; using System.Collections.Generic;
 public static class Pnc {
@@ -74,6 +82,16 @@ $sess = (Get-Process -Id $PID).SessionId
 Yaz "Oturum kimligi: $sess (0 = servis, GUI yok; >0 = etkilesimli masaustu)"
 $ek = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize
 Yaz ("Ekran: {0}x{1}" -f $ek.Width, $ek.Height)
+
+$kayit = 'HKLM:\SOFTWARE\SenseRemote'
+$kayitYazildi = $false
+if ($Rol) {
+  if ($env:GITHUB_ACTIONS -ne 'true' -and -not $Zorla) { throw "-Rol HKLM'ye yazar; yalniz CI'da ya da -Zorla ile" }
+  New-Item -Path $kayit -Force | Out-Null
+  New-ItemProperty -Path $kayit -Name Role -Value $Rol -PropertyType String -Force | Out-Null
+  $kayitYazildi = $true
+  Yaz "Kurulu rol yazildi (test): $Rol"
+}
 
 $p = Start-Process -FilePath $exeTam -WorkingDirectory (Split-Path $exeTam) -PassThru `
   -RedirectStandardOutput $out -RedirectStandardError $err
@@ -142,12 +160,36 @@ try {
       if ($enIyi -le $Esik) {
         $basarisiz = ("Acilis duman testi: ana pencere bos (en iyi oran {0:P2}, esik {1:P0})" -f $enIyi, $Esik)
       }
+
+      # Sense kabugu denetimi: pencere erisilebilirlik agacindaki metinler (UI Automation; Flutter
+      # anlamsal agaci istemci isteyince acar). Stok RustDesk metni varsa ya da hic Sense metni yoksa basarisiz.
+      $adlar = @()
+      try {
+        $kok = [System.Windows.Automation.AutomationElement]::FromHandle($secili)
+        for ($deneme = 0; $deneme -lt 5 -and $adlar.Count -lt 3; $deneme++) {
+          $adlar = @($kok.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+            ForEach-Object { $_.Current.Name } | Where-Object { $_ })
+          if ($adlar.Count -lt 3) { Start-Sleep -Seconds 3 }
+        }
+      } catch { Yaz "UI Automation hatasi: $($_.Exception.Message)" }
+      Yaz ("UIA metinleri ({0}): {1}" -f $adlar.Count, (($adlar | Select-Object -First 40) -join ' | '))
+      $adlar | Set-Content -Encoding utf8 (Join-Path $OutDir 'uia-metinler.txt')
+      $stok = @($adlar | Where-Object { $_ -match 'Control Remote Desktop|Enter remote ID|Your Desktop|One-time password' })
+      $sense = @($adlar | Where-Object { $_ -match 'Bilgisayarlar|Bu bilgisayar|hesab.nla gir|Hakk.nda|Ayarlar' })
+      if ($Rol -and $stok.Count -gt 0) {
+        $basarisiz = (@($basarisiz, "Acilis duman testi: stok RustDesk ana sayfasi gorunuyor (Sense kabugu acilmadi): $($stok -join ', ')") | Where-Object { $_ }) -join ' | '
+      } elseif ($Rol -and $adlar.Count -gt 0 -and $sense.Count -eq 0) {
+        $basarisiz = (@($basarisiz, "Acilis duman testi: pencerede Sense metni yok") | Where-Object { $_ }) -join ' | '
+      } elseif ($Rol -and $adlar.Count -eq 0) {
+        Yaz "UYARI: erisilebilirlik agaci bos; yalniz piksel olcumu gecerli"
+      }
     }
   }
 } finally {
   if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
   Get-Process -Name $ad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 1
+  if ($kayitYazildi) { Remove-Item -Path $kayit -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 # stdout/stderr hata isaretleri
