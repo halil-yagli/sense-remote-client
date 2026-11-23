@@ -67,9 +67,12 @@ void main() {
       expect(find.text('stock'), findsOneWidget);
     });
 
-    test('senseRegisterScreens can be called before any screen lands', () {
+    test('senseRegisterScreens registers the four B screens (B3)', () {
       senseRegisterScreens();
-      expect(senseEntry(SenseEntry.about), isNull);
+      for (final e in SenseEntry.values) {
+        expect(senseEntry(e), isNotNull, reason: e.name);
+      }
+      senseClearEntries();
     });
   });
 

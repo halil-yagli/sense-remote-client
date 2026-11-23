@@ -15,7 +15,11 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
+import 'screens/controller/about/sense_about_page.dart' show senseAboutScreen;
 import 'screens/controller/sense_home_strings.dart' show SenseHomeRole;
+import 'screens/controller/settings/sense_settings_page.dart' show senseControllerSettingsScreen;
+import 'screens/controller/shell/controller_shell.dart' show senseControllerScreen;
+import 'screens/host/shell/host_shell.dart' show senseHostScreen;
 import 'screens/splash/sense_splash.dart';
 import 'tokens/sense_tokens.dart';
 
@@ -41,7 +45,12 @@ void senseRegisterEntry(SenseEntry entry, SenseEntryBuilder builder) =>
 /// Registers the B/C entries; main.dart calls it once before the first frame.
 /// B/C add their line here when their screen lands, e.g.
 /// `senseRegisterEntry(SenseEntry.hostHome, senseHostScreen);`
-void senseRegisterScreens() {}
+void senseRegisterScreens() {
+  senseRegisterEntry(SenseEntry.hostHome, senseHostScreen);
+  senseRegisterEntry(SenseEntry.controllerHome, senseControllerScreen);
+  senseRegisterEntry(SenseEntry.controllerSettings, senseControllerSettingsScreen);
+  senseRegisterEntry(SenseEntry.about, senseAboutScreen);
+}
 
 /// Removes every registered entry (tests).
 @visibleForTesting
