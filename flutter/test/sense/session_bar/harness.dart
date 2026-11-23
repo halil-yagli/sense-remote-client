@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/screens/session/bar/sense_session_frame.dart';
 import 'package:flutter_hbb/sense/screens/session/chat_icon/chat_layer.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart';
+import 'package:flutter_hbb/sense/components/components_b.dart' show SenseGlowScene, SenseGlowStyle;
 import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
 
 import '../chat/support.dart' show makeController;
@@ -25,31 +26,44 @@ void setWindow(WidgetTester tester, Size size) {
   addTearDown(tester.view.reset);
 }
 
-/// Stand-in for the remote screen (prototype `.rdesk .wall`).
+/// Stand-in for the remote screen (prototype `.rdesk .wall`): the library's dark glow scene
+/// and the placeholder label.
 class FakeRemoteScreen extends StatelessWidget {
   const FakeRemoteScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
+    return SenseGlowScene(
       key: const ValueKey('fake-remote'),
-      decoration: BoxDecoration(
-        gradient: RadialGradient(
-          center: const Alignment(-0.4, -0.2),
-          radius: 1.2,
-          colors: [SenseColors.glowStart.withOpacity(0.75), SenseColors.glowEnd.withOpacity(0.35), SenseColors.bg],
+      style: SenseGlowStyle.scene,
+      child: Center(
+        child: Text(
+          'uzak bilgisayarın ekranı · 3840×2160 · %38 ölçekte',
+          style: TextStyle(
+            fontFamily: SenseFont.family,
+            fontSize: SenseFontSize.bodySmall,
+            color: SenseColors.textDim,
+            decoration: TextDecoration.none,
+          ),
         ),
       ),
-      child: const SizedBox.expand(),
     );
   }
 }
 
 /// [chatIcon]: also draw the Sense chat icon in the remote screen's corner, as in the
 /// real window (prototype c10 shows it bottom right).
-Widget frameApp(FakeBackend b, {FakePopups? popups, SenseBarController? menus, bool chatIcon = false}) {
+Widget frameApp(FakeBackend b,
+    {FakePopups? popups, SenseBarController? menus, bool chatIcon = false, bool still = false}) {
   return MaterialApp(
     debugShowCheckedModeBanner: false,
+    // Golden images: pulses stand still at full brightness, so the recording dot reads (Y4).
+    builder: still
+        ? (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(disableAnimations: true),
+              child: child!,
+            )
+        : null,
     home: Scaffold(
       backgroundColor: SenseColors.bg,
       body: RepaintBoundary(

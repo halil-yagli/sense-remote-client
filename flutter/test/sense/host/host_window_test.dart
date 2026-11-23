@@ -19,6 +19,7 @@ import 'package:flutter_hbb/sense/screens/host/permissions/permissions_category.
 import 'package:flutter_hbb/sense/screens/host/recent/recent_category.dart';
 import 'package:flutter_hbb/sense/screens/host/role/role_category.dart';
 import 'package:flutter_hbb/sense/screens/host/sense_password_model.dart';
+import 'package:flutter_hbb/sense/screens/host/sense_password_strings.dart';
 import 'package:flutter_hbb/sense/screens/host/shell/host_shell.dart';
 import 'package:flutter_hbb/sense/screens/host/this_computer/this_computer_view.dart';
 import 'package:flutter_hbb/sense/sense.dart';
@@ -762,6 +763,69 @@ void main() {
       pw.dispose();
       role.dispose();
     }, skip: goldenSkip('host_a11'), tags: const ['golden']);
+
+    // The permanent password states, in the open category (the same body as a10); this replaces
+    // the old stand-alone "Kalıcı şifre" panel image (Y2).
+    testWidgets('Kalıcı şifre states in the in-place category', (tester) async {
+      SensePasswordController pw(SensePasswordStage stage,
+          {Map<String, Object?> status = const {}, String? message, bool waiting = true}) {
+        final c = passwordIn(stage, status: status)..message = message;
+        if (stage == SensePasswordStage.verifying && waiting) {
+          c.login = const SenseLoginStatus('waiting', url: kUrl, pairingCode: '482913');
+        }
+        if (stage == SensePasswordStage.unlocked) {
+          c.until = kNow + 263;
+          c.user = 'Ayşe Demir';
+        }
+        return c;
+      }
+
+      final cs = [
+        pw(SensePasswordStage.locked),
+        pw(SensePasswordStage.locked, status: {'perm_set': false}),
+        pw(SensePasswordStage.verifying),
+        pw(SensePasswordStage.unlocked, message: 'İki şifre aynı değil.'),
+        pw(SensePasswordStage.expired),
+        pw(SensePasswordStage.locked, status: {'perm_set': false}, message: sensePasswordErrorText('panel_outdated')),
+        pw(SensePasswordStage.controller, status: {'role': 'controller'}),
+        pw(SensePasswordStage.unsupported, status: {'supported': false}),
+      ];
+      Widget one(SensePasswordController c) => SizedBox(
+            width: 560,
+            child: SenseAccordion(
+              density: SenseAccordionDensity.page,
+              initialOpenId: 'pw',
+              items: [
+                SenseAccordionItem(
+                  id: 'pw',
+                  title: SenseHostStrings.password,
+                  summary: senseHostPasswordSummary(c.status),
+                  level: senseHostPasswordLevel(c.status),
+                  builder: (_) => SensePasswordCategoryBody(controller: c, deviceId: '482 913 207', now: () => kNow),
+                ),
+              ],
+            ),
+          );
+      setWindow(tester, const Size(1180, 1500));
+      await tester.pumpWidget(app(Align(
+        alignment: Alignment.topLeft,
+        child: RepaintBoundary(
+          key: const Key('golden'),
+          child: Container(
+            color: SenseColors.bg,
+            width: 1180,
+            padding: const EdgeInsets.all(10),
+            child: Wrap(spacing: 10, runSpacing: 10, children: [for (final c in cs) one(c)]),
+          ),
+        ),
+      )));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('host_password_states')));
+      for (final c in cs) {
+        c.dispose();
+      }
+    }, skip: goldenSkip('host_password_states'), tags: const ['golden']);
 
     testWidgets('status box: the six states', (tester) async {
       Widget one(SenseHostPhase p) => SizedBox(

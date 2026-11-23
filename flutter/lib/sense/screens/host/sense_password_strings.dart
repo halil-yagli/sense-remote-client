@@ -1,7 +1,6 @@
-// Sense Remote: texts of the "Kalıcı şifre" page (permanent password plan
-// 2026-11-21, §4, package U13). Turkish first (the UI language for now),
-// English next to it, like the setup wizard (sense_install_strings.dart).
-// Error codes of the native side map to short texts; internals are never shown.
+// Sense Remote: texts of the permanent password (plan 2026-11-21, §4, package U13).
+// Turkish only; error codes of the native side map to short texts, internals
+// are never shown.
 
 const Map<String, String> kSensePasswordTr = {
   'title': 'Kalıcı şifre',
@@ -87,88 +86,9 @@ const Map<String, String> kSensePasswordTr = {
   'rule_other': 'Bu şifre kurala uymuyor; başka bir şifre seç.',
 };
 
-const Map<String, String> kSensePasswordEn = {
-  'title': 'Permanent password',
-  'security': 'Security',
-  'open': 'Open',
-  'summary_set': 'Set',
-  'summary_set_at': 'Set · {date}',
-  'summary_none': 'Not set',
-  'summary_unknown': 'Locked',
-  'summary_controller': 'Not needed on this computer',
-  'summary_unsupported': 'Not available in this version yet',
-  'host_set': 'Permanent password: set',
-  'host_none': 'Permanent password: none',
-  'host_unknown': 'Permanent password',
-  'locked_set': 'Permanent password set · last changed {date}',
-  'locked_set_nodate': 'Permanent password set.',
-  'locked_hint': 'To change it, verify with your Sense account.',
-  'locked_none':
-      'No permanent password. Set one to connect when no one is at this computer.',
-  'locked_unknown':
-      'To set or change the permanent password, verify with your Sense account.',
-  'unlock': 'Unlock',
-  'requesting': 'Preparing verification…',
-  'pairing_label': 'PAIRING CODE',
-  'pairing_spoken': 'Pairing code: ',
-  'qr_label': 'QR code of the verification link',
-  'verifying_hint':
-      'Scan it with your phone or your own computer; sign in with your Sense Google account, compare the code, approve.',
-  'verifying_wait': 'Waiting for approval (up to 3 minutes).',
-  'copy_link': 'Copy link',
-  'link_copied': 'Link copied.',
-  'open_here': 'Open on this computer',
-  'open_here_note': "Do not leave a Google session open on a customer's computer.",
-  'open_browser': 'Open in browser',
-  'cancel': 'Cancel',
-  'unlocked': 'Verified: {name} · locks in {time}',
-  'new_password': 'New password',
-  'repeat_password': 'Type it again',
-  'rules':
-      '12–64 characters; no spaces or non-English letters (English letters, digits, symbols). No single repeated character, no run like 1234…, not the computer ID.',
-  'save': 'Save',
-  'done':
-      'The permanent password was changed. Save it in the company password manager; Sense Remote never shows it again. Running connections were not ended.',
-  'ok': 'OK',
-  'expired': 'Time is up. Verify again.',
-  'controller':
-      "This computer only connects out; it needs no permanent password. The password of a computer you connect to is changed in Sense Remote on that computer (also while connected).",
-  'unsupported': 'This feature is not available in this version yet.',
-  'err_mismatch': 'The two passwords are not the same.',
-  'err_token_invalid': 'The sign-in is not valid, verify again.',
-  'err_password_scope': 'The sign-in is not valid, verify again.',
-  'err_replayed': 'The sign-in is not valid, verify again.',
-  'err_device_mismatch': 'This sign-in is not for this computer, verify again.',
-  'err_device_not_eligible': 'This computer is not active in the panel.',
-  'err_bad_request_signature': 'The verification request was refused, verify again.',
-  'err_validation': 'The verification request was refused, verify again.',
-  'err_request_expired': 'The verification expired, verify again.',
-  'err_rate_limited': 'Too many attempts. Try again within an hour.',
-  'err_signing_unavailable': 'The panel can not grant this now. Try again later.',
-  'err_network': 'The panel did not answer. Check the network and try again.',
-  'err_panel_outdated': 'The panel does not support this feature yet.',
-  'err_not_incoming': 'This computer only connects out; it needs no permanent password.',
-  'err_unsupported': 'This feature is not available in this version yet.',
-  'err_busy': 'Something else is running. Try again in a moment.',
-  'err_ipc_failed': 'The Sense Remote service did not answer. Try again in a moment.',
-  'err_no_pending': 'The verification expired, verify again.',
-  'err_grant_invalid': 'The permission could not be verified, verify again.',
-  'err_nonce_mismatch': 'The permission could not be verified, verify again.',
-  'err_write_failed': 'The password could not be saved. Try again.',
-  'err_login_timeout': 'The approval did not come in time. Verify again.',
-  'err_login_failed': 'The sign-in did not finish. Try again.',
-  'err_other': 'That did not work. Try again.',
-  'rule_length': 'The password must be 12–64 characters.',
-  'rule_charset': 'Only English letters, digits and symbols; no spaces.',
-  'rule_repeated': 'No single repeated character and no run like 1234….',
-  'rule_contains_id': 'The password must not contain the computer ID.',
-  'rule_common': 'This password is too common; choose another one.',
-  'rule_other': 'This password does not follow the rule; choose another one.',
-};
-
-/// Turkish first (the UI language for now), English when a key is missing.
+/// Turkish only (the app UI is Turkish only); a missing key returns the key.
 String sensePasswordText(String key, [Map<String, String> args = const {}]) {
-  var text = kSensePasswordTr[key] ?? kSensePasswordEn[key] ?? key;
+  var text = kSensePasswordTr[key] ?? key;
   args.forEach((k, v) => text = text.replaceAll('{$k}', v));
   return text;
 }

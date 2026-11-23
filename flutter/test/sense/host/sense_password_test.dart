@@ -1,17 +1,12 @@
 // Sense Remote: "Kalıcı şifre" page (permanent password plan 2026-11-21, §4,
 // package U13). Status JSON → text and buttons for every state and error
 // code, the flow with a fake backend (mismatch, Kaydet → set, expiry), the
-// password fields, and golden images.
+// password fields and golden images are in host_window_test.dart (in-place body).
 
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_hbb/sense/screens/install/sense_install_model.dart'
-    show SenseLoginStatus;
 import 'package:flutter_hbb/sense/screens/host/sense_password_model.dart';
-import 'package:flutter_hbb/sense/screens/host/sense_password_page.dart';
+import 'package:flutter_hbb/sense/screens/host/data/password.dart';
 import 'package:flutter_hbb/sense/screens/host/sense_password_strings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -104,17 +99,6 @@ Future<void> _unlock(SensePasswordController c) async {
   await c.tick(); // done → unlock
 }
 
-Future<void> _pump(WidgetTester tester, Widget child, Size size) async {
-  tester.view.physicalSize = size;
-  tester.view.devicePixelRatio = 1;
-  addTearDown(tester.view.reset);
-  await tester.pumpWidget(MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(backgroundColor: Colors.black, body: child)));
-  // No pumpAndSettle: a focused field blinks its cursor for ever.
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 100));
-}
 
 void main() {
   group('status JSON', () {
@@ -487,158 +471,4 @@ void main() {
       expect(m.c.message, 'Bağlantı kopyalandı.');
     });
   });
-
-  group('page', () {
-    testWidgets('fields: hidden, no selection; Kaydet calls set',
-        (tester) async {
-      final m = _make();
-      await tester.runAsync(() => _unlock(m.c));
-      await _pump(
-          tester,
-          SingleChildScrollView(
-              child: SizedBox(
-                  width: 440, child: SensePasswordPanel(controller: m.c))),
-          const Size(600, 700));
-      for (final key in ['sense-pw-new', 'sense-pw-repeat']) {
-        final field = tester.widget<TextField>(find.byKey(Key(key)));
-        expect(field.obscureText, isTrue, reason: key);
-        expect(field.enableInteractiveSelection, isFalse, reason: key);
-        expect(field.enableSuggestions, isFalse, reason: key);
-        expect(field.autocorrect, isFalse, reason: key);
-      }
-      expect(find.text('Doğrulandı: Ayşe · 5:00 içinde kilitlenir'),
-          findsOneWidget);
-      await tester.enterText(find.byKey(const Key('sense-pw-new')), 'deneme-Sifre-42');
-      await tester.enterText(
-          find.byKey(const Key('sense-pw-repeat')), 'deneme-Sifre-42');
-      await tester.tap(find.byKey(const Key('sense-pw-save')));
-      await tester.pump();
-      await tester.pump();
-      expect(m.f.setPasswords, ['deneme-Sifre-42']);
-      expect(find.textContaining('Kalıcı şifre değiştirildi.'), findsOneWidget);
-      expect(find.byKey(const Key('sense-pw-ok')), findsOneWidget);
-      m.c.dispose();
-    });
-
-    // U14: the switch is on in the Windows/macOS build. The status JSON exactly
-    // as `ui::status_value` writes it (`supported: true`) opens the real page
-    // (locked + Kilidi aç); `supported: false` (Linux) keeps "not open yet".
-    testWidgets('switch on: real state, not "henüz açık değil"', (tester) async {
-      const on = [
-        '{"supported":true,"role":"host","perm_set":false,"changed_at":null,'
-            '"stage":"locked","until":null,"user":null}',
-        '{"supported":true,"role":"both","perm_set":true,"changed_at":1700000000,'
-            '"stage":"locked","until":null,"user":null}',
-        '{"supported":true,"role":"host","perm_set":null,"changed_at":null,'
-            '"stage":"locked","until":null,"user":null}',
-      ];
-      const off =
-          '{"supported":false,"role":"host","perm_set":null,"changed_at":null,'
-          '"stage":"locked","until":null,"user":null}';
-      for (final json in [...on, off]) {
-        final m = _make(_Fake()..statusJson = json);
-        await tester.runAsync(m.c.load);
-        await _pump(
-            tester,
-            SingleChildScrollView(
-                child: SizedBox(
-                    width: 440, child: SensePasswordPanel(controller: m.c))),
-            const Size(600, 700));
-        final supported = json != off;
-        expect(m.c.stage,
-            supported ? SensePasswordStage.locked : SensePasswordStage.unsupported,
-            reason: json);
-        expect(find.byKey(const Key('sense-pw-unsupported')),
-            supported ? findsNothing : findsOneWidget,
-            reason: json);
-        expect(find.byKey(const Key('sense-pw-unlock')),
-            supported ? findsOneWidget : findsNothing,
-            reason: json);
-        expect(sensePasswordSummary(m.c.status) == 'Bu sürümde henüz açık değil',
-            !supported,
-            reason: json);
-        expect(sensePasswordHostLine(m.c.status) != null, supported, reason: json);
-        m.c.dispose();
-      }
-    });
-  });
-
-  group('golden images (Windows + macOS)', () {
-    // Rendered on the Linux CI runner (`PR kontrolu`) with the bundled Poppins.
-
-    SensePasswordController panel(SensePasswordStage stage,
-        {Map<String, Object?> status = const {},
-        String? message,
-        bool waiting = true}) {
-      final c = SensePasswordController(_Fake(),
-          interval: const Duration(days: 1), now: () => _now);
-      c.status = _s(status);
-      c.stage = stage;
-      c.message = message;
-      if (stage == SensePasswordStage.verifying && waiting) {
-        c.login = const SenseLoginStatus('waiting',
-            url: _url, pairingCode: '482913');
-      }
-      if (stage == SensePasswordStage.unlocked) {
-        c.until = _now + 263;
-        c.user = 'Ayşe Demir';
-      }
-      return c;
-    }
-
-    Widget box(SensePasswordController c, {double width = 440}) => Container(
-          width: width,
-          margin: const EdgeInsets.all(10),
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-              color: Colors.black,
-              border: Border.all(color: const Color(0xFF33333D)),
-              borderRadius: BorderRadius.circular(14)),
-          child: SensePasswordPanel(controller: c, onClose: () {}),
-        );
-
-    testWidgets('every state', (tester) async {
-      final changed = DateTime(2026, 11, 21, 14, 5).millisecondsSinceEpoch ~/ 1000;
-      final cs = [
-        panel(SensePasswordStage.locked, status: {'changed_at': changed}),
-        panel(SensePasswordStage.locked, status: {'perm_set': false}),
-        panel(SensePasswordStage.verifying),
-        panel(SensePasswordStage.verifying, status: {'role': 'both'}),
-        panel(SensePasswordStage.unlocked, message: 'İki şifre aynı değil.'),
-        panel(SensePasswordStage.done),
-        panel(SensePasswordStage.expired),
-        panel(SensePasswordStage.locked,
-            status: {'perm_set': false},
-            message: sensePasswordErrorText('panel_outdated')),
-        panel(SensePasswordStage.controller, status: {'role': 'controller'}),
-        panel(SensePasswordStage.unsupported, status: {'supported': false}),
-      ];
-      await _pump(
-          tester,
-          Align(
-            alignment: Alignment.topLeft,
-            child: RepaintBoundary(
-              key: const Key('golden'),
-              child: Container(
-                color: Colors.black,
-                width: 1440,
-                padding: const EdgeInsets.all(10),
-                child: Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.start,
-                    children: [for (final c in cs) box(c)]),
-              ),
-            ),
-          ),
-          const Size(1440, 1800));
-      expect(tester.takeException(), isNull);
-      await expectLater(find.byKey(const Key('golden')),
-          matchesGoldenFile('../../goldens/host/sense_password_states.png'));
-      for (final c in cs) {
-        c.dispose();
-      }
-    });
-
-    // Sense Remote: goldens are rendered on the Linux runner; text rasterises
-    // differently on macOS/Windows, so compare them only on Linux.
-  }, skip: !Platform.isLinux);
 }

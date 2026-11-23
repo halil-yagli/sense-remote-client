@@ -224,8 +224,8 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              key: const Key('sense-install-scroll'),
+            child: _FadedScroll(
+              scrollKey: const Key('sense-install-scroll'),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -524,4 +524,56 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
           ],
         ]),
       );
+}
+
+/// Scroll area whose top edge fades out once the page is scrolled, so a heading cut by the
+/// edge does not show a hard half line (Y6).
+class _FadedScroll extends StatefulWidget {
+  const _FadedScroll({required this.scrollKey, required this.child});
+
+  final Key scrollKey;
+  final Widget child;
+
+  static const double fadeHeight = 24;
+
+  @override
+  State<_FadedScroll> createState() => _FadedScrollState();
+}
+
+class _FadedScrollState extends State<_FadedScroll> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scroll = SingleChildScrollView(
+      key: widget.scrollKey,
+      controller: _controller,
+      child: widget.child,
+    );
+    return AnimatedBuilder(
+      animation: _controller,
+      child: scroll,
+      builder: (context, child) {
+        final offset = _controller.hasClients ? _controller.offset : 0.0;
+        final fade = offset.clamp(0.0, _FadedScroll.fadeHeight);
+        if (fade < 1) return child!;
+        return ShaderMask(
+          blendMode: BlendMode.dstIn,
+          shaderCallback: (rect) => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [SenseColors.bg.withOpacity(0), SenseColors.bg],
+            stops: [0, (fade / rect.height).clamp(0.0, 1.0)],
+          ).createShader(rect),
+          child: child,
+        );
+      },
+    );
+  }
 }

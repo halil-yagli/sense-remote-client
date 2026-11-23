@@ -79,7 +79,7 @@ class _SenseSplashState extends State<SenseSplash> with SingleTickerProviderStat
               children: [
                 SenseBreathe(
                   enabled: widget.animate,
-                  child: const SenseMark(key: Key('sense-splash-mark')),
+                  child: const SenseMark(key: Key('sense-splash-mark'), color: SenseColors.textMuted),
                 ),
                 const SizedBox(height: SenseSplash.gap),
                 ExcludeSemantics(
