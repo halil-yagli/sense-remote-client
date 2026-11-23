@@ -105,11 +105,21 @@ void main() {
 
     // A second tab, then back and forth: sessions are not rebuilt. (The controller moves the
     // page 100 ms after a jump, so the test lets that time pass.)
-    Future<void> settle() => tester.pump(const Duration(milliseconds: 150));
+    // A page built after the window exists asks for its "connecting" dialog before the fake
+    // window has an overlay for it; that known message is not what is tested here.
+    Future<void> pumpFor(int ms) async {
+      await tester.pump(Duration(milliseconds: ms));
+      Object? e;
+      while ((e = tester.takeException()) != null) {
+        if (!e.toString().contains('_overlayState is null')) throw e!;
+      }
+    }
+
+    Future<void> settle() => pumpFor(150);
     String why(String step) =>
         '$step: ' + logs.where((l) => l.contains('REMOTE PAGE dispose')).join('\n---\n');
     controller.add(_tab(controller, 'peerB'));
-    await tester.pump(const Duration(milliseconds: 50));
+    await pumpFor(50);
     await settle();
     expect(_disposed(logs), 0, reason: why('after adding the second tab'));
     controller.jumpTo(1);
