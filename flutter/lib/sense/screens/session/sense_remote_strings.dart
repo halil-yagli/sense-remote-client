@@ -8,6 +8,8 @@
 
 import 'package:flutter/painting.dart';
 
+import '../../tokens/sense_tokens.dart';
+
 /// The Sense items replace the stock monitor and chat buttons of the toolbar.
 const bool kSenseRemoteWindow = true;
 
@@ -166,15 +168,23 @@ String senseNetworkKindLabel(String kind) {
 
 /// Extra tokens of the connection window (prototype uygulama.html: warm bar,
 /// amber note). Black/white and the navy→purple accent come from SenseCmTokens.
+// Sense Remote (A1b, YH T1): bridge only, aliases of the one token set.
 class SenseRemoteTokens {
-  static const warn = Color(0xFFFFB84D);
-  static const warnBorder = Color(0x80FF9700);
-  static const warnFill = Color(0x14FF9700);
-  static const barTrack = Color(0xFF1B1B22);
-  static const mapCell = Color(0xFF2A2A33);
-  static const mapText = Color(0xFFD0D0D8);
-  static const hot = LinearGradient(
-      colors: [Color(0xFFFF9700), Color(0xFFFF3B4D)]);
-  static const bar = LinearGradient(
-      colors: [Color(0xFF020162), Color(0xFF640164)]);
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const warn = SenseColors.warn;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static final warnBorder = SenseColors.warn.withAlpha(0x80);
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static final warnFill = SenseColors.warn.withAlpha(0x14);
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const barTrack = SenseColors.raised;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const mapCell = SenseColors.line;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const mapText = SenseColors.textSecondary;
+  @Deprecated('Sense Remote A1b: use SenseGradients / tokens/sense_tokens.dart')
+  static const hot =
+      LinearGradient(colors: [SenseColors.warn, SenseColors.hot]);
+  @Deprecated('Sense Remote A1b: use SenseGradients / tokens/sense_tokens.dart')
+  static const bar = SenseGradients.glow;
 }

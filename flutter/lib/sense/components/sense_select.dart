@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import '../strings/common.dart';
 import '../tokens/sense_tokens.dart';
+import 'caret.dart';
 
 class SenseSelectOption<T> {
   const SenseSelectOption({
@@ -145,12 +146,7 @@ class _SenseSelectState<T> extends State<SenseSelect<T>> {
           ),
         ),
         const SizedBox(width: 8),
-        const ExcludeSemantics(
-          child: Text(
-            '▾',
-            style: TextStyle(fontFamily: SenseFont.family, fontSize: 9, color: SenseColors.textDim),
-          ),
-        ),
+        const SenseCaret(direction: SenseCaretDirection.down, small: true),
       ]),
     );
 

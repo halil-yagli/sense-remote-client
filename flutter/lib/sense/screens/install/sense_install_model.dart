@@ -5,6 +5,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../tokens/sense_tokens.dart';
+
 import 'sense_install_strings.dart';
 import 'sense_mac_permissions.dart';
 
@@ -20,29 +22,46 @@ const int kSenseMaxLocation = 96;
 const int kSenseMaxNote = 300;
 
 /// Design tokens (BRAND_CORE §5: black and white, navy→purple light accent).
+// Sense Remote (A1b, YH T1): bridge only. Every field is an alias of the one token set
+// (tokens/sense_tokens.dart); screens move to SenseColors in their own PRs, then this goes.
 class SenseTokens {
-  static const black = Color(0xFF000000);
-  static const white = Color(0xFFFFFFFF);
-  static const line = Color(0xFF1D1D25);
-  static const border = Color(0xFF2A2A33);
-  static const field = Color(0xFF0A0A0E);
-  static const muted = Color(0xFF8E8E98);
-  // Sense Remote: #5D5D66 was 3.2:1 on black; #76767F is about 4.6:1 (WCAG AA
-  // for the small setup texts, design review T3-5).
-  static const dim = Color(0xFF76767F);
-  static const soft = Color(0xFFC9C9D1);
-  static const text3 = Color(0xFFB5B5BE);
-  static const accent1 = Color(0xFF020162);
-  static const accent2 = Color(0xFF640164);
-  static const error = Color(0xFFFF6B7A);
-  static const radius = 10.0;
-  static const radiusCard = 14.0;
-  static const font = 'Poppins';
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const black = SenseColors.bg;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const white = SenseColors.text;
+  // Was #1D1D25: the hover tone, not a border.
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const line = SenseColors.hover;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const border = SenseColors.line;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const field = SenseColors.surface;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const muted = SenseColors.textMuted;
+  // Was #76767F on readable setup texts (notes, hints): readable text is at least muted (#68).
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const dim = SenseColors.textMuted;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const soft = SenseColors.textSecondary;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const text3 = SenseColors.textSecondary;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const accent1 = SenseColors.glowStart;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const accent2 = SenseColors.glowEnd;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const error = SenseColors.dangerTextSoft;
+  @Deprecated('Sense Remote A1b: use SenseRadii / tokens/sense_tokens.dart')
+  static const radius = SenseRadii.categoryLarge;
+  @Deprecated('Sense Remote A1b: use SenseRadii / tokens/sense_tokens.dart')
+  static const radiusCard = SenseRadii.popup;
+  @Deprecated('Sense Remote A1b: use SenseFont / tokens/sense_tokens.dart')
+  static const font = SenseFont.family;
+  // No token: system fonts after the bundled Poppins.
+  @Deprecated('Sense Remote A1b: use SenseFont / tokens/sense_tokens.dart')
   static const fontFallback = ['Segoe UI', 'Helvetica Neue', 'Arial'];
-  static const gradient = LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [accent1, accent2]);
+  @Deprecated('Sense Remote A1b: use SenseGradients / tokens/sense_tokens.dart')
+  static const gradient = SenseGradients.glow;
 }
 
 // Sense Remote (Mac M3): `applications` and `permissions` are macOS only; Windows never
