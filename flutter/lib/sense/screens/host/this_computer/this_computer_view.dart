@@ -493,9 +493,9 @@ class _HostTile extends StatelessWidget {
     );
     final t = trailing;
     if (t == null) return tile;
-    return Stack(children: [
+    return Stack(fit: StackFit.passthrough, children: [
       tile,
-      Positioned(top: _kTilePadV - 4, right: _kTilePadH - 2, child: t),
+      Positioned(top: _kTilePadV - 5, right: _kTilePadH - 2, child: t),
     ]);
   }
 }
