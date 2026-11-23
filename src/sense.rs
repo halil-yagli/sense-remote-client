@@ -825,6 +825,9 @@ pub mod option_lock;
 pub mod role_change;
 #[allow(dead_code)]
 pub mod tray_menu;
+// Sense Remote (karar #84): the computer's cleaned logs go to the panel when a connection or an
+// update failed, or when the panel asks.
+pub mod log_upload;
 
 #[cfg(test)]
 mod tests {

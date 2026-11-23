@@ -408,6 +408,9 @@ pub enum Data {
     // its last connections, UI -> `--server` and, on macOS, `--server` -> root daemon
     // (`_service` channel, `Store` only).
     SenseIdentitySet(crate::sense::identity_set::SenseIdentityIpc),
+    // Sense Remote (karar #84): a Controller session closed without a picture (or could not be
+    // set up); UI process -> `--server`, which sends its logs to the panel. No answer, no path.
+    SenseLog(crate::sense::log_upload::SenseLogIpc),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -1379,6 +1382,9 @@ async fn handle(data: Data, stream: &mut Connection) {
                 allow_err!(stream.send(&Data::SenseIdentitySet(reply)).await);
             }
         }
+        // Sense Remote (karar #84): acts only in the `--server` process, two connection reasons
+        // only, rate-limited there.
+        Data::SenseLog(message) => crate::sense::log_upload::on_main_ipc(message),
         Data::NatType(_) => {
             let t = Config::get_nat_type();
             allow_err!(stream.send(&Data::NatType(Some(t))).await);

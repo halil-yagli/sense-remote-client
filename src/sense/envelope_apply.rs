@@ -47,6 +47,8 @@ const KEY_RELEASE: &str = "sense_release";
 const KEY_UPDATE_ORDER: &str = "sense_update_order";
 /// Sense Remote (S6): capabilities of the panel (`health_v2`), information only.
 const KEY_PANEL_CAPS: &str = "sense_panel_caps";
+/// Sense Remote (karar #84): the panel asks this computer for its log (`logs_v1`).
+const KEY_LOG_REQUEST: &str = "sense_log_request";
 
 /// What the sync loop takes from a heartbeat answer. There is deliberately no field for the
 /// upstream `strategy`, `disconnect` or `modified_at`.
@@ -61,6 +63,9 @@ pub struct HeartbeatAnswer {
     pub update: update::Answer,
     /// Sense Remote (S6): `sense_panel_caps` (strings); `None` when missing or of another shape.
     pub panel_caps: Option<Vec<String>>,
+    /// Sense Remote (karar #84): `sense_log_request: true`. Acted on by `log_upload::on_answer`
+    /// only while the panel announces `logs_v1`; it carries no data.
+    pub log_request: bool,
     /// Keys that are not acted on (sorted), for the log.
     pub ignored: Vec<String>,
 }
@@ -93,6 +98,10 @@ pub fn parse_answer(body: &str) -> Option<HeartbeatAnswer> {
             KEY_PANEL_CAPS => match panel_caps(&value) {
                 Some(caps) => answer.panel_caps = Some(caps),
                 None => answer.ignored.push(key),
+            },
+            KEY_LOG_REQUEST => match value {
+                Value::Bool(true) => answer.log_request = true,
+                _ => answer.ignored.push(key),
             },
             // Sense Remote (D3c, H1): read by `identity_set::on_heartbeat_answer`, not here.
             super::report::KEY_LOCATIONS => {}
@@ -467,6 +476,21 @@ mod tests {
             assert_eq!(answer.ignored, vec!["sense_panel_caps"]);
         }
         assert_eq!(parse_answer("{}").unwrap().panel_caps, None);
+    }
+
+    /// Sense Remote (karar #84): `sense_log_request` is read only as `true`; anything else is
+    /// ignored and logged.
+    #[test]
+    fn log_request_is_read() {
+        let answer = parse_answer(&json!({ "sense_log_request": true }).to_string()).unwrap();
+        assert!(answer.log_request);
+        assert!(answer.ignored.is_empty());
+        for bad in [json!(false), json!("true"), json!(1), json!(null)] {
+            let answer = parse_answer(&json!({ "sense_log_request": bad }).to_string()).unwrap();
+            assert!(!answer.log_request);
+            assert_eq!(answer.ignored, vec!["sense_log_request"]);
+        }
+        assert!(!parse_answer("{}").unwrap().log_request);
     }
 
     // Update plan 2026-11-21 §3.4 (U0): the three update keys are split off, everything else is
