@@ -261,9 +261,8 @@ void main() {
       }
     });
 
-    test('Turkish and English have the same keys; no "RustDesk"', () {
-      expect(kSensePasswordTr.keys.toSet(), kSensePasswordEn.keys.toSet());
-      for (final t in [...kSensePasswordTr.values, ...kSensePasswordEn.values]) {
+    test('texts are Turkish only and never name "RustDesk"', () {
+      for (final t in kSensePasswordTr.values) {
         expect(t.toLowerCase(), isNot(contains('rustdesk')));
       }
     });
