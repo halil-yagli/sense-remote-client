@@ -137,10 +137,11 @@ class KeyboardShortcutsPageBodyState extends State<KeyboardShortcutsPageBody> {
     // — the same helper feeds the first-enable seed pass, this Reset action,
     // and the action-list filter below, so the three can never disagree on
     // which actions belong on this platform.
-    json['bindings'] = filterDefaultBindingsForPlatform(
+    // Sense Remote: plus the toolbar and close shortcuts of the session list (O5).
+    json['bindings'] = withSenseDefaultShortcuts(filterDefaultBindingsForPlatform(
       jsonDecode(bind.mainGetDefaultKeyboardShortcuts()) as List,
       ShortcutModel.currentPlatformCapabilities(),
-    );
+    ));
     await _writeJson(json);
   }
 

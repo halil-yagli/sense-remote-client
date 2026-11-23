@@ -185,12 +185,16 @@ void main() {
     expect(k.sections.firstWhere((s) => s.id == 'shortcuts').summary, '6 kısayol · salt okunur');
   });
 
-  test('shortcuts: six read-only rows, unbound ones say so', () {
+  test('shortcuts: six read-only rows, all bound', () {
     final k = senseKeyboardList(FakeBackend());
     final rows = k.sections.firstWhere((s) => s.id == 'shortcuts').entries.cast<SenseInfoEntry>();
     expect(rows, hasLength(6));
     expect(rows.first.detail, 'Ctrl+Alt+Shift+Enter');
-    expect(rows.firstWhere((r) => r.id == 'shortcut.close_tab').detail, 'atanmadı');
+    expect(rows.map((r) => r.detail), isNot(contains('atanmadı')));
+    expect(rows.firstWhere((r) => r.id == 'shortcut.close_tab').detail, 'Ctrl+Alt+Shift+Q');
+    final unbound = FakeBackend()..shortcuts = const [SenseShortcutRow('close_tab', 'Bağlantıyı bitir', null)];
+    final r = senseKeyboardList(unbound).sections.firstWhere((s) => s.id == 'shortcuts').entries.single as SenseInfoEntry;
+    expect(r.detail, 'atanmadı');
   });
 
   group('person rights lock, never hide (plan §2.1)', () {

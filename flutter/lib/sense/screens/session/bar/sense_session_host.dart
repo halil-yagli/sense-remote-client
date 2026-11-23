@@ -34,6 +34,7 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
   final Map<String, SenseFfiSessionBackend> _backends = {};
   final List<Worker> _workers = [];
   bool _retryScheduled = false;
+  final Set<String> _synced = {};
 
   @override
   void initState() {
@@ -61,6 +62,9 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
       fullscreen: stateGlobal.fullscreen.isTrue,
     );
     if (stateGlobal.showTabBar.value != want) stateGlobal.showTabBar.value = want;
+    for (final b in _backends.values) {
+      b.syncInset();
+    }
   }
 
   void _onTabs() {
@@ -89,6 +93,10 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
         () => SenseFfiSessionBackend(ffi: ffi, toolbarState: page.toolbarState, contextOf: () => context),
       );
       final popups = SenseSessionPopups.of(tab.key, ffi);
+      if (!_synced.contains(tab.key)) {
+        _synced.add(tab.key);
+        WidgetsBinding.instance.addPostFrameCallback((_) => backend.syncInset());
+      }
       return (backend: backend, popups: popups);
     } catch (_) {
       // The page state is created in this frame; look again after it.

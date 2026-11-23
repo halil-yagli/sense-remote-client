@@ -214,11 +214,11 @@ class FakeBackend extends SenseSessionBackend {
   @override
   List<SenseShortcutRow> shortcuts = const [
     SenseShortcutRow('toggle_fullscreen', 'Tam ekran', 'Ctrl+Alt+Shift+Enter'),
-    SenseShortcutRow('toggle_toolbar', 'Çubuğu gizle / göster', null),
+    SenseShortcutRow('toggle_toolbar', 'Çubuğu gizle / göster', 'Ctrl+Alt+Shift+B'),
     SenseShortcutRow('switch_display_next', 'Sonraki ekran', 'Ctrl+Alt+Shift+→'),
     SenseShortcutRow('send_ctrl_alt_del', 'Ctrl+Alt+Del gönder', 'Ctrl+Alt+Shift+Del'),
     SenseShortcutRow('screenshot', 'Ekran görüntüsü al', 'Ctrl+Alt+Shift+P'),
-    SenseShortcutRow('close_tab', 'Bağlantıyı bitir', null),
+    SenseShortcutRow('close_tab', 'Bağlantıyı bitir', 'Ctrl+Alt+Shift+Q'),
   ];
   @override
   bool showRemoteCursor = true;

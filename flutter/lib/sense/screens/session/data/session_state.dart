@@ -171,6 +171,19 @@ double? senseParseDouble(Object? raw) {
 }
 
 // ---------------------------------------------------------------------------
+// Space above the remote screen (decision 3, O1)
+// ---------------------------------------------------------------------------
+
+/// What sits above the remote screen in a Sense connection window: the 28 px tab strip
+/// (only with more than one session, never in full screen) and the Sense bar (46 px, 0
+/// while hidden). The canvas subtracts this to fit the image ("Sığdır").
+double senseTopInset({required bool tabStrip, required double barHeight}) =>
+    (tabStrip ? kSenseTabStripHeight : 0) + barHeight;
+
+/// RustDesk's tab strip (`kDesktopRemoteTabBarHeight`).
+const double kSenseTabStripHeight = 28;
+
+// ---------------------------------------------------------------------------
 // Labels at the T9 widths
 // ---------------------------------------------------------------------------
 

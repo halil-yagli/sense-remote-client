@@ -28,6 +28,7 @@ import '../../../../models/shortcut_model.dart';
 import '../../../../models/state_model.dart' show stateGlobal;
 import '../../../../utils/scale.dart' show getSessionCustomScalePercent;
 import '../../../strings/session.dart';
+import '../../../tokens/sense_tokens.dart' show SenseSizes;
 import '../data/grants.dart';
 import '../data/session_state.dart';
 import '../layers/layer_controller.dart' show SenseLayerController;
@@ -126,7 +127,9 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
     watch(_pi.isSet);
     watch(_pi.displaysCount);
     watch(stateGlobal.fullscreen);
+    _workers.add(ever(toolbarState.hide, (_) => syncInset()));
     watch(toolbarState.hide);
+    _workers.add(ever(_pi.isSet, (_) => syncInset()));
     watch(ffi.inputModel.relativeMouseMode);
     for (final find in <RxInterface<Object?> Function()>[
       () => PrivacyModeState.find(ffi.id),
@@ -319,6 +322,14 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
 
   @override
   void toggleBar() => toolbarState.switchHide(_sid);
+
+  /// The remote screen starts under the tab strip and the bar: tell the canvas, so
+  /// "Sığdır" fits the image into what is left (state_model `tabBarHeight`).
+  void syncInset() {
+    final h = barHidden ? 0.0 : SenseSizes.sessionToolbarHeight;
+    if (stateGlobal.senseBarHeight.value != h) stateGlobal.senseBarHeight.value = h;
+    if (ready) ffi.canvasModel.updateViewStyle();
+  }
 
   @override
   bool get fullscreen => stateGlobal.fullscreen.isTrue;
@@ -672,7 +683,9 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
 
   @override
   List<SenseShortcutRow> get shortcuts {
-    final defaults = {for (final b in kDefaultShortcutBindings) b['action'] as String: b};
+    final defaults = {
+      for (final b in [...kDefaultShortcutBindings, ...kSenseDefaultShortcutBindings]) b['action'] as String: b,
+    };
     return [
       for (final (id, label) in kSenseShortcutRows)
         SenseShortcutRow(
