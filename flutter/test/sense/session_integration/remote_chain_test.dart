@@ -74,11 +74,8 @@ void main() {
     final oldPrint = debugPrint;
     debugPrint = (String? m, {int? wrapWidth}) {
       if (m == null) return;
-      final trace = StackTrace.current.toString().split('
-').take(16).join('
-');
-      logs.add(m.contains('REMOTE PAGE dispose') ? '$m
-$trace' : m);
+      final trace = StackTrace.current.toString().split('\n').take(16).join('\n');
+      logs.add(m.contains('REMOTE PAGE dispose') ? '$m\n$trace' : m);
     };
     addTearDown(() => debugPrint = oldPrint);
     tester.view.physicalSize = const Size(1280, 720);
@@ -109,9 +106,8 @@ $trace' : m);
     // A second tab, then back and forth: sessions are not rebuilt. (The controller moves the
     // page 100 ms after a jump, so the test lets that time pass.)
     Future<void> settle() => tester.pump(const Duration(milliseconds: 150));
-    String why(String step) => '$step: ' + logs.where((l) => l.contains('REMOTE PAGE dispose')).join('
----
-');
+    String why(String step) =>
+        '$step: ' + logs.where((l) => l.contains('REMOTE PAGE dispose')).join('\n---\n');
     controller.add(_tab(controller, 'peerB'));
     await tester.pump(const Duration(milliseconds: 50));
     await settle();
