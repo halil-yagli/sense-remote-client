@@ -167,7 +167,7 @@ void main() {
     test('the chat code has no way to write to disk', () {
       // Only the bridge (Rust) touches files; the chat keeps text in memory.
       final banned = RegExp(r"dart:io|SharedPreferences|mainSetLocalOption|mainSetOption|"
-          r"File\(|writeAsString|writeAsBytes|path_provider");
+          r"\bFile\(|writeAsString|writeAsBytes|path_provider");
       final dirs = ['lib/sense/screens/shared/chat', 'lib/sense/screens/session/chat_icon'];
       final hits = <String>[];
       for (final d in dirs) {

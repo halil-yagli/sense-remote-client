@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import '../../../sense.dart';
 import '../../../strings/chat.dart';
 import 'chat_controller.dart';
+import 'chat_entry.dart';
 import 'data/call.dart';
 
 abstract final class SenseChatCallSize {

@@ -4,7 +4,7 @@
 
 import 'dart:math' as math;
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../../../sense.dart';
 import '../../../strings/chat.dart';
