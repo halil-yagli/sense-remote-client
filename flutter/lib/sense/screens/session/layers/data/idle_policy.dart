@@ -1,13 +1,24 @@
 // Sense Remote: the idle limit of the computer this window is connected to (YH O15).
-// The value is the panel's "Hareketsiz bağlantıyı kes" permission of that computer.
-import '../layer_spec.dart';
+// The value is the panel's "Hareketsiz bağlantıyı kes" permission of that computer,
+// read from peer-status `idle_disconnect_min` (minutes; null or missing = off).
+import '../../data/sense_peer_status.dart';
+import '../layer_controller.dart';
 
 abstract final class SenseIdlePolicy {
-  // TODO(panel): the computer's "Hareketsiz bağlantıyı kes" value (device policy
-  // `auto_disconnect_minutes`) does not reach the Controller yet: the grants envelope
-  // is per person (no device policy in it), and neither `/api/peers` nor
-  // `/api/sense/peer-status` sends it; RustDesk's own connection does not carry the
-  // Host's timeout either. Needs a panel field (e.g. peers `sense.idle_minutes`).
-  // Until then the YH O14 default (30 dk) is used; the Host still enforces its own.
-  static Duration? limitFor(String peerId) => SenseIdleTiming.defaultLimit;
+  /// Minutes from the panel to a limit; null, zero or negative = never cut.
+  static Duration? limitFromMinutes(int? minutes) =>
+      minutes == null || minutes <= 0 ? null : Duration(minutes: minutes);
+
+  /// Reads peer-status once and gives the controller the limit. Until it answers (and
+  /// when the panel has nothing) the computer is never cut for being idle.
+  static Future<void> load(
+    String peerId,
+    SenseLayerController controller, {
+    Future<SensePeerStatusResult> Function(String id)? fetch,
+  }) async {
+    final r = await (fetch ?? SensePeerStatusClient().fetch)(peerId);
+    final status = r.status;
+    if (status == null) return;
+    controller.idleLimit = limitFromMinutes(status.idleDisconnectMin);
+  }
 }
