@@ -10,17 +10,15 @@ abstract class SenseIncomingDirSource {
   Future<void> set(String path);
 }
 
-/// Local option the adapter keeps the choice in until D3d1 lands.
+/// Local option the core keeps the choice in (`chat_file.rs` INCOMING_DIR_OPTION).
 const kSenseIncomingDirOption = 'sense-incoming-dir';
 
 class SenseIncomingDirBridge implements SenseIncomingDirSource {
-  // TODO(D3d1): main_sense_incoming_dir — replace with
-  // `bind.mainSenseIncomingDir()` (the core checks the folder can be reached).
+  /// The core checks the folder can be written to; '' when it falls back to
+  /// Downloads.
   @override
-  Future<String> current() async => bind.mainGetLocalOption(key: kSenseIncomingDirOption);
+  Future<String> current() => bind.mainSenseIncomingDir();
 
-  // TODO(D3d1): main_sense_set_incoming_dir — replace with
-  // `bind.mainSenseSetIncomingDir(path: path)`.
   @override
-  Future<void> set(String path) => bind.mainSetLocalOption(key: kSenseIncomingDirOption, value: path);
+  Future<void> set(String path) => bind.mainSenseSetIncomingDir(path: path);
 }

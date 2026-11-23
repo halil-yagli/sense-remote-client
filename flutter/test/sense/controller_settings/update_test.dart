@@ -575,7 +575,7 @@ void main() {
           ),
           size: const Size(900, 900));
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenPath('update_strip_states')));
-    }, skip: goldenSkip('update_strip_states'));
+    }, skip: goldenSkip('update_strip_states'), tags: const ['golden']);
 
     testWidgets('narrow strip (Host window 280 px), macOS step', (tester) async {
       await _pump(
@@ -598,6 +598,6 @@ void main() {
           ),
           size: const Size(280, 400));
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenPath('update_strip_narrow')));
-    }, skip: goldenSkip('update_strip_narrow'));
+    }, skip: goldenSkip('update_strip_narrow'), tags: const ['golden']);
   });
 }

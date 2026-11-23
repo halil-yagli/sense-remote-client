@@ -53,7 +53,7 @@ abstract final class SenseHostStrings {
   static const String errInvalid = 'Ad 1–64 karakter olmalı.';
   static const String errNetwork = 'Panele ulaşılamadı; değişiklik kaydedilmedi. Yeniden dene.';
   static const String errLocation = 'Bu yer bu bilgisayarın projesinde yok.';
-  static const String errUnavailable = 'Bu sürümde henüz değiştirilemiyor.';
+  static const String errUnavailable = 'Servis yanıt vermiyor; birazdan yeniden dene.';
   static const String errOther = 'Kaydedilemedi. Yeniden dene.';
 
   /// Minutes / hours of a connection ("14 dk", "1 sa 5 dk").

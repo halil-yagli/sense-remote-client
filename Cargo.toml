@@ -75,6 +75,8 @@ num_cpus = "1.15"
 bytes = { version = "1.4", features = ["serde"] }
 default-net = { git = "https://github.com/rustdesk-org/netdev", branch = "rustdesk-0.22" }
 wol-rs = "1.0"
+# Sense Remote (S5, O12): Downloads folder for chat files; already in the tree via hbb_common.
+dirs-next = "2.0"
 flutter_rust_bridge = { version = "=1.80", features = ["uuid"], optional = true}
 errno = "0.3"
 rdev = { git = "https://github.com/rustdesk-org/rdev" }
