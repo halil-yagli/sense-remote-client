@@ -19,7 +19,6 @@ final _rules = <String, RegExp>{
 const _legacy = <String, int>{
   'lib/sense/screens/controller/sense_update_view.dart': 1,
   'lib/sense/screens/host/sense_home_mac.dart': 1,
-  'lib/sense/screens/host/sense_password_page.dart': 1,
   'lib/sense/screens/host_live/sense_cm_panel.dart': 35,
   'lib/sense/screens/host_live/sense_cm_style.dart': 1,
   'lib/sense/screens/host_live/sense_cm_widgets.dart': 32,

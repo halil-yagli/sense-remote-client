@@ -12,7 +12,7 @@ import 'harness.dart';
 Future<void> shot(WidgetTester tester, String name, FakeBackend b,
     {Size size = const Size(1440, 900), SenseBarMenu? open, List<String> taps = const [], bool chatIcon = false}) async {
   setWindow(tester, size);
-  await tester.pumpWidget(frameApp(b, chatIcon: chatIcon));
+  await tester.pumpWidget(frameApp(b, chatIcon: chatIcon, still: true));
   if (open != null) {
     await tester.tap(find.byKey(ValueKey('sense-bar-menu-${open.name}')));
     await tester.pump();

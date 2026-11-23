@@ -215,7 +215,7 @@ class FakeBackend extends SenseSessionBackend {
   List<SenseShortcutRow> shortcuts = const [
     SenseShortcutRow('toggle_fullscreen', 'Tam ekran', 'Ctrl+Alt+Shift+Enter'),
     SenseShortcutRow('toggle_toolbar', 'Çubuğu gizle / göster', 'Ctrl+Alt+Shift+B'),
-    SenseShortcutRow('switch_display_next', 'Sonraki ekran', 'Ctrl+Alt+Shift+→'),
+    SenseShortcutRow('switch_display_next', 'Sonraki ekran', 'Ctrl+Alt+Shift+Sağ'),
     SenseShortcutRow('send_ctrl_alt_del', 'Ctrl+Alt+Del gönder', 'Ctrl+Alt+Shift+Del'),
     SenseShortcutRow('screenshot', 'Ekran görüntüsü al', 'Ctrl+Alt+Shift+P'),
     SenseShortcutRow('close_tab', 'Bağlantıyı bitir', 'Ctrl+Alt+Shift+Q'),

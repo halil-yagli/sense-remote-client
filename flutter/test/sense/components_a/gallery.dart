@@ -142,7 +142,7 @@ Widget galleryCards() => SizedBox(
         const SenseCard(
           title: 'Ethernet',
           copyText: '192.0.2.10',
-          child: SenseCardRow(label: 'Hız', value: '1 Gb/sn', last: true),
+          child: SenseCardRow(label: 'Hız', value: '1 Gbit/s', last: true),
         ),
       ]),
     );

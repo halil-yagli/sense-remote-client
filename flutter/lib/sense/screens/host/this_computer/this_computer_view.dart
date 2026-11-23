@@ -220,6 +220,7 @@ class _SenseThisComputerViewState extends State<SenseThisComputerView> {
           SenseButton(
               key: const Key('sense-host-retry'),
               label: SenseHostStrings.retry,
+              kind: SenseButtonKind.primary, // same look as the Controller list's retry (Y8)
               size: SenseButtonSize.small,
               onPressed: widget.onRetry)
         );
@@ -305,22 +306,16 @@ class _SenseThisComputerViewState extends State<SenseThisComputerView> {
           SenseStatGrid(children: [
             _HostTile(
               label: SenseHostStrings.id,
-              // Wrap: the ID itself never breaks; in a narrow column Kopyala drops below it.
-              child: Wrap(
-                  spacing: SenseUi.iconGap,
-                  runSpacing: SenseUi.iconGap,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                Text(widget.deviceId,
-                    key: const Key('sense-host-id'),
-                    maxLines: 1,
-                    softWrap: false,
-                    style: _valueStyle(null)),
-                SenseCopyButton(
-                    key: const Key('sense-host-copy-id'),
-                    text: widget.deviceId.replaceAll(' ', ''),
-                    onCopied: () => SenseToast.show(context, SenseHostStrings.idCopied)),
-              ]),
+              // Kopyala sits on the label line (top right), so the ID tile is as tall as the others.
+              trailing: SenseCopyButton(
+                  key: const Key('sense-host-copy-id'),
+                  text: widget.deviceId.replaceAll(' ', ''),
+                  onCopied: () => SenseToast.show(context, SenseHostStrings.idCopied)),
+              child: Text(widget.deviceId,
+                  key: const Key('sense-host-id'),
+                  maxLines: 1,
+                  softWrap: false,
+                  style: _valueStyle(null)),
             ),
             _HostTile(label: SenseHostStrings.place, child: _placeValue()),
             _HostTile(
@@ -460,11 +455,14 @@ TextStyle _valueStyle(SenseLevel? level) => SenseTextStyles.of(
 
 /// A tile of the status box (`.kv>div`): label + any value widget.
 class _HostTile extends StatelessWidget {
-  const _HostTile({required this.label, required this.child, this.level});
+  const _HostTile({required this.label, required this.child, this.level, this.trailing});
 
   final String label;
   final Widget child;
   final SenseLevel? level;
+
+  /// Drawn over the top right corner, on the label line; takes no height.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -473,7 +471,7 @@ class _HostTile extends StatelessWidget {
       SenseLevel.hot => SenseColors.hot.withOpacity(0.55),
       _ => SenseColors.line,
     };
-    return Container(
+    final tile = Container(
       padding: const EdgeInsets.symmetric(vertical: _kTilePadV, horizontal: _kTilePadH),
       decoration: BoxDecoration(
         color: SenseColors.surface,
@@ -493,6 +491,12 @@ class _HostTile extends StatelessWidget {
         ],
       ),
     );
+    final t = trailing;
+    if (t == null) return tile;
+    return Stack(fit: StackFit.passthrough, children: [
+      tile,
+      Positioned(top: _kTilePadV - 5, right: _kTilePadH - 2, child: t),
+    ]);
   }
 }
 
