@@ -2757,21 +2757,17 @@ mod test {
         assert_eq!(merged["socks"]["proxy"], "192.0.2.1:1080");
         // Code path: the write branch returns before `Config::set_socks`, and the sync handler
         // merges before anything is stored.
-        let source = include_str!("ipc.rs").replace("
-", "
-");
+        let source = include_str!("ipc.rs").replace("\r\n", "\n");
         let start = source.find("        Data::Socks(s) => match s {").unwrap();
         let body = &source[start..];
         let body = &body[..body.find("        Data::SocksWs(s)").unwrap()];
         let refused = body.find("if sense_refuses_socks_write() {").unwrap();
         assert!(refused < body.find("Config::set_socks(").unwrap());
         assert!(body[refused..].starts_with(
-            "if sense_refuses_socks_write() {
-                    log::warn!("
+            "if sense_refuses_socks_write() {\n                    log::warn!("
         ));
         let start = source
-            .find("        Data::SyncConfig(Some(configs)) => {
-            let (config, config2)")
+            .find("        Data::SyncConfig(Some(configs)) => {\n            let (config, config2)")
             .unwrap();
         let body = &source[start..];
         let merged = body.find("sense_keep_socks(config2, &Config2::get())").unwrap();
