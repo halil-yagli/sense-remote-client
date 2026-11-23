@@ -107,12 +107,11 @@ void main() {
     // page 100 ms after a jump, so the test lets that time pass.)
     // A page built after the window exists asks for its "connecting" dialog before the fake
     // window has an overlay for it; that known message is not what is tested here.
+    final stray = <Object>[];
     Future<void> pumpFor(int ms) async {
-      await tester.pump(Duration(milliseconds: ms));
-      Object? e;
-      while ((e = tester.takeException()) != null) {
-        if (!e.toString().contains('_overlayState is null')) throw e!;
-      }
+      await runZonedGuarded(() => tester.pump(Duration(milliseconds: ms)), (e, st) {
+        if (!e.toString().contains('_overlayState is null')) stray.add(e);
+      });
     }
 
     Future<void> settle() => pumpFor(150);
@@ -134,6 +133,7 @@ void main() {
     expect(Get.isRegistered<FFI>(tag: 'peerA'), isTrue);
     expect(Get.isRegistered<FFI>(tag: 'peerB'), isTrue);
     expect(tester.takeException(), isNull);
+    expect(stray, isEmpty);
 
     // Teardown: close the tabs the way the window does.
     controller.clear();
