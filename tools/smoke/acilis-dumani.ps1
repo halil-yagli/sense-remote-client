@@ -168,7 +168,7 @@ try {
         $kok = [System.Windows.Automation.AutomationElement]::FromHandle($secili)
         for ($deneme = 0; $deneme -lt 5 -and $adlar.Count -lt 3; $deneme++) {
           $adlar = @($kok.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
-            ForEach-Object { $_.Current.Name } | Where-Object { $_ })
+            ForEach-Object { $_.Current.Name } | Where-Object { $_ -and $_ -ne 'FLUTTERVIEW' })
           if ($adlar.Count -lt 3) { Start-Sleep -Seconds 3 }
         }
       } catch { Yaz "UI Automation hatasi: $($_.Exception.Message)" }
