@@ -462,8 +462,8 @@ void main() {
           [SenseUpdateAction.cancel]);
     });
 
-    test('the bridge offers Vazgeç where the core can cancel (Windows)', () {
-      expect(SenseUpdateBridge().canCancel, Platform.isWindows);
+    test('the bridge offers Vazgeç where the core can cancel (Windows, macOS)', () {
+      expect(SenseUpdateBridge().canCancel, Platform.isWindows || Platform.isMacOS);
     });
 
     testWidgets('Vazgeç stops the download', (tester) async {

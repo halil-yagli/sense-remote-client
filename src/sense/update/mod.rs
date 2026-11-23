@@ -323,7 +323,8 @@ pub enum SenseUpdateIpc {
     Install { version: u32 },
     /// macOS only, daemon → agent: the daemon's status JSON.
     DaemonStatus(String),
-    /// Sense Remote (D3e, #68): UI → `--server`: "Vazgeç" while downloading.
+    /// Sense Remote (D3e, #68): UI → `--server`: "Vazgeç" while downloading. On the macOS
+    /// `_service` channel: agent → daemon, answered with `CancelAnswer`.
     CancelRequest,
     /// `--server` → UI: the answer to `CancelRequest`, one of `request_cancel`'s codes.
     CancelAnswer(String),
@@ -486,10 +487,12 @@ async fn forward_to_daemon(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
                 _ => None,
             }
         }
-        // Sense Remote (D3e): the daemon does not stop a download yet (its `_service` channel
-        // does not take the request); the app offers no "Vazgeç" on macOS.
+        // Sense Remote (#68): "Vazgeç" goes to the daemon, which holds the download.
         SenseUpdateIpc::CancelRequest => {
-            Some(SenseUpdateIpc::CancelAnswer(UNSUPPORTED.to_owned()))
+            match daemon_mac::request_daemon(SenseUpdateIpc::CancelRequest).await {
+                Some(SenseUpdateIpc::CancelAnswer(code)) => Some(SenseUpdateIpc::CancelAnswer(code)),
+                _ => Some(SenseUpdateIpc::CancelAnswer(IPC_FAILED.to_owned())),
+            }
         }
         SenseUpdateIpc::InstallRequest { version } => {
             let asked = daemon_mac::request_daemon(SenseUpdateIpc::Install { version }).await;

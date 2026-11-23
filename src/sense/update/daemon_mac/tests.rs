@@ -106,8 +106,11 @@ fn bad_hints_are_dropped() {
 }
 
 #[test]
-fn only_the_three_service_messages_are_taken() {
+fn only_the_four_service_messages_are_taken() {
     assert_eq!(classify(&SenseUpdateIpc::StatusQuery, true, &ctx(), None), Some(Call::Status));
+    // Sense Remote (#68): "Vazgeç" on macOS.
+    assert_eq!(classify(&SenseUpdateIpc::CancelRequest, true, &ctx(), None), Some(Call::Cancel));
+    assert_eq!(classify(&SenseUpdateIpc::CancelRequest, false, &ctx(), None), None);
     assert_eq!(
         classify(&SenseUpdateIpc::Install { version: 4 }, true, &ctx(), None),
         Some(Call::Install(4))
@@ -117,6 +120,7 @@ fn only_the_three_service_messages_are_taken() {
         SenseUpdateIpc::InstallRequest { version: 4 },
         SenseUpdateIpc::InstallAnswer(String::new()),
         SenseUpdateIpc::DaemonStatus("{}".to_owned()),
+        SenseUpdateIpc::CancelAnswer(String::new()),
     ] {
         assert_eq!(classify(&other, true, &ctx(), None), None, "{other:?}");
     }

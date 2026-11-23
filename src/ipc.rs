@@ -737,9 +737,10 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
 // Sense Remote (Mac M5, plan §3.3): besides `SyncConfig`, the protected `_service` channel takes
 // an envelope `Apply` call. A `Result` (the daemon's own answer) or any other `Data` coming from
 // a client is rejected and the connection closed, as before.
-// Sense Remote (update plan 2026-11-21, §3.7): and exactly three update messages: `Offer`,
-// `Install` and `StatusQuery`. The answers (`Status`, `DaemonStatus`) and the UI's
-// `InstallRequest` are not something a client may send here.
+// Sense Remote (update plan 2026-11-21, §3.7): and exactly four update messages: `Offer`,
+// `Install`, `StatusQuery` and (#68) `CancelRequest`. The answers (`Status`, `DaemonStatus`,
+// `InstallAnswer`, `CancelAnswer`) and the UI's `InstallRequest` are not something a client may
+// send here.
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn sense_service_accepts(data: &Data) -> bool {
     use crate::sense::update::SenseUpdateIpc;
@@ -750,6 +751,8 @@ fn sense_service_accepts(data: &Data) -> bool {
                 SenseUpdateIpc::Offer { .. }
                     | SenseUpdateIpc::Install { .. }
                     | SenseUpdateIpc::StatusQuery
+                    // Sense Remote (#68): "Vazgeç" on macOS; the answer is the daemon's.
+                    | SenseUpdateIpc::CancelRequest
             )
             // Sense Remote (permanent password plan §3.7): the four requests, never an answer.
             | Data::SensePassword(
@@ -861,6 +864,33 @@ async fn sense_service_envelope(data: Data, stream: &mut Connection) {
             .send(&Data::SenseEnvelope(SenseEnvelopeIpc::Result(outcomes)))
             .await
     );
+}
+
+// Sense Remote (decision #68 (5)): in Sense the proxy is managed from the panel, so the IPC
+// handler takes no proxy change from a local process (`Data::Socks(Some)`, `SyncConfig`).
+fn sense_refuses_socks_write() -> bool {
+    crate::sense::SOCKS_LOCKED
+}
+
+// Sense Remote (decision #68 (5)): `incoming` with `own`'s proxy. The field is private to
+// `hbb_common`, so this goes through the serde form this IPC carries anyway (JSON). If that
+// fails, `own` is kept as a whole (nothing of the sync applies) and it is logged; the proxy
+// values themselves are never logged.
+fn sense_keep_socks(incoming: Config2, own: &Config2) -> Config2 {
+    let merged = (|| {
+        let own_socks = serde_json::to_value(own)
+            .ok()?
+            .get("socks")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let mut value = serde_json::to_value(&incoming).ok()?;
+        value.as_object_mut()?.insert("socks".to_owned(), own_socks);
+        serde_json::from_value::<Config2>(value).ok()
+    })();
+    merged.unwrap_or_else(|| {
+        log::error!("Sense Remote: synced config2 not merged, own config2 kept");
+        own.clone()
+    })
 }
 
 // Sense Remote (security review G4-3): on macOS the user process syncs its whole config to the
@@ -1116,6 +1146,12 @@ async fn handle(data: Data, stream: &mut Connection) {
                 allow_err!(stream.send(&Data::Socks(Config::get_socks())).await);
             }
             Some(data) => {
+                // Sense Remote (decision #68 (5)): the proxy is managed from the panel; no local
+                // process changes it over IPC (`ui_interface::set_socks` is locked as well).
+                if sense_refuses_socks_write() {
+                    log::warn!("Sense Remote: IPC proxy change refused (panel managed)");
+                    return;
+                }
                 let _nat = CheckTestNatType::new();
                 if data.proxy.is_empty() {
                     Config::set_socks(None);
@@ -1349,6 +1385,13 @@ async fn handle(data: Data, stream: &mut Connection) {
         }
         Data::SyncConfig(Some(configs)) => {
             let (config, config2) = *configs;
+            // Sense Remote (decision #68 (5)): nor through a whole-config sync; this process
+            // keeps its own proxy.
+            let config2 = if sense_refuses_socks_write() {
+                sense_keep_socks(config2, &Config2::get())
+            } else {
+                config2
+            };
             // Sense Remote (permanent password plan §3.7): on Windows no Sense flow sends this;
             // with a role installed a UI process must not replace SYSTEM's identity, key pair,
             // password or salt this way (macOS: `sense_keep_root_config`, G4-3).
@@ -2686,10 +2729,59 @@ pub async fn set_install_option(k: String, v: String) -> ResultType<()> {
 
 #[cfg(test)]
 mod test {
-    // Sense Remote (update plan 2026-11-21, §3.7): of the update messages the `_service` channel
-    // takes exactly `Offer`, `Install` and `StatusQuery`.
+    // Sense Remote (decision #68 (5)): a local process cannot change the proxy over the main
+    // IPC: `Data::Socks(Some)` is refused before anything is written, and a `SyncConfig` keeps
+    // the receiving process's own proxy while the rest of the sync applies.
     #[test]
-    fn sense_service_channel_takes_only_three_update_messages() {
+    fn sense_proxy_not_changed_over_ipc() {
+        use super::{sense_keep_socks, sense_refuses_socks_write, Config2};
+        assert!(sense_refuses_socks_write());
+        let incoming: Config2 = serde_json::from_value(serde_json::json!({
+            "socks": { "proxy": "198.51.100.7:1080", "username": "u", "password": "p" },
+            "options": { "sense-test": "1" }
+        }))
+        .unwrap();
+        let own: Config2 = serde_json::from_value(serde_json::json!({
+            "options": { "sense-test": "0" }
+        }))
+        .unwrap();
+        let merged = serde_json::to_value(sense_keep_socks(incoming, &own)).unwrap();
+        assert!(merged["socks"].is_null(), "{merged}");
+        assert_eq!(merged["options"]["sense-test"], "1");
+        let own: Config2 = serde_json::from_value(serde_json::json!({
+            "socks": { "proxy": "192.0.2.1:1080", "username": "", "password": "" }
+        }))
+        .unwrap();
+        let incoming = Config2::default();
+        let merged = serde_json::to_value(sense_keep_socks(incoming, &own)).unwrap();
+        assert_eq!(merged["socks"]["proxy"], "192.0.2.1:1080");
+        // Code path: the write branch returns before `Config::set_socks`, and the sync handler
+        // merges before anything is stored.
+        let source = include_str!("ipc.rs").replace("
+", "
+");
+        let start = source.find("        Data::Socks(s) => match s {").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("        Data::SocksWs(s)").unwrap()];
+        let refused = body.find("if sense_refuses_socks_write() {").unwrap();
+        assert!(refused < body.find("Config::set_socks(").unwrap());
+        assert!(body[refused..].starts_with(
+            "if sense_refuses_socks_write() {
+                    log::warn!("
+        ));
+        let start = source
+            .find("        Data::SyncConfig(Some(configs)) => {
+            let (config, config2)")
+            .unwrap();
+        let body = &source[start..];
+        let merged = body.find("sense_keep_socks(config2, &Config2::get())").unwrap();
+        assert!(merged < body.find("trusted_devices::config::update(").unwrap());
+    }
+
+    // Sense Remote (update plan 2026-11-21, §3.7): of the update messages the `_service` channel
+    // takes exactly `Offer`, `Install`, `StatusQuery` and (#68) `CancelRequest`.
+    #[test]
+    fn sense_service_channel_takes_only_four_update_messages() {
         use super::{sense_service_accepts, Data};
         use crate::sense::update::SenseUpdateIpc;
         for accepted in [
@@ -2701,13 +2793,17 @@ mod test {
             },
             SenseUpdateIpc::Install { version: 4 },
             SenseUpdateIpc::StatusQuery,
+            // Sense Remote (#68): "Vazgeç" on macOS.
+            SenseUpdateIpc::CancelRequest,
         ] {
             assert!(sense_service_accepts(&Data::SenseUpdate(accepted.clone())), "{accepted:?}");
         }
         for rejected in [
             SenseUpdateIpc::Status("{}".to_owned()),
             SenseUpdateIpc::InstallRequest { version: 4 },
+            SenseUpdateIpc::InstallAnswer(String::new()),
             SenseUpdateIpc::DaemonStatus("{}".to_owned()),
+            SenseUpdateIpc::CancelAnswer(String::new()),
         ] {
             assert!(!sense_service_accepts(&Data::SenseUpdate(rejected.clone())), "{rejected:?}");
         }

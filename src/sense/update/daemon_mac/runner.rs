@@ -19,7 +19,10 @@ use crate::sense::update::{
 use hbb_common::{config::Config, libc, log};
 use std::{
     path::PathBuf,
-    sync::{mpsc, Mutex, MutexGuard},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc, Mutex, MutexGuard,
+    },
     time::{Duration, Instant},
 };
 
@@ -42,6 +45,8 @@ struct Daemon {
 enum Job {
     Persist(State),
     Download(download::Request),
+    /// Sense Remote (#68): stop the running download, then remove its `.part` file.
+    AbortDownload(PathBuf),
     Verify {
         file: PathBuf,
         sha256: String,
@@ -53,6 +58,23 @@ enum Job {
 }
 
 static DAEMON: Mutex<Option<Daemon>> = Mutex::new(None);
+/// Sense Remote (#68): number of the current download; a running download stops as soon as it
+/// changes ("Vazgeç"), and its thread, so `AbortDownload` can wait for it.
+static DOWNLOAD_RUN: AtomicU64 = AtomicU64::new(0);
+static DOWNLOAD_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
+/// How often a running download looks at `DOWNLOAD_RUN`.
+const CANCEL_POLL: Duration = Duration::from_millis(200);
+
+fn download_thread() -> MutexGuard<'static, Option<std::thread::JoinHandle<()>>> {
+    DOWNLOAD_THREAD.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+/// Resolves once download `run` is no longer the current one.
+async fn superseded(run: u64) {
+    while DOWNLOAD_RUN.load(Ordering::SeqCst) == run {
+        hbb_common::tokio::time::sleep(CANCEL_POLL).await;
+    }
+}
 
 fn lock() -> MutexGuard<'static, Option<Daemon>> {
     DAEMON.lock().unwrap_or_else(|err| err.into_inner())
@@ -195,13 +217,13 @@ impl Daemon {
         if let Action::DropFile { file } = action {
             return download::is_plain_file_name(&file).then(|| Job::DropFile(dir.join(file)));
         }
-        // Sense Remote (D3e): the daemon takes no "Vazgeç" (`classify`), so the engine never asks
-        // it to stop a download; never let it fall through to the installation below.
-        if let Action::AbortDownload = action {
-            return None;
-        }
         let release = self.state.release.as_ref()?;
         let file = dir.join(&release.file);
+        // Sense Remote (#68): "Vazgeç", as `runner.rs`.
+        if let Action::AbortDownload = action {
+            let part = format!("{}{}", release.file, download::PART_SUFFIX);
+            return Some(Job::AbortDownload(dir.join(part)));
+        }
         Some(match action {
             Action::Download => Job::Download(download::Request {
                 url: release.url.clone(),
@@ -252,27 +274,56 @@ fn perform(job: Job) {
                 }
             }
         }
-        Job::Download(mut request) => spawn("sense-update-dl", move || {
-            // The folder is made safe (root 0700, no symlink) once per download.
-            match apply::prepare_download_dir() {
-                Some(dir) => request.dir = dir,
-                None => {
-                    log::error!("Sense Remote: update download folder not safe");
-                    step(Event::Failed(UpdateError::DownloadFailed));
-                    return;
+        Job::Download(mut request) => {
+            // Sense Remote (#68): a new number; an older download (already stopped) ends.
+            let run = DOWNLOAD_RUN.fetch_add(1, Ordering::SeqCst) + 1;
+            let thread = spawn_thread("sense-update-dl", move || {
+                // The folder is made safe (root 0700, no symlink) once per download.
+                match apply::prepare_download_dir() {
+                    Some(dir) => request.dir = dir,
+                    None => {
+                        log::error!("Sense Remote: update download folder not safe");
+                        step(Event::Failed(UpdateError::DownloadFailed));
+                        return;
+                    }
                 }
-            }
-            let progress = |pct: u8| step(Event::DownloadProgress(pct));
-            let result = hbb_common::tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|_| UpdateError::DownloadFailed)
-                .and_then(|runtime| runtime.block_on(download::fetch(&request, &progress)));
-            step(match result {
-                Ok(_) => Event::Downloaded,
-                Err(err) => Event::Failed(err),
+                let progress = |pct: u8| step(Event::DownloadProgress(pct));
+                let runtime = match hbb_common::tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
+                    Err(_) => {
+                        step(Event::Failed(UpdateError::DownloadFailed));
+                        return;
+                    }
+                };
+                // Sense Remote (#68): "Vazgeç" drops the download; the engine already went back to
+                // "Yeni sürüm hazır", so nothing is reported.
+                let result = runtime.block_on(async {
+                    hbb_common::tokio::select! {
+                        result = download::fetch(&request, &progress) => Some(result),
+                        _ = superseded(run) => None,
+                    }
+                });
+                match result {
+                    Some(Ok(_)) => step(Event::Downloaded),
+                    Some(Err(err)) => step(Event::Failed(err)),
+                    None => {}
+                }
             });
-        }),
+            *download_thread() = thread;
+        }
+        // Sense Remote (#68): stop the download and wait for its thread (here, so a new
+        // download cannot start before the old `.part` file is gone), then remove the file.
+        Job::AbortDownload(part) => {
+            DOWNLOAD_RUN.fetch_add(1, Ordering::SeqCst);
+            if let Some(thread) = download_thread().take() {
+                let _ = thread.join();
+            }
+            let _ = std::fs::remove_file(part);
+            log::info!("Sense Remote: update download cancelled");
+        }
         Job::Verify { file, sha256, size } => spawn("sense-update-verify", move || {
             step(match download::verify_file(&file, size, &sha256) {
                 Ok(()) => Event::Verified,
@@ -298,9 +349,20 @@ fn perform(job: Job) {
 }
 
 fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
-    if let Err(err) = std::thread::Builder::new().name(name.to_owned()).spawn(work) {
-        log::error!("Sense Remote: {name} not started: {err}");
-        step(Event::Failed(UpdateError::InstallFailed));
+    let _ = spawn_thread(name, work);
+}
+
+fn spawn_thread(
+    name: &str,
+    work: impl FnOnce() + Send + 'static,
+) -> Option<std::thread::JoinHandle<()>> {
+    match std::thread::Builder::new().name(name.to_owned()).spawn(work) {
+        Ok(thread) => Some(thread),
+        Err(err) => {
+            log::error!("Sense Remote: {name} not started: {err}");
+            step(Event::Failed(UpdateError::InstallFailed));
+            None
+        }
     }
 }
 
@@ -364,6 +426,18 @@ pub fn on_service_ipc(
                 Err(code) => code,
             };
             Some(SenseUpdateIpc::InstallAnswer(code.to_owned()))
+        }
+        // Sense Remote (#68): checked and done under one lock, as `runner::request_cancel`.
+        Call::Cancel => {
+            let code = match engine::check_cancel(&daemon.state) {
+                Ok(()) => {
+                    let ctx = daemon.ctx(false);
+                    daemon.advance(Event::CancelRequested, &ctx);
+                    engine::CANCEL_ACCEPTED
+                }
+                Err(code) => code,
+            };
+            Some(SenseUpdateIpc::CancelAnswer(code.to_owned()))
         }
         Call::Status => {
             let warning =

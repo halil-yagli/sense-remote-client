@@ -23,7 +23,7 @@ import '../settings/sense_settings_page.dart';
 import '../update/sense_update_view.dart' show SenseUpdateWatch;
 import 'account_box.dart';
 import '../../../../desktop/pages/desktop_tab_page.dart' show DesktopTabPage;
-import '../../../router.dart' show senseRoleChangeReopen;
+import '../../../router.dart' show senseAboutRequest, senseRoleChangeReopen;
 
 enum SenseControllerNav { computers, thisComputer, settings, about }
 
@@ -73,7 +73,11 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _grants.start();
+    senseAboutRequest.addListener(_showAbout); // Sense Remote (D3f): macOS app menu
   }
+
+  // Signed out the sign-in page stays (About is in the menu after sign-in).
+  void _showAbout() => setState(() => _nav = SenseControllerNav.about);
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -84,6 +88,7 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    senseAboutRequest.removeListener(_showAbout);
     _grants.dispose();
     _login.dispose();
     super.dispose();

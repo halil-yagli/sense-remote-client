@@ -5,7 +5,7 @@
         <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="22505"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
-    <!-- Sense Remote: menü metinleri Türkçe ve Sense adıyla; modül adı PRODUCT_NAME (SenseRemote). -->
+    <!-- Sense Remote: menü metinleri Türkçe ve Sense adıyla; modül adı PRODUCT_NAME (SenseRemote). Hakkında Sense Hakkında sayfasını açar (AppDelegate.senseShowAbout); çalışmayan "Ayarlar…" kaldırıldı (D3f). -->
     <objects>
         <customObject id="-2" userLabel="File's Owner" customClass="NSApplication">
             <connections>
@@ -30,12 +30,10 @@
                             <menuItem title="Sense Remote Hakkında" id="5kV-Vb-QxS">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
-                                    <action selector="orderFrontStandardAboutPanel:" target="-1" id="Exp-CZ-Vem"/>
+                                    <action selector="senseShowAbout:" target="Voe-Tx-rLC" id="Exp-CZ-Vem"/>
                                 </connections>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="VOq-y0-SEH"/>
-                            <menuItem title="Ayarlar…" keyEquivalent="," id="BOF-NM-1cW"/>
-                            <menuItem isSeparatorItem="YES" id="wFC-TO-SCJ"/>
                             <menuItem title="Servisler" id="NMo-om-nkz">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <menu key="submenu" title="Servisler" systemMenu="services" id="hz9-B4-Xy5"/>

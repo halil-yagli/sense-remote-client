@@ -59,11 +59,10 @@ class SenseUpdateBridge extends SenseUpdateBackend {
   @override
   void openUrl(String url) => launchUrlString(url);
 
-  // D3e (#68): `main_sense_update_cancel` stops the user's own download on
-  // Windows. The macOS daemon does not take it yet, so Vazgeç is not offered
-  // there (no button that does nothing).
+  // D3e (#68): `main_sense_update_cancel` stops the user's own download; on
+  // macOS the agent hands it to the daemon that holds the download (D3f).
   @override
-  bool get canCancel => Platform.isWindows;
+  bool get canCancel => Platform.isWindows || Platform.isMacOS;
 
   @override
   Future<void> cancel() async {
