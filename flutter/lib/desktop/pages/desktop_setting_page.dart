@@ -27,7 +27,6 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
-import '../../sense/screens/controller/sense_home_about.dart'; // Sense Remote
 import '../../sense/screens/controller/about/sense_about_page.dart' as sense_about; // Sense Remote: C4
 import '../../sense/screens/controller/settings/sense_settings_page.dart'; // Sense Remote: C3
 import '../../sense/tokens/sense_tokens.dart' show SenseColors; // Sense Remote
@@ -2602,7 +2601,7 @@ class _AboutState extends State<_About> {
     // Sense Remote: Sense About page (version, role, panel status, small
     // "Açık kaynak lisansları" link). The stock page is kept below unused so
     // upstream merges stay small.
-    return const SenseAboutPage();
+    return const sense_about.SenseAboutPage();
   }
 
   // ignore: unused_element

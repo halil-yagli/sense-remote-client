@@ -41,6 +41,7 @@ import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'models/model.dart';
 import 'models/platform_model.dart';
 import 'common/sense_theme.dart'; // Sense Remote
+import 'sense/strings/common.dart'; // Sense Remote (A2c)
 
 import 'package:flutter_hbb/native/win32.dart'
     if (dart.library.html) 'package:flutter_hbb/web/win32.dart';
@@ -577,13 +578,13 @@ class MyTheme {
     ],
   );
 
-  static ThemeMode getThemeModePreference() {
-    // Sense Remote: an installed Sense computer is always dark (Sense theme).
-    if (senseRoleInstalled()) return ThemeMode.dark;
-    return themeModeFromString(bind.mainGetLocalOption(key: kCommConfKeyTheme));
-  }
+  /// Sense Remote (A2c, YH T1 #38): only the dark theme. There is no theme
+  /// choice; the saved option and the system's light mode are ignored.
+  static ThemeMode getThemeModePreference() => ThemeMode.dark;
 
   static Future<void> changeDarkMode(ThemeMode mode) async {
+    // Sense Remote (A2c, T1): any requested mode becomes dark.
+    mode = ThemeMode.dark;
     Get.changeThemeMode(mode);
     if (desktopType == DesktopType.main || isAndroid || isIOS || isWeb) {
       if (mode == ThemeMode.system) {
@@ -599,19 +600,8 @@ class MyTheme {
     }
   }
 
-  static ThemeMode currentThemeMode() {
-    final preference = getThemeModePreference();
-    if (preference == ThemeMode.system) {
-      if (WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-          Brightness.light) {
-        return ThemeMode.light;
-      } else {
-        return ThemeMode.dark;
-      }
-    } else {
-      return preference;
-    }
-  }
+  // Sense Remote (A2c, T1): always dark, also when the system is light.
+  static ThemeMode currentThemeMode() => ThemeMode.dark;
 
   static ColorThemeExtension color(BuildContext context) {
     return Theme.of(context).extension<ColorThemeExtension>()!;
@@ -3064,7 +3054,9 @@ int versionCmp(String v1, String v2) {
 }
 
 String getWindowName({WindowType? overrideType}) {
-  final name = bind.mainGetAppNameSync();
+  // Sense Remote (A2c, T2): window, taskbar and Dock show "Sense Remote"
+  // (the internal app name "SenseRemote" has no space).
+  const name = SenseCommonStrings.appName;
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;

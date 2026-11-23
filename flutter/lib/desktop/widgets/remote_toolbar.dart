@@ -26,6 +26,7 @@ import './kb_layout_type_chooser.dart';
 // Sense Remote: connection window parts (map, info, status, chat, ghost).
 import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
 import '../../sense/screens/session/sense_remote_window.dart';
+import '../../sense/tokens/sense_tokens.dart' show SenseColors;
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
 
@@ -332,16 +333,16 @@ class _ToolbarTheme {
   // uygulama.html screen 4): dark gray buttons with white icons instead of
   // RustDesk's blue, Sense red for "end" (design review T3-7).
   static const Color blueColor =
-      kSenseRemoteWindow ? Color(0xFF1D1D25) : MyTheme.button;
+      kSenseRemoteWindow ? SenseColors.hover : MyTheme.button;
   static const Color hoverBlueColor =
-      kSenseRemoteWindow ? Color(0xFF33333D) : MyTheme.accent;
+      kSenseRemoteWindow ? SenseColors.lineStrong : MyTheme.accent;
   static Color inactiveColor = Colors.grey[800]!;
   static Color hoverInactiveColor = Colors.grey[850]!;
 
   static const Color redColor =
-      kSenseRemoteWindow ? Color(0xFFD81E30) : Colors.redAccent;
+      kSenseRemoteWindow ? SenseColors.danger : Colors.redAccent;
   static const Color hoverRedColor =
-      kSenseRemoteWindow ? Color(0xFFB3172A) : Colors.red;
+      kSenseRemoteWindow ? SenseColors.dangerHover : Colors.red;
   // kMinInteractiveDimension
   static const double height = 20.0;
   static const double dividerHeight = 12.0;
@@ -694,6 +695,9 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
   @override
   Widget build(BuildContext context) {
+    // Sense Remote: the Sense session bar sits above the remote screen
+    // (sense/screens/session/bar, via remote_tab_page.dart); no floating toolbar.
+    if (kSenseRemoteWindow) return const SizedBox.shrink();
     return Obx(() {
       // Wait for initialization to complete to prevent flickering
       if (!widget.state.initialized.value ||
@@ -863,12 +867,9 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
     }
-    // Sense Remote: display info, status, chat panel and ghost mode buttons
-    // (the Sense chat panel replaces the stock floating chat).
-    if (kSenseRemoteWindow) {
-      toolbarItems.add(SenseRemoteToolbarButtons(
-          id: widget.id, ffi: widget.ffi, vertical: !isHorizontal));
-    } else {
+    // Sense Remote: the Sense bar replaces this toolbar (build returns early), so
+    // only the stock chat button is kept here.
+    if (!kSenseRemoteWindow) {
       toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
     }
     if (!isWeb) {

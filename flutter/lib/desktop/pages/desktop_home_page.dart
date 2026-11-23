@@ -24,8 +24,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
-// Sense Remote: Sense home screens (Controller project cards, small Host home).
-import '../../sense/screens/controller/sense_home_controller.dart';
+// Sense Remote: Sense home screens (B3 Controller window, Mac permission card).
+import '../../sense/screens/controller/shell/controller_shell.dart';
 import '../../sense/screens/host/sense_home_mac.dart';
 // Sense Remote (B2, YH H1): the Host window, same size as the Controller (#36).
 import '../../sense/screens/host/shell/host_shell.dart';
@@ -82,6 +82,19 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           child: Stack(children: [
         Offstage(child: OnlineStatusWidget()),
         const Positioned.fill(child: SenseHostShell()),
+      ]));
+    }
+    // Sense Remote (B3, YH C1, C2): Controller and Host + Controller get the
+    // Sense Controller window: "Sense hesabınla gir" when not signed in (the
+    // stock connection page is gone), else Bilgisayarlar, Ayarlar, Hakkında.
+    // The stock status widget stays mounted (hidden) for `svcStatus`.
+    final senseRole = senseHomeRole();
+    if (senseRole == SenseHomeRole.controller ||
+        senseRole == SenseHomeRole.both) {
+      return _buildBlock(
+          child: Stack(children: [
+        Offstage(child: OnlineStatusWidget()),
+        Positioned.fill(child: SenseControllerShell(role: senseRole)),
       ]));
     }
     final isIncomingOnly = bind.isIncomingOnly();
@@ -207,17 +220,12 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   buildRightPane(BuildContext context) {
-    // Sense Remote: Controller and Host + Controller get the project cards;
-    // without a panel sign-in the stock connection page stays.
-    final stock = Container(
+    // Sense Remote (B3): Controller roles never get here (see build); only a
+    // computer without a Sense role keeps the stock connection page.
+    return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: ConnectionPage(),
     );
-    final role = senseHomeRole();
-    if (role == SenseHomeRole.controller || role == SenseHomeRole.both) {
-      return SenseControllerHome(fallback: stock);
-    }
-    return stock;
   }
 
   buildIDBoard(BuildContext context) {

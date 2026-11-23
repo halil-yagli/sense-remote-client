@@ -167,10 +167,11 @@ class ShortcutModel {
     }
     json['enabled'] = v;
     if (v && shouldSeedDefaultShortcutBindings(json)) {
-      json['bindings'] = filterDefaultBindingsForPlatform(
+      // Sense Remote: plus the toolbar and close shortcuts of the session list (O5).
+      json['bindings'] = withSenseDefaultShortcuts(filterDefaultBindingsForPlatform(
         jsonDecode(bind.mainGetDefaultKeyboardShortcuts()) as List,
         currentPlatformCapabilities(),
-      );
+      ));
     } else if (json.containsKey('bindings')) {
       json['bindings'] = shortcutBindingMapsFrom(json['bindings']);
     }

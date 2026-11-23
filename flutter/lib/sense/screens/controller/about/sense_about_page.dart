@@ -362,3 +362,6 @@ class _Licenses extends StatelessWidget {
         ],
       );
 }
+
+/// Router entry (A2c `SenseEntry.about`, C4; the Host reaches only this).
+Widget senseAboutScreen() => const SenseAboutPage();

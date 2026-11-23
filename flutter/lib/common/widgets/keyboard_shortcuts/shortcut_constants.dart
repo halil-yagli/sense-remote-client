@@ -120,3 +120,39 @@ final List<Map<String, Object>> kDefaultShortcutBindings = [
       'key': entry[1],
     },
 ];
+
+// Sense Remote: the two shortcuts of the session list "Kısayollar" (YH O5) that
+// RustDesk leaves unbound. Same Ctrl/Cmd+Alt+Shift family as the RustDesk defaults
+// (no clash with them: delete, enter, arrows, p, m, s, i, c). Not Ctrl+Alt+key: on
+// Windows Ctrl+Alt is AltGr, and AltGr+Q types "@" on a Turkish Q keyboard.
+// RustDesk's own default list (and its Rust fixture) stays as it is.
+final List<Map<String, Object>> kSenseDefaultShortcutBindings = [
+  {
+    'action': kShortcutActionToggleToolbar,
+    'mods': const ['primary', 'alt', 'shift'],
+    'key': 'b',
+  },
+  {
+    'action': kShortcutActionCloseTab,
+    'mods': const ['primary', 'alt', 'shift'],
+    'key': 'q',
+  },
+];
+
+/// Adds the Sense defaults to seeded [bindings]: skipped when the action already has a
+/// binding or the key combination is taken.
+List<Map<String, dynamic>> withSenseDefaultShortcuts(List<Map<String, dynamic>> bindings) {
+  String combo(Map b) {
+    final mods = (b['mods'] is List ? (b['mods'] as List).map((e) => '$e').toList() : <String>[])..sort();
+    return '${mods.join('+')}+${b['key']}';
+  }
+
+  final out = [for (final b in bindings) Map<String, dynamic>.of(b)];
+  final actions = {for (final b in out) b['action']};
+  final combos = {for (final b in out) combo(b)};
+  for (final s in kSenseDefaultShortcutBindings) {
+    if (actions.contains(s['action']) || combos.contains(combo(s))) continue;
+    out.add(Map<String, dynamic>.of(s));
+  }
+  return out;
+}

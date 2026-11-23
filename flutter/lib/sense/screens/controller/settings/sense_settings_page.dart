@@ -500,3 +500,6 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
     );
   }
 }
+
+/// Router entry (A2c `SenseEntry.controllerSettings`, C3; never from a Host).
+Widget senseControllerSettingsScreen() => const SenseSettingsPage();
