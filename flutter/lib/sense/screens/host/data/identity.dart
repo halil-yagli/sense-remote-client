@@ -1,15 +1,11 @@
 // Sense Remote: name and place of this computer (YH H1, #33, #51, S3; plan §2.6).
 // The Host is the one source of its name; the place is chosen from the places of
 // its project (no free text). Bridge `main_sense_identity` /
-// `main_sense_identity_set` comes with D3c; until then [SenseIdentityBridge]
-// reads the values the installer wrote and cannot save (honest "unavailable").
+// `main_sense_identity_set` (D3c): the service signs the change to the panel
+// and stores it only when the panel took it.
 import 'dart:convert';
 
 import '../../../../models/platform_model.dart';
-
-/// Built-in options the installer writes (src/sense.rs).
-const kSenseNameOption = 'sense-name';
-const kSenseLocationOption = 'sense-location';
 
 class SensePlace {
   const SensePlace(this.id, this.name);
@@ -97,23 +93,12 @@ abstract class SenseIdentityBackend {
 class SenseIdentityBridge implements SenseIdentityBackend {
   const SenseIdentityBridge();
 
-  // TODO(D3c): main_sense_identity — until then the installer's values, no place list.
+  // D3c: `--server` answers (stored name / place, the panel's place list, panel state).
   @override
-  Future<String> identity() async {
-    final name = bind.mainGetBuildinOption(key: kSenseNameOption).trim();
-    final place = bind.mainGetBuildinOption(key: kSenseLocationOption).trim();
-    return jsonEncode({
-      'name': name,
-      'location_id': '',
-      'location_name': place,
-      'locations': [
-        if (place.isNotEmpty) {'id': '', 'name': place}
-      ],
-      'panel': null,
-    });
-  }
+  Future<String> identity() => bind.mainSenseIdentity();
 
-  // TODO(D3c): main_sense_identity_set — nothing is saved before the bridge exists.
+  // D3c: `--server` signs the change to the panel with the device key, then stores it.
   @override
-  Future<String> setIdentity(String name, String placeId) async => '{"error":"unavailable"}';
+  Future<String> setIdentity(String name, String placeId) =>
+      bind.mainSenseIdentitySet(name: name, locationId: placeId);
 }
