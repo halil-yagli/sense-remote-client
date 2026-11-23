@@ -130,8 +130,8 @@ void main() {
       final cards = cat(v, 'storage').rows.whereType<SenseStatusCard>().toList();
       expect(cards.map((c) => c.title), ['Samsung SSD 980 PRO 1TB', 'WDC WD20EZBX 2TB']);
       expect(cards.map((c) => c.tags), [['NVMe'], ['SATA HDD']]);
-      expect(meter(cards[0].rows, 'C:').text, '577 / 931 GB');
-      expect(meter(cards[1].rows, 'D:').text, '1,75 / 1,82 TB');
+      expect(meter(cards[0].rows, 'C: Sistem').text, '577 / 931 GB');
+      expect(meter(cards[1].rows, 'D: İçerik').text, '1,75 / 1,82 TB');
       expect(line(cards[0].rows, 'Sağlık').value, 'İyi · kalan ömür %96');
       expect(line(cards[0].rows, 'Anlık okuma / yazma').value, '24 / 3 MB/s');
       expect(line(cards[1].rows, 'Sıcaklık').value, isNull);
@@ -144,13 +144,15 @@ void main() {
       expect(cards.map((c) => c.title), ['Ethernet', 'Ethernet 2', 'Wi-Fi']);
       expect(cards.map((c) => c.tags), [['bağlı'], ['kablo takılı değil'], ['bağlı']]);
       final eth = cards[0].rows;
-      expect(line(eth, 'IPv4').value, '192.168.10.42');
+      expect(line(eth, 'IPv4').value, '192.168.10.42 /24');
       expect(line(eth, 'IPv4').tag, 'STATİK');
       expect(line(eth, 'IPv4').tagStrong, isTrue);
-      expect(line(eth, 'IPv4 (ek)').value, '10.0.0.5');
+      expect(line(eth, 'IPv4 (ek)').value, '10.0.0.5 /8');
       expect(line(eth, 'DNS').value, '192.168.10.1 · 1.1.1.1');
       expect(line(eth, 'Hız').value, '1 Gbit/s');
       expect(meter(eth, 'Anlık trafik').text, '↓ 12 · ↑ 3 Mbit/s');
+      expect(meter(eth, 'Anlık trafik').traffic!.down, '12');
+      expect(meter(eth, 'Anlık trafik').traffic!.up, '3');
       expect(flat(cards[1].rows).whereType<SenseStatusLine>().map((l) => l.label), ['Kart', 'MAC']);
       expect(line(cards[2].rows, 'IPv4').tag, 'DHCP');
       expect(line(cards[2].rows, 'Ağ adı').value, 'Ornek-Personel · 5 GHz · sinyal %78');

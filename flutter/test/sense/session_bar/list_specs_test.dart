@@ -64,7 +64,6 @@ const kCorrespondence = <String, String>{
   'Not (showAuditDialog)': 'actions.note',
   'Terminal (connectWithToken)': 'actions.terminal',
   'TCP (connectWithToken)': 'actions.tunnel',
-  'Kamera (connectWithToken)': 'actions.camera',
   'Parmak izi (onCopyFingerprint)': 'actions.fingerprint',
 };
 

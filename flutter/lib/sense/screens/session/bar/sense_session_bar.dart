@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 
 import '../../../components/blink.dart';
 import '../../../components/button.dart';
+import '../../../components/caret.dart';
 import '../../../components/sense_mark.dart';
 import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart';
@@ -183,7 +184,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
           ]),
           menu(SenseBarMenu.actions, labels.actions, leading: [
             if (b.recordingOn)
-              const SenseStatusDot(key: ValueKey('sense-bar-rec-dot'), color: SenseColors.hot, blinking: true),
+              const SenseStatusDot(key: ValueKey('sense-bar-rec-dot'), color: SenseColors.hot, blinking: true, glow: true),
           ], tags: [
             if (b.recordingOn)
               const SenseStateChip(
@@ -421,7 +422,12 @@ class _MenuButton extends StatelessWidget {
             for (final w in tags) ...[const SizedBox(width: 6), w],
             if (!compact) ...[
               const SizedBox(width: 6),
-              Text('▾', style: SenseTextStyles.of(size: SenseFontSize.capsSmall, color: SenseColors.textDim)),
+              const SenseCaret(
+                key: ValueKey('sense-bar-caret'),
+                direction: SenseCaretDirection.down,
+                size: 10,
+                small: true,
+              ),
             ],
           ]),
         );

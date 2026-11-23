@@ -46,7 +46,7 @@ void main() {
       (t) => shot(t, 'list_display_s09', FakeBackend(), open: SenseBarMenu.display, taps: ['Özel kalite']),
       skip: goldenSkip('list_display_s09'), tags: const ['golden']);
   testWidgets('c04 Klavye ve fare, Fare ve imleç open',
-      (t) => shot(t, 'list_keyboard_c04', FakeBackend(facts: const SensePeerFacts(os: SensePeerOs.mac, sasEnabled: false)),
+      (t) => shot(t, 'list_keyboard_c04', FakeBackend(facts: const SensePeerFacts(os: SensePeerOs.mac, sasEnabled: false, displaysCount: 3)),
           open: SenseBarMenu.keyboard, taps: ['Fare ve imleç']),
       skip: goldenSkip('list_keyboard_c04'), tags: const ['golden']);
   testWidgets('n10 Klavye ve fare, Kısayollar open',

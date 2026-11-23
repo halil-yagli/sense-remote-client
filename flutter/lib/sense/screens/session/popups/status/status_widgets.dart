@@ -6,6 +6,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/widgets.dart';
 
 import '../../../../sense.dart';
@@ -92,12 +93,37 @@ class SenseMeterRowView extends StatelessWidget {
           const SizedBox(width: _kMeterGap),
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: _kMeterValue),
-            child: Text(row.text ?? SenseStatusStrings.unreadable,
-                textAlign: TextAlign.right, style: _valueStyle(row.text, row.valueLevel)),
+            child: row.traffic != null && row.text != null
+                ? _TrafficValue(traffic: row.traffic!, style: _valueStyle(row.text, row.valueLevel))
+                : Text(row.text ?? SenseStatusStrings.unreadable,
+                    textAlign: TextAlign.right, style: _valueStyle(row.text, row.valueLevel)),
           ),
         ]),
       ),
     );
+  }
+}
+
+/// "↓ 12 · ↑ 3 Mbit/s" with drawn arrows (Poppins has no ↓ ↑).
+class _TrafficValue extends StatelessWidget {
+  const _TrafficValue({required this.traffic, required this.style});
+  final SenseTraffic traffic;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = (style.fontSize ?? SenseFontSize.hintLarge) + 1;
+    Widget arrow(IconData d) => Padding(
+          padding: const EdgeInsets.only(right: 2),
+          child: Icon(d, key: ValueKey('sense-traffic-${d == Icons.arrow_downward ? 'down' : 'up'}'), size: size, color: style.color),
+        );
+    return Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.end, children: [
+      arrow(Icons.arrow_downward),
+      Text(traffic.down, style: style),
+      Text(' · ', style: style),
+      arrow(Icons.arrow_upward),
+      Text('${traffic.up} Mbit/s', style: style),
+    ]);
   }
 }
 
@@ -192,7 +218,7 @@ class SenseStatusTagView extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: _kTagPadH, vertical: _kTagPadV),
         decoration: BoxDecoration(
-          color: strong ? SenseColors.text : SenseColors.line,
+          color: strong ? SenseColors.textSecondary : SenseColors.line,
           borderRadius: BorderRadius.circular(_kTagRadius),
         ),
         child: Text(label, style: style(strong)),

@@ -602,6 +602,8 @@ class _SliderRowState extends State<_SliderRow> {
         child: Opacity(opacity: SenseUi.disabledOpacity, child: IgnorePointer(child: row)),
       );
     }
+    // Switched off by its parent option (Özel kalite kapalı): faded, like locked rows.
+    if (!enabled) return Opacity(opacity: SenseUi.disabledOpacity, child: row);
     return row;
   }
 }

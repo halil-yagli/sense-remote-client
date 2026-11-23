@@ -507,7 +507,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         min: SenseRd.trackpadMin.toDouble(),
         max: SenseRd.trackpadMax.toDouble(),
         value: b.trackpadSpeed.clamp(SenseRd.trackpadMin, SenseRd.trackpadMax).toDouble(),
-        format: (v) => '${v.round()}%',
+        format: (v) => '%${v.round()}',
         noRights: !control,
         onChanged: editable ? (v) => b.setTrackpadSpeed(v.round()) : null,
       ),
@@ -688,12 +688,6 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         tag: _S.technical,
         noRights: !terminal,
         onTap: b.openTunnel,
-      ),
-      SenseActionEntry(
-        id: 'actions.camera',
-        label: _S.camera,
-        rustdesk: 'View camera',
-        onTap: b.openCamera,
       ),
     ],
     SenseActionEntry(
