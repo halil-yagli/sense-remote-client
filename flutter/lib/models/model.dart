@@ -44,6 +44,7 @@ import '../common/widgets/dialog.dart';
 import 'input_model.dart';
 import 'platform_model.dart';
 import 'package:flutter_hbb/utils/scale.dart';
+import 'package:flutter_hbb/sense/screens/session/layers/data/session_hub.dart';
 
 import 'package:flutter_hbb/generated_bridge.dart'
     if (dart.library.html) 'package:flutter_hbb/web/bridge.dart';
@@ -892,6 +893,12 @@ class FfiModel with ChangeNotifier {
     final title = evt['title'];
     final text = evt['text'];
     final link = evt['link'];
+
+    // Sense Remote (O14): a session-ending message shows the Sense card instead.
+    if (SenseSessionHub.onMessage(
+        peerId, '${type ?? ''}', '${title ?? ''}', '${text ?? ''}')) {
+      return;
+    }
 
     // The peer-gone detector reconnects under `restarting-show` rather than an error title, so
     // it needs naming here too. By its own title, not the type: an explicitly restarted remote
@@ -3897,6 +3904,13 @@ class QualityMonitorData {
   String? targetBitrate;
   String? codecFormat;
   String? chroma;
+  // Sense Remote (O13, TK7): link values of D1 for the connection layer.
+  // `lastFrameMs` is the age of the last frame when [lastFrameAt] was received;
+  // `lossEst` is an estimate in percent; [probeAt] is when the last delay probe came.
+  int? lastFrameMs;
+  DateTime? lastFrameAt;
+  double? lossEst;
+  DateTime? probeAt;
 }
 
 class QualityMonitorModel with ChangeNotifier {
@@ -3959,7 +3973,17 @@ class QualityMonitorModel with ChangeNotifier {
       }
       if (evt.containsKey('delay') && (evt['delay'] as String).isNotEmpty) {
         _data.delay = evt['delay'];
+        // Sense Remote (O13): a delay value means a probe just arrived.
+        _data.probeAt = DateTime.now();
       }
+      // Sense Remote (O13, TK7): empty = not in this update.
+      final lastFrame = int.tryParse('${evt['last_frame_ms'] ?? ''}');
+      if (lastFrame != null) {
+        _data.lastFrameMs = lastFrame;
+        _data.lastFrameAt = DateTime.now();
+      }
+      final loss = double.tryParse('${evt['loss_est'] ?? ''}');
+      if (loss != null) _data.lossEst = loss;
       if (evt.containsKey('target_bitrate') &&
           (evt['target_bitrate'] as String).isNotEmpty) {
         _data.targetBitrate = evt['target_bitrate'];
