@@ -61,8 +61,8 @@ class SenseSessionBar extends StatefulWidget {
   final SenseBarController menus;
   final SenseBarPopups popups;
 
-  /// Anchor of each list under its button (the frame hangs the list there).
-  final Map<SenseBarMenu, LayerLink> links;
+  /// Key of each list button (the frame hangs the list under it).
+  final Map<SenseBarMenu, GlobalKey> links;
 
   /// Window move / maximise from the empty bar (the remote window has no title bar).
   final VoidCallback? onDragStart;
@@ -152,8 +152,8 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
                   }
                 : null,
           );
-          final link = widget.links[m];
-          return link == null ? button : CompositedTransformTarget(link: link, child: button);
+          final key = widget.links[m];
+          return key == null ? button : KeyedSubtree(key: key, child: button);
         }
 
         Widget popup(SenseBarPopup p, String label) => _PopupButton(

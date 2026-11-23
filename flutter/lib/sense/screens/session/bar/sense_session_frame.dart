@@ -47,7 +47,17 @@ class SenseSessionFrame extends StatefulWidget {
 class _SenseSessionFrameState extends State<SenseSessionFrame> {
   SenseBarController? _own;
   SenseBarController get _menus => widget.menus ?? (_own ??= SenseBarController());
-  final Map<SenseBarMenu, LayerLink> _links = {for (final m in SenseBarMenu.values) m: LayerLink()};
+  final Map<SenseBarMenu, GlobalKey> _links = {for (final m in SenseBarMenu.values) m: GlobalKey()};
+  final GlobalKey _area = GlobalKey();
+
+  /// Left edge of [m]'s button in the frame, kept so the list stays on screen.
+  double _anchorX(SenseBarMenu m, double width) {
+    final button = _links[m]?.currentContext?.findRenderObject();
+    final area = _area.currentContext?.findRenderObject();
+    if (button is! RenderBox || area is! RenderBox || !button.attached || !area.attached) return 0;
+    final x = button.localToGlobal(Offset.zero, ancestor: area).dx;
+    return x.clamp(0.0, (width - kSenseListWidth).clamp(0.0, width)).toDouble();
+  }
   SenseBarMenu? _lastOpen;
 
   @override
@@ -105,7 +115,7 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
               onDragStart: widget.onDragStart,
               onDoubleTap: widget.onDoubleTap,
             );
-            return Stack(children: [
+            return Stack(key: _area, children: [
               Column(children: [
                 AnimatedContainer(
                   key: const ValueKey('sense-bar-slot'),
@@ -145,21 +155,14 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
                           ),
                         ),
                         Positioned(
-                          left: 0,
+                          left: _anchorX(open, c.maxWidth),
                           top: 0,
-                          child: CompositedTransformFollower(
-                            link: _links[open]!,
-                            showWhenUnlinked: false,
-                            targetAnchor: Alignment.bottomLeft,
-                            followerAnchor: Alignment.topLeft,
-                            offset: const Offset(0, -1),
-                            child: SenseSessionList(
+                          child: SenseSessionList(
                               key: ValueKey('sense-list-${open.name}'),
                               spec: senseBuildList(open, b),
                               maxHeight: (c.maxHeight - kSenseListBottomGap).clamp(120.0, double.infinity),
                               onNotify: (m) => SenseToast.show(context, m),
                             ),
-                          ),
                         ),
                       ],
                     ]);

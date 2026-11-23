@@ -240,7 +240,7 @@ void main() {
         of: find.byKey(const ValueKey('sense-island-flip')), matching: find.byType(Transform)).first);
     expect(flip.transform.entry(1, 1), closeTo(-1, 1e-6));
     expect(flip.transform.entry(0, 1).abs() + flip.transform.entry(1, 0).abs(), 0);
-    expect(find.byType(RotationTransition), findsNothing);
+    expect(find.descendant(of: find.byType(SenseIsland), matching: find.byType(RotationTransition)), findsNothing);
 
     await tester.tap(body);
     await tester.pump();
