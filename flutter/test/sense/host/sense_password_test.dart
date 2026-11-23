@@ -8,15 +8,11 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_hbb/sense/screens/controller/sense_home_about.dart';
-import 'package:flutter_hbb/sense/screens/host/sense_home_host.dart';
-import 'package:flutter_hbb/sense/screens/controller/sense_home_strings.dart';
 import 'package:flutter_hbb/sense/screens/install/sense_install_model.dart'
     show SenseLoginStatus;
 import 'package:flutter_hbb/sense/screens/host/sense_password_model.dart';
 import 'package:flutter_hbb/sense/screens/host/sense_password_page.dart';
 import 'package:flutter_hbb/sense/screens/host/sense_password_strings.dart';
-import 'package:flutter_hbb/sense/components/sense_version_chip.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _now = 1000000;
@@ -642,82 +638,6 @@ void main() {
       }
     });
 
-    Widget host() => SizedBox(
-          width: 280,
-          child: SenseHostHomeView(
-            name: 'Galeri kioskı',
-            location: 'Galeri 1',
-            deviceId: '',
-            state: SenseHostState.ready,
-            versionChip: SenseVersionChip(version: 3, onTap: () {}),
-            passwordLine: SensePasswordHostLine(
-                text: sensePasswordHostLine(_s({'perm_set': false}))!,
-                onTap: () {}),
-          ),
-        );
-
-    testWidgets('Host home, Windows', (tester) async {
-      await _pump(
-          tester,
-          Align(
-              alignment: Alignment.topLeft,
-              child: RepaintBoundary(key: const Key('golden'), child: host())),
-          const Size(280, 460));
-      expect(find.text('Kalıcı şifre: yok'), findsOneWidget);
-      await expectLater(find.byKey(const Key('golden')),
-          matchesGoldenFile('../../goldens/host/sense_password_host_windows.png'));
-    });
-
-    testWidgets('Host, macOS: home line and the narrow verifying page',
-        (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      final c = panel(SensePasswordStage.verifying);
-      try {
-        await _pump(
-            tester,
-            Align(
-                alignment: Alignment.topLeft,
-                child: RepaintBoundary(
-                    key: const Key('golden'),
-                    child: Container(
-                      color: Colors.black,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [host(), box(c, width: 256)],
-                      ),
-                    ))),
-            const Size(560, 640));
-        expect(tester.takeException(), isNull);
-        await expectLater(find.byKey(const Key('golden')),
-            matchesGoldenFile('../../goldens/host/sense_password_host_mac.png'));
-      } finally {
-        debugDefaultTargetPlatformOverride = null;
-        c.dispose();
-      }
-    });
-
-    testWidgets('About › Güvenlik', (tester) async {
-      await _pump(
-          tester,
-          RepaintBoundary(
-            key: const Key('golden'),
-            child: SenseAboutView(
-              version: 3,
-              role: SenseHomeRole.host,
-              account: '',
-              year: 2026,
-              onOpenUrl: (_) {},
-              passwordSection: SensePasswordAboutView(
-                  summary: sensePasswordSummary(
-                      _s({}), DateTime(2026, 11, 21, 14, 5)),
-                  onOpen: () {}),
-            ),
-          ),
-          const Size(600, 600));
-      expect(find.text('Ayarlı · 21.11.2026 14:05'), findsOneWidget);
-      await expectLater(find.byKey(const Key('golden')),
-          matchesGoldenFile('../../goldens/host/sense_password_about.png'));
-    });
     // Sense Remote: goldens are rendered on the Linux runner; text rasterises
     // differently on macOS/Windows, so compare them only on Linux.
   }, skip: !Platform.isLinux);

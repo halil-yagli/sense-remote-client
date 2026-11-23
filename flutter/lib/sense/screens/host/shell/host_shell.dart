@@ -10,6 +10,7 @@ import '../../../strings/host.dart';
 import '../../controller/sense_update_view.dart' show SenseUpdateWatch;
 import '../../controller/sense_home_strings.dart' show SenseHomeRole;
 import '../this_computer/this_computer_page.dart';
+import '../../../../desktop/pages/desktop_tab_page.dart' show DesktopTabPage;
 import 'host_about.dart';
 
 enum SenseHostNav { thisComputer, about }
@@ -233,3 +234,9 @@ class _NavItem extends StatelessWidget {
         ),
       );
 }
+
+/// Router entry (A2c `SenseEntry.hostHome`, H1). The Host window lives in the
+/// stock window frame (title bar, window buttons, remote-input block, service
+/// status) whose home tab shows [SenseHostShell]; returning the shell alone
+/// would drop the window buttons.
+Widget senseHostScreen() => const DesktopTabPage();

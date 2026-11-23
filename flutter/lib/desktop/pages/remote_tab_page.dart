@@ -24,6 +24,7 @@ import '../../common/widgets/dialog.dart';
 import '../../models/platform_model.dart';
 // Sense Remote: connection window in Sense colors.
 import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
+import '../../sense/screens/session/bar/sense_session_host.dart' show SenseSessionTabFrame;
 
 class _MenuTheme {
   static const Color blueColor = MyTheme.button;
@@ -147,7 +148,11 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
         ),
         // Sense Remote: white accent instead of RustDesk's blue (T3-7).
         selectedBorderColor: kSenseRemoteWindow ? Colors.white : MyTheme.accent,
-        pageViewBuilder: (pageView) => pageView,
+        // Sense Remote: the one session bar, Sense island and lists around the remote
+        // screen; the tab strip only with more than one session (TK9 decision 3).
+        pageViewBuilder: (pageView) => kSenseRemoteWindow
+            ? SenseSessionTabFrame(controller: tabController, child: pageView)
+            : pageView,
         labelGetter: DesktopTab.tablabelGetter,
         tabBuilder: (key, icon, label, themeConf) => Obx(() {
           final connectionType = ConnectionTypeState.find(key);

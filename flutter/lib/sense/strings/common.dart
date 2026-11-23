@@ -32,4 +32,8 @@ abstract final class SenseCommonStrings {
   /// After an update: "Sürüm N kuruluyor · Sense Remote yeniden açılıyor".
   static String splashUpdating(int version) =>
       'Sürüm $version kuruluyor · Sense Remote yeniden açılıyor';
+
+  /// After a role change (A2c, prototype `splash(...)`).
+  static const String splashRoleChange =
+      'Rol uygulanıyor · Sense Remote yeni rolle açılıyor';
 }
