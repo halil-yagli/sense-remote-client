@@ -576,6 +576,12 @@ impl<T: InvokeUiSession> Remote<T> {
                 }
             }
         }
+        // Sense Remote (O12): result of a chat file.
+        crate::sense::chat_file::on_status(
+            self.handler.lc.read().unwrap().session_id,
+            id,
+            err.as_deref(),
+        );
         if let Some(err) = err {
             self.handler.job_error(id, err, file_num);
         } else {
@@ -1414,6 +1420,12 @@ impl<T: InvokeUiSession> Remote<T> {
         let speed = (transferred - last_transferred) as f64 / (elapsed as f64 / 1000.);
         let file_num = job.file_num() - 1;
         handler.job_progress(job.id(), file_num, speed, job.finished_size() as f64);
+        // Sense Remote (O12): progress of a chat file.
+        crate::sense::chat_file::on_progress(
+            handler.lc.read().unwrap().session_id,
+            job.id(),
+            job.finished_size(),
+        );
     }
 
     fn update_jobs_status(&mut self) {
@@ -1462,6 +1474,21 @@ impl<T: InvokeUiSession> Remote<T> {
     }
 
     pub async fn sync_jobs_status_to_local(&mut self) -> bool {
+        // Sense Remote (O12, S12): chat files cut by the drop wait in memory and resume at the
+        // next login of this session; a remote session writes no transfer list to the peer's
+        // config.
+        if self.handler.is_default() {
+            let live: Vec<(i32, i32)> = self
+                .read_jobs
+                .iter()
+                .map(|j| (j.id(), j.file_num()))
+                .collect();
+            crate::sense::chat_file::on_link_lost(
+                self.handler.lc.read().unwrap().session_id,
+                &live,
+            );
+            return false;
+        }
         if !self.is_connected {
             return false;
         }
@@ -1777,6 +1804,14 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         self.handler.handle_peer_info(pi);
+                        // Sense Remote (O12): resume the chat files a dropped link cut, from
+                        // where they stopped (same session only).
+                        if self.handler.is_default() {
+                            let sid = self.handler.lc.read().unwrap().session_id;
+                            for d in crate::sense::chat_file::on_connected(sid) {
+                                self.sender.send(d).ok();
+                            }
+                        }
                         #[cfg(all(target_os = "windows", not(feature = "flutter")))]
                         self.check_clipboard_file_context();
                         if self.handler.is_default() {

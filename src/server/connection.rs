@@ -378,6 +378,8 @@ pub struct Connection {
     awaiting_2fa: bool,
     // Sense Remote (S7-b): when the Controller started recording this connection, if it is.
     sense_recording_since: Option<Instant>,
+    // Sense Remote (S12): chat messages and chat files of this connection, for the closing audit.
+    sense_chat: crate::sense::chat_file::ConnCounts,
     trusted_device: Option<crate::trusted_devices::host::Attempt>,
     keyboard: bool,
     clipboard: bool,
@@ -575,6 +577,7 @@ impl Connection {
             require_2fa: crate::auth_2fa::get_2fa(None),
             awaiting_2fa: false,
             sense_recording_since: None,
+            sense_chat: Default::default(),
             trusted_device: None,
             // Defer display enumeration until login succeeds. Monitor login replaces this
             // with the primary index returned with the refreshed display snapshot.
@@ -802,6 +805,7 @@ impl Connection {
                             msg_out.set_misc(misc);
                             conn.send(msg_out).await;
                             conn.chat_unanswered = false;
+                            conn.sense_chat.add_message(); // Sense Remote (S12)
                         }
                         ipc::Data::SwitchPermission{name, enabled} => {
                             log::info!("Change permission {} -> {}", name, enabled);
@@ -1247,8 +1251,10 @@ impl Connection {
 
         // Sense Remote (S7-b): a recording ends with its connection.
         conn.sense_set_recording(false);
+        // Sense Remote (S12): counts only, never the chat text or file names.
         conn.post_conn_audit(json!({
             "action": "close",
+            "sense": conn.sense_chat.audit(),
         }));
         if let Some(s) = conn.server.upgrade() {
             let mut s = s.write().unwrap();
@@ -2381,6 +2387,15 @@ impl Connection {
     #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
     fn file_transfer_enabled(&self) -> bool {
         self.file && self.enable_file_transfer
+    }
+
+    // Sense Remote (S5, O12): chat files need what clipboard files need: the Host's file
+    // permission and the Controller's file option. Builds without file copy / paste take none.
+    fn sense_chat_files_enabled(&self) -> bool {
+        #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
+        return self.file_transfer_enabled();
+        #[cfg(not(any(target_os = "windows", feature = "unix-file-copy-paste")))]
+        return false;
     }
 
     #[cfg(feature = "unix-file-copy-paste")]
@@ -3582,6 +3597,27 @@ impl Connection {
                             }
                         }
                     }
+                    // Sense Remote (S5, O12, S8): a chat file rides on this Remote connection, so no
+                    // second (file transfer) connection is opened. Only the upload into the incoming
+                    // folder and its confirm / cancel; browsing and reading the Host stay off. The
+                    // one-way rule below still applies.
+                    let mut sense_chat_file = false;
+                    if !handle_fa {
+                        match crate::sense::chat_file::host_file_action(
+                            self.sense_chat_files_enabled(),
+                            &fa,
+                        ) {
+                            crate::sense::chat_file::HostAction::Handle => {
+                                handle_fa = true;
+                                sense_chat_file = true;
+                            }
+                            crate::sense::chat_file::HostAction::Refuse(job_id) => {
+                                self.send(fs::new_error(job_id, "Permission denied", 0)).await;
+                                return true;
+                            }
+                            crate::sense::chat_file::HostAction::Ignore => {}
+                        }
+                    }
                     if handle_fa {
                         if self.delayed_read_dir.is_some() {
                             if let Some(file_action::Union::ReadDir(rd)) = fa.union {
@@ -3833,12 +3869,17 @@ impl Connection {
                                     total_size: r.total_size,
                                     conn_id: self.inner.id(),
                                 });
-                                self.post_file_audit(
-                                    FileAuditType::RemoteReceive,
-                                    &r.path,
-                                    Self::get_files_for_audit(fs::JobType::Generic, r.files),
-                                    json!({}),
-                                );
+                                // Sense Remote (S12): a chat file is counted, its name is not sent.
+                                if sense_chat_file {
+                                    self.sense_chat.add_file();
+                                } else {
+                                    self.post_file_audit(
+                                        FileAuditType::RemoteReceive,
+                                        &r.path,
+                                        Self::get_files_for_audit(fs::JobType::Generic, r.files),
+                                        json!({}),
+                                    );
+                                }
                                 self.file_transferred = true;
                             }
                             Some(file_action::Union::RemoveDir(d)) => {
@@ -3981,6 +4022,7 @@ impl Connection {
                     Some(misc::Union::ChatMessage(c)) => {
                         self.send_to_cm(ipc::Data::ChatMessage { text: c.text });
                         self.chat_unanswered = true;
+                        self.sense_chat.add_message(); // Sense Remote (S12)
                         self.update_auto_disconnect_timer();
                     }
                     Some(misc::Union::Option(o)) => {
