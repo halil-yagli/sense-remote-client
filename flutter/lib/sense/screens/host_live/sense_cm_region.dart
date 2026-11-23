@@ -18,6 +18,18 @@ const String _kRunnerClass = 'FLUTTER_RUNNER_WIN32_WINDOW';
 
 int _hwnd = 0;
 
+// CreateRoundRectRgn and SetWindowRgn are not in package:win32 5.10; looked up
+// on first use (Windows only).
+typedef _CreateRgnC = IntPtr Function(Int32, Int32, Int32, Int32, Int32, Int32);
+typedef _CreateRgnD = int Function(int, int, int, int, int, int);
+typedef _SetRgnC = Int32 Function(IntPtr, IntPtr, Int32);
+typedef _SetRgnD = int Function(int, int, int);
+
+final _createRoundRectRgn = DynamicLibrary.open('gdi32.dll')
+    .lookupFunction<_CreateRgnC, _CreateRgnD>('CreateRoundRectRgn');
+final _setWindowRgn = DynamicLibrary.open('user32.dll')
+    .lookupFunction<_SetRgnC, _SetRgnD>('SetWindowRgn');
+
 /// The runner window of this process (the CM process has only this one).
 int _ownWindow() {
   if (_hwnd != 0 && win32.IsWindow(_hwnd) != 0) return _hwnd;
@@ -50,13 +62,13 @@ void senseCmSetWindowRegion(
     final hwnd = _ownWindow();
     if (hwnd == 0) return;
     if (radius == null) {
-      win32.SetWindowRgn(hwnd, 0, win32.TRUE);
+      _setWindowRgn(hwnd, 0, 1);
       return;
     }
     final d = (radius * 2).round();
-    final rgn = win32.CreateRoundRectRgn(0, 0, width + 1, height + 1, d, d);
+    final rgn = _createRoundRectRgn(0, 0, width + 1, height + 1, d, d);
     // The system owns the region after SetWindowRgn; it is not deleted here.
-    win32.SetWindowRgn(hwnd, rgn, win32.TRUE);
+    _setWindowRgn(hwnd, rgn, 1);
   } catch (e) {
     debugPrint('Sense CM: window region failed: $e');
   }
