@@ -41,8 +41,8 @@ abstract final class SenseEndTiming {
 abstract final class SenseIdleTiming {
   static const Duration warnBefore = Duration(minutes: 1);
 
-  /// Used until the panel's "Hareketsiz bağlantıyı kes" value reaches the
-  /// Controller (YH O14 reason text "30 dk hareketsiz"); see data/idle_policy.dart.
+  /// Only the wording of the ended card when no limit is known; it never cuts
+  /// (the limit comes from the panel, see data/idle_policy.dart).
   static const Duration defaultLimit = Duration(minutes: 30);
 }
 
