@@ -48,7 +48,10 @@ Widget desk(List<Widget> children) => app(
       still: true,
     );
 
-Widget card(Client c, SenseChatController chat, {Duration? recording}) => Positioned(
+/// Stands in for the system file chooser, so the card shows its ataç (h02).
+Future<List<String>> _noFiles() async => const <String>[];
+
+Widget card(Client c, SenseChatController chat, {Duration? recording, bool attach = true}) => Positioned(
       right: kSenseCmMargin,
       bottom: kSenseCmMargin,
       width: kSenseCmPanelSize.width,
@@ -58,6 +61,7 @@ Widget card(Client c, SenseChatController chat, {Duration? recording}) => Positi
         chat: chat,
         whoLine: senseHostWhoLine(c, const Duration(minutes: 14)),
         recording: recording,
+        pickFiles: attach ? _noFiles : null,
         animateIn: false,
         actions: SenseHostCardActions(
           onMinimize: () {},

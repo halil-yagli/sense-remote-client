@@ -5,6 +5,7 @@ export 'tokens/theme.dart';
 export 'components/button.dart';
 export 'components/card.dart';
 export 'components/chip.dart';
+export 'components/glyph.dart';
 export 'components/header_row.dart';
 export 'components/inline_edit.dart';
 export 'components/led.dart';
