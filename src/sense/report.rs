@@ -121,6 +121,26 @@ pub struct SenseDisk {
     pub used_pct: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_gb: Option<f64>,
+    /// Sense Remote (Sürüm 4, session status popup #86): volume name ("Sistem"; Windows volume
+    /// label, macOS volume name). Only with the panel capability `disk_label`
+    /// (`report_sig::CAP_DISK_LABEL`): the panel's strict schema refuses unknown fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// Longest volume name sent (characters).
+const MAX_DISK_LABEL_CHARS: usize = 64;
+
+/// Sense Remote (Sürüm 4): the volume name as sent: trimmed, without control characters, at
+/// most `MAX_DISK_LABEL_CHARS`; `None` when empty or not asked for.
+fn disk_label(raw: &str, with_label: bool) -> Option<String> {
+    if !with_label {
+        return None;
+    }
+    let clean: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let label: String = clean.trim().chars().take(MAX_DISK_LABEL_CHARS).collect();
+    let label = label.trim_end().to_owned();
+    (!label.is_empty()).then_some(label)
 }
 
 /// `SenseHealth`. `gpu_pct` / `gpu_temp_c` are filled by the GPU task (I5).
@@ -214,7 +234,8 @@ pub struct HeartbeatBase {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maintenance_curtain: Option<bool>,
     /// Sense Remote (Mac M4): only macOS sends it; information only, NOT in the signed report
-    /// (`report_sig::SIGNED_FIELDS`), so no policy decision may rest on it.
+    /// v1 (`report_sig::SIGNED_FIELDS`), so no policy decision may rest on it. Report v2 (S4-4,
+    /// `report_sig::SIGNED_FIELDS_V2`) signs it together with `health`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_permissions: Option<MacPermissions>,
 }
@@ -555,6 +576,7 @@ fn cpu_pct(usage: f32) -> Option<f64> {
 }
 
 fn measure_disks() -> Vec<SenseDisk> {
+    let with_label = super::report_sig::panel_has(super::report_sig::CAP_DISK_LABEL);
     let disks = Disks::new_with_refreshed_list();
     let mut out: Vec<SenseDisk> = Vec::new();
     for disk in disks.list() {
@@ -567,7 +589,10 @@ fn measure_disks() -> Vec<SenseDisk> {
         if out.iter().any(|d| d.mount == mount) {
             continue;
         }
-        if let Some(entry) = disk_entry(mount, disk.total_space(), disk.available_space()) {
+        if let Some(mut entry) = disk_entry(mount, disk.total_space(), disk.available_space()) {
+            // Sense Remote (Sürüm 4): `Disk::name` is the volume label on Windows and the
+            // volume name on macOS.
+            entry.label = disk_label(&disk.name().to_string_lossy(), with_label);
             out.push(entry);
         }
         if out.len() >= MAX_DISKS {
@@ -605,6 +630,7 @@ fn disk_entry(mount: String, total: u64, available: u64) -> Option<SenseDisk> {
         mount,
         used_pct,
         total_gb: Some(total_gb),
+        label: None,
     })
 }
 
@@ -973,16 +999,47 @@ pub(super) fn canonical_json(value: &Value) -> String {
                 .collect();
             format!("{{{}}}", parts.join(","))
         }
-        Value::Number(n) => {
-            if n.is_f64() {
-                let f = n.as_f64().unwrap_or(0.0);
-                if f.fract() == 0.0 && f.abs() < 9.0e15 {
-                    return format!("{}", f as i64);
-                }
-            }
-            n.to_string()
-        }
+        Value::Number(n) => match n.as_f64() {
+            // Sense Remote (S4-4): every float as ECMAScript writes it (JCS §3.2.2.3), so signed
+            // health / inventory bytes match the panel also for e.g. 0.0000015 or 1e21.
+            Some(f) if n.is_f64() => js_number(f),
+            _ => n.to_string(),
+        },
         other => other.to_string(),
+    }
+}
+
+/// ECMAScript `Number::toString` of a finite double (JCS number serialization). The shortest
+/// round-trip digits come from Rust's `{:e}`; only their layout differs from JavaScript.
+fn js_number(f: f64) -> String {
+    if f == 0.0 || !f.is_finite() {
+        return "0".to_owned();
+    }
+    let sci = format!("{:e}", f.abs());
+    let (mantissa, exponent) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let k = digits.len() as i32;
+    // value = 0.digits × 10^n
+    let n = exponent.parse::<i32>().unwrap_or(0) + 1;
+    let body = if k <= n && n <= 21 {
+        format!("{digits}{}", "0".repeat((n - k) as usize))
+    } else if 0 < n && n <= 21 {
+        format!("{}.{}", &digits[..n as usize], &digits[n as usize..])
+    } else if -6 < n && n <= 0 {
+        format!("0.{}{digits}", "0".repeat((-n) as usize))
+    } else {
+        let e = n - 1;
+        let sign = if e < 0 { '-' } else { '+' };
+        if k == 1 {
+            format!("{digits}e{sign}{}", e.abs())
+        } else {
+            format!("{}.{}e{sign}{}", &digits[..1], &digits[1..], e.abs())
+        }
+    };
+    if f < 0.0 {
+        format!("-{body}")
+    } else {
+        body
     }
 }
 
@@ -990,6 +1047,54 @@ pub(super) fn canonical_json(value: &Value) -> String {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    /// Sense Remote (Sürüm 4): the volume name only when the panel takes it, cleaned.
+    #[test]
+    fn disk_label_only_when_asked_for() {
+        assert_eq!(disk_label("Sistem", false), None);
+        assert_eq!(disk_label("Sistem", true).as_deref(), Some("Sistem"));
+        assert_eq!(disk_label("  İçerik\u{0} ", true).as_deref(), Some("İçerik"));
+        assert_eq!(disk_label("   ", true), None);
+        assert_eq!(disk_label("", true), None);
+        let long = "Ş".repeat(100);
+        assert_eq!(disk_label(&long, true).unwrap().chars().count(), MAX_DISK_LABEL_CHARS);
+        // Without a label the disk serialises exactly as before (older panels).
+        let d = disk_entry("C:".into(), 1 << 30, 1 << 29).unwrap();
+        assert!(serde_json::to_value(&d).unwrap().get("label").is_none());
+        let d = SenseDisk { label: Some("Sistem".into()), ..d };
+        assert_eq!(serde_json::to_value(&d).unwrap()["label"], "Sistem");
+    }
+
+    /// Sense Remote (S4-4): floats are written as ECMAScript `JSON.stringify` writes them.
+    #[test]
+    fn canonical_numbers_match_ecmascript() {
+        for (value, js) in [
+            (0.0, "0"),
+            (-0.0, "0"),
+            (3.0, "3"),
+            (-3.0, "-3"),
+            (1.25, "1.25"),
+            (12.5, "12.5"),
+            (0.1, "0.1"),
+            (476.9, "476.9"),
+            (0.0000015, "0.0000015"),
+            (0.000001, "0.000001"),
+            (1e-7, "1e-7"),
+            (1.5e-7, "1.5e-7"),
+            (1e16, "10000000000000000"),
+            (123456789012345680000.0, "123456789012345680000"),
+            (1e21, "1e+21"),
+            (1.5e300, "1.5e+300"),
+            (3.700000047683716, "3.700000047683716"),
+            (-41.7, "-41.7"),
+        ] {
+            assert_eq!(canonical_json(&serde_json::json!(value)), js, "{value:e}");
+        }
+        // Integers stay integers.
+        assert_eq!(canonical_json(&serde_json::json!(42)), "42");
+        assert_eq!(canonical_json(&serde_json::json!(-600)), "-600");
+        assert_eq!(canonical_json(&serde_json::json!(100_000_000_000u64)), "100000000000");
+    }
 
     // Field names and enum values of the Zod contract
     // (sense-remote-panel packages/shared/src/client-api/sense-ext.ts + common.ts, main 6ef012c).
@@ -1081,6 +1186,7 @@ mod tests {
                 mount: "C:".into(),
                 used_pct: 41.2,
                 total_gb: Some(953.8),
+                label: None,
             }]),
             uptime_s: Some(3600),
             ..Default::default()

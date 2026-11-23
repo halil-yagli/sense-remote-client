@@ -25,6 +25,11 @@
 //!   own, so one odd adapter never makes the panel drop the whole `sense` extension.
 //! - G2-12: IPv6 addresses that carry the MAC (EUI-64, `..ff:fe..`) or an embedded IPv4
 //!   (`::ffff:a.b.c.d`) are not sent.
+//!
+//! Sense Remote (Sürüm 4, session status popup #86): with the panel capability `ip_prefix`
+//! (`report_sig::CAP_IP_PREFIX`) each IPv4 address carries its prefix length, `"192.168.1.20/24"`.
+//! Without it the plain address as before: the panel's schema (`z.ipv4()`) would refuse the
+//! prefixed form and drop the whole extension.
 
 // Sense Remote: some helpers are only reached on Windows / in tests.
 #![allow(dead_code)]
@@ -80,6 +85,8 @@ pub(super) struct RawAdapter {
     pub up: bool,
     pub ipv4: Vec<Ipv4Addr>,
     pub ipv6: Vec<Ipv6Addr>,
+    /// Sense Remote (Sürüm 4): prefix length per IPv4 address, as the OS reports it.
+    pub ipv4_prefix: Vec<(Ipv4Addr, u8)>,
     /// Sense Remote (Mac M4): BSD name on macOS (`en0`, `utun3`), where `name` is the name
     /// shown in the system's network settings; `None` elsewhere. Only used to recognise helper
     /// interfaces; never sent.
@@ -130,11 +137,11 @@ fn apply_mac_service(adapter: &mut RawAdapter, bsd_name: &str, service: Option<&
 /// no adapter at all (read failed or unsupported platform; Windows always has a loopback), so the
 /// caller leaves `network` out; `Some(vec![])` when adapters exist but none is worth sending.
 pub fn collect() -> Option<Vec<SenseNetwork>> {
-    from_raw(read_adapters())
+    from_raw(read_adapters(), super::report_sig::panel_has(super::report_sig::CAP_IP_PREFIX))
 }
 
-fn from_raw(adapters: Vec<RawAdapter>) -> Option<Vec<SenseNetwork>> {
-    (!adapters.is_empty()).then(|| build(adapters))
+fn from_raw(adapters: Vec<RawAdapter>, with_prefix: bool) -> Option<Vec<SenseNetwork>> {
+    (!adapters.is_empty()).then(|| build_with(adapters, with_prefix))
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -167,6 +174,7 @@ fn read_adapters() -> Vec<RawAdapter> {
                 kind,
                 ipv4: i.ipv4.iter().map(|n| n.addr).collect(),
                 ipv6: i.ipv6.iter().map(|n| n.addr).collect(),
+                ipv4_prefix: i.ipv4.iter().map(|n| (n.addr, n.prefix_len)).collect(),
                 bsd_name: None,
             };
             #[cfg(target_os = "macos")]
@@ -309,14 +317,38 @@ fn fits_contract(n: &SenseNetwork) -> bool {
         && n.name.encode_utf16().count() <= 128
         && !n.name.chars().any(char::is_control);
     let kind_ok = ["ethernet", "wifi", "other"].contains(&n.kind.as_str());
-    let ipv4_ok =
-        n.ipv4.len() <= MAX_ADDRESSES && n.ipv4.iter().all(|ip| ip.parse::<Ipv4Addr>().is_ok());
+    let ipv4_ok = n.ipv4.len() <= MAX_ADDRESSES && n.ipv4.iter().all(|ip| ipv4_text_ok(ip));
     let ipv6 = n.ipv6.as_deref().unwrap_or_default();
     let ipv6_ok = ipv6.len() <= MAX_ADDRESSES && ipv6.iter().all(|ip| ip.parse::<Ipv6Addr>().is_ok());
     name_ok && kind_ok && ipv4_ok && ipv6_ok && (!n.ipv4.is_empty() || !ipv6.is_empty())
 }
 
+/// `"a.b.c.d"` or, with the prefix, `"a.b.c.d/n"` (n = 0..=32, no leading zero).
+fn ipv4_text_ok(text: &str) -> bool {
+    let (ip, prefix) = match text.split_once('/') {
+        Some((ip, prefix)) => (ip, Some(prefix)),
+        None => (text, None),
+    };
+    ip.parse::<Ipv4Addr>().is_ok()
+        && prefix.map_or(true, |p| {
+            p.parse::<u8>().is_ok_and(|n| n <= 32 && n.to_string() == p)
+        })
+}
+
+/// Sense Remote (Sürüm 4): the IPv4 text sent; the prefix only when asked for and known.
+fn ipv4_text(ip: &Ipv4Addr, prefixes: &[(Ipv4Addr, u8)], with_prefix: bool) -> String {
+    match prefixes.iter().find(|(addr, _)| addr == ip) {
+        Some((_, len)) if with_prefix && *len <= 32 => format!("{ip}/{len}"),
+        _ => ip.to_string(),
+    }
+}
+
+/// The list without prefixes (tests of the filters and the order).
 fn build(adapters: Vec<RawAdapter>) -> Vec<SenseNetwork> {
+    build_with(adapters, false)
+}
+
+fn build_with(adapters: Vec<RawAdapter>, with_prefix: bool) -> Vec<SenseNetwork> {
     let mut kept: Vec<RawAdapter> = adapters
         .into_iter()
         .filter(|a| !a.loopback && !a.tunnel && !is_virtual(a))
@@ -347,7 +379,7 @@ fn build(adapters: Vec<RawAdapter>) -> Vec<SenseNetwork> {
                 .ipv4
                 .iter()
                 .take(MAX_ADDRESSES)
-                .map(|ip| ip.to_string())
+                .map(|ip| ipv4_text(ip, &a.ipv4_prefix, with_prefix))
                 .collect();
             let ipv6: Vec<String> = a
                 .ipv6
@@ -388,6 +420,7 @@ mod tests {
             up: true,
             ipv4: ipv4.iter().map(|s| s.parse().unwrap()).collect(),
             ipv6: Vec::new(),
+            ipv4_prefix: Vec::new(),
             bsd_name: None,
         }
     }
@@ -540,9 +573,9 @@ mod tests {
         let mut loopback = adapter(1, "Loopback Pseudo-Interface 1", Kind::Other, &["127.0.0.1"]);
         loopback.loopback = true;
         let unplugged = adapter(2, "Ethernet", Kind::Ethernet, &[]);
-        assert_eq!(from_raw(vec![loopback, unplugged]), Some(vec![]));
+        assert_eq!(from_raw(vec![loopback, unplugged], false), Some(vec![]));
         // Nothing reported at all: unknown, the field is left out.
-        assert_eq!(from_raw(vec![]), None);
+        assert_eq!(from_raw(vec![], true), None);
     }
 
     #[test]
@@ -601,6 +634,27 @@ mod tests {
         assert_eq!(out[0].name, "wifi");
     }
 
+    /// Sense Remote (Sürüm 4): `"192.168.1.20/24"` only when the panel takes it; an address
+    /// whose prefix is unknown stays plain.
+    #[test]
+    fn ipv4_prefix_only_when_asked_for() {
+        let mut eth = adapter(1, "Ethernet", Kind::Ethernet, &["192.168.1.20", "10.0.0.5"]);
+        eth.ipv4_prefix = vec![("192.168.1.20".parse().unwrap(), 24)];
+        assert_eq!(build_with(vec![eth.clone()], false)[0].ipv4, ["192.168.1.20", "10.0.0.5"]);
+        let out = build_with(vec![eth.clone()], true);
+        assert_eq!(out[0].ipv4, ["192.168.1.20/24", "10.0.0.5"]);
+        assert!(fits_contract(&out[0]));
+        // A prefix the OS could not have meant is not sent.
+        eth.ipv4_prefix = vec![("192.168.1.20".parse().unwrap(), 40)];
+        assert_eq!(build_with(vec![eth], true)[0].ipv4[0], "192.168.1.20");
+        for good in ["10.0.0.1", "10.0.0.1/0", "10.0.0.1/8", "10.0.0.1/32"] {
+            assert!(ipv4_text_ok(good), "{good}");
+        }
+        for bad in ["10.0.0.1/33", "10.0.0.1/", "10.0.0.1/024", "10.0.0.1/x", "10.0.0/24", "/24"] {
+            assert!(!ipv4_text_ok(bad), "{bad}");
+        }
+    }
+
     /// Real adapters on the CI machine: whatever is found fits the contract.
     #[test]
     fn live_values_fit_contract() {
@@ -610,7 +664,7 @@ mod tests {
             assert!(!n.name.is_empty() && n.name.chars().count() <= MAX_NAME_CHARS);
             assert!(n.ipv4.len() <= MAX_ADDRESSES);
             for ip in &n.ipv4 {
-                let ip: Ipv4Addr = ip.parse().unwrap();
+                let ip: Ipv4Addr = ip.split('/').next().unwrap().parse().unwrap();
                 assert!(keep_ipv4(&ip));
             }
             assert!(!n.ipv4.is_empty() || n.ipv6.is_some());

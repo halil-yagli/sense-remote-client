@@ -1,0 +1,1344 @@
+{
+  "v": 1,
+  "description": "Sense Remote imzali alim (S4-4) ortak test vektoru: panel packages/shared device-report.ts ile uretildi. Heartbeat rapor v2: hb_v2_prefix || JCS({id, uuid, ts, applied_seq} + hb_v2_signed_fields icinden sense'te olanlar + conn_count (govdedeki conns sayisi, yoksa 0)); report = {v:2, ts, sig}. Sysinfo: sysinfo_prefix || JCS({id, uuid, ts, sense: report haric butun ek}); report = {ts, sig}. signed_text yalniz imzasi gecerli vakalarda: istemci bayt bayt ayni metni uretmeli. Gizli anahtar yok.",
+  "hb_v2_prefix": "sense-remote/hb-report/v2\n",
+  "hb_v2_signed_fields": [
+    "applied_seq",
+    "envelope_error",
+    "clock_skew_s",
+    "caps",
+    "maintenance_curtain",
+    "health",
+    "mac_permissions"
+  ],
+  "sysinfo_prefix": "sense-remote/sysinfo/v1\n",
+  "future_skew_s": 300,
+  "heartbeat_cases": [
+    {
+      "name": "hb_v2_ok_full",
+      "description": "v2: saglik (kesirli sayilar, Turkce/kacisli metin), 2 baglanti, signed_ingest caps",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 2,
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 4,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "gpu_pct": 0.0000015,
+            "cpu_temp_c": 41.7,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384,
+            "disks": [
+              {
+                "mount": "C:",
+                "used_pct": 63.25,
+                "total_gb": 476.9
+              }
+            ],
+            "uptime_s": 86400,
+            "cpu_mhz": 3600,
+            "top_processes": [
+              {
+                "name": "Görüntüleyici \"Ç\" \\ ş",
+                "cpu_pct": 3.700000047683716
+              }
+            ],
+            "net_io": [
+              {
+                "name": "Ethernet 2",
+                "rx_bps": 100000000000,
+                "tx_bps": 0
+              }
+            ]
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": [
+            "role_all",
+            "curtain",
+            "apply",
+            "update",
+            "password",
+            "signed_ingest"
+          ],
+          "maintenance_curtain": false,
+          "update": {
+            "state": "idle",
+            "at": 1799999970
+          },
+          "loc_rev": 3,
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "DjgTDS98iPEjfS2KwAXVCCFSCkiXuk40zcO2Hd3NvQBHQN0rcPCCtQY_vtUk2Z2QrAeGiOfqCoxh2luqpb_IAg"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "ok",
+      "signed_text": "sense-remote/hb-report/v2\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\",\"apply\",\"update\",\"password\",\"signed_ingest\"],\"clock_skew_s\":-420,\"conn_count\":2,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"health\":{\"at\":1799999970,\"cpu_mhz\":3600,\"cpu_pct\":12.5,\"cpu_temp_c\":41.7,\"disks\":[{\"mount\":\"C:\",\"total_gb\":476.9,\"used_pct\":63.25}],\"gpu_pct\":0.0000015,\"mem_total_mb\":16384,\"mem_used_mb\":4096,\"net_io\":[{\"name\":\"Ethernet 2\",\"rx_bps\":100000000000,\"tx_bps\":0}],\"top_processes\":[{\"cpu_pct\":3.700000047683716,\"name\":\"Görüntüleyici \\\"Ç\\\" \\\\ ş\"}],\"uptime_s\":86400},\"id\":\"123456789\",\"maintenance_curtain\":false,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "hb_v2_ok_mac",
+      "description": "v2: mac_permissions imzali, baglanti yok (conn_count 0)",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 0,
+        "sense": {
+          "v": 1,
+          "role": "controller",
+          "app_version": 4,
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 1
+          },
+          "applied_seq": 0,
+          "caps": [
+            "role_all",
+            "apply",
+            "signed_ingest"
+          ],
+          "mac_permissions": {
+            "screen_recording": true,
+            "accessibility": false,
+            "input_monitoring": true
+          },
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "jkiQUZUEcs4nF4UQlcoytRqm2zv4eil73qn5lxEXP8RkHKoF_ouEu0ptqkw2xsdIl3XKqgjI1_Dkvh-K73x8Dw"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": null,
+      "now_s": 1800000000,
+      "result": "ok",
+      "signed_text": "sense-remote/hb-report/v2\n{\"applied_seq\":0,\"caps\":[\"role_all\",\"apply\",\"signed_ingest\"],\"conn_count\":0,\"health\":{\"at\":1799999970,\"cpu_pct\":1},\"id\":\"123456789\",\"mac_permissions\":{\"accessibility\":false,\"input_monitoring\":true,\"screen_recording\":true},\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "hb_v2_bad_conn_count",
+      "description": "2 baglantiyla imzalandi, govdede 1 baglanti",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 1,
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 4,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "gpu_pct": 0.0000015,
+            "cpu_temp_c": 41.7,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384,
+            "disks": [
+              {
+                "mount": "C:",
+                "used_pct": 63.25,
+                "total_gb": 476.9
+              }
+            ],
+            "uptime_s": 86400,
+            "cpu_mhz": 3600,
+            "top_processes": [
+              {
+                "name": "Görüntüleyici \"Ç\" \\ ş",
+                "cpu_pct": 3.700000047683716
+              }
+            ],
+            "net_io": [
+              {
+                "name": "Ethernet 2",
+                "rx_bps": 100000000000,
+                "tx_bps": 0
+              }
+            ]
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": [
+            "role_all",
+            "curtain",
+            "apply",
+            "update",
+            "password",
+            "signed_ingest"
+          ],
+          "maintenance_curtain": false,
+          "update": {
+            "state": "idle",
+            "at": 1799999970
+          },
+          "loc_rev": 3,
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "DjgTDS98iPEjfS2KwAXVCCFSCkiXuk40zcO2Hd3NvQBHQN0rcPCCtQY_vtUk2Z2QrAeGiOfqCoxh2luqpb_IAg"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "hb_v2_bad_health_changed",
+      "description": "Imzadan sonra health.cpu_pct degisti",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 2,
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 4,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 99,
+            "gpu_pct": 0.0000015,
+            "cpu_temp_c": 41.7,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384,
+            "disks": [
+              {
+                "mount": "C:",
+                "used_pct": 63.25,
+                "total_gb": 476.9
+              }
+            ],
+            "uptime_s": 86400,
+            "cpu_mhz": 3600,
+            "top_processes": [
+              {
+                "name": "Görüntüleyici \"Ç\" \\ ş",
+                "cpu_pct": 3.700000047683716
+              }
+            ],
+            "net_io": [
+              {
+                "name": "Ethernet 2",
+                "rx_bps": 100000000000,
+                "tx_bps": 0
+              }
+            ]
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": [
+            "role_all",
+            "curtain",
+            "apply",
+            "update",
+            "password",
+            "signed_ingest"
+          ],
+          "maintenance_curtain": false,
+          "update": {
+            "state": "idle",
+            "at": 1799999970
+          },
+          "loc_rev": 3,
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "DjgTDS98iPEjfS2KwAXVCCFSCkiXuk40zcO2Hd3NvQBHQN0rcPCCtQY_vtUk2Z2QrAeGiOfqCoxh2luqpb_IAg"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "hb_v2_bad_mac_permissions_changed",
+      "description": "Imzadan sonra mac_permissions degisti",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 0,
+        "sense": {
+          "v": 1,
+          "role": "controller",
+          "app_version": 4,
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 1
+          },
+          "applied_seq": 0,
+          "caps": [
+            "role_all",
+            "apply",
+            "signed_ingest"
+          ],
+          "mac_permissions": {
+            "screen_recording": true,
+            "accessibility": true,
+            "input_monitoring": true
+          },
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "jkiQUZUEcs4nF4UQlcoytRqm2zv4eil73qn5lxEXP8RkHKoF_ouEu0ptqkw2xsdIl3XKqgjI1_Dkvh-K73x8Dw"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": null,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "hb_v2_bad_v_removed",
+      "description": "v2 imzasi, report.v silindi (v1 oneki ile denetlenir)",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 2,
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 4,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "gpu_pct": 0.0000015,
+            "cpu_temp_c": 41.7,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384,
+            "disks": [
+              {
+                "mount": "C:",
+                "used_pct": 63.25,
+                "total_gb": 476.9
+              }
+            ],
+            "uptime_s": 86400,
+            "cpu_mhz": 3600,
+            "top_processes": [
+              {
+                "name": "Görüntüleyici \"Ç\" \\ ş",
+                "cpu_pct": 3.700000047683716
+              }
+            ],
+            "net_io": [
+              {
+                "name": "Ethernet 2",
+                "rx_bps": 100000000000,
+                "tx_bps": 0
+              }
+            ]
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": [
+            "role_all",
+            "curtain",
+            "apply",
+            "update",
+            "password",
+            "signed_ingest"
+          ],
+          "maintenance_curtain": false,
+          "update": {
+            "state": "idle",
+            "at": 1799999970
+          },
+          "loc_rev": 3,
+          "report": {
+            "ts": 1799999970,
+            "sig": "DjgTDS98iPEjfS2KwAXVCCFSCkiXuk40zcO2Hd3NvQBHQN0rcPCCtQY_vtUk2Z2QrAeGiOfqCoxh2luqpb_IAg"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "hb_v2_bad_sig_bit",
+      "description": "sig'in ilk baytinda bir bit degisti",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 2,
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 4,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "gpu_pct": 0.0000015,
+            "cpu_temp_c": 41.7,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384,
+            "disks": [
+              {
+                "mount": "C:",
+                "used_pct": 63.25,
+                "total_gb": 476.9
+              }
+            ],
+            "uptime_s": 86400,
+            "cpu_mhz": 3600,
+            "top_processes": [
+              {
+                "name": "Görüntüleyici \"Ç\" \\ ş",
+                "cpu_pct": 3.700000047683716
+              }
+            ],
+            "net_io": [
+              {
+                "name": "Ethernet 2",
+                "rx_bps": 100000000000,
+                "tx_bps": 0
+              }
+            ]
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": [
+            "role_all",
+            "curtain",
+            "apply",
+            "update",
+            "password",
+            "signed_ingest"
+          ],
+          "maintenance_curtain": false,
+          "update": {
+            "state": "idle",
+            "at": 1799999970
+          },
+          "loc_rev": 3,
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "DzgTDS98iPEjfS2KwAXVCCFSCkiXuk40zcO2Hd3NvQBHQN0rcPCCtQY_vtUk2Z2QrAeGiOfqCoxh2luqpb_IAg"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "hb_v2_bad_other_key",
+      "description": "Baska cihazin anahtariyla imzali",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 2,
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 4,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "gpu_pct": 0.0000015,
+            "cpu_temp_c": 41.7,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384,
+            "disks": [
+              {
+                "mount": "C:",
+                "used_pct": 63.25,
+                "total_gb": 476.9
+              }
+            ],
+            "uptime_s": 86400,
+            "cpu_mhz": 3600,
+            "top_processes": [
+              {
+                "name": "Görüntüleyici \"Ç\" \\ ş",
+                "cpu_pct": 3.700000047683716
+              }
+            ],
+            "net_io": [
+              {
+                "name": "Ethernet 2",
+                "rx_bps": 100000000000,
+                "tx_bps": 0
+              }
+            ]
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": [
+            "role_all",
+            "curtain",
+            "apply",
+            "update",
+            "password",
+            "signed_ingest"
+          ],
+          "maintenance_curtain": false,
+          "update": {
+            "state": "idle",
+            "at": 1799999970
+          },
+          "loc_rev": 3,
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "QIt66PJEUgSDN-cUl3PjkoD-8Uo-NGa_f66VRW3p0XxrfldcqCOfacYPmh87VXaSFGamxGYJ4IwCTDcHlc-7DA"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999910,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "hb_v2_replayed",
+      "description": "ts = last_report_ts",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 2,
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 4,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "gpu_pct": 0.0000015,
+            "cpu_temp_c": 41.7,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384,
+            "disks": [
+              {
+                "mount": "C:",
+                "used_pct": 63.25,
+                "total_gb": 476.9
+              }
+            ],
+            "uptime_s": 86400,
+            "cpu_mhz": 3600,
+            "top_processes": [
+              {
+                "name": "Görüntüleyici \"Ç\" \\ ş",
+                "cpu_pct": 3.700000047683716
+              }
+            ],
+            "net_io": [
+              {
+                "name": "Ethernet 2",
+                "rx_bps": 100000000000,
+                "tx_bps": 0
+              }
+            ]
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": [
+            "role_all",
+            "curtain",
+            "apply",
+            "update",
+            "password",
+            "signed_ingest"
+          ],
+          "maintenance_curtain": false,
+          "update": {
+            "state": "idle",
+            "at": 1799999970
+          },
+          "loc_rev": 3,
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "DjgTDS98iPEjfS2KwAXVCCFSCkiXuk40zcO2Hd3NvQBHQN0rcPCCtQY_vtUk2Z2QrAeGiOfqCoxh2luqpb_IAg"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999970,
+      "now_s": 1800000000,
+      "result": "replayed",
+      "signed_text": "sense-remote/hb-report/v2\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\",\"apply\",\"update\",\"password\",\"signed_ingest\"],\"clock_skew_s\":-420,\"conn_count\":2,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"health\":{\"at\":1799999970,\"cpu_mhz\":3600,\"cpu_pct\":12.5,\"cpu_temp_c\":41.7,\"disks\":[{\"mount\":\"C:\",\"total_gb\":476.9,\"used_pct\":63.25}],\"gpu_pct\":0.0000015,\"mem_total_mb\":16384,\"mem_used_mb\":4096,\"net_io\":[{\"name\":\"Ethernet 2\",\"rx_bps\":100000000000,\"tx_bps\":0}],\"top_processes\":[{\"cpu_pct\":3.700000047683716,\"name\":\"Görüntüleyici \\\"Ç\\\" \\\\ ş\"}],\"uptime_s\":86400},\"id\":\"123456789\",\"maintenance_curtain\":false,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "hb_v2_future",
+      "description": "ts > now_s + future_skew_s",
+      "heartbeat": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "conn_count": 2,
+        "sense": {
+          "v": 1,
+          "role": "host_controller",
+          "app_version": 4,
+          "displays_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "health": {
+            "at": 1799999970,
+            "cpu_pct": 12.5,
+            "gpu_pct": 0.0000015,
+            "cpu_temp_c": 41.7,
+            "mem_used_mb": 4096,
+            "mem_total_mb": 16384,
+            "disks": [
+              {
+                "mount": "C:",
+                "used_pct": 63.25,
+                "total_gb": 476.9
+              }
+            ],
+            "uptime_s": 86400,
+            "cpu_mhz": 3600,
+            "top_processes": [
+              {
+                "name": "Görüntüleyici \"Ç\" \\ ş",
+                "cpu_pct": 3.700000047683716
+              }
+            ],
+            "net_io": [
+              {
+                "name": "Ethernet 2",
+                "rx_bps": 100000000000,
+                "tx_bps": 0
+              }
+            ]
+          },
+          "applied_seq": 7,
+          "envelope_error": {
+            "seq": 8,
+            "k": "0123456789abcdef",
+            "reason": "not_allowed",
+            "at": 1799999965
+          },
+          "clock_skew_s": -420,
+          "caps": [
+            "role_all",
+            "curtain",
+            "apply",
+            "update",
+            "password",
+            "signed_ingest"
+          ],
+          "maintenance_curtain": false,
+          "update": {
+            "state": "idle",
+            "at": 1799999970
+          },
+          "loc_rev": 3,
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "DjgTDS98iPEjfS2KwAXVCCFSCkiXuk40zcO2Hd3NvQBHQN0rcPCCtQY_vtUk2Z2QrAeGiOfqCoxh2luqpb_IAg"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": null,
+      "now_s": 1799999669,
+      "result": "future",
+      "signed_text": "sense-remote/hb-report/v2\n{\"applied_seq\":7,\"caps\":[\"role_all\",\"curtain\",\"apply\",\"update\",\"password\",\"signed_ingest\"],\"clock_skew_s\":-420,\"conn_count\":2,\"envelope_error\":{\"at\":1799999965,\"k\":\"0123456789abcdef\",\"reason\":\"not_allowed\",\"seq\":8},\"health\":{\"at\":1799999970,\"cpu_mhz\":3600,\"cpu_pct\":12.5,\"cpu_temp_c\":41.7,\"disks\":[{\"mount\":\"C:\",\"total_gb\":476.9,\"used_pct\":63.25}],\"gpu_pct\":0.0000015,\"mem_total_mb\":16384,\"mem_used_mb\":4096,\"net_io\":[{\"name\":\"Ethernet 2\",\"rx_bps\":100000000000,\"tx_bps\":0}],\"top_processes\":[{\"cpu_pct\":3.700000047683716,\"name\":\"Görüntüleyici \\\"Ç\\\" \\\\ ş\"}],\"uptime_s\":86400},\"id\":\"123456789\",\"maintenance_curtain\":false,\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    }
+  ],
+  "sysinfo_cases": [
+    {
+      "name": "si_ok_full",
+      "description": "Ekranlar (kesirli olcek), ag, envanter (Turkce metin), bilinmeyen alan",
+      "sysinfo": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 4,
+          "platform": "windows-x64",
+          "displays": [
+            {
+              "index": 0,
+              "name": "DELL U2723QE",
+              "x": 0,
+              "y": 0,
+              "width": 3840,
+              "height": 2160,
+              "scale": 1.5,
+              "primary": true,
+              "refresh_hz": 59.997,
+              "connection": "displayport"
+            },
+            {
+              "index": 1,
+              "x": 3840,
+              "y": -120,
+              "width": 1920,
+              "height": 1080,
+              "scale": 1,
+              "refresh_hz": 60
+            }
+          ],
+          "displays_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "network": [
+            {
+              "name": "Ethernet",
+              "kind": "ethernet",
+              "ipv4": [
+                "192.168.1.20"
+              ],
+              "up": true
+            }
+          ],
+          "inventory": {
+            "at": 1799999970,
+            "cpu": {
+              "model": "Intel(R) Core(TM) i7",
+              "cores": 8,
+              "threads": 16,
+              "base_mhz": 2900
+            },
+            "gpus": [
+              {
+                "name": "Ekran Kartı Ğ",
+                "integrated": false,
+                "vram_mb": 8192
+              }
+            ],
+            "physical_disks": [
+              {
+                "id": "0",
+                "model": "Samsung SSD",
+                "bus": "nvme",
+                "media": "ssd",
+                "size_gb": 476.9,
+                "life_left_pct": 97.5
+              }
+            ],
+            "serial": "ABC-123",
+            "os": {
+              "name": "Windows 11 Pro",
+              "version": "24H2",
+              "hostname": "GALERI-1",
+              "timezone": "Türkiye"
+            }
+          },
+          "future_field": {
+            "nested": [
+              1,
+              2.5,
+              "x"
+            ]
+          },
+          "report": {
+            "ts": 1799999970,
+            "sig": "rC9k6WZBxD5CrcLhjkALInl-ShGheoXpeHW4DL_j7affa6HG70jFTfoQrsE-AfWnX5v6XC0kRSHZ3wyteDPjCw"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": null,
+      "now_s": 1800000000,
+      "result": "ok",
+      "signed_text": "sense-remote/sysinfo/v1\n{\"id\":\"123456789\",\"sense\":{\"app_version\":4,\"displays\":[{\"connection\":\"displayport\",\"height\":2160,\"index\":0,\"name\":\"DELL U2723QE\",\"primary\":true,\"refresh_hz\":59.997,\"scale\":1.5,\"width\":3840,\"x\":0,\"y\":0},{\"height\":1080,\"index\":1,\"refresh_hz\":60,\"scale\":1,\"width\":1920,\"x\":3840,\"y\":-120}],\"displays_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"future_field\":{\"nested\":[1,2.5,\"x\"]},\"inventory\":{\"at\":1799999970,\"cpu\":{\"base_mhz\":2900,\"cores\":8,\"model\":\"Intel(R) Core(TM) i7\",\"threads\":16},\"gpus\":[{\"integrated\":false,\"name\":\"Ekran Kartı Ğ\",\"vram_mb\":8192}],\"os\":{\"hostname\":\"GALERI-1\",\"name\":\"Windows 11 Pro\",\"timezone\":\"Türkiye\",\"version\":\"24H2\"},\"physical_disks\":[{\"bus\":\"nvme\",\"id\":\"0\",\"life_left_pct\":97.5,\"media\":\"ssd\",\"model\":\"Samsung SSD\",\"size_gb\":476.9}],\"serial\":\"ABC-123\"},\"network\":[{\"ipv4\":[\"192.168.1.20\"],\"kind\":\"ethernet\",\"name\":\"Ethernet\",\"up\":true}],\"platform\":\"windows-x64\",\"role\":\"host\",\"v\":1},\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "si_ok_minimal",
+      "description": "Envantersiz, bilinmeyen alansiz",
+      "sysinfo": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 4,
+          "platform": "windows-x64",
+          "displays": [
+            {
+              "index": 0,
+              "name": "DELL U2723QE",
+              "x": 0,
+              "y": 0,
+              "width": 3840,
+              "height": 2160,
+              "scale": 1.5,
+              "primary": true,
+              "refresh_hz": 59.997,
+              "connection": "displayport"
+            },
+            {
+              "index": 1,
+              "x": 3840,
+              "y": -120,
+              "width": 1920,
+              "height": 1080,
+              "scale": 1,
+              "refresh_hz": 60
+            }
+          ],
+          "displays_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "network": [
+            {
+              "name": "Ethernet",
+              "kind": "ethernet",
+              "ipv4": [
+                "192.168.1.20"
+              ],
+              "up": true
+            }
+          ],
+          "report": {
+            "ts": 1799999970,
+            "sig": "_mqctooWopWhToHB9bJJUnnDXuokuXCJSKwtxzPmdDM01h4fOTkaIzoAIid4klB8lOqE7tymYqHbIapetpeNBA"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999969,
+      "now_s": 1800000000,
+      "result": "ok",
+      "signed_text": "sense-remote/sysinfo/v1\n{\"id\":\"123456789\",\"sense\":{\"app_version\":4,\"displays\":[{\"connection\":\"displayport\",\"height\":2160,\"index\":0,\"name\":\"DELL U2723QE\",\"primary\":true,\"refresh_hz\":59.997,\"scale\":1.5,\"width\":3840,\"x\":0,\"y\":0},{\"height\":1080,\"index\":1,\"refresh_hz\":60,\"scale\":1,\"width\":1920,\"x\":3840,\"y\":-120}],\"displays_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"network\":[{\"ipv4\":[\"192.168.1.20\"],\"kind\":\"ethernet\",\"name\":\"Ethernet\",\"up\":true}],\"platform\":\"windows-x64\",\"role\":\"host\",\"v\":1},\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "si_bad_network_changed",
+      "description": "Imzadan sonra ipv4 degisti",
+      "sysinfo": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 4,
+          "platform": "windows-x64",
+          "displays": [
+            {
+              "index": 0,
+              "name": "DELL U2723QE",
+              "x": 0,
+              "y": 0,
+              "width": 3840,
+              "height": 2160,
+              "scale": 1.5,
+              "primary": true,
+              "refresh_hz": 59.997,
+              "connection": "displayport"
+            },
+            {
+              "index": 1,
+              "x": 3840,
+              "y": -120,
+              "width": 1920,
+              "height": 1080,
+              "scale": 1,
+              "refresh_hz": 60
+            }
+          ],
+          "displays_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "network": [
+            {
+              "name": "Ethernet",
+              "kind": "ethernet",
+              "ipv4": [
+                "10.0.0.9"
+              ],
+              "up": true
+            }
+          ],
+          "inventory": {
+            "at": 1799999970,
+            "cpu": {
+              "model": "Intel(R) Core(TM) i7",
+              "cores": 8,
+              "threads": 16,
+              "base_mhz": 2900
+            },
+            "gpus": [
+              {
+                "name": "Ekran Kartı Ğ",
+                "integrated": false,
+                "vram_mb": 8192
+              }
+            ],
+            "physical_disks": [
+              {
+                "id": "0",
+                "model": "Samsung SSD",
+                "bus": "nvme",
+                "media": "ssd",
+                "size_gb": 476.9,
+                "life_left_pct": 97.5
+              }
+            ],
+            "serial": "ABC-123",
+            "os": {
+              "name": "Windows 11 Pro",
+              "version": "24H2",
+              "hostname": "GALERI-1",
+              "timezone": "Türkiye"
+            }
+          },
+          "future_field": {
+            "nested": [
+              1,
+              2.5,
+              "x"
+            ]
+          },
+          "report": {
+            "ts": 1799999970,
+            "sig": "rC9k6WZBxD5CrcLhjkALInl-ShGheoXpeHW4DL_j7affa6HG70jFTfoQrsE-AfWnX5v6XC0kRSHZ3wyteDPjCw"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": null,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "si_bad_field_added",
+      "description": "Imzadan sonra bilinmeyen alan eklendi",
+      "sysinfo": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 4,
+          "platform": "windows-x64",
+          "displays": [
+            {
+              "index": 0,
+              "name": "DELL U2723QE",
+              "x": 0,
+              "y": 0,
+              "width": 3840,
+              "height": 2160,
+              "scale": 1.5,
+              "primary": true,
+              "refresh_hz": 59.997,
+              "connection": "displayport"
+            },
+            {
+              "index": 1,
+              "x": 3840,
+              "y": -120,
+              "width": 1920,
+              "height": 1080,
+              "scale": 1,
+              "refresh_hz": 60
+            }
+          ],
+          "displays_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "network": [
+            {
+              "name": "Ethernet",
+              "kind": "ethernet",
+              "ipv4": [
+                "192.168.1.20"
+              ],
+              "up": true
+            }
+          ],
+          "inventory": {
+            "at": 1799999970,
+            "cpu": {
+              "model": "Intel(R) Core(TM) i7",
+              "cores": 8,
+              "threads": 16,
+              "base_mhz": 2900
+            },
+            "gpus": [
+              {
+                "name": "Ekran Kartı Ğ",
+                "integrated": false,
+                "vram_mb": 8192
+              }
+            ],
+            "physical_disks": [
+              {
+                "id": "0",
+                "model": "Samsung SSD",
+                "bus": "nvme",
+                "media": "ssd",
+                "size_gb": 476.9,
+                "life_left_pct": 97.5
+              }
+            ],
+            "serial": "ABC-123",
+            "os": {
+              "name": "Windows 11 Pro",
+              "version": "24H2",
+              "hostname": "GALERI-1",
+              "timezone": "Türkiye"
+            }
+          },
+          "future_field": {
+            "nested": [
+              1,
+              2.5,
+              "x"
+            ]
+          },
+          "report": {
+            "ts": 1799999970,
+            "sig": "rC9k6WZBxD5CrcLhjkALInl-ShGheoXpeHW4DL_j7affa6HG70jFTfoQrsE-AfWnX5v6XC0kRSHZ3wyteDPjCw"
+          },
+          "extra": true
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": null,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "si_bad_v2",
+      "description": "sysinfo raporunda v alani (yalniz heartbeat'te gecerli)",
+      "sysinfo": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 4,
+          "platform": "windows-x64",
+          "displays": [
+            {
+              "index": 0,
+              "name": "DELL U2723QE",
+              "x": 0,
+              "y": 0,
+              "width": 3840,
+              "height": 2160,
+              "scale": 1.5,
+              "primary": true,
+              "refresh_hz": 59.997,
+              "connection": "displayport"
+            },
+            {
+              "index": 1,
+              "x": 3840,
+              "y": -120,
+              "width": 1920,
+              "height": 1080,
+              "scale": 1,
+              "refresh_hz": 60
+            }
+          ],
+          "displays_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "network": [
+            {
+              "name": "Ethernet",
+              "kind": "ethernet",
+              "ipv4": [
+                "192.168.1.20"
+              ],
+              "up": true
+            }
+          ],
+          "inventory": {
+            "at": 1799999970,
+            "cpu": {
+              "model": "Intel(R) Core(TM) i7",
+              "cores": 8,
+              "threads": 16,
+              "base_mhz": 2900
+            },
+            "gpus": [
+              {
+                "name": "Ekran Kartı Ğ",
+                "integrated": false,
+                "vram_mb": 8192
+              }
+            ],
+            "physical_disks": [
+              {
+                "id": "0",
+                "model": "Samsung SSD",
+                "bus": "nvme",
+                "media": "ssd",
+                "size_gb": 476.9,
+                "life_left_pct": 97.5
+              }
+            ],
+            "serial": "ABC-123",
+            "os": {
+              "name": "Windows 11 Pro",
+              "version": "24H2",
+              "hostname": "GALERI-1",
+              "timezone": "Türkiye"
+            }
+          },
+          "future_field": {
+            "nested": [
+              1,
+              2.5,
+              "x"
+            ]
+          },
+          "report": {
+            "v": 2,
+            "ts": 1799999970,
+            "sig": "rC9k6WZBxD5CrcLhjkALInl-ShGheoXpeHW4DL_j7affa6HG70jFTfoQrsE-AfWnX5v6XC0kRSHZ3wyteDPjCw"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": null,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "si_bad_other_key",
+      "description": "Baska cihazin anahtariyla imzali",
+      "sysinfo": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 4,
+          "platform": "windows-x64",
+          "displays": [
+            {
+              "index": 0,
+              "name": "DELL U2723QE",
+              "x": 0,
+              "y": 0,
+              "width": 3840,
+              "height": 2160,
+              "scale": 1.5,
+              "primary": true,
+              "refresh_hz": 59.997,
+              "connection": "displayport"
+            },
+            {
+              "index": 1,
+              "x": 3840,
+              "y": -120,
+              "width": 1920,
+              "height": 1080,
+              "scale": 1,
+              "refresh_hz": 60
+            }
+          ],
+          "displays_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "network": [
+            {
+              "name": "Ethernet",
+              "kind": "ethernet",
+              "ipv4": [
+                "192.168.1.20"
+              ],
+              "up": true
+            }
+          ],
+          "inventory": {
+            "at": 1799999970,
+            "cpu": {
+              "model": "Intel(R) Core(TM) i7",
+              "cores": 8,
+              "threads": 16,
+              "base_mhz": 2900
+            },
+            "gpus": [
+              {
+                "name": "Ekran Kartı Ğ",
+                "integrated": false,
+                "vram_mb": 8192
+              }
+            ],
+            "physical_disks": [
+              {
+                "id": "0",
+                "model": "Samsung SSD",
+                "bus": "nvme",
+                "media": "ssd",
+                "size_gb": 476.9,
+                "life_left_pct": 97.5
+              }
+            ],
+            "serial": "ABC-123",
+            "os": {
+              "name": "Windows 11 Pro",
+              "version": "24H2",
+              "hostname": "GALERI-1",
+              "timezone": "Türkiye"
+            }
+          },
+          "future_field": {
+            "nested": [
+              1,
+              2.5,
+              "x"
+            ]
+          },
+          "report": {
+            "ts": 1799999970,
+            "sig": "B9DjPJI3LRhhVMHahH7aok-NzfhYwCewrJaM2IkikioXfwEjqYMd-gMcJOITaUzn-YE2Mcfl5HCiIzJ5UHyYDQ"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": null,
+      "now_s": 1800000000,
+      "result": "bad_signature"
+    },
+    {
+      "name": "si_replayed",
+      "description": "ts = son sysinfo_ts",
+      "sysinfo": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "sense": {
+          "v": 1,
+          "role": "host",
+          "app_version": 4,
+          "platform": "windows-x64",
+          "displays": [
+            {
+              "index": 0,
+              "name": "DELL U2723QE",
+              "x": 0,
+              "y": 0,
+              "width": 3840,
+              "height": 2160,
+              "scale": 1.5,
+              "primary": true,
+              "refresh_hz": 59.997,
+              "connection": "displayport"
+            },
+            {
+              "index": 1,
+              "x": 3840,
+              "y": -120,
+              "width": 1920,
+              "height": 1080,
+              "scale": 1,
+              "refresh_hz": 60
+            }
+          ],
+          "displays_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "network": [
+            {
+              "name": "Ethernet",
+              "kind": "ethernet",
+              "ipv4": [
+                "192.168.1.20"
+              ],
+              "up": true
+            }
+          ],
+          "inventory": {
+            "at": 1799999970,
+            "cpu": {
+              "model": "Intel(R) Core(TM) i7",
+              "cores": 8,
+              "threads": 16,
+              "base_mhz": 2900
+            },
+            "gpus": [
+              {
+                "name": "Ekran Kartı Ğ",
+                "integrated": false,
+                "vram_mb": 8192
+              }
+            ],
+            "physical_disks": [
+              {
+                "id": "0",
+                "model": "Samsung SSD",
+                "bus": "nvme",
+                "media": "ssd",
+                "size_gb": 476.9,
+                "life_left_pct": 97.5
+              }
+            ],
+            "serial": "ABC-123",
+            "os": {
+              "name": "Windows 11 Pro",
+              "version": "24H2",
+              "hostname": "GALERI-1",
+              "timezone": "Türkiye"
+            }
+          },
+          "future_field": {
+            "nested": [
+              1,
+              2.5,
+              "x"
+            ]
+          },
+          "report": {
+            "ts": 1799999970,
+            "sig": "rC9k6WZBxD5CrcLhjkALInl-ShGheoXpeHW4DL_j7affa6HG70jFTfoQrsE-AfWnX5v6XC0kRSHZ3wyteDPjCw"
+          }
+        }
+      },
+      "device_pk": "APAwxQwwZWnpkaAK5FW9P_VRoFPo7fIQy8h_4Dhup_w",
+      "last_report_ts": 1799999970,
+      "now_s": 1800000000,
+      "result": "replayed",
+      "signed_text": "sense-remote/sysinfo/v1\n{\"id\":\"123456789\",\"sense\":{\"app_version\":4,\"displays\":[{\"connection\":\"displayport\",\"height\":2160,\"index\":0,\"name\":\"DELL U2723QE\",\"primary\":true,\"refresh_hz\":59.997,\"scale\":1.5,\"width\":3840,\"x\":0,\"y\":0},{\"height\":1080,\"index\":1,\"refresh_hz\":60,\"scale\":1,\"width\":1920,\"x\":3840,\"y\":-120}],\"displays_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"future_field\":{\"nested\":[1,2.5,\"x\"]},\"inventory\":{\"at\":1799999970,\"cpu\":{\"base_mhz\":2900,\"cores\":8,\"model\":\"Intel(R) Core(TM) i7\",\"threads\":16},\"gpus\":[{\"integrated\":false,\"name\":\"Ekran Kartı Ğ\",\"vram_mb\":8192}],\"os\":{\"hostname\":\"GALERI-1\",\"name\":\"Windows 11 Pro\",\"timezone\":\"Türkiye\",\"version\":\"24H2\"},\"physical_disks\":[{\"bus\":\"nvme\",\"id\":\"0\",\"life_left_pct\":97.5,\"media\":\"ssd\",\"model\":\"Samsung SSD\",\"size_gb\":476.9}],\"serial\":\"ABC-123\"},\"network\":[{\"ipv4\":[\"192.168.1.20\"],\"kind\":\"ethernet\",\"name\":\"Ethernet\",\"up\":true}],\"platform\":\"windows-x64\",\"role\":\"host\",\"v\":1},\"ts\":1799999970,\"uuid\":\"dGVzdC11dWlk\"}"
+    }
+  ]
+}

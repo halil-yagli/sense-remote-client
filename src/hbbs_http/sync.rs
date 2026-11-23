@@ -202,7 +202,18 @@ async fn start_hbbs_sync_async() {
                     }
                     // Sense Remote: role, Sense version, platform, displays, network addresses.
                     // Measuring blocks (DXGI, adapters), so off the async loop.
-                    if let Ok(Some(sense)) = tokio::task::spawn_blocking(crate::sense::report::sysinfo_ext).await {
+                    if let Ok(Some(mut sense)) = tokio::task::spawn_blocking(crate::sense::report::sysinfo_ext).await {
+                        // Sense Remote (security review S4-4): signed with the device key when
+                        // the panel asks for it (inventory and addresses only from this computer).
+                        if crate::sense::report_sig::panel_signed_ingest() {
+                            sense_sign_sysinfo(
+                                &mut sense,
+                                &id,
+                                &mut sense_report_ts,
+                                &mut sense_report_reserved,
+                                sense_report.server_offset_s,
+                            );
+                        }
                         v["sense"] = sense;
                     }
                     let v = v.to_string();
@@ -284,12 +295,15 @@ async fn start_hbbs_sync_async() {
                 {
                     sense_report.extend(&mut sense, applied_seq);
                     // Sense Remote (wave 3, K-R2-3 / G2-1): signed with the device key, last.
+                    // Sense Remote (S4-4): report v2 (health and connection count signed too)
+                    // when the panel asks for it.
                     sense_sign_report(
                         &mut sense,
                         &id,
                         &mut sense_report_ts,
                         &mut sense_report_reserved,
                         sense_report.server_offset_s,
+                        conns.len(),
                     );
                     // Sense Remote (update plan 2026-11-21, §3.5): `sense.update`, display only
                     // and outside the signed report, so it is added after signing.
@@ -328,6 +342,9 @@ async fn start_hbbs_sync_async() {
                         }
                         // Sense Remote (S6): detailed health data only for a panel that takes it.
                         crate::sense::health_v2::set_panel_caps(answer.panel_caps.as_deref());
+                        // Sense Remote (S4-4): signed report v2 and sysinfo only for a panel that
+                        // checks them.
+                        crate::sense::report_sig::set_panel_caps(answer.panel_caps.as_deref());
                         sense_report.server_time(answer.server_time, now_s());
                         sense_handle_envelopes(&answer.envelopes, &id, &mut sense_report).await;
                         // Sense Remote (update plan 2026-11-21, §3.4): hint, release notice and
@@ -352,18 +369,9 @@ fn sense_sign_report(
     last_ts: &mut Option<i64>,
     reserved: &mut Option<i64>,
     server_offset_s: Option<i64>,
+    conn_count: usize,
 ) {
-    // Sense Remote (G3-6): a reservation beyond the panel's `future` limit is dropped.
-    let (ts, reservation) = crate::sense::report_sig::next_ts_checked(
-        *last_ts,
-        *reserved,
-        now_s(),
-        server_offset_s,
-    );
-    if let Some(reservation) = reservation {
-        LocalConfig::set_option(SENSE_REPORT_TS.to_owned(), reservation.to_string());
-        *reserved = Some(reservation);
-    }
+    let ts = sense_next_report_ts(last_ts, reserved, server_offset_s);
     let uuid = crate::encode64(hbb_common::get_uuid());
     let (secret_key, public_key) = Config::get_key_pair();
     // Sense Remote (K3-2): the public key once per run, to compare with the registration log
@@ -375,13 +383,66 @@ fn sense_sign_report(
             crate::sense::identity::public_key_label(&public_key)
         )
     });
-    if crate::sense::report_sig::sign_into(sense, id, &uuid, ts, &secret_key) {
+    // Sense Remote (S4-4): v2 while the panel asks for signed ingest, else v1 as before.
+    let signed = if crate::sense::report_sig::panel_signed_ingest() {
+        crate::sense::report_sig::sign_into_v2(sense, id, &uuid, ts, conn_count, &secret_key)
+    } else {
+        crate::sense::report_sig::sign_into(sense, id, &uuid, ts, &secret_key)
+    };
+    if signed {
         *last_ts = Some(ts);
     } else {
         hbb_common::throttled_log!(
             API_LOG_INTERVAL,
             warn,
             "Sense Remote: heartbeat report not signed (no device key or no applied_seq)"
+        );
+    }
+}
+
+// Sense Remote: `ts` of the next signed report or sysinfo. One strictly increasing series for
+// both (the panel keeps a separate last `ts` for each). The reservation is stored before use.
+#[cfg(not(any(target_os = "ios")))]
+fn sense_next_report_ts(
+    last_ts: &Option<i64>,
+    reserved: &mut Option<i64>,
+    server_offset_s: Option<i64>,
+) -> i64 {
+    // Sense Remote (G3-6): a reservation beyond the panel's `future` limit is dropped.
+    let (ts, reservation) = crate::sense::report_sig::next_ts_checked(
+        *last_ts,
+        *reserved,
+        now_s(),
+        server_offset_s,
+    );
+    if let Some(reservation) = reservation {
+        LocalConfig::set_option(SENSE_REPORT_TS.to_owned(), reservation.to_string());
+        *reserved = Some(reservation);
+    }
+    ts
+}
+
+// Sense Remote (security review S4-4): signs the sysinfo extension with the device key
+// (`sense.report`). Without a key it goes unsigned; the panel then keeps the last signed
+// inventory and addresses of a computer that signs. The secret key is never logged.
+#[cfg(not(any(target_os = "ios")))]
+fn sense_sign_sysinfo(
+    sense: &mut Value,
+    id: &str,
+    last_ts: &mut Option<i64>,
+    reserved: &mut Option<i64>,
+    server_offset_s: Option<i64>,
+) {
+    let ts = sense_next_report_ts(last_ts, reserved, server_offset_s);
+    let uuid = crate::encode64(hbb_common::get_uuid());
+    let (secret_key, _) = Config::get_key_pair();
+    if crate::sense::report_sig::sign_sysinfo_into(sense, id, &uuid, ts, &secret_key) {
+        *last_ts = Some(ts);
+    } else {
+        hbb_common::throttled_log!(
+            API_LOG_INTERVAL,
+            warn,
+            "Sense Remote: sysinfo not signed (no device key)"
         );
     }
 }

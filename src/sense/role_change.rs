@@ -408,7 +408,8 @@ mod ui {
             crate::ui_interface::get_id(),
             crate::ui_interface::get_uuid(),
             false, // remember_me: the token is never saved as the app sign-in
-            LoginPurpose::Role,
+            // Sense Remote (S4-2): the token then changes to this role only.
+            LoginPurpose::Role(target),
         );
         // The page shows the pairing code right away: wait for it here.
         let deadline = Instant::now() + PAIRING_WAIT;
