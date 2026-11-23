@@ -26,8 +26,10 @@ import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
 // Sense Remote: Sense home screens (Controller project cards, small Host home).
 import '../../sense/screens/controller/sense_home_controller.dart';
-import '../../sense/screens/host/sense_home_host.dart';
 import '../../sense/screens/host/sense_home_mac.dart';
+// Sense Remote (B2, YH H1): the Host window, same size as the Controller (#36).
+import '../../sense/screens/host/shell/host_shell.dart';
+import '../../sense/tokens/sense_tokens.dart' show SenseSizes;
 import '../../sense/screens/controller/sense_home_strings.dart';
 
 /// Sense Remote: role of this computer for the home screen (from the role
@@ -70,6 +72,18 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    // Sense Remote (B2, YH H1): a Host gets only the Sense window. The stock
+    // logo, ID and one-time password boards, the password warning, the pink
+    // cards and the "Quit" button are gone; nothing here opens the settings
+    // tab page (TK9 Risk H1). The stock status widget stays mounted (hidden)
+    // because it refreshes `stateGlobal.svcStatus`.
+    if (senseHomeRole() == SenseHomeRole.host) {
+      return _buildBlock(
+          child: Stack(children: [
+        Offstage(child: OnlineStatusWidget()),
+        const Positioned.fill(child: SenseHostShell()),
+      ]));
+    }
     final isIncomingOnly = bind.isIncomingOnly();
     return _buildBlock(
         child: Row(
@@ -90,22 +104,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   Widget buildLeftPane(BuildContext context) {
     final isIncomingOnly = bind.isIncomingOnly();
     final isOutgoingOnly = bind.isOutgoingOnly();
-    // Sense Remote: on a Host the small Sense card replaces logo, ID and
-    // password boards; the install / permission cards below stay.
-    final senseHost = senseHomeRole() == SenseHomeRole.host;
+    // Sense Remote (B2): a Host never gets here (see build).
     final children = <Widget>[
       if (!isOutgoingOnly) buildPresetPasswordWarning(),
-      if (senseHost)
-        // Sense Remote (Mac M7): the macOS permission notice changes the card
-        // height; the Host window follows it (never called on Windows).
-        SenseHostHome(onMacPermissionsChanged: () {
-          if (isInHomePage()) {
-            Future.delayed(Duration(milliseconds: 300), () {
-              _updateWindowSize();
-            });
-          }
-        }),
-      if (!senseHost) ...[
       if (bind.isCustomClient())
         Align(
           alignment: Alignment.center,
@@ -118,7 +119,6 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       buildTip(context),
       if (!isOutgoingOnly) buildIDBoard(context),
       if (!isOutgoingOnly) buildPasswordBoard(context),
-      ],
       FutureBuilder<Widget>(
         future: Future.value(
             Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
@@ -149,11 +149,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         },
       );
       children.addAll([
-        // Sense Remote: the Sense card shows the status; the stock widget stays
-        // mounted (hidden) because it refreshes `stateGlobal.svcStatus`.
-        if (senseHost) Offstage(child: statusWidget),
-        if (!senseHost) Divider(),
-        if (!senseHost) statusWidget.marginOnly(bottom: 6, right: 6)
+        Divider(),
+        statusWidget.marginOnly(bottom: 6, right: 6)
       ]);
     }
     final textColor = Theme.of(context).textTheme.titleLarge?.color;
@@ -161,10 +158,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       value: gFFI.serverModel,
       child: Container(
         width: isIncomingOnly ? 280.0 : 200.0,
-        // Sense Remote: the Host home is black like the other Sense screens.
-        color: senseHost
-            ? Colors.black
-            : Theme.of(context).colorScheme.background,
+        color: Theme.of(context).colorScheme.background,
         child: Stack(
           children: [
             Column(
@@ -912,6 +906,12 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   _updateWindowSize() {
+    // Sense Remote (B2, #36, T9): the Host window has the Controller's size,
+    // not the size of its content; on a short screen it follows the screen.
+    if (senseHomeRole() == SenseHomeRole.host) {
+      _senseHostWindowSize();
+      return;
+    }
     RenderObject? renderObject = _childKey.currentContext?.findRenderObject();
     if (renderObject == null) {
       return;
@@ -922,6 +922,24 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         imcomingOnlyHomeSize = size;
         windowManager.setSize(getIncomingOnlyHomeSize());
       }
+    }
+  }
+
+  /// Sense Remote (B2): the Host window is as big as the Controller window
+  /// (SenseSizes.window*), never taller than the visible screen.
+  Future<void> _senseHostWindowSize() async {
+    var height = SenseSizes.windowHeight;
+    try {
+      final screen = await window_size.getCurrentScreen();
+      if (screen != null) {
+        final visible = screen.visibleFrame.height / screen.scaleFactor;
+        if (visible > 0 && visible < height) height = visible;
+      }
+    } catch (_) {}
+    final size = Size(SenseSizes.windowWidth, height - kDesktopRemoteTabBarHeight);
+    if (size != imcomingOnlyHomeSize) {
+      imcomingOnlyHomeSize = size;
+      await windowManager.setSize(getIncomingOnlyHomeSize());
     }
   }
 

@@ -12,11 +12,8 @@ import 'dart:async';
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 
-import '../../../models/platform_model.dart';
 import '../host_live/sense_cm_style.dart';
 import '../host_live/sense_cm_widgets.dart';
 import '../controller/sense_home_strings.dart' show senseHomeUpper;
@@ -24,37 +21,14 @@ import '../install/sense_install_strings.dart'
     show formatSensePairingCode, spokenSensePairingCode;
 import 'sense_password_model.dart';
 import 'sense_password_strings.dart';
+import 'data/password.dart';
+
+export 'data/password.dart';
 
 typedef _T = SenseCmTokens;
 
 String _t(String key, [Map<String, String> args = const {}]) =>
     sensePasswordText(key, args);
-
-class SensePasswordBridge implements SensePasswordBackend {
-  const SensePasswordBridge();
-
-  @override
-  Future<String> status() => bind.mainSensePasswordStatus();
-  @override
-  Future<String> begin() => bind.mainSensePasswordBegin();
-  @override
-  Future<String> loginStatus() => bind.mainSensePasswordLoginStatus();
-  @override
-  Future<String> unlock() => bind.mainSensePasswordUnlock();
-  @override
-  Future<String> check(String password) =>
-      bind.mainSensePasswordCheck(password: password);
-  @override
-  Future<String> set(String password) =>
-      bind.mainSensePasswordSet(password: password);
-  @override
-  Future<void> cancel() => bind.mainSensePasswordCancel();
-  @override
-  void openUrl(String url) => launchUrlString(url);
-  @override
-  Future<void> copy(String text) =>
-      Clipboard.setData(ClipboardData(text: text));
-}
 
 DateTime? _changed(SensePasswordStatus s) => s.changedAt == null
     ? null
