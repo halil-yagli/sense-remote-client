@@ -287,7 +287,7 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
       style: SenseTextStyles.of(color: SenseColors.textMuted, height: _L.leadHeight));
 
   /// Footer note (`.sfoot .note2`); takes the free space.
-  Widget _note(String text, {Key? key}) => Expanded(
+  Widget _footNote(String text, {Key? key}) => Expanded(
         child: Text(text,
             key: key,
             maxLines: 2,

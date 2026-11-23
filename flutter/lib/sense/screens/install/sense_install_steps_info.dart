@@ -28,7 +28,7 @@ extension _SenseInstallInfoSteps on _SenseInstallWizardState {
         _button(_t('back'),
             _installed ? () => _go(SenseInstallStep.summary) : () => _go(SenseInstallStep.role),
             key: const Key('sense-back')),
-        _note(_infoReady ? '' : _t('info-missing'), key: const Key('sense-info-missing')),
+        _footNote(_infoReady ? '' : _t('info-missing'), key: const Key('sense-info-missing')),
         _button(_t('next'), _infoReady ? _infoNext : null,
             primary: true, key: const Key('sense-info-next')),
       ],
@@ -131,7 +131,7 @@ extension _SenseInstallInfoSteps on _SenseInstallWizardState {
       [
         _button(_t('back'), _busy || _installed ? null : () => _go(SenseInstallStep.info),
             key: const Key('sense-back')),
-        _note(_t(widget.mac ? 'install-note-mac' : 'install-note')),
+        _footNote(_t(widget.mac ? 'install-note-mac' : 'install-note')),
         if (registering)
           _button(_t('register-save'), _enrolling || _waitLeft > 0 ? null : _enroll,
               primary: true, key: const Key('sense-register'))

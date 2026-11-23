@@ -66,7 +66,7 @@ extension _SenseInstallAccountStep on _SenseInstallWizardState {
         box,
       ],
       [
-        _note(_t('domain-note')),
+        _footNote(_t('domain-note')),
         _button(_t('next'), _loginAccepted ? _accountNext : null,
             primary: true, key: const Key('sense-account-next')),
       ],
