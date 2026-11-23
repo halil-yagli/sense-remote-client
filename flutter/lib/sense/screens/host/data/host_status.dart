@@ -5,6 +5,8 @@
 import 'dart:convert';
 
 import '../../../../models/platform_model.dart';
+import '../../../../common.dart' show gFFI;
+import '../../../../models/server_model.dart' show Client;
 import '../../../../models/state_model.dart';
 
 enum SenseHostPhase { ready, connecting, down, stopped, mac, busy }
@@ -59,6 +61,24 @@ Future<void> senseHostRetry() async {
   await bind.mainCheckConnectStatus();
 }
 
-// TODO(D1): Host overlay state (`connected_by`, `since`) is not in the bridge yet;
-// the page then counts the time from when it saw the connection start.
-Future<String> senseHostLiveRaw() async => '{}';
+/// Pure: the "who is connected" JSON from the clients of the server model. Only an authorized,
+/// open, remote-screen connection counts (not a file transfer, not a closed one). The start
+/// time is not in the bridge (the Rust side keeps `since` only in the recent list), so
+/// `since` stays out and the page counts from when it saw the connection (P3, B4).
+String senseHostLiveFrom(Iterable<Client> clients) {
+  for (final c in clients) {
+    if (c.authorized &&
+        !c.disconnected &&
+        !c.isFileTransfer &&
+        !c.isTerminal &&
+        c.portForward.isEmpty &&
+        c.name.isNotEmpty) {
+      return jsonEncode({'connected_by': c.name});
+    }
+  }
+  return '{}';
+}
+
+/// Who is connected now, read from the live server model (no bridge function needed).
+Future<String> senseHostLiveRaw() async => senseHostLiveFrom(gFFI.serverModel.clients);
+

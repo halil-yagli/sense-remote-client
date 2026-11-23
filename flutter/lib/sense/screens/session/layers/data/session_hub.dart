@@ -12,7 +12,8 @@ abstract final class SenseSessionHub {
       _handlers[peerId] = handler;
 
   static void unregister(String peerId, SenseMessageHandler handler) {
-    if (identical(_handlers[peerId], handler)) _handlers.remove(peerId);
+    // P3 (B10): a method torn off twice is `==` but not `identical`.
+    if (_handlers[peerId] == handler) _handlers.remove(peerId);
   }
 
   /// True = Sense took the message; RustDesk shows nothing.

@@ -62,6 +62,7 @@ abstract final class SenseControllerStrings {
   static const String dragToSort = 'Sürükleyerek sırala';
   static const String orderSaved = 'Sıra kaydedildi';
   static const String orderFailed = 'Sıra kaydedilemedi; panele ulaşılamadı.';
+  static const String connectFailed = 'Bağlantı penceresi açılamadı; tekrar dene.';
   static const String crossProject = 'Projeler arası taşıma panelde yapılır';
 
   // Tile.

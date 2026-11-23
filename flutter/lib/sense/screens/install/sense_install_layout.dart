@@ -14,6 +14,7 @@ abstract final class _L {
   static const double macTrafficLights = 64;
   static const double closeWidth = 40;
   static const double rail = 220;
+  static const double railNarrow = 176;
   static const double railPadV = 18;
   static const double railPadH = 14;
   static const double stepGap = 4;
@@ -111,14 +112,14 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
     ];
   }
 
-  Widget _rail() {
+  Widget _rail({bool narrow = false}) {
     final steps = _steps;
     // The upgrade's own done page belongs to its step.
     final current = steps.indexWhere((s) => s.$1 == _step);
     final version = widget.version.trim();
     final os = _t(widget.mac ? 'os-mac' : 'os-windows');
     return Container(
-      width: _L.rail,
+      width: narrow ? _L.railNarrow : _L.rail,
       padding: const EdgeInsets.symmetric(vertical: _L.railPadV, horizontal: _L.railPadH),
       decoration: const BoxDecoration(
         border: Border(right: BorderSide(color: SenseColors.line)),

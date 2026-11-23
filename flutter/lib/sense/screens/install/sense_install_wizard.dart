@@ -35,6 +35,31 @@ String _t(String key, [Map<String, String> args = const {}]) =>
 const Size kSenseInstallSize = Size(860, 620);
 const Size kSenseInstallMinSize = Size(760, 540);
 
+/// Sense Remote (P3, B6): empty room kept free around the setup window on the screen.
+const double kSenseInstallScreenMargin = 40;
+
+/// Pure: the setup window's size and minimum size for a screen whose visible area (logical
+/// px, without the taskbar) is [visible]; `null` = unknown. The window never gets bigger than
+/// the screen, so the footer buttons ([Güncelle], [İleri]) stay on it (B6).
+({Size size, Size min}) senseInstallWindowFor(Size? visible) {
+  var size = kSenseInstallSize;
+  if (visible != null && visible.width > 0 && visible.height > 0) {
+    size = Size(
+      size.width.clamp(0, visible.width - kSenseInstallScreenMargin).toDouble(),
+      size.height.clamp(0, visible.height - kSenseInstallScreenMargin).toDouble(),
+    );
+  }
+  final min = Size(
+    kSenseInstallMinSize.width < size.width ? kSenseInstallMinSize.width : size.width,
+    kSenseInstallMinSize.height < size.height ? kSenseInstallMinSize.height : size.height,
+  );
+  return (size: size, min: min);
+}
+
+/// Width below which the step list narrows (B6), so a window smaller than 860 wide keeps room
+/// for the page and its buttons.
+const double kSenseInstallNarrowWidth = 820;
+
 class SenseInstallWizard extends StatefulWidget {
   const SenseInstallWizard({
     super.key,
@@ -514,12 +539,15 @@ class _SenseInstallWizardState extends State<SenseInstallWizard> {
             children: [
               _titleBar(),
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _rail(),
-                    Expanded(child: _main()),
-                  ],
+                // Sense Remote (B6): the step list narrows in a narrow window.
+                child: LayoutBuilder(
+                  builder: (context, box) => Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _rail(narrow: box.maxWidth < kSenseInstallNarrowWidth),
+                      Expanded(child: _main()),
+                    ],
+                  ),
                 ),
               ),
             ],
