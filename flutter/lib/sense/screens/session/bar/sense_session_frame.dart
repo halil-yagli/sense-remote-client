@@ -70,6 +70,7 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
   @override
   void didUpdateWidget(SenseSessionFrame old) {
     super.didUpdateWidget(old);
+    if (old.backend != widget.backend) _menus.close();
     if (old.popups != widget.popups) {
       old.popups.removeListener(_onPopups);
       widget.popups.addListener(_onPopups);

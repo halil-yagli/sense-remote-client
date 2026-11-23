@@ -116,7 +116,7 @@ class _SensePopupHostState extends State<SensePopupHost> {
             const SingleActivator(LogicalKeyboardKey.escape): () => widget.controller.close(),
         },
         child: LayoutBuilder(builder: (context, constraints) {
-          return Stack(children: [
+          return Stack(fit: StackFit.expand, children: [
             Positioned.fill(child: widget.child),
             ListenableBuilder(
               listenable: widget.controller,
