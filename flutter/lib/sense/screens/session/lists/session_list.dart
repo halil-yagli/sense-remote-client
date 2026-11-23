@@ -226,12 +226,12 @@ class SenseListEntryView extends StatelessWidget {
   Widget build(BuildContext context) {
     final e = entry;
     final Widget row = switch (e) {
-      SenseActionEntry() => _action(e),
-      SenseToggleEntry() => _toggle(e),
-      SenseChoiceEntry() => e.style == SenseChoiceStyle.segment ? _segment(e) : _radios(e),
-      SenseSliderEntry() => _slider(context, e),
-      SenseInfoEntry() => _info(e),
-      SenseTilesEntry() => _tiles(e),
+      SenseActionEntry a => _action(a),
+      SenseToggleEntry t => _toggle(t),
+      SenseChoiceEntry c => c.style == SenseChoiceStyle.segment ? _segment(c) : _radios(c),
+      SenseSliderEntry s => _slider(context, s),
+      SenseInfoEntry i => _info(i),
+      SenseTilesEntry t => _tiles(t),
     };
     return KeyedSubtree(key: ValueKey('sense-entry-${e.id}'), child: row);
   }
@@ -581,7 +581,7 @@ class _SliderRowState extends State<_SliderRow> {
               onChanged: enabled ? (x) => setState(() => _drag = x) : null,
               onChangeEnd: enabled
                   ? (x) {
-                      change(x);
+                      change!(x);
                       widget.notify('${e.label} · ${e.format(x)}');
                     }
                   : null,
