@@ -70,10 +70,14 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let elapsed = rt.block_on(hbb_common::tokio::time::timeout(
-            std::time::Duration::from_millis(1),
-            std::future::pending::<()>(),
-        ));
+        // The time-out future needs the runtime's timer, so it is made inside `block_on`.
+        let elapsed = rt.block_on(async {
+            hbb_common::tokio::time::timeout(
+                std::time::Duration::from_millis(1),
+                std::future::pending::<()>(),
+            )
+            .await
+        });
         let err = anyhow::Error::from(elapsed.unwrap_err());
         assert!(!no_listener(&err));
     }
