@@ -11,8 +11,8 @@ void main() {
         textDirection: TextDirection.ltr,
         child: Center(
           child: SizedBox(
-            width: 900,
-            height: 600,
+            width: 700,
+            height: 500,
             child: buildRemoteBlock(block: false.obs, mask: true, child: body),
           ),
         ),
@@ -23,7 +23,7 @@ void main() {
       status: const SizedBox(width: 10, height: 10),
       shell: const ColoredBox(key: Key('shell'), color: Color(0xFF123456)),
     )));
-    expect(tester.getSize(find.byKey(const Key('shell'))), const Size(900, 600));
+    expect(tester.getSize(find.byKey(const Key('shell'))), const Size(700, 500));
   });
 
   testWidgets('the old loose Stack gave the shell no room', (tester) async {

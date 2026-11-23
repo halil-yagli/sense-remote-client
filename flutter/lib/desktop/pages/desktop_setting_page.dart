@@ -264,19 +264,24 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     return Obx(() {
       final videoConnBlock =
           _canBeBlocked.value && stateGlobal.videoConnCount > 0;
-      return Stack(children: [
+      // Sense Remote: the page fills its space; inside buildRemoteBlock's loose
+      // Stack the Row could otherwise size itself to its content (the black
+      // body of the home tab came from the same pattern).
+      return Stack(fit: StackFit.expand, children: [
         buildRemoteBlock(
           block: _block,
           mask: false,
           use: canBeBlocked,
           child: preventMouseKeyBuilder(
-            child: Row(children: children),
+            child: SizedBox.expand(child: Row(children: children)),
             block: videoConnBlock,
           ),
         ),
         if (videoConnBlock)
-          Container(
-            color: Colors.black.withOpacity(0.5),
+          Positioned.fill(
+            child: Container(
+              color: Colors.black.withOpacity(0.5),
+            ),
           )
       ]);
     });
