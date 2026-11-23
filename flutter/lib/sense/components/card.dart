@@ -31,6 +31,7 @@ class SenseCard extends StatelessWidget {
     this.copyText,
     this.onCopied,
     this.trailing,
+    this.tags = const <Widget>[],
   });
 
   final String title;
@@ -43,8 +44,12 @@ class SenseCard extends StatelessWidget {
   final String? copyText;
   final VoidCallback? onCopied;
 
-  /// Extra widget in the header, before Kopyala.
+  /// Extra widget in the header, before Kopyala (right-aligned).
   final Widget? trailing;
+
+  /// Small labels right after the title ("NVMe", "SSD"). The title takes the free
+  /// space first and only ends in "…" when it really does not fit (G7).
+  final List<Widget> tags;
 
   Color _border() {
     switch (level) {
@@ -79,11 +84,15 @@ class SenseCard extends StatelessWidget {
                   const SizedBox(width: _kHeadGap),
                 ],
                 Expanded(
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold),
+                  child: SenseTitleWithTags(
+                    title: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold),
+                    ),
+                    tags: tags,
+                    gap: _kHeadGap,
                   ),
                 ),
                 if (trailing != null) ...[const SizedBox(width: _kHeadGap), trailing!],
@@ -97,6 +106,32 @@ class SenseCard extends StatelessWidget {
           child,
         ],
       ),
+    );
+  }
+}
+
+/// A one-line title followed by small tags, inside the room it is given.
+///
+/// The tags keep their own width (never cut) and the title gets everything else, so
+/// a long name ("Samsung SSD 980 PRO 1TB") is shown in full while there is room and
+/// ends in "…" only when it really does not fit (G7). Avoids the `Flexible` + `Spacer`
+/// pair, which splits the free space in half and cuts the title too early.
+class SenseTitleWithTags extends StatelessWidget {
+  const SenseTitleWithTags({super.key, required this.title, this.tags = const <Widget>[], this.gap = _kHeadGap});
+
+  /// Usually a `Text` with `maxLines: 1` and `TextOverflow.ellipsis`.
+  final Widget title;
+  final List<Widget> tags;
+  final double gap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (tags.isEmpty) return title;
+    return Row(
+      children: [
+        Flexible(child: title),
+        for (final t in tags) ...[SizedBox(width: gap), t],
+      ],
     );
   }
 }

@@ -14,6 +14,9 @@ import 'support.dart';
 
 const stage = Size(1600, 900);
 
+/// Stands in for the system file chooser, so the composer shows its ataç (c08).
+Future<List<String>> _noFiles() async => const <String>[];
+
 Widget scene(SenseChatController c, {ValueNotifier<bool>? focused}) => app(
       RepaintBoundary(
         key: const Key('golden'),
@@ -26,6 +29,7 @@ Widget scene(SenseChatController c, {ValueNotifier<bool>? focused}) => app(
                 controller: c,
                 computerName: 'Giriş Salonu PC-2',
                 windowFocused: focused,
+                pickFiles: _noFiles,
                 animate: false,
               ),
             ),

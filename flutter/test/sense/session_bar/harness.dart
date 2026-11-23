@@ -6,9 +6,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/screens/session/bar/sense_session_frame.dart';
+import 'package:flutter_hbb/sense/screens/session/chat_icon/chat_layer.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart';
 import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
 
+import '../chat/support.dart' show makeController;
 import 'fake_backend.dart';
 
 const String kGoldenDir = 'test/goldens/session_bar';
@@ -43,7 +45,9 @@ class FakeRemoteScreen extends StatelessWidget {
   }
 }
 
-Widget frameApp(FakeBackend b, {FakePopups? popups, SenseBarController? menus}) {
+/// [chatIcon]: also draw the Sense chat icon in the remote screen's corner, as in the
+/// real window (prototype c10 shows it bottom right).
+Widget frameApp(FakeBackend b, {FakePopups? popups, SenseBarController? menus, bool chatIcon = false}) {
   return MaterialApp(
     debugShowCheckedModeBanner: false,
     home: Scaffold(
@@ -54,7 +58,18 @@ Widget frameApp(FakeBackend b, {FakePopups? popups, SenseBarController? menus}) 
           backend: b,
           popups: popups ?? FakePopups(),
           menus: menus,
-          child: const FakeRemoteScreen(),
+          child: chatIcon
+              ? Stack(children: [
+                  const Positioned.fill(child: FakeRemoteScreen()),
+                  Positioned.fill(
+                    child: SenseChatLayer(
+                      controller: makeController(),
+                      computerName: 'Giriş Salonu PC-2',
+                      animate: false,
+                    ),
+                  ),
+                ])
+              : const FakeRemoteScreen(),
         ),
       ),
     ),
