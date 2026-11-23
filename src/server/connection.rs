@@ -1761,16 +1761,16 @@ impl Connection {
                             // handler (a proxy interposing a 2xx maintenance
                             // page, a malformed error) and must not be mistaken
                             // for storage, so it is retried rather than dropped.
-                            if text.trim().is_empty() {
+                            // Sense Remote (#83): the panel answers `200 {}`, which also
+                            // means stored (see crate::sense::audit_resp).
+                            use crate::sense::audit_resp::{classify_audit_body, AuditAnswer};
+                            let answer = classify_audit_body(&text);
+                            if answer == AuditAnswer::Stored {
                                 return Ok(text);
                             }
-                            let server_err = serde_json::from_str::<Value>(&text)
-                                .ok()
-                                .and_then(|v| v.get("error")?.as_str().map(|s| s.to_owned()))
-                                .filter(|e| !e.is_empty());
-                            let (label, detail) = match &server_err {
-                                Some(e) => ("server error", e.as_str()),
-                                None => ("unexpected response body", text.as_str()),
+                            let (label, detail) = match &answer {
+                                AuditAnswer::ServerError(e) => ("server error", e.as_str()),
+                                _ => ("unexpected response body", text.as_str()),
                             };
                             let brief: String = detail.chars().take(128).collect();
                             (true, format!("{}: {}", label, brief))

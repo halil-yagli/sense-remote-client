@@ -28,6 +28,25 @@ use hwcodec::{
 #[cfg(test)]
 mod repeat_tests;
 
+// Sense Remote (#82): the VRAM encoder must run on the adapter that owns the captured output.
+// An unknown (0) LUID never matches, so the RAM / software path is used instead.
+fn same_adapter(encoder_luid: i64, capture_luid: i64) -> bool {
+    capture_luid != 0 && encoder_luid == capture_luid
+}
+
+#[cfg(test)]
+mod luid_tests {
+    use super::same_adapter;
+
+    #[test]
+    fn only_capture_adapter_matches() {
+        assert!(same_adapter(54999, 54999));
+        assert!(!same_adapter(54999, 61000));
+        assert!(!same_adapter(0, 0));
+        assert!(!same_adapter(54999, 0));
+    }
+}
+
 // https://www.reddit.com/r/buildapc/comments/d2m4ny/two_graphics_cards_two_monitors/
 // https://www.reddit.com/r/techsupport/comments/t2v9u6/dual_monitor_setup_with_dual_gpu/
 // https://cybersided.com/two-monitors-two-gpus/
@@ -203,7 +222,7 @@ impl VRamEncoder {
     pub fn try_get(device: &AdapterDevice, format: CodecFormat) -> Option<FeatureContext> {
         let v: Vec<_> = Self::available(format)
             .drain(..)
-            .filter(|e| e.luid == device.luid)
+            .filter(|e| same_adapter(e.luid, device.luid))
             .collect();
         if v.len() > 0 {
             // prefer ffmpeg

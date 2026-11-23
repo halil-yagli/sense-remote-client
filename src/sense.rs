@@ -802,6 +802,10 @@ pub mod server;
 pub mod curtain;
 // Sense Remote (S8): one Controller at a time.
 pub mod single_conn;
+// Sense Remote (#82): hardware encoder first-frame safety net.
+pub mod encoder_guard;
+// Sense Remote (#83): audit endpoint answer reading.
+pub mod audit_resp;
 // Sense Remote (S10): connection quality the app shows (last frame age, loss estimate).
 pub mod link_quality;
 // Sense Remote: design values used on the Rust side (T1).

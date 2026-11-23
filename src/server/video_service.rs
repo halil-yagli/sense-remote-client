@@ -757,6 +757,22 @@ fn run(vs: VideoService) -> ResultType<()> {
             &mut second_instant,
             &sp.name(),
         )?;
+        // Sense Remote (#82): hardware encoder silent for 3 s (e.g. wrong GPU) -> software encoder.
+        #[cfg(windows)]
+        if crate::sense::encoder_guard::first_frame_overdue(
+            start.elapsed(),
+            encoder_warmed_up,
+            encoder.is_hardware(),
+            crate::sense::encoder_guard::FIRST_FRAME_TIMEOUT,
+        ) {
+            log::warn!(
+                "no encoded frame from hardware encoder within {:?} on {}, switching to software encoder",
+                crate::sense::encoder_guard::FIRST_FRAME_TIMEOUT,
+                sp.name()
+            );
+            crate::sense::encoder_guard::deny_hardware(&sp.name());
+            bail!("SWITCH");
+        }
         // On macOS, a refresh here would destroy a hardware encoder that has been fed a frame but
         // not yet produced its first packet, restarting the warm-up forever. Defer until it has;
         // one that never does is still switched away from by max_fail_times in handle_one_frame.
@@ -1116,8 +1132,15 @@ fn get_encoder_config(
     let negotiated_codec = Encoder::negotiated_codec();
     match negotiated_codec {
         CodecFormat::H264 | CodecFormat::H265 => {
+            // Sense Remote (#82): this monitor's hardware encoder produced no frame; use software.
+            let hw_denied = crate::sense::encoder_guard::hardware_denied(&_name);
+            if hw_denied {
+                log::warn!("hardware encoder disabled for {_name}, using software encoder");
+            }
             #[cfg(feature = "vram")]
-            if let Some(feature) = VRamEncoder::try_get(&c.device(), negotiated_codec) {
+            if let Some(feature) = VRamEncoder::try_get(&c.device(), negotiated_codec)
+                .filter(|_| !hw_denied)
+            {
                 return EncoderCfg::VRAM(VRamEncoderConfig {
                     device: c.device(),
                     width: c.width,
@@ -1128,7 +1151,7 @@ fn get_encoder_config(
                 });
             }
             #[cfg(feature = "hwcodec")]
-            if let Some(hw) = HwRamEncoder::try_get(negotiated_codec) {
+            if let Some(hw) = HwRamEncoder::try_get(negotiated_codec).filter(|_| !hw_denied) {
                 return EncoderCfg::HWRAM(HwRamEncoderConfig {
                     name: hw.name,
                     mc_name: hw.mc_name,
