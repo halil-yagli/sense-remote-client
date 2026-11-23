@@ -1574,7 +1574,7 @@ connected peer 123456789
         ] {
             let json = serde_json::to_string(&message).unwrap();
             assert_eq!(serde_json::from_str::<SenseLogIpc>(&json).unwrap(), message);
-            assert!(!json.contains('\') && !json.contains('/'));
+            assert!(!json.contains('\\') && !json.contains('/'));
         }
     }
 
