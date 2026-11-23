@@ -82,9 +82,13 @@ void main() {
       final texts = tester.widgetList<RichText>(find.byType(RichText)).where((t) => t.text.toPlainText() == 'okunamadı');
       expect(texts, isNotEmpty);
       for (final t in texts) {
-        final span = (t.text as TextSpan).children?.first.style ?? (t.text as TextSpan).style;
-        expect(span?.fontStyle, FontStyle.italic);
-        expect(span?.color, SenseColors.textDim);
+        TextStyle? style;
+        t.text.visitChildren((span) {
+          if (span is TextSpan && span.text == 'okunamadı') style = span.style;
+          return style == null;
+        });
+        expect(style?.fontStyle, FontStyle.italic);
+        expect(style?.color, SenseColors.textDim);
       }
     });
 
