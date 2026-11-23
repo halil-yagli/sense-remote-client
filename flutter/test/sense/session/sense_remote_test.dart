@@ -1,18 +1,14 @@
 // Sense Remote: connection window parts (sense_remote_*.dart,
-// sense/screens/session/data/sense_peer_status.dart) — display map, display info, status box,
-// chat panel, ghost toggle, panel peer-status parsing.
+// sense/screens/session/data/sense_peer_status.dart) — display map, ghost toggle,
+// panel peer-status parsing.
 
 import 'dart:convert';
 
-import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/sense/screens/session/data/sense_peer_status.dart';
 import 'package:flutter_hbb/common/widgets/toolbar.dart' show TToggleMenu;
 import 'package:flutter_hbb/consts.dart' show kAllDisplayValue;
-import 'package:flutter_hbb/sense/screens/session/sense_remote_chat.dart';
-import 'package:flutter_hbb/sense/screens/session/sense_remote_display_info.dart';
 import 'package:flutter_hbb/sense/screens/session/sense_remote_map.dart';
-import 'package:flutter_hbb/sense/screens/session/sense_remote_status.dart';
 import 'package:flutter_hbb/sense/screens/session/sense_remote_strings.dart';
 import 'package:flutter_hbb/sense/screens/session/sense_remote_window.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -264,212 +260,6 @@ void main() {
     });
   });
 
-  group('display info', () {
-    test('rows from the panel: connection, resolution, Hz, colour, HDR', () {
-      final rows = senseDisplayInfoRows(protoDisplays[0], fullStatus().display(0))
-          .map((r) => r.toString())
-          .toList();
-      expect(rows, [
-        'Bağlantı: DisplayPort',
-        'Çözünürlük: 3840 × 2160',
-        'Yenileme: 59,94 Hz',
-        'Renk: 10 bit · RGB 4:4:4',
-        'HDR: HDR açık',
-        'Ölçek: %150',
-        'Konum: x 0, y 0',
-      ]);
-    });
-
-    test('without panel data only what RustDesk knows is shown', () {
-      final rows = senseDisplayInfoRows(protoDisplays[1], null)
-          .map((r) => r.toString())
-          .toList();
-      expect(rows, ['Çözünürlük: 1080 × 1920', 'Konum: x -1080, y 240']);
-    });
-
-    test('YCbCr 4:2:2 gets a note, RGB does not', () {
-      final s = fullStatus();
-      expect(senseDisplayWarning(s.display(1)), startsWith('YCbCr 4:2:2 — '));
-      expect(senseDisplayWarning(s.display(0)), isNull);
-    });
-
-    testWidgets('card for one display and for all', (tester) async {
-      Future<void> pump(int current, SensePeerStatusResult? r) =>
-          tester.pumpWidget(MaterialApp(
-            home: Scaffold(
-              body: SenseDisplayInfoPanel(
-                displays: protoDisplays,
-                current: current,
-                result: r,
-                loading: false,
-                onRetry: () {},
-              ),
-            ),
-          ));
-      final ok = SensePeerStatusResult.ok(fullStatus());
-      await pump(1, ok);
-      expect(find.text('Ekran 2'), findsOneWidget);
-      expect(find.text('HDMI'), findsOneWidget);
-      expect(find.text('50 Hz'), findsOneWidget);
-      expect(find.textContaining('YCbCr 4:2:2 —'), findsOneWidget);
-      expect(find.text('Ekran 1 · ana'), findsNothing);
-
-      await pump(kAllDisplayValue, ok);
-      expect(find.text('Ekran 1 · ana'), findsOneWidget);
-      expect(find.text('Ekran 2'), findsOneWidget);
-      expect(find.text('Ekran 3'), findsOneWidget);
-
-      await pump(0, const SensePeerStatusResult.error(SensePeerStatusError.notFound));
-      expect(find.text('Panel bilgisi yok'), findsOneWidget);
-      expect(find.text('3840 × 2160'), findsOneWidget);
-      expect(find.text('Yeniden dene'), findsNothing);
-    });
-  });
-
-  group('status box', () {
-    test('meters and rows', () {
-      final v = senseStatusView(fullStatus(), 1012);
-      expect(v.subtitle, 'çevrimiçi · son yoklama 12 sn önce');
-      expect(v.meters.map((m) => m.toString()).toList(), [
-        'İşlemci: %34',
-        'Ekran kartı: 81°C (!)',
-        'Bellek: 18/32 GB',
-        'Disk C:: %72',
-      ]);
-      expect(v.rows.map((r) => r.toString()).toList(), [
-        'Açık kalma: 6 gün 4 sa',
-        'Ekranlar: 3 · DP, HDMI, DP',
-        'Sürüm: Sürüm 2',
-      ]);
-    });
-
-    test('network addresses: ethernet first, several in order', () {
-      final rows = senseStatusView(fullStatus(), 1012)
-          .network
-          .map((r) => r.toString())
-          .toList();
-      expect(rows, [
-        'Ethernet 1: 192.0.2.10',
-        'Ethernet 2: 198.51.100.7\n198.51.100.8',
-        'Wi-Fi: 192.0.2.30',
-        'Diğer: 2001:db8::1',
-      ]);
-    });
-
-    test('nothing reported → "Bildirilmedi", no invented value', () {
-      final v = senseStatusView(
-          const SensePeerStatus(online: false, lastSeenAt: 0), 7200);
-      expect(v.meters, isEmpty);
-      expect(v.subtitle, 'çevrimdışı · son yoklama 2 sa önce');
-      expect(v.rows.map((r) => r.toString()).toList(), [
-        'Sağlık: Bildirilmedi',
-        'Ekranlar: Bildirilmedi',
-        'Sürüm: Bildirilmedi',
-      ]);
-      expect(v.network.map((r) => r.toString()).toList(), ['Ağ: Bildirilmedi']);
-    });
-
-    testWidgets('popup shows data; no frame rate or latency', (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: SenseStatusPopup(
-              result: SensePeerStatusResult.ok(fullStatus()),
-              loading: false,
-              nowS: 1012,
-              onRetry: () {},
-            ),
-          ),
-        ),
-      ));
-      expect(find.textContaining('Bilgisayar durumu'), findsOneWidget);
-      expect(find.text('İşlemci'), findsOneWidget);
-      expect(find.text('81°C'), findsOneWidget);
-      final eth1 = tester.getTopLeft(
-          find.byKey(const ValueKey('sense-remote-net-Ethernet 1')));
-      final eth2 = tester.getTopLeft(
-          find.byKey(const ValueKey('sense-remote-net-Ethernet 2')));
-      final wifi =
-          tester.getTopLeft(find.byKey(const ValueKey('sense-remote-net-Wi-Fi')));
-      expect(eth1.dy, lessThan(eth2.dy));
-      expect(eth2.dy, lessThan(wifi.dy));
-      expect(find.textContaining('fps'), findsNothing);
-      expect(find.textContaining(' ms'), findsNothing);
-    });
-
-    testWidgets('panel unreachable → retry; no key → plain note',
-        (tester) async {
-      var retries = 0;
-      Future<void> pump(SensePeerStatusResult r) =>
-          tester.pumpWidget(MaterialApp(
-            home: Scaffold(
-              body: SenseStatusPopup(
-                  result: r, loading: false, nowS: 0, onRetry: () => retries++),
-            ),
-          ));
-      await pump(const SensePeerStatusResult.error(SensePeerStatusError.failed));
-      expect(find.text('Panel bilgisine ulaşılamadı'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('sense-remote-retry')));
-      expect(retries, 1);
-      await pump(const SensePeerStatusResult.error(SensePeerStatusError.noKey));
-      expect(find.text('Panel bilgisi yok'), findsOneWidget);
-      expect(find.byKey(const ValueKey('sense-remote-retry')), findsNothing);
-    });
-  });
-
-  group('chat panel', () {
-    testWidgets('both directions, send and close', (tester) async {
-      final me = ChatUser(id: 'me');
-      final them = ChatUser(id: 'peer', firstName: 'Galeri kioskı');
-      final sent = <String>[];
-      var closed = 0;
-      final controller = TextEditingController();
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: Row(children: [
-            const Spacer(),
-            SenseRemoteChatPanel(
-              peerName: 'Galeri kioskı',
-              messages: [
-                ChatMessage(
-                    text: 'Tamam.', user: them, createdAt: DateTime(2026, 11, 17, 17, 11)),
-                ChatMessage(
-                    text: 'Merhaba', user: me, createdAt: DateTime(2026, 11, 17, 17, 10)),
-              ],
-              myUserId: 'me',
-              controller: controller,
-              onSend: sent.add,
-              onClose: () => closed++,
-            ),
-          ]),
-        ),
-      ));
-      expect(find.text('Galeri kioskı · sahadaki kişi'), findsOneWidget);
-      expect(find.text('Merhaba'), findsOneWidget);
-      expect(find.text('Tamam.'), findsOneWidget);
-      expect(find.text('17:10'), findsOneWidget);
-      // Newest message is at the bottom.
-      expect(tester.getTopLeft(find.text('Merhaba')).dy,
-          lessThan(tester.getTopLeft(find.text('Tamam.')).dy));
-      // Own message on the right.
-      expect(tester.getTopLeft(find.text('Merhaba')).dx,
-          greaterThan(tester.getTopLeft(find.text('Tamam.')).dx));
-
-      await tester.enterText(
-          find.byKey(const ValueKey('sense-remote-chat-input')), '  Ekran 2  ');
-      await tester.tap(find.byKey(const ValueKey('sense-remote-chat-send')));
-      expect(sent, ['Ekran 2']);
-
-      controller.clear();
-      await tester.tap(find.byKey(const ValueKey('sense-remote-chat-send')));
-      expect(sent, ['Ekran 2']); // empty text is not sent
-
-      await tester.tap(find.byKey(const ValueKey('sense-remote-chat-close')));
-      expect(closed, 1);
-      expect(find.byKey(const ValueKey('sense-remote-chat-voice')), findsNothing);
-    });
-  });
-
   group('ghost mode toggle', () {
     TToggleMenu menu(bool value, List<bool?> log, {bool enabled = true}) =>
         TToggleMenu(
@@ -496,48 +286,6 @@ void main() {
       senseGhostToggle([menu(false, a), menu(true, b)], true)!();
       expect(a, isEmpty);
       expect(b, [false]);
-    });
-
-    testWidgets('strip text', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: SenseGhostBar()));
-      expect(find.textContaining('Hayalet mod açık'), findsOneWidget);
-    });
-  });
-
-  group('session', () {
-    test('opening a box reads the panel once; closing stops the timer',
-        () async {
-      var calls = 0;
-      final s = SenseRemoteSession(
-        peerId: '123456789',
-        client: SensePeerStatusClient(
-          apiServer: () async => 'https://panel.example.test',
-          accessToken: () => 'test-key',
-          get: (url, headers) async {
-            calls++;
-            return (statusCode: 200, body: jsonEncode(fullStatusJson()));
-          },
-        ),
-      );
-      s.toggleStatus();
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-      expect(calls, 1);
-      expect(s.result?.status?.appVersion, 2);
-      s.toggleInfo(); // fresh data: no second read
-      await Future<void>.delayed(Duration.zero);
-      expect(calls, 1);
-      s.toggleStatus();
-      s.toggleInfo();
-      s.dispose();
-    });
-
-    test('chat open state', () {
-      final s = SenseRemoteSession(peerId: '1');
-      expect(s.chatOpen, isFalse);
-      s.setChatOpen(true);
-      expect(s.chatOpen, isTrue);
-      s.dispose();
     });
   });
 

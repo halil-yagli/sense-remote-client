@@ -54,11 +54,22 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
   void initState() {
     super.initState();
     _menus.addListener(_onMenus);
+    widget.popups.addListener(_onPopups);
+  }
+
+  @override
+  void didUpdateWidget(SenseSessionFrame old) {
+    super.didUpdateWidget(old);
+    if (old.popups != widget.popups) {
+      old.popups.removeListener(_onPopups);
+      widget.popups.addListener(_onPopups);
+    }
   }
 
   @override
   void dispose() {
     _menus.removeListener(_onMenus);
+    widget.popups.removeListener(_onPopups);
     _own?.dispose();
     super.dispose();
   }
@@ -66,7 +77,13 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
   void _onMenus() {
     final open = _menus.openMenu;
     if (open != null && open != _lastOpen) widget.backend.refresh();
+    if ((open == null) != (_lastOpen == null)) widget.popups.onMenu(open != null);
     _lastOpen = open;
+  }
+
+  /// Another popup (chat, status) took the one place: the list closes (T7).
+  void _onPopups() {
+    if (!widget.popups.menuAllowed && _menus.openMenu != null) _menus.close();
   }
 
   @override

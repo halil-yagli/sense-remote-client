@@ -12,8 +12,7 @@ import '../../../../desktop/widgets/tabbar_widget.dart'
 import '../../../tokens/sense_tokens.dart';
 import '../data/session_state.dart';
 import '../lists/ffi_backend.dart';
-import '../sense_remote_window.dart' show SenseRemoteSession;
-import 'sense_session_bar.dart';
+import 'session_popups.dart';
 import 'sense_session_frame.dart';
 
 /// Decision 3: the tab strip shows only with more than one session, never in full screen.
@@ -33,7 +32,6 @@ class SenseSessionTabFrame extends StatefulWidget {
 
 class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
   final Map<String, SenseFfiSessionBackend> _backends = {};
-  final Map<String, _SessionPopups> _popups = {};
   final List<Worker> _workers = [];
   bool _retryScheduled = false;
 
@@ -54,9 +52,6 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
     for (final b in _backends.values) {
       b.dispose();
     }
-    for (final p in _popups.values) {
-      p.dispose();
-    }
     super.dispose();
   }
 
@@ -72,7 +67,7 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
     final keys = {for (final t in widget.controller.state.value.tabs) t.key};
     for (final gone in _backends.keys.where((k) => !keys.contains(k)).toList()) {
       _backends.remove(gone)?.dispose();
-      _popups.remove(gone)?.dispose();
+      SenseSessionPopups.remove(gone);
       SenseSessionEvents.remove(gone);
     }
     _applyTabStrip();
@@ -80,7 +75,7 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
   }
 
   /// The selected tab's session, or null while its page is not built yet.
-  ({SenseFfiSessionBackend backend, _SessionPopups popups})? _current() {
+  ({SenseFfiSessionBackend backend, SenseSessionPopups popups})? _current() {
     final state = widget.controller.state.value;
     if (state.tabs.isEmpty) return null;
     final index = state.selected.clamp(0, state.tabs.length - 1);
@@ -93,7 +88,7 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
         tab.key,
         () => SenseFfiSessionBackend(ffi: ffi, toolbarState: page.toolbarState, contextOf: () => context),
       );
-      final popups = _popups.putIfAbsent(tab.key, () => _SessionPopups(SenseRemoteSession.of(page.id)));
+      final popups = SenseSessionPopups.of(tab.key, ffi);
       return (backend: backend, popups: popups);
     } catch (_) {
       // The page state is created in this frame; look again after it.
@@ -130,47 +125,4 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
       );
     });
   }
-}
-
-/// Bilgisayar durumu and Ekran bilgisi over the existing session state (C2 draws them).
-/// One at a time (T7); opening one closes the chat panel.
-class _SessionPopups extends ChangeNotifier implements SenseBarPopups {
-  _SessionPopups(this.session) {
-    session.addListener(notifyListeners);
-  }
-
-  final SenseRemoteSession session;
-
-  @override
-  void dispose() {
-    session.removeListener(notifyListeners);
-    super.dispose();
-  }
-
-  @override
-  bool isOpen(SenseBarPopup p) => p == SenseBarPopup.status ? session.statusOpen : session.infoOpen;
-
-  @override
-  void toggle(SenseBarPopup p) {
-    final opening = !isOpen(p);
-    if (opening) {
-      session.setChatOpen(false);
-      final other = p == SenseBarPopup.status ? SenseBarPopup.info : SenseBarPopup.status;
-      if (isOpen(other)) _flip(other);
-    }
-    _flip(p);
-  }
-
-  void _flip(SenseBarPopup p) => p == SenseBarPopup.status ? session.toggleStatus() : session.toggleInfo();
-
-  @override
-  void closeAll() {
-    if (session.statusOpen) session.toggleStatus();
-    if (session.infoOpen) session.toggleInfo();
-    session.setChatOpen(false);
-  }
-
-  // TODO(C2): worst level of the status / display popups (peer status + health).
-  @override
-  SenseLevel? level(SenseBarPopup p) => null;
 }

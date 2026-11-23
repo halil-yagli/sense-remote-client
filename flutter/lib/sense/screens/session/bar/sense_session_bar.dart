@@ -32,6 +32,12 @@ abstract class SenseBarPopups implements Listenable {
 
   /// Worst status inside the popup (T6), or null when unknown.
   SenseLevel? level(SenseBarPopup p);
+
+  /// False when another popup (e.g. the chat) took the place of the open list.
+  bool get menuAllowed;
+
+  /// A bar list opened or closed (it holds the one popup place while open).
+  void onMenu(bool open);
 }
 
 /// Gap kept free in the middle of the bar for the island.
@@ -125,6 +131,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
   Widget build(BuildContext context) {
     final width = MediaQuery.maybeSizeOf(context)?.width ?? SenseSizes.minScreenWidth;
     final labels = senseBarLabels(width);
+    final compact = width <= SenseBreakpoints.narrow;
     return ListenableBuilder(
       listenable: Listenable.merge([b, widget.menus, widget.popups]),
       builder: (context, _) {
@@ -134,6 +141,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
           final button = _MenuButton(
             key: ValueKey('sense-bar-menu-${m.name}'),
             label: label,
+            compact: compact,
             open: menus.isOpen(m),
             leading: leading,
             tags: tags,
@@ -257,8 +265,18 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
               delegate: _BarLayout(),
               children: [
                 LayoutId(id: _Slot.left, child: left),
-                LayoutId(id: _Slot.lists, child: ClipRect(child: lists)),
-                LayoutId(id: _Slot.popups, child: ClipRect(child: popups)),
+                LayoutId(
+                    id: _Slot.lists,
+                    child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: SizedBox(height: SenseSizes.sessionToolbarHeight - 1, child: lists))),
+                LayoutId(
+                    id: _Slot.popups,
+                    child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: SizedBox(height: SenseSizes.sessionToolbarHeight - 1, child: popups))),
                 LayoutId(id: _Slot.right, child: right),
               ],
             ),
@@ -271,8 +289,9 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
 
 enum _Slot { left, lists, popups, right }
 
-/// Left and right blocks at the edges; the two middle groups take equal halves around the
-/// centre (prototype grid `minmax(0,1fr) minmax(0,1fr)`), so the island is in the middle.
+/// Left and right blocks at the edges; the two middle groups meet at the centre (prototype
+/// grid `minmax(0,1fr) minmax(0,1fr)`), so the island is in the middle. A group that does
+/// not fit its side is scaled down instead of overflowing.
 class _BarLayout extends MultiChildLayoutDelegate {
   @override
   void performLayout(Size size) {
@@ -280,15 +299,16 @@ class _BarLayout extends MultiChildLayoutDelegate {
     final w = size.width;
     final rightSize = layoutChild(_Slot.right, BoxConstraints(maxWidth: w * 0.42, minHeight: h, maxHeight: h));
     final leftSize = layoutChild(_Slot.left, BoxConstraints(maxWidth: w * 0.26, minHeight: h, maxHeight: h));
-    final side = leftSize.width > rightSize.width ? leftSize.width : rightSize.width;
-    final half = (w / 2 - side - kSenseBarCentreGap / 2).clamp(0.0, w);
-    final listsSize = layoutChild(_Slot.lists, BoxConstraints(maxWidth: half, minHeight: h, maxHeight: h));
-    final popupsSize = layoutChild(_Slot.popups, BoxConstraints(maxWidth: half, minHeight: h, maxHeight: h));
+    // Each middle group may use the room on its own side; both stay against the centre.
+    final listsRoom = (w / 2 - leftSize.width - kSenseBarCentreGap / 2).clamp(0.0, w);
+    final popupsRoom = (w / 2 - rightSize.width - kSenseBarCentreGap / 2).clamp(0.0, w);
+    final listsSize = layoutChild(_Slot.lists, BoxConstraints(maxWidth: listsRoom, minHeight: h, maxHeight: h));
+    final popupsSize = layoutChild(_Slot.popups, BoxConstraints(maxWidth: popupsRoom, minHeight: h, maxHeight: h));
     positionChild(_Slot.left, Offset.zero);
     positionChild(_Slot.right, Offset(w - rightSize.width, 0));
     positionChild(_Slot.lists, Offset(w / 2 - kSenseBarCentreGap / 2 - listsSize.width, 0));
     positionChild(_Slot.popups, Offset(w / 2 + kSenseBarCentreGap / 2, 0));
-    assert(popupsSize.width <= half + 0.5);
+    assert(popupsSize.width <= popupsRoom + 0.5);
   }
 
   @override
@@ -371,8 +391,12 @@ class _MenuButton extends StatelessWidget {
     required this.onTap,
     this.leading = const [],
     this.tags = const [],
+    this.compact = false,
   });
   final String label;
+
+  /// T9 narrow window (≤ 1300 px): tighter padding, no caret.
+  final bool compact;
   final bool open;
   final VoidCallback? onTap;
   final List<Widget> leading;
@@ -387,7 +411,7 @@ class _MenuButton extends StatelessWidget {
       builder: (context, s) {
         final fg = open || s.hovered ? SenseColors.text : SenseColors.textSecondary;
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 7 : 10),
           color: open ? SenseColors.raised : (s.hovered ? SenseColors.hover : null),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             for (final w in leading) ...[w, const SizedBox(width: 6)],
@@ -395,8 +419,10 @@ class _MenuButton extends StatelessWidget {
                 maxLines: 1,
                 style: SenseTextStyles.of(weight: SenseFontWeight.medium, color: fg)),
             for (final w in tags) ...[const SizedBox(width: 6), w],
-            const SizedBox(width: 6),
-            Text('▾', style: SenseTextStyles.of(size: SenseFontSize.capsSmall, color: SenseColors.textDim)),
+            if (!compact) ...[
+              const SizedBox(width: 6),
+              Text('▾', style: SenseTextStyles.of(size: SenseFontSize.capsSmall, color: SenseColors.textDim)),
+            ],
           ]),
         );
       },

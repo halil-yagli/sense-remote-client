@@ -867,12 +867,9 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
     }
-    // Sense Remote: display info, status, chat panel and ghost mode buttons
-    // (the Sense chat panel replaces the stock floating chat).
-    if (kSenseRemoteWindow) {
-      toolbarItems.add(SenseRemoteToolbarButtons(
-          id: widget.id, ffi: widget.ffi, vertical: !isHorizontal));
-    } else {
+    // Sense Remote: the Sense bar replaces this toolbar (build returns early), so
+    // only the stock chat button is kept here.
+    if (!kSenseRemoteWindow) {
       toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
     }
     if (!isWeb) {

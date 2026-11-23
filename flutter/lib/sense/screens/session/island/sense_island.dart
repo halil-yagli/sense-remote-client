@@ -137,7 +137,6 @@ class _SenseIslandState extends State<SenseIsland> {
       label: SenseSessionStrings.islandLabel,
       child: FocusableActionDetector(
         mouseCursor: SystemMouseCursors.click,
-        onShowHoverHighlight: (v) => setState(() => _hover = v),
         onShowFocusHighlight: (v) => setState(() => _focus = v),
         actions: {
           ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
@@ -145,7 +144,10 @@ class _SenseIslandState extends State<SenseIsland> {
             return null;
           }),
         },
-        child: GestureDetector(
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() => _hover = false),
+          child: GestureDetector(
           key: const ValueKey('sense-island'),
           behavior: HitTestBehavior.opaque,
           onTapDown: (_) => setState(() => _down = true),
@@ -164,6 +166,7 @@ class _SenseIslandState extends State<SenseIsland> {
                 const _Shoulder(left: false),
               ],
             ),
+          ),
           ),
         ),
       ),

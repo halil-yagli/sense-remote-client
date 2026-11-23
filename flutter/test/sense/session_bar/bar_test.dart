@@ -99,6 +99,15 @@ void main() {
     await tester.pump();
     expect(list(SenseBarMenu.screens), findsNothing);
     expect(popups.isOpen(SenseBarPopup.info), isTrue);
+
+    // The chat (or any other popup) taking the place closes the list.
+    await tester.tap(menu(SenseBarMenu.actions));
+    await tester.pump();
+    expect(popups.menuEvents.last, isTrue);
+    popups.kick();
+    await tester.pump();
+    expect(list(SenseBarMenu.actions), findsNothing);
+    expect(popups.menuEvents.last, isFalse);
     await drain(tester);
   });
 

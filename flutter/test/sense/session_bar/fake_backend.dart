@@ -335,4 +335,22 @@ class FakePopups extends ChangeNotifier implements SenseBarPopups {
 
   @override
   SenseLevel? level(SenseBarPopup p) => p == SenseBarPopup.status ? statusLevel : infoLevel;
+
+  bool kicked = false;
+  final List<bool> menuEvents = [];
+
+  @override
+  bool get menuAllowed => !kicked;
+
+  @override
+  void onMenu(bool open) {
+    menuEvents.add(open);
+    if (open) kicked = false;
+  }
+
+  /// Another popup (the chat) takes the place.
+  void kick() {
+    kicked = true;
+    notifyListeners();
+  }
 }
