@@ -6,6 +6,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/common.dart' as common show isTest;
 import 'package:flutter_hbb/common.dart' show MyTheme, SessionID;
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart' show RemotePage;
@@ -93,6 +94,9 @@ void main() {
   testWidgets('RemotePage is built once and keeps its shared state; a tab switch rebuilds nothing',
       (tester) async {
     platformFFI.setBindingForTesting(_FakeBind());
+    // ServerModel starts no 500 ms polling timer in test mode.
+    common.isTest = true;
+    addTearDown(() => common.isTest = false);
     final logs = <String>[];
     final oldPrint = debugPrint;
     debugPrint = (String? m, {int? wrapWidth}) {
