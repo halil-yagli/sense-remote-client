@@ -640,5 +640,5 @@ void main() {
 
     // Sense Remote: goldens are rendered on the Linux runner; text rasterises
     // differently on macOS/Windows, so compare them only on Linux.
-  }, skip: !Platform.isLinux, tags: const ['golden']);
+  }, skip: !Platform.isLinux);
 }
