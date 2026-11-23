@@ -80,15 +80,23 @@ class SenseHeaderRow extends StatelessWidget {
         padding: const EdgeInsets.only(top: _kPadTop, bottom: _kPadBottom),
         child: Row(
           children: [
+            // The title takes all the room the status does not need; the status is
+            // capped at half the width. Two `Flexible`s would split the free space in
+            // half and cut a long title while space is left (G7).
             Expanded(
-              child: Row(
-                children: [
-                  Flexible(child: heading),
-                  if (status != null) ...[
-                    const SizedBox(width: _kGap),
-                    Flexible(child: SenseLiveStatus(text: status!, level: statusLevel)),
+              child: LayoutBuilder(
+                builder: (context, c) => Row(
+                  children: [
+                    Flexible(child: heading),
+                    if (status != null) ...[
+                      const SizedBox(width: _kGap),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: c.maxWidth.isFinite ? c.maxWidth / 2 : double.infinity),
+                        child: SenseLiveStatus(text: status!, level: statusLevel),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
             for (final action in trailing) ...[
