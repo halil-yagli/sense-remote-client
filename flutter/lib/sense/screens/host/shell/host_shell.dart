@@ -5,6 +5,7 @@
 // H1): Hakkında and the version open the Sense About inside this window.
 import 'package:flutter/widgets.dart';
 
+import '../../../router.dart' show senseShowSplash;
 import '../../../sense.dart';
 import '../../../strings/host.dart';
 import '../../controller/sense_update_view.dart' show SenseUpdateWatch;
@@ -36,7 +37,6 @@ class SenseHostShell extends StatefulWidget {
 
 class _SenseHostShellState extends State<SenseHostShell> {
   SenseHostNav _nav = SenseHostNav.thisComputer;
-  bool _splash = false;
 
   @override
   Widget build(BuildContext context) => SenseUpdateWatch(
@@ -44,14 +44,16 @@ class _SenseHostShellState extends State<SenseHostShell> {
           nav: _nav,
           version: senseAppVersion(),
           onNav: (n) => setState(() => _nav = n),
-          splash: _splash,
           strip: strip,
           child: _nav == SenseHostNav.about
               ? (widget.about ?? const SenseHostAbout())
               : (widget.page ??
                   SenseThisComputerPage(
                     role: SenseHomeRole.host,
-                    onRoleRestart: () => setState(() => _splash = true),
+                    // Sense Remote (D3b): the service stored the new role; the
+                    // opening screen covers the window while the app reopens.
+                    onRoleRestart: () =>
+                        senseShowSplash(message: SenseCommonStrings.splashRoleChange),
                   )),
         ),
       );

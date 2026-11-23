@@ -1,11 +1,11 @@
 // Sense Remote: role of this computer and the in-app role change (YH H2, S4;
-// plan §2.6). Bridge `main_sense_role_*` comes with D3b; until then the current
-// role is read from the applied role settings (real) and a change answers
-// "unavailable" (nothing is pretended).
+// plan §2.6). Bridge `main_sense_role_*` (D3b, `src/sense/role_change.rs`):
+// Sense sign-in with purpose `role` → panel `role-change` → the service applies
+// the signed role → the app reopens with it.
 import 'dart:convert';
 
 import '../../../../models/platform_model.dart';
-import '../../controller/sense_home_strings.dart' show SenseHomeRole, senseHomeRoleFrom;
+import '../../controller/sense_home_strings.dart' show SenseHomeRole;
 
 enum SenseRole { host, controller }
 
@@ -106,30 +106,19 @@ abstract class SenseRoleBackend {
 class SenseRoleBridge implements SenseRoleBackend {
   const SenseRoleBridge();
 
-  // TODO(D3b): main_sense_role_status — the role applied at start is read instead.
+  /// The stored role (Windows HKLM / macOS state.json) and a running change.
   @override
-  Future<String> status() async {
-    final role = senseHomeRoleFrom(
-        incomingOnly: bind.isIncomingOnly(),
-        outgoingOnly: bind.isOutgoingOnly(),
-        settingsDisabled: bind.isDisableSettings());
-    final t = senseRoleTarget(senseRolesOf(role));
-    return jsonEncode({
-      'roles': [if (t != null) t],
-      'pending': null,
-      'error': null,
-    });
-  }
+  Future<String> status() => bind.mainSenseRoleStatus();
 
-  // TODO(D3b): main_sense_role_change_begin
+  /// Sense sign-in with purpose `role` → `{pairing_code, url, expires_at}`.
   @override
-  Future<String> begin(String target) async => '{"error":"unavailable"}';
+  Future<String> begin(String target) => bind.mainSenseRoleChangeBegin(target: target);
 
-  // TODO(D3b): main_sense_role_change_status
+  /// `{stage: login|applying|restarting, error}`; the service applies the
+  /// panel's signed role and `restarting` means it is stored.
   @override
-  Future<String> changeStatus() async => '{"error":"unavailable"}';
+  Future<String> changeStatus() => bind.mainSenseRoleChangeStatus();
 
-  // TODO(D3b): main_sense_role_change_cancel
   @override
-  Future<void> cancel() async {}
+  Future<void> cancel() => bind.mainSenseRoleChangeCancel();
 }
