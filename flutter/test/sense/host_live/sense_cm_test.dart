@@ -1,13 +1,27 @@
-// Sense Remote: Host-side connection icon and card (sense_cm_*.dart).
-
+// Sense Remote: Host-side Sense icon and card (YH H3, H4; sense_cm_*.dart,
+// data/*). Geometry, edge tab, the icon's states, the card's boxes and the
+// chat wiring. Golden images: host_live_golden_test.dart.
 
 import 'package:dash_chat_2/dash_chat_2.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_hbb/sense/screens/host_live/sense_cm_page.dart';
-import 'package:flutter_hbb/sense/screens/host_live/sense_cm_geometry.dart';
-import 'package:flutter_hbb/sense/screens/host_live/sense_cm_window.dart';
 import 'package:flutter_hbb/models/server_model.dart';
+import 'package:flutter_hbb/sense/sense.dart';
+import 'package:flutter_hbb/sense/screens/host_live/data/call.dart';
+import 'package:flutter_hbb/sense/screens/host_live/data/chat.dart';
+import 'package:flutter_hbb/sense/screens/host_live/data/files.dart';
+import 'package:flutter_hbb/sense/screens/host_live/data/overlay.dart';
+import 'package:flutter_hbb/sense/screens/host_live/sense_cm_geometry.dart';
+import 'package:flutter_hbb/sense/screens/host_live/sense_cm_page.dart';
+import 'package:flutter_hbb/sense/screens/host_live/sense_cm_window.dart';
+import 'package:flutter_hbb/sense/screens/shared/chat/chat_call.dart';
+import 'package:flutter_hbb/sense/screens/shared/chat/chat_composer.dart';
+import 'package:flutter_hbb/sense/screens/shared/chat/chat_controller.dart';
+import 'package:flutter_hbb/sense/screens/shared/chat/chat_entry.dart';
+import 'package:flutter_hbb/sense/strings/host_live.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../chat/support.dart';
 
 // 1920x1080 monitor with a 40 px task bar at the bottom.
 const work = Rect.fromLTWH(0, 0, 1920, 1040);
@@ -19,51 +33,6 @@ Client client(int id, String name,
     bool audio = true}) {
   return Client(
       id, authorized, false, false, name, '12345$id', keyboard, clipboard, audio);
-}
-
-class Calls {
-  final List<String> log = [];
-  SenseCmActions actions() => SenseCmActions(
-        onHide: () => log.add('hide'),
-        onSelect: (c) => log.add('select ${c.id}'),
-        onEnd: (c) => log.add('end ${c.id}'),
-        onAccept: (c) => log.add('accept ${c.id}'),
-        onReject: (c) => log.add('reject ${c.id}'),
-        onCloseEnded: (c) => log.add('close ${c.id}'),
-        onVoice: (c, a) => log.add('voice ${c.id} $a'),
-        onVoiceEnd: (c) => log.add('voice-end ${c.id}'),
-        onSend: (c, t) => log.add('send ${c.id} $t'),
-      );
-}
-
-Future<void> pumpPanel(
-  WidgetTester tester, {
-  required List<Client> clients,
-  Client? selected,
-  required Calls calls,
-  List<ChatMessage> messages = const [],
-  bool canAccept = true,
-  TextEditingController? controller,
-}) async {
-  tester.view.physicalSize = kSenseCmPanelSize;
-  tester.view.devicePixelRatio = 1;
-  addTearDown(tester.view.reset);
-  await tester.pumpWidget(MaterialApp(
-    home: Scaffold(
-      body: SenseCmPanel(
-        clients: clients,
-        selected: selected ?? clients.first,
-        connectedFor: (_) => const Duration(minutes: 3, seconds: 42),
-        messages: messages,
-        myUserId: 'me',
-        canAccept: canAccept,
-        chatController: controller ?? TextEditingController(),
-        chatFocus: FocusNode(),
-        actions: calls.actions(),
-      ),
-    ),
-  ));
-  await tester.pump();
 }
 
 void main() {
@@ -302,136 +271,454 @@ void main() {
     });
   });
 
-  group('icon', () {
-    testWidgets('shows the live dot, the unread badge and opens on tap',
+  group('edge tab geometry (H3 "Kenara saklı")', () {
+    const icon = kSenseCmIconSize;
+
+    test('the icon is 64 x 64 and the tab window 24 x 52 (tab 18 wide)', () {
+      expect(icon, const Size(64, 64));
+      expect(kSenseCmEdgeSize, const Size(24, 52));
+      expect(kSenseCmEdgeTabWidth, 18);
+    });
+
+    test('the default place is bottom right, 14 above the task bar', () {
+      expect(senseCmDefaultIconRect(work, icon, kSenseCmMargin),
+          const Rect.fromLTWH(1842, 962, 64, 64));
+    });
+
+    test('dropped near the left or right edge it goes to that edge', () {
+      expect(senseCmEdgeFor(const Rect.fromLTWH(4, 300, 64, 64), work, 12),
+          SenseCmEdge.left);
+      expect(senseCmEdgeFor(const Rect.fromLTWH(-30, 300, 64, 64), work, 12),
+          SenseCmEdge.left);
+      expect(senseCmEdgeFor(const Rect.fromLTWH(1850, 300, 64, 64), work, 12),
+          SenseCmEdge.right);
+      expect(senseCmEdgeFor(const Rect.fromLTWH(900, 300, 64, 64), work, 12),
+          isNull);
+      // The default corner (14 from the edge) is not an edge drop.
+      expect(
+          senseCmEdgeFor(
+              senseCmDefaultIconRect(work, icon, kSenseCmMargin), work, 12),
+          isNull);
+    });
+
+    test('the tab hugs the edge and the icon comes back beside it', () {
+      const dropped = Rect.fromLTWH(1855, 400, 64, 64);
+      final tab = senseCmEdgeRect(
+          dropped, work, SenseCmEdge.right, kSenseCmEdgeSize, 6);
+      expect(tab, const Rect.fromLTWH(1896, 406, 24, 52));
+      final back = senseCmIconFromEdge(
+          tab, work, SenseCmEdge.right, icon, kSenseCmEdgeInset, 6);
+      expect(back, const Rect.fromLTWH(1838, 400, 64, 64));
+
+      final left = senseCmEdgeRect(const Rect.fromLTWH(2, 1000, 64, 64), work,
+          SenseCmEdge.left, kSenseCmEdgeSize, 6);
+      // Kept inside the work area (above the task bar).
+      expect(left, const Rect.fromLTWH(0, 988, 24, 52));
+      expect(
+          senseCmIconFromEdge(
+              left, work, SenseCmEdge.left, icon, kSenseCmEdgeInset, 6),
+          const Rect.fromLTWH(18, 976, 64, 64));
+    });
+
+    test('at 150 % the tab and the icon scale with the monitor', () {
+      const scale = 1.5;
+      const area = Rect.fromLTWH(0, 0, 2880, 1560);
+      final rect =
+          senseCmDefaultIconRect(area, icon * scale, kSenseCmMargin * scale);
+      expect(rect.size, const Size(96, 96));
+      final tab = senseCmEdgeRect(
+          rect, area, SenseCmEdge.right, kSenseCmEdgeSize * scale, 6 * scale);
+      expect(tab.size, const Size(36, 78));
+      expect(tab.right, area.right);
+    });
+  });
+
+  group('data', () {
+    test('sense_recording is read from the clients JSON', () {
+      expect(
+          senseParseRecording(
+              '[{"id":3,"sense_recording":true},{"id":4},{"id":"x"}]'),
+          {3: true, 4: false});
+      expect(senseParseRecording('nope'), isEmpty);
+      expect(senseParseRecording('{}'), isEmpty);
+    });
+
+    test('the who line reads like the prototype', () {
+      final c = client(1, 'Halil Y.', clipboard: false, audio: false)
+        ..file = true;
+      expect(senseHostPermissions(c), ['ekran', 'fare ve klavye', 'dosya']);
+      expect(senseHostWhoLine(c, const Duration(minutes: 14)),
+          'Halil Y. · 14 dk · ekran, fare ve klavye, dosya');
+      expect(SenseHostLiveStrings.minutes(const Duration(seconds: 20)), '1 dk');
+      expect(SenseHostLiveStrings.minutes(const Duration(minutes: 65)),
+          '1 sa 05 dk');
+      expect(senseHostWhoLine(client(2, 'Ali', keyboard: false), null),
+          'Ali · ekran, pano, ses');
+    });
+
+    test('the clock counts the connection and the recording', () {
+      var now = DateTime(2026, 11, 23, 17, 0);
+      final clock = SenseHostClock(now: () => now);
+      final c = client(1, 'Halil');
+      clock.update([c]);
+      now = now.add(const Duration(minutes: 1, seconds: 15));
+      expect(clock.connectedFor(1), const Duration(minutes: 1, seconds: 15));
+      expect(clock.recordingFor(1), isNull);
+      c.senseRecording = true;
+      clock.update([c]);
+      now = now.add(const Duration(minutes: 1, seconds: 15));
+      clock.update([c]);
+      expect(clock.recordingFor(1), const Duration(minutes: 1, seconds: 15));
+      c.senseRecording = false;
+      clock.update([c]);
+      expect(clock.recordingFor(1), isNull);
+      clock.update(const []);
+      expect(clock.connectedFor(1), isNull);
+    });
+
+    test('the recording watch hands every connection over', () async {
+      final seen = <String>[];
+      final watch = SenseHostRecordingWatch(
+        onRecording: (id, on) => seen.add('$id $on'),
+        readState: () async => '[{"id":1,"sense_recording":true}]',
+      );
+      await watch.poll();
+      expect(seen, ['1 true']);
+      watch.stop();
+    });
+
+    test('the server model keeps the recording flag', () {
+      final c = Client.fromJson({
+        'id': 1,
+        'authorized': true,
+        'is_file_transfer': false,
+        'is_view_camera': false,
+        'port_forward': '',
+        'name': 'Halil',
+        'peer_id': '1',
+        'keyboard': true,
+        'clipboard': true,
+        'audio': true,
+        'file': true,
+        'restart': false,
+        'recording': false,
+        'block_input': false,
+        'disconnected': false,
+        'from_switch': false,
+        'in_voice_call': false,
+        'incoming_voice_call': false,
+        'sense_recording': true,
+      });
+      expect(c.senseRecording, isTrue);
+      expect(c.toJson()['sense_recording'], isTrue);
+    });
+
+    test('Controller messages reach the card once, oldest first', () {
+      final sent = <String>[];
+      final chat = makeController(sentTexts: sent);
+      final them = ChatUser(id: 'peer', firstName: 'Sense Department');
+      final me = ChatUser(id: 'me');
+      final list = [
+        ChatMessage(text: 'ikinci', user: them, createdAt: DateTime(2026, 1, 1, 10, 2)),
+        ChatMessage(text: 'benim', user: me, createdAt: DateTime(2026, 1, 1, 10, 1)),
+        ChatMessage(text: 'ilk', user: them, createdAt: DateTime(2026, 1, 1, 10, 0)),
+      ];
+      var fed = senseHostFeedMessages(chat, list, 'me', 0);
+      expect(fed, 2);
+      expect([for (final e in chat.entries) (e as SenseChatText).text],
+          ['ilk', 'ikinci']);
+      expect(chat.entries.every((e) => !e.mine), isTrue);
+      fed = senseHostFeedMessages(chat, list, 'me', fed);
+      expect(chat.entries, hasLength(2));
+      expect(chat.unread, 2);
+    });
+
+    test('call phase follows RustDesk flags', () {
+      expect(
+          senseHostCallPhase(
+              inCall: true, incoming: false, current: SenseCallPhase.idle),
+          SenseCallPhase.active);
+      expect(
+          senseHostCallPhase(
+              inCall: false, incoming: true, current: SenseCallPhase.idle),
+          SenseCallPhase.incoming);
+      expect(
+          senseHostCallPhase(
+              inCall: false, incoming: false, current: SenseCallPhase.calling),
+          SenseCallPhase.calling);
+      expect(
+          senseHostCallPhase(
+              inCall: false, incoming: false, current: SenseCallPhase.active),
+          SenseCallPhase.idle);
+    });
+
+    test('Host calling and Host files wait for the bridge (D3d2)', () async {
+      expect(SenseHostChatCall.canStart, isFalse);
+      expect(SenseHostChatFiles.available, isFalse);
+      final files = SenseHostChatFiles(connId: 1);
+      expect(await files.send(['a.txt']), isEmpty);
+      expect(await files.jobs(), isEmpty);
+    });
+
+    test('the card shows the waiting, then the live connection', () {
+      final ended = client(1, 'A')..disconnected = true;
+      final live = client(2, 'B');
+      final waiting = client(3, 'C', authorized: false);
+      expect(senseCmPick([ended, live]).id, 2);
+      expect(senseCmPick([live, waiting]).id, 3);
+      expect(senseCmPick([ended]).id, 1);
+    });
+  });
+
+  group('icon (H3)', () {
+    testWidgets('logo only: live dot, no badge, no ring, no record dot',
         (tester) async {
       var taps = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: Center(
-          child: SenseCmIcon(live: true, unread: 2, onTap: () => taps++),
-        ),
-      ));
-      expect(find.byKey(const ValueKey('sense-cm-live')), findsOneWidget);
-      expect(find.text('2'), findsOneWidget);
-      expect(tester.getSize(find.byKey(const ValueKey('sense-cm-icon'))),
-          kSenseCmIconSize);
-      await tester.tap(find.byKey(const ValueKey('sense-cm-icon')));
+      await pumpBox(tester, kSenseCmIconSize,
+          SenseHostIcon(onTap: () => taps++));
+      expect(tester.getSize(find.byKey(const Key('sense-host-icon'))),
+          const Size(64, 64));
+      expect(find.byKey(const Key('sense-host-icon-live')), findsOneWidget);
+      expect(find.byKey(const Key('sense-host-icon-badge')), findsNothing);
+      expect(find.byKey(const Key('sense-host-icon-ring')), findsNothing);
+      expect(find.byKey(const Key('sense-host-icon-rec')), findsNothing);
+      // No plate, no frame (#4): nothing paints a box behind the mark.
+      final boxes = tester
+          .widgetList<Container>(find.descendant(
+              of: find.byKey(const Key('sense-host-icon')),
+              matching: find.byType(Container)))
+          .where((c) =>
+              c.decoration is BoxDecoration &&
+              (c.decoration as BoxDecoration).shape == BoxShape.rectangle &&
+              (c.decoration as BoxDecoration).borderRadius == null);
+      expect(boxes, isEmpty);
+      await tester.tap(find.byKey(const Key('sense-host-icon')));
       expect(taps, 1);
     });
 
-    testWidgets('no badge without unread messages', (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: Center(child: SenseCmIcon(live: false, unread: 0, onTap: () {})),
-      ));
-      expect(find.byKey(const ValueKey('sense-cm-unread')), findsNothing);
+    testWidgets('unread, call, transfer and recording', (tester) async {
+      await pumpBox(
+          tester,
+          kSenseCmIconSize,
+          SenseHostIcon(
+            onTap: () {},
+            unread: 3,
+            inCall: true,
+            transferring: true,
+            recording: true,
+          ));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('3'), findsOneWidget);
+      final badge = tester.getTopLeft(find.byKey(const Key('sense-host-icon-badge')));
+      expect(badge.dx, lessThan(32), reason: 'badge is top left');
+      final rec = tester.getTopLeft(find.byKey(const Key('sense-host-icon-rec')));
+      expect(rec.dx, lessThan(32), reason: 'record dot is bottom left');
+      expect(rec.dy, greaterThan(32));
+      final live = tester.getTopLeft(find.byKey(const Key('sense-host-icon-busy')));
+      expect(live.dx, greaterThan(32), reason: 'the dot is top right');
+      expect(find.byKey(const Key('sense-host-icon-ring')), findsOneWidget);
+    });
+
+    testWidgets('a drag starts the window drag, not a tap', (tester) async {
+      var taps = 0;
+      var drags = 0;
+      await pumpBox(
+          tester,
+          const Size(300, 300),
+          Center(
+            child: SenseHostIcon(onTap: () => taps++, onDragStart: () => drags++),
+          ));
+      await tester.drag(find.byKey(const Key('sense-host-icon')), const Offset(60, 0));
+      expect(drags, 1);
+      expect(taps, 0);
+    });
+
+    testWidgets('a 150 % screen keeps the icon logo sized', (tester) async {
+      tester.view.physicalSize = const Size(96, 96);
+      tester.view.devicePixelRatio = 1.5;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(app(SenseHostIcon(onTap: () {}), still: true));
+      expect(tester.getSize(find.byKey(const Key('sense-host-icon'))),
+          const Size(64, 64));
+      expect(tester.getSize(find.byType(SenseMark).last),
+          const Size(SenseSizes.chatIconLogoWidth, SenseSizes.chatIconLogoHeight));
     });
   });
 
-  group('card', () {
-    testWidgets('who, time, permissions, chat, end and hide', (tester) async {
-      final calls = Calls();
-      final controller = TextEditingController();
-      await pumpPanel(tester,
-          clients: [client(1, 'Halil')],
-          calls: calls,
-          controller: controller,
-          messages: [
-            ChatMessage(
-                text: 'Merhaba',
-                user: ChatUser(id: '123451'),
-                createdAt: DateTime(2026)),
-          ]);
-      expect(find.text('Halil'), findsOneWidget);
-      expect(find.text('bağlı · 03:42'), findsOneWidget);
-      expect(find.text('klavye · fare'), findsOneWidget);
-      expect(find.text('pano'), findsOneWidget);
-      expect(find.text('ses'), findsOneWidget);
-      expect(find.text('Merhaba'), findsOneWidget);
-      expect(find.text('Kabul et'), findsNothing);
-      // One connection: no list.
-      expect(find.byKey(const ValueKey('sense-cm-row-1')), findsNothing);
-
-      await tester.enterText(
-          find.byKey(const ValueKey('sense-cm-input')), 'Tamam');
-      await tester.tap(find.byKey(const ValueKey('sense-cm-send')));
-      await tester.tap(find.byKey(const ValueKey('sense-cm-end')));
-      await tester.tap(find.byKey(const ValueKey('sense-cm-hide')));
-      expect(calls.log, ['send 1 Tamam', 'end 1', 'hide']);
-      expect(tester.takeException(), isNull);
+  group('edge tab (H3)', () {
+    testWidgets('18 wide, 24 under the mouse; a press brings the icon back',
+        (tester) async {
+      var taps = 0;
+      await pumpBox(tester, kSenseCmEdgeSize,
+          SenseHostEdgeTab(edge: SenseCmEdge.right, onTap: () => taps++));
+      final tab = find.byKey(const Key('sense-host-edge'));
+      expect(tester.getSize(tab), const Size(18, 52));
+      expect(tester.getTopRight(tab).dx, 24, reason: 'hugs the right edge');
+      expect(find.byType(SenseStatusDot), findsOneWidget);
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      addTearDown(gesture.removePointer);
+      await gesture.moveTo(tester.getCenter(tab));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(tab), const Size(24, 52));
+      await tester.tap(tab);
+      expect(taps, 1);
     });
 
-    testWidgets('an empty message is not sent', (tester) async {
-      final calls = Calls();
-      await pumpPanel(tester, clients: [client(1, 'Halil')], calls: calls);
-      await tester.enterText(find.byKey(const ValueKey('sense-cm-input')), '  ');
-      await tester.tap(find.byKey(const ValueKey('sense-cm-send')));
-      expect(calls.log, isEmpty);
+    testWidgets('on the left edge it hugs the left side', (tester) async {
+      await pumpBox(tester, kSenseCmEdgeSize,
+          SenseHostEdgeTab(edge: SenseCmEdge.left, onTap: () {}));
+      expect(tester.getTopLeft(find.byKey(const Key('sense-host-edge'))).dx, 0);
+    });
+  });
+
+  group('card (H4)', () {
+    testWidgets('header, who box, end, minimize; no RustDesk name',
+        (tester) async {
+      final calls = <String>[];
+      final chat = makeController();
+      await pumpCard(tester, client(1, 'Halil Y.'), chat, calls);
+      expect(find.text('Sense Remote'), findsOneWidget);
+      expect(find.text('Sense Department ile'), findsOneWidget);
+      expect(find.text('Sense Department bağlı'), findsOneWidget);
+      expect(find.text('Halil Y. · 14 dk · ekran, fare ve klavye, pano, ses'),
+          findsOneWidget);
+      expect(find.text('Sense Department ile sohbet'), findsOneWidget);
+      expect(find.byKey(const Key('sense-host-recording')), findsNothing);
+      expect(find.byKey(const Key('sense-host-incoming')), findsNothing);
+      expect(find.textContaining('RustDesk'), findsNothing);
+      await tester.tap(find.byKey(const Key('sense-host-end')));
+      await tester.tap(find.byKey(const Key('sense-host-minimize')));
+      await tester.tap(find.byKey(const Key('sense-host-header')));
+      expect(calls, ['end', 'minimize', 'minimize']);
+    });
+
+    testWidgets('recording strip shows the running time', (tester) async {
+      await pumpCard(tester, client(1, 'Halil Y.'), makeController(), [],
+          recording: const Duration(minutes: 1, seconds: 15));
+      expect(find.text('Bu bağlantı kaydediliyor · 01:15'), findsOneWidget);
+    });
+
+    testWidgets('incoming voice call: Reddet / Kabul et', (tester) async {
+      final calls = <String>[];
+      final chat = makeController();
+      chat.setPhase(SenseCallPhase.incoming);
+      await pumpCard(tester, client(1, 'Halil Y.'), chat, calls);
+      expect(find.text('Sense Department sesli arıyor'), findsOneWidget);
+      expect(find.textContaining('görüntülü'), findsNothing, reason: '#67');
+      await tester.tap(find.byKey(const Key('sense-host-call-reject')));
+      await tester.tap(find.byKey(const Key('sense-host-call-accept')));
+      expect(calls, ['call false', 'call true']);
+    });
+
+    testWidgets('in a call: Aramayı bitir and the Mikrofon button',
+        (tester) async {
+      final call = FakeCall();
+      final chat = makeController(call: call);
+      chat.setPhase(SenseCallPhase.active);
+      await pumpCard(tester, client(1, 'Halil Y.'), chat, []);
+      expect(find.byKey(const Key('sense-call-end')), findsOneWidget);
+      expect(find.byType(SenseMicButton), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-call-end')));
+      await tester.pump();
+      expect(call.ends, 1);
+    });
+
+    testWidgets('Ara is faded until the Host can call (D3d2)', (tester) async {
+      final call = FakeCall();
+      final chat = makeController(call: call);
+      await pumpCard(tester, client(1, 'Halil Y.'), chat, []);
+      final ara = tester.widget<SenseButton>(find.byKey(const Key('sense-call-start')));
+      expect(ara.onPressed, isNull);
+      await pumpCard(tester, client(1, 'Halil Y.'), chat, [], canCall: true);
+      await tester.tap(find.byKey(const Key('sense-call-start')));
+      await tester.pump();
+      expect(call.starts, 1);
+    });
+
+    testWidgets('chat: send, the other side, wipe note; no ataç yet',
+        (tester) async {
+      final sent = <String>[];
+      final chat = makeController(sentTexts: sent);
+      chat.receiveText('Merhaba, bağlandım.');
+      await pumpCard(tester, client(1, 'Halil Y.'), chat, []);
+      expect(find.text('Merhaba, bağlandım.'), findsOneWidget);
+      expect(find.textContaining('Sense Department · '), findsOneWidget);
+      expect(find.byKey(const Key('sense-chat-wipe-note')), findsOneWidget);
+      expect(find.byKey(const Key('sense-chat-attach')), findsNothing);
+      await tester.enterText(find.byKey(const Key('sense-chat-input')), 'Ekran 2 takılıyor');
+      await tester.tap(find.byKey(const Key('sense-chat-send')));
+      await tester.pump();
+      expect(sent, ['Ekran 2 takılıyor']);
+      expect(find.text('Ekran 2 takılıyor'), findsOneWidget);
     });
 
     testWidgets('a waiting peer can be accepted or rejected', (tester) async {
-      final calls = Calls();
-      await pumpPanel(tester,
-          clients: [client(5, 'Ekip', authorized: false)], calls: calls);
-      expect(find.text('Bu bilgisayara bağlanmak istiyor.'), findsOneWidget);
-      expect(find.byKey(const ValueKey('sense-cm-input')), findsNothing);
-      expect(find.byKey(const ValueKey('sense-cm-end')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('sense-cm-accept')));
-      await tester.tap(find.byKey(const ValueKey('sense-cm-reject')));
-      expect(calls.log, ['accept 5', 'reject 5']);
+      final calls = <String>[];
+      await pumpCard(tester, client(1, 'Halil Y.', authorized: false),
+          makeController(), calls);
+      expect(find.text('Halil Y. bağlanmak istiyor'), findsOneWidget);
+      expect(find.byType(SenseChatComposer), findsNothing);
+      await tester.tap(find.byKey(const Key('sense-host-accept')));
+      await tester.tap(find.byKey(const Key('sense-host-reject')));
+      expect(calls, ['accept', 'reject']);
     });
 
     testWidgets('password-only mode offers no "Kabul et"', (tester) async {
-      await pumpPanel(tester,
-          clients: [client(5, 'Ekip', authorized: false)],
-          calls: Calls(),
+      await pumpCard(tester, client(1, 'Halil Y.', authorized: false),
+          makeController(), [],
           canAccept: false);
-      expect(find.byKey(const ValueKey('sense-cm-accept')), findsNothing);
-      expect(find.byKey(const ValueKey('sense-cm-reject')), findsOneWidget);
-    });
-
-    testWidgets('several connections are listed and selectable',
-        (tester) async {
-      final calls = Calls();
-      final a = client(1, 'Halil');
-      final b = client(2, 'Ayşe')..unreadChatMessageCount.value = 3;
-      await pumpPanel(tester, clients: [a, b], selected: a, calls: calls);
-      expect(find.byKey(const ValueKey('sense-cm-row-1')), findsOneWidget);
-      expect(find.byKey(const ValueKey('sense-cm-row-2')), findsOneWidget);
-      expect(find.text('3'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('sense-cm-row-2')));
-      expect(calls.log, ['select 2']);
-      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('sense-host-accept')), findsNothing);
+      expect(find.byKey(const Key('sense-host-reject')), findsOneWidget);
     });
 
     testWidgets('an ended connection can be closed', (tester) async {
-      final calls = Calls();
-      await pumpPanel(tester,
-          clients: [client(9, 'Halil')..disconnected = true], calls: calls);
-      expect(find.text('Bağlantı bitti.'), findsOneWidget);
-      expect(find.byKey(const ValueKey('sense-cm-end')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('sense-cm-close')));
-      expect(calls.log, ['close 9']);
-    });
-
-    testWidgets('incoming voice call', (tester) async {
-      final calls = Calls();
-      await pumpPanel(tester,
-          clients: [client(4, 'Halil')..incomingVoiceCall = true],
-          calls: calls);
-      expect(find.text('Sesli görüşme isteği'), findsOneWidget);
-      await tester.tap(find.text('Kabul et'));
-      expect(calls.log, ['voice 4 true']);
-    });
-
-    testWidgets('the brand reads Sense Remote, never RustDesk',
-        (tester) async {
-      await pumpPanel(tester, clients: [client(1, 'Halil')], calls: Calls());
-      final texts = tester
-          .widgetList<RichText>(find.byType(RichText))
-          .map((t) => t.text.toPlainText())
-          .join('\n');
-      expect(texts, contains('Sense Remote'));
-      expect(texts.toLowerCase(), isNot(contains('rustdesk')));
+      final calls = <String>[];
+      await pumpCard(tester, client(1, 'Halil Y.')..disconnected = true,
+          makeController(), calls);
+      expect(find.text('Bağlantı bitti'), findsOneWidget);
+      expect(find.byKey(const Key('sense-host-end')), findsNothing);
+      await tester.tap(find.byKey(const Key('sense-host-close')));
+      expect(calls, ['close']);
     });
   });
+}
+
+Future<void> pumpBox(WidgetTester tester, Size size, Widget child) async {
+  setWindow(tester, size);
+  await tester.pumpWidget(app(child, still: true));
+  await tester.pump();
+}
+
+Future<void> pumpCard(
+  WidgetTester tester,
+  Client c,
+  SenseChatController chat,
+  List<String> calls, {
+  Duration? recording,
+  bool canAccept = true,
+  bool canCall = false,
+}) async {
+  setWindow(tester, kSenseCmPanelSize);
+  await tester.pumpWidget(app(
+    SenseHostCard(
+      client: c,
+      chat: chat,
+      whoLine: senseHostWhoLine(c, const Duration(minutes: 14)),
+      recording: recording,
+      canAccept: canAccept,
+      canCall: canCall,
+      animateIn: false,
+      actions: SenseHostCardActions(
+        onMinimize: () => calls.add('minimize'),
+        onEnd: () => calls.add('end'),
+        onAccept: () => calls.add('accept'),
+        onReject: () => calls.add('reject'),
+        onCloseEnded: () => calls.add('close'),
+        onAnswerCall: (a) => calls.add('call $a'),
+      ),
+    ),
+    still: true,
+  ));
+  await tester.pump();
 }

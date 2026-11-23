@@ -1,6 +1,6 @@
-// Sense Remote: geometry of the Host-side connection icon (prototype
-// Calisma/prototip/uygulama.html, screen 5). Pure functions only, so the
-// placement rules are covered by unit tests without a real window.
+// Sense Remote: geometry of the Host-side Sense icon (YH H3, H4; prototype
+// SENSE-REMOTE_PROTOTIP.html `#hico`, `.hedge`, `#hside`). Pure functions only,
+// so the placement rules are covered by unit tests without a real window.
 //
 // All rectangles are in the same unit: physical pixels on Windows and points
 // on macOS, which is what `window_size` reports for monitors there.
@@ -8,14 +8,32 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-/// Logical size of the collapsed icon window.
-const Size kSenseCmIconSize = Size(52, 52);
+import '../../tokens/sense_tokens.dart';
 
-/// Logical size of the open card (who is connected, permissions, chat, end).
-const Size kSenseCmPanelSize = Size(328, 500);
+/// Logical size of the collapsed icon window: the 64 × 64 area of the
+/// transparent logo (`.chatico`), no plate, no frame (#4).
+const Size kSenseCmIconSize = Size(SenseSizes.chatIcon, SenseSizes.chatIcon);
 
-/// Logical gap between the icon and the edge of the work area.
-const double kSenseCmMargin = 16;
+/// Logical size of the open card (H4): popup width, room for the strips, the
+/// call row and a few messages. Smaller work areas clamp it.
+const Size kSenseCmPanelSize = Size(SenseSizes.popupWidth, 680);
+
+/// Logical gap between the icon and the edge of the work area (prototype 14).
+const double kSenseCmMargin = 14;
+
+/// Edge tab (H3 "Kenara saklı", `.hedge`): 18 × 52, 24 wide under the mouse.
+/// The window is the hover width so the tab can grow inside it.
+const double kSenseCmEdgeTabWidth = 18;
+const Size kSenseCmEdgeSize = Size(24, 52);
+
+/// An icon dropped this close to the left or right edge of its work area goes
+/// to the edge as a tab.
+const double kSenseCmEdgeSnap = 12;
+
+/// The tab sits a little lower than the icon was (`HS.ey = HS.ico.y + 6`) and
+/// the icon comes back this far from the edge (`HS.ico.x = 18`).
+const double kSenseCmEdgeTopShift = 6;
+const double kSenseCmEdgeInset = 18;
 
 /// Local option that remembers where the user left the icon ("x,y", in the
 /// window unit of the platform).
@@ -88,8 +106,46 @@ Rect senseCmIconRectFromPanel(
       Rect.fromLTWH(left, top, icon.width, icon.height), workArea);
 }
 
+/// Corner radius of the Windows click region around the icon: the clear
+/// corners of the 64 × 64 area outside it let clicks through; the unread badge
+/// (top left) and the dots stay inside it.
+const double kSenseCmIconRegionRadius = 16;
+
+/// Which screen edge holds the tab.
+enum SenseCmEdge { left, right }
+
+/// The edge an icon at [icon] was dropped on, or null when it is not close to
+/// one (H3: "ekran kenarına bırakınca saklanır").
+SenseCmEdge? senseCmEdgeFor(Rect icon, Rect workArea, double snap) {
+  if (icon.left <= workArea.left + snap) return SenseCmEdge.left;
+  if (icon.right >= workArea.right - snap) return SenseCmEdge.right;
+  return null;
+}
+
+/// Window rectangle of the edge tab for an icon dropped at [icon].
+Rect senseCmEdgeRect(
+    Rect icon, Rect workArea, SenseCmEdge edge, Size tab, double topShift) {
+  final left =
+      edge == SenseCmEdge.left ? workArea.left : workArea.right - tab.width;
+  return clampSenseCmRect(
+      Rect.fromLTWH(left, icon.top + topShift, tab.width, tab.height),
+      workArea);
+}
+
+/// Icon rectangle when the tab at [tab] is pressed: back beside the edge, at
+/// the height it was hidden from.
+Rect senseCmIconFromEdge(Rect tab, Rect workArea, SenseCmEdge edge, Size icon,
+    double inset, double topShift) {
+  final left = edge == SenseCmEdge.left
+      ? workArea.left + inset
+      : workArea.right - inset - icon.width;
+  return clampSenseCmRect(
+      Rect.fromLTWH(left, tab.top - topShift, icon.width, icon.height),
+      workArea);
+}
+
 /// Sense Remote: icon mode per platform. Win7 compatible mode keeps a normal
-/// title bar, where a 52 px window would not fit, so it keeps the old window.
+/// title bar, where a 64 px window would not fit, so it keeps the old window.
 bool senseCmEnabledOn(
     {required bool windows, required bool macOS, required bool compatibleUi}) {
   return macOS || (windows && !compatibleUi);
@@ -97,7 +153,7 @@ bool senseCmEnabledOn(
 
 /// Sense Remote: how many window units one logical pixel is. Windows places
 /// windows in physical pixels; macOS in points, which already are logical
-/// (a Retina screen reports scale 2 but a 52 pt window is still 52 wide).
+/// (a Retina screen reports scale 2 but a 64 pt window is still 64 wide).
 double senseCmUnitScale(
     {required bool pointUnits, required double scaleFactor}) {
   return pointUnits ? 1.0 : scaleFactor;
