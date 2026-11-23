@@ -288,6 +288,8 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
     }
 
     fn remove_connection(&self, id: i32, close: bool) {
+        // Sense Remote (S12): the Host card's file list of this connection is gone.
+        crate::sense::chat_file::host_forget(id);
         if close {
             CLIENTS.write().unwrap().remove(&id);
         } else {
@@ -325,6 +327,12 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn show_elevation(&self, show: bool) {
         self.ui_handler.show_elevation(show);
+    }
+
+    // Sense Remote (S5): RustDesk's transfer log also moves the Host card's file rows.
+    fn file_transfer_log(&self, action: &str, log: &str) {
+        crate::sense::chat_file::host_transfer_log(action, log);
+        self.ui_handler.file_transfer_log(action, log);
     }
 
     // Sense Remote (S7-b).
@@ -392,6 +400,31 @@ pub fn close(id: i32) {
     if let Some(client) = CLIENTS.read().unwrap().get(&id) {
         allow_err!(client.tx.send(Data::Close));
     };
+}
+
+/// Sense Remote (S5, O11): a request of the Host card (file offer, call start) to connection
+/// `id`. False when that connection is gone.
+pub fn sense_to_conn(id: i32, data: Data) -> bool {
+    #[cfg(not(any(target_os = "ios")))]
+    if let Some(client) = CLIENTS.read().unwrap().get(&id) {
+        return !client.disconnected && client.tx.send(data).is_ok();
+    }
+    #[cfg(any(target_os = "ios"))]
+    let _ = (id, data);
+    false
+}
+
+/// Sense Remote (O11): a call setting of the Host card (microphone off, sound output) to every
+/// connection; nothing when there is none (the Controller app).
+pub fn sense_to_all(data: Data) {
+    #[cfg(not(any(target_os = "ios")))]
+    for client in CLIENTS.read().unwrap().values() {
+        if !client.disconnected {
+            allow_err!(client.tx.send(data.clone()));
+        }
+    }
+    #[cfg(any(target_os = "ios"))]
+    let _ = data;
 }
 
 /// Like `close`, but says the CM's WINDOW closed rather than a person disconnecting this peer.
@@ -635,10 +668,10 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                         file_timer = crate::rustdesk_interval(time::interval(MILLI5));
                                     }
                                     let log = fs::serialize_transfer_jobs(&write_jobs);
-                                    self.cm.ui_handler.file_transfer_log("transfer", &log);
+                                    self.cm.file_transfer_log("transfer", &log); // Sense Remote (S5)
                                 }
                                 Data::FileTransferLog((action, log)) => {
-                                    self.cm.ui_handler.file_transfer_log(&action, &log);
+                                    self.cm.file_transfer_log(&action, &log); // Sense Remote (S5)
                                 }
                                 #[cfg(target_os = "windows")]
                                 Data::ClipboardFile(_clip) => {
@@ -731,6 +764,11 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                         }
                                     }
                                 }
+                                // Sense Remote (S5, O11): call level and offer results from the
+                                // connection.
+                                Data::Config((name, value)) => {
+                                    crate::sense::chat_file::host_from_conn(self.conn_id, &name, value.as_deref());
+                                }
                                 _ => {
 
                                 }
@@ -813,7 +851,7 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                     }
                 },
                 Some(job_log) = rx_log.recv() => {
-                    self.cm.ui_handler.file_transfer_log("transfer", &job_log);
+                    self.cm.file_transfer_log("transfer", &job_log); // Sense Remote (S5)
                 }
                 _ = file_timer.tick() => {
                     if !self.read_jobs.is_empty() {
@@ -822,7 +860,7 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                             log::error!("Error processing read jobs: {}", e);
                         }
                         let log = fs::serialize_transfer_jobs(&self.read_jobs);
-                        self.cm.ui_handler.file_transfer_log("transfer", &log);
+                        self.cm.file_transfer_log("transfer", &log); // Sense Remote (S5)
                     } else {
                         file_timer = crate::rustdesk_interval(time::interval_at(Instant::now() + SEC30, SEC30));
                     }
@@ -1108,6 +1146,7 @@ async fn handle_fs(
                     _ => None,
                 })
                 .collect();
+            let sense_chat = crate::sense::chat_file::parse_incoming(&path).is_some();
             let path = crate::sense::chat_file::host_resolve(path, &mut files, file_num, &busy);
             // Convert files to FileEntry
             let file_entries: Vec<FileEntry> = files
@@ -1139,6 +1178,10 @@ async fn handle_fs(
             job.total_size = total_size;
             job.conn_id = conn_id;
             write_jobs.push(job);
+            // Sense Remote (S5): the Host card lists the chat file (where it is saved).
+            if sense_chat {
+                crate::sense::chat_file::host_job_in(conn_id, id, &path, total_size);
+            }
         }
         ipc::FS::CancelWrite { id } => {
             if let Some(job) = fs::remove_job(id, write_jobs) {

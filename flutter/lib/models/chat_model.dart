@@ -654,6 +654,10 @@ class ChatModel with ChangeNotifier {
   void onVoiceCallIncoming() {
     if (isConnManager) {
       _voiceCallStatus.value = VoiceCallStatus.incoming;
+    } else {
+      // Sense Remote (H4, O11; D3d2): the Host calls this Controller. "Ara"
+      // answers, "Aramayı bitir" refuses.
+      _senseCall(SenseCallPhase.incoming);
     }
   }
 
