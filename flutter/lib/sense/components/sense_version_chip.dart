@@ -6,7 +6,6 @@ import 'package:flutter/widgets.dart';
 
 import '../../models/platform_model.dart';
 import '../../desktop/pages/desktop_setting_page.dart';
-import '../screens/controller/sense_home_about.dart' show kSenseVersionOption;
 import '../screens/controller/sense_home_strings.dart';
 import '../screens/controller/sense_update_strings.dart';
 import '../tokens/sense_tokens.dart';

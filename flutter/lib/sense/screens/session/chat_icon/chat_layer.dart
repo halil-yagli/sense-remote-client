@@ -17,6 +17,7 @@ import '../../../sense.dart';
 import '../../../strings/chat.dart';
 import '../../shared/chat/chat_controller.dart';
 import '../../shared/chat/chat_popup.dart';
+import '../popups/status/status_widgets.dart' show SenseChatIconPlacement;
 import 'chat_icon.dart';
 import 'chat_notice.dart';
 
@@ -46,9 +47,13 @@ class SenseChatLayer extends StatefulWidget {
     this.pickFiles,
     this.dropBuilder,
     this.animate = true,
+    this.iconPlacement,
   });
 
   final SenseChatController controller;
+
+  /// Sense Remote (C1): where the icon is, for the right popups to end above it.
+  final ValueNotifier<SenseChatIconPlacement?>? iconPlacement;
 
   /// Remote computer's name for the notification card.
   final String computerName;
@@ -187,6 +192,14 @@ class SenseChatLayerState extends State<SenseChatLayer> {
     return LayoutBuilder(builder: (context, box) {
       _area = Size(box.maxWidth, box.maxHeight);
       final icon = _iconAt(_area);
+      final place = widget.iconPlacement;
+      if (place != null) {
+        final next = SenseChatIconPlacement(
+            icon: icon & const Size.square(SenseSizes.chatIcon), area: _area);
+        if (place.value != next) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => place.value = next);
+        }
+      }
       return Stack(clipBehavior: Clip.none, children: [
         if (!c.isOpen)
           Positioned(

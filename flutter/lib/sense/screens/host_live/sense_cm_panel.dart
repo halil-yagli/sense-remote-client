@@ -1,425 +1,558 @@
-// Sense Remote: the open card of the Host-side connection icon: who is
-// connected, permissions, chat, "Bağlantıyı bitir" and "Gizle". Pure widget
-// (data + callbacks), covered by widget tests; `SenseCmRoot` wires it.
+// Sense Remote: the Host card (YH H4; h02, h05; prototype `#hside` + chatHTML
+// host view; onaylı 2026-11-22_popuplar-ve-sohbet). Opens beside the Sense
+// icon, "–" brings the icon back (no close). From the top:
+//   header "Sense Remote · Sense Department ile" · –
+//   red recording strip "Bu bağlantı kaydediliyor · 01:15" (S7, #37)
+//   green "Sense Department bağlı" box: kişi · süre · yetkiler + Bağlantıyı bitir
+//   incoming voice call "Sense Department sesli arıyor" · Reddet / Kabul et (#67)
+//   call row "● Sense Department ile sohbet · Ara" and the chat (C3, shared)
+// Usable while the maintenance curtain is on (#22): the CM window stays above it.
+//
+// Pure widget (data + callbacks), covered by widget tests; `SenseCmRoot`
+// wires it.
 
-import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/server_model.dart';
-import 'sense_cm_geometry.dart';
-import 'sense_cm_style.dart';
-import 'sense_cm_widgets.dart';
+import '../../sense.dart';
+import '../../strings/chat.dart';
+import '../../strings/host_live.dart';
+import '../shared/chat/chat_bubbles.dart';
+import '../shared/chat/chat_call.dart';
+import '../shared/chat/chat_composer.dart';
+import '../shared/chat/chat_controller.dart';
+import '../shared/chat/chat_entry.dart';
+import '../shared/chat/chat_popup.dart' show SenseFileDropBuilder;
 
 /// Actions of the card; the root wires them to the connection manager.
-class SenseCmActions {
-  const SenseCmActions({
-    required this.onHide,
-    required this.onSelect,
+class SenseHostCardActions {
+  const SenseHostCardActions({
+    required this.onMinimize,
     required this.onEnd,
     required this.onAccept,
     required this.onReject,
     required this.onCloseEnded,
-    required this.onVoice,
-    required this.onVoiceEnd,
-    required this.onSend,
+    required this.onAnswerCall,
     this.onDragStart,
   });
 
-  final VoidCallback onHide;
-  final ValueChanged<Client> onSelect;
-  final ValueChanged<Client> onEnd;
-  final ValueChanged<Client> onAccept;
-  final ValueChanged<Client> onReject;
-  final ValueChanged<Client> onCloseEnded;
-  final void Function(Client client, bool accept) onVoice;
-  final ValueChanged<Client> onVoiceEnd;
-  final void Function(Client client, String text) onSend;
+  /// "–" and a tap on the header: back to the icon.
+  final VoidCallback onMinimize;
+
+  /// "Bağlantıyı bitir".
+  final VoidCallback onEnd;
+
+  /// Access request (approve mode "click").
+  final VoidCallback onAccept;
+  final VoidCallback onReject;
+
+  /// "Kapat" of an ended connection.
+  final VoidCallback onCloseEnded;
+
+  /// Incoming voice call: Kabul et (true) / Reddet (false).
+  final ValueChanged<bool> onAnswerCall;
+
+  /// Dragging the header moves the window.
   final VoidCallback? onDragStart;
 }
 
-/// Open state: the card.
-class SenseCmPanel extends StatelessWidget {
-  const SenseCmPanel({
+/// Measures of the card's own boxes (`.recbar`, `.ov`, `.ringin`).
+abstract final class SenseHostCardSize {
+  static const EdgeInsets headPadding = EdgeInsets.fromLTRB(14, 10, 10, 10);
+  static const EdgeInsets bodyPadding = EdgeInsets.fromLTRB(12, 10, 12, 0);
+  static const EdgeInsets boxPadding = EdgeInsets.symmetric(horizontal: 10, vertical: 8);
+  static const EdgeInsets recPadding = EdgeInsets.symmetric(horizontal: 10, vertical: 7);
+  static const double boxGap = 8;
+  static const double titleGap = 8;
+  static const double metaGap = 4;
+  static const double recDot = 8;
+  static const double callDot = 9;
+  static const double recBorderOpacity = 0.45;
+  static const double recFillOpacity = 0.08;
+  static const double callBorderOpacity = 0.4;
+  static const double callFillOpacity = 0.06;
+}
+
+class SenseHostCard extends StatefulWidget {
+  const SenseHostCard({
     super.key,
-    required this.clients,
-    required this.selected,
-    required this.connectedFor,
-    required this.messages,
-    required this.myUserId,
-    required this.canAccept,
-    required this.chatController,
-    required this.chatFocus,
+    required this.client,
+    required this.chat,
+    required this.whoLine,
     required this.actions,
+    this.recording,
+    this.canAccept = true,
+    this.canCall = false,
+    this.pickFiles,
+    this.dropBuilder,
+    this.from = SensePopupFrom.bottom,
+    this.animateIn = true,
   });
 
-  final List<Client> clients;
-  final Client selected;
-  final Duration? Function(Client client) connectedFor;
-  final List<ChatMessage> messages; // newest first, as ChatModel keeps them
-  final String myUserId;
-  final bool canAccept; // false when the approve mode is "password"
-  final TextEditingController chatController;
-  final FocusNode chatFocus;
-  final SenseCmActions actions;
+  /// The one connection (#40: one Controller at a time).
+  final Client client;
+  final SenseChatController chat;
 
-  String _status(Client c) {
-    if (c.disconnected) return senseCmText('ended');
-    if (!c.authorized) return senseCmText('waiting');
-    final d = connectedFor(c);
-    return d == null
-        ? senseCmText('connected')
-        : '${senseCmText('connected')} · ${formatSenseCmDuration(d)}';
+  /// "Halil Y. · 14 dk · ekran, fare ve klavye, dosya".
+  final String whoLine;
+  final SenseHostCardActions actions;
+
+  /// How long the Controller has been recording; null = not recording.
+  final Duration? recording;
+
+  /// False when the approve mode is "password" (no "Kabul et").
+  final bool canAccept;
+
+  /// "Ara" from the Host (D3d2); false draws it faded.
+  final bool canCall;
+
+  /// Ataç; null hides it (Host → Controller files wait for D3d2).
+  final Future<List<String>> Function()? pickFiles;
+  final SenseFileDropBuilder? dropBuilder;
+  final SensePopupFrom from;
+  final bool animateIn;
+
+  @override
+  State<SenseHostCard> createState() => _SenseHostCardState();
+}
+
+class _SenseHostCardState extends State<SenseHostCard> {
+  final ScrollController _scroll = ScrollController();
+  bool _dropHover = false;
+
+  SenseChatController get c => widget.chat;
+  Client get client => widget.client;
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _attach() async {
+    final pick = widget.pickFiles;
+    if (pick == null) return;
+    final paths = await pick();
+    if (paths.isNotEmpty) await c.sendFiles(paths);
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = selected;
-    final showChat = c.authorized && !c.disconnected;
-    return Material(
-      color: SenseCmTokens.black,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(SenseCmTokens.radiusCard + 2),
-        side: const BorderSide(color: SenseCmTokens.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: DefaultTextStyle(
-        style: SenseCmTokens.text(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _header(c),
-            if (clients.length > 1) _list(),
-            _who(c),
-            _permissions(c),
-            if (!c.disconnected && !c.authorized) _request(c),
-            if (!c.disconnected && c.incomingVoiceCall) _voiceRequest(c),
-            if (!c.disconnected && c.inVoiceCall) _voiceOn(c),
-            if (showChat)
-              Expanded(child: _chat(c))
-            else
-              Expanded(
-                child: c.disconnected
-                    ? Center(
-                        child: Text(senseCmText('disconnected'),
-                            style: SenseCmTokens.text(
-                                color: SenseCmTokens.muted)))
-                    : const SizedBox.shrink(),
-              ),
-            _footer(c),
-          ],
-        ),
-      ),
+    Widget child = ListenableBuilder(listenable: c, builder: (context, _) => _frame());
+    final drop = widget.dropBuilder;
+    if (drop != null && widget.pickFiles != null) {
+      child = drop(child, (paths) => c.sendFiles(paths), (v) {
+        if (mounted && v != _dropHover) setState(() => _dropHover = v);
+      });
+    }
+    child = Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: SenseHostLiveStrings.brand,
+      child: child,
     );
+    return widget.animateIn ? SensePopupEnter(from: widget.from, child: child) : child;
   }
 
-  Widget _header(Client c) {
-    final live = c.authorized && !c.disconnected;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanStart: actions.onDragStart == null
-          ? null
-          : (_) => actions.onDragStart!(),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-        decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: SenseCmTokens.line))),
-        child: Row(
-          children: [
-            const SenseCmMark(size: 18),
-            const SizedBox(width: 8),
-            Text.rich(TextSpan(children: [
-              TextSpan(
-                  text: senseCmText('brand_bold'),
-                  style:
-                      SenseCmTokens.text(size: 13, weight: FontWeight.w700)),
-              TextSpan(
-                  text: senseCmText('brand_light'),
-                  style:
-                      SenseCmTokens.text(size: 13, weight: FontWeight.w200)),
-            ])),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: live ? SenseCmTokens.live : SenseCmTokens.idle),
-                  ),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(_status(c),
-                        key: const ValueKey('sense-cm-status'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: SenseCmTokens.text(
-                            size: 11,
-                            color: live
-                                ? SenseCmTokens.live
-                                : SenseCmTokens.muted)),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 4),
-            SenseCmTextButton(
-              key: const ValueKey('sense-cm-hide'),
-              label: senseCmText('hide'),
-              onTap: actions.onHide,
-            ),
-          ],
-        ),
+  Widget _frame() {
+    final live = client.authorized && !client.disconnected;
+    final inCall = c.phase == SenseCallPhase.calling || c.phase == SenseCallPhase.active;
+    return Container(
+      key: const Key('sense-host-card'),
+      decoration: BoxDecoration(
+        color: SenseColors.surface,
+        border: Border.all(color: _dropHover ? SenseColors.text : SenseColors.line),
+        borderRadius: BorderRadius.circular(SenseRadii.popup),
       ),
-    );
-  }
-
-  Widget _list() {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 132),
-      child: Container(
-        decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: SenseCmTokens.line))),
-        child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          shrinkWrap: true,
-          children: [
-            for (final client in clients)
-              InkWell(
-                key: ValueKey('sense-cm-row-${client.id}'),
-                onTap: () => actions.onSelect(client),
-                child: Container(
-                  color: client.id == selected.id
-                      ? SenseCmTokens.field
-                      : Colors.transparent,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  child: Row(
-                    children: [
-                      SenseCmAvatar(name: client.name, size: 24),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(client.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: SenseCmTokens.text(
-                                weight: client.id == selected.id
-                                    ? FontWeight.w600
-                                    : FontWeight.w300)),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(SenseRadii.popup - 1),
+        child: DefaultTextStyle(
+          style: SenseTextStyles.body,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _Header(onMinimize: widget.actions.onMinimize, onDragStart: widget.actions.onDragStart),
+              Container(height: 1, color: SenseColors.line),
+              Padding(
+                padding: SenseHostCardSize.bodyPadding,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (widget.recording != null && !client.disconnected)
+                      _RecordingStrip(elapsed: widget.recording!),
+                    if (client.disconnected)
+                      _EndedBox(onClose: widget.actions.onCloseEnded)
+                    else if (!client.authorized)
+                      _RequestBox(
+                        name: client.name,
+                        canAccept: widget.canAccept,
+                        onAccept: widget.actions.onAccept,
+                        onReject: widget.actions.onReject,
+                      )
+                    else
+                      _ConnectedBox(whoLine: widget.whoLine, onEnd: widget.actions.onEnd),
+                    if (live && c.phase == SenseCallPhase.incoming)
+                      _IncomingCall(onAnswer: widget.actions.onAnswerCall),
+                    if (live) ...[
+                      SenseCallTicker(
+                        controller: c,
+                        builder: (context, elapsed) => SenseCallRow(
+                          phase: c.phase,
+                          elapsed: elapsed,
+                          onlineText: SenseChatLabels.host.peerOnline,
+                          onCall: widget.canCall ? c.startCall : null,
+                          onEnd: c.endCall,
+                        ),
                       ),
-                      Text(_status(client),
-                          style: SenseCmTokens.text(
-                              size: 10, color: SenseCmTokens.muted)),
-                      if (client.unreadChatMessageCount.value > 0) ...[
-                        const SizedBox(width: 6),
-                        SenseCmBadge(count: client.unreadChatMessageCount.value),
+                      if (inCall) ...[
+                        const SizedBox(height: SenseHostCardSize.boxGap),
+                        SenseMicButton(call: c.call),
                       ],
                     ],
-                  ),
+                  ],
                 ),
               ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _who(Client c) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-      child: Row(
-        children: [
-          SenseCmAvatar(name: c.name, size: 36),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(c.name,
-                    key: const ValueKey('sense-cm-name'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: SenseCmTokens.text(
-                        size: 13, weight: FontWeight.w600)),
-                Text(senseCmKindText(c),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: SenseCmTokens.text(
-                        size: 11, color: SenseCmTokens.muted)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _permissions(Client c) {
-    final perms = senseCmPermissions(c);
-    if (perms.isEmpty || c.disconnected) return const SizedBox(height: 4);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        children: [for (final p in perms) SenseCmPill(label: p)],
-      ),
-    );
-  }
-
-  Widget _request(Client c) {
-    return _notice(
-      senseCmText('request'),
-      [
-        if (canAccept)
-          SenseCmButton(
-              key: const ValueKey('sense-cm-accept'),
-              label: senseCmText('accept'),
-              primary: true,
-              onTap: () => actions.onAccept(c)),
-        SenseCmButton(
-            key: const ValueKey('sense-cm-reject'),
-            label: senseCmText('reject'),
-            onTap: () => actions.onReject(c)),
-      ],
-    );
-  }
-
-  Widget _voiceRequest(Client c) => _notice(senseCmText('voice_request'), [
-        SenseCmButton(
-            label: senseCmText('accept'),
-            primary: true,
-            onTap: () => actions.onVoice(c, true)),
-        SenseCmButton(
-            label: senseCmText('reject'),
-            onTap: () => actions.onVoice(c, false)),
-      ]);
-
-  Widget _voiceOn(Client c) => _notice(senseCmText('voice_on'), [
-        SenseCmButton(
-            label: senseCmText('voice_end'), onTap: () => actions.onVoiceEnd(c)),
-      ]);
-
-  Widget _notice(String text, List<Widget> buttons) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: SenseCmTokens.field,
-        borderRadius: BorderRadius.circular(SenseCmTokens.radius),
-        border: Border.all(color: SenseCmTokens.line),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(text, style: SenseCmTokens.text(color: SenseCmTokens.soft)),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              for (var i = 0; i < buttons.length; i++) ...[
-                if (i > 0) const SizedBox(width: 8),
-                Expanded(child: buttons[i]),
+              Expanded(child: live ? _messages() : const SizedBox.shrink()),
+              if (live) ...[
+                Container(height: 1, color: SenseColors.line),
+                SenseChatComposer(
+                  onSend: c.send,
+                  onAttach: widget.pickFiles == null ? null : _attach,
+                ),
               ],
             ],
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _chat(Client c) {
-    void send() {
-      final text = chatController.text.trim();
-      if (text.isEmpty) return;
-      actions.onSend(c, text);
+  Widget _messages() {
+    final rows = <Widget>[
+      for (final e in c.entries.reversed) _row(e),
+      const SenseChatWipeNote(),
+    ];
+    return RawScrollbar(
+      controller: _scroll,
+      thickness: SenseSizes.scrollbarThumb,
+      radius: const Radius.circular(SenseSizes.scrollbarThumb),
+      thumbColor: SenseColors.lineStrong,
+      crossAxisMargin: (SenseSizes.scrollbarArea - SenseSizes.scrollbarThumb) / 2,
+      child: ListView(
+        key: const Key('sense-host-messages'),
+        controller: _scroll,
+        reverse: true,
+        primary: false,
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        children: rows,
+      ),
+    );
+  }
+
+  Widget _row(SenseChatEntry e) {
+    final author = e.mine ? SenseChatStrings.me : SenseChatLabels.host.peer;
+    final time = senseChatTime(e.at);
+    switch (e) {
+      case SenseChatText():
+        return SenseChatBubble(text: e.text, author: author, time: time, mine: e.mine);
+      case SenseChatFileEntry():
+        final job = c.job(e.jobId);
+        if (job == null) return const SizedBox.shrink();
+        return SenseFileBubble(
+          key: Key('sense-file-${job.id}'),
+          job: job,
+          author: author,
+          time: time,
+          onReveal: job.path.isEmpty ? null : () => c.files.reveal(job.path),
+        );
     }
-
-    return Container(
-      decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: SenseCmTokens.line))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: messages.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(senseCmText('chat_empty'),
-                          textAlign: TextAlign.center,
-                          style: SenseCmTokens.text(
-                              size: 11, color: SenseCmTokens.muted)),
-                    ),
-                  )
-                : ListView.builder(
-                    key: const ValueKey('sense-cm-messages'),
-                    reverse: true,
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                    itemCount: messages.length,
-                    itemBuilder: (_, i) {
-                      final m = messages[i];
-                      return SenseCmBubble(
-                          text: m.text, mine: m.user.id == myUserId);
-                    },
-                  ),
-          ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-            decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: SenseCmTokens.line))),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('sense-cm-input'),
-                    controller: chatController,
-                    focusNode: chatFocus,
-                    style: SenseCmTokens.text(),
-                    cursorColor: SenseCmTokens.white,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => send(),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: senseCmText('chat_hint'),
-                      hintStyle:
-                          SenseCmTokens.text(color: SenseCmTokens.muted),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                  ),
-                ),
-                SenseCmTextButton(
-                  key: const ValueKey('sense-cm-send'),
-                  label: senseCmText('send'),
-                  strong: true,
-                  onTap: send,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
+}
 
-  Widget _footer(Client c) {
-    // A waiting peer is answered with "Reddet" above; no second button.
-    if (!c.authorized && !c.disconnected) return const SizedBox(height: 12);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      child: c.disconnected
-          ? SenseCmButton(
-              key: const ValueKey('sense-cm-close'),
-              label: senseCmText('close'),
-              onTap: () => actions.onCloseEnded(c))
-          : SenseCmButton(
-              key: const ValueKey('sense-cm-end'),
-              label: senseCmText('end'),
-              danger: true,
-              onTap: () => actions.onEnd(c)),
+class _Header extends StatelessWidget {
+  const _Header({required this.onMinimize, this.onDragStart});
+
+  final VoidCallback onMinimize;
+  final VoidCallback? onDragStart;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        key: const Key('sense-host-header'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onMinimize,
+        onPanStart: onDragStart == null ? null : (_) => onDragStart!(),
+        child: Padding(
+          padding: SenseHostCardSize.headPadding,
+          child: Row(children: [
+            Text(
+              SenseHostLiveStrings.brand,
+              style: SenseTextStyles.of(
+                  size: SenseFontSize.popupTitle, weight: SenseFontWeight.bold),
+            ),
+            const SizedBox(width: SenseHostCardSize.titleGap),
+            Expanded(
+              child: Text(
+                SenseHostLiveStrings.subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: SenseTextStyles.of(
+                  size: SenseFontSize.popupSubtitle,
+                  weight: SenseFontWeight.thin,
+                  color: SenseColors.textMuted,
+                ),
+              ),
+            ),
+            SensePopupIconButton(
+              key: const Key('sense-host-minimize'),
+              glyph: '–',
+              tooltip: SenseHostLiveStrings.minimize,
+              onPressed: onMinimize,
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }
 
+/// `.recbar`: red frame, blinking red dot, "Bu bağlantı kaydediliyor · 01:15".
+class _RecordingStrip extends StatelessWidget {
+  const _RecordingStrip({required this.elapsed});
+
+  final Duration elapsed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('sense-host-recording'),
+      margin: const EdgeInsets.only(bottom: SenseHostCardSize.boxGap),
+      padding: SenseHostCardSize.recPadding,
+      decoration: BoxDecoration(
+        color: SenseColors.hot.withOpacity(SenseHostCardSize.recFillOpacity),
+        border: Border.all(color: SenseColors.hot.withOpacity(SenseHostCardSize.recBorderOpacity)),
+        borderRadius: BorderRadius.circular(SenseRadii.category),
+      ),
+      child: Row(children: [
+        const SenseStatusDot(
+            color: SenseColors.hot, size: SenseHostCardSize.recDot, blinking: true),
+        const SizedBox(width: SenseHostCardSize.titleGap),
+        Expanded(
+          child: Text(
+            SenseHostLiveStrings.recording(senseCallClock(elapsed)),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: SenseTextStyles.of(
+                size: SenseFontSize.hintLarge, color: SenseColors.dangerTextSoft),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// `.ov` frame used by the who / request / ended boxes.
+class _Box extends StatelessWidget {
+  const _Box({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: SenseHostCardSize.boxGap),
+      padding: SenseHostCardSize.boxPadding,
+      decoration: BoxDecoration(
+        color: SenseColors.bg,
+        border: Border.all(color: SenseColors.line),
+        borderRadius: BorderRadius.circular(SenseRadii.categoryLarge),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _BoxText extends StatelessWidget {
+  const _BoxText({required this.title, this.titleColor = SenseColors.text, this.meta});
+
+  final String title;
+  final Color titleColor;
+  final String? meta;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: SenseTextStyles.of(
+              size: SenseFontSize.categoryTitleSmall,
+              weight: SenseFontWeight.bold,
+              color: titleColor),
+        ),
+        if (meta != null && meta!.isNotEmpty) ...[
+          const SizedBox(height: SenseHostCardSize.metaGap),
+          Text(
+            meta!,
+            key: const Key('sense-host-who'),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: SenseTextStyles.hint,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// `.ov.ok.hinfo`: "Sense Department bağlı" + who line + red Bağlantıyı bitir.
+class _ConnectedBox extends StatelessWidget {
+  const _ConnectedBox({required this.whoLine, required this.onEnd});
+
+  final String whoLine;
+  final VoidCallback onEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Box(
+      key: const Key('sense-host-connected'),
+      child: Row(children: [
+        Expanded(
+          child: _BoxText(
+            title: SenseHostLiveStrings.connected,
+            titleColor: SenseColors.ok,
+            meta: whoLine,
+          ),
+        ),
+        const SizedBox(width: SenseHostCardSize.boxGap),
+        SenseButton(
+          key: const Key('sense-host-end'),
+          label: SenseHostLiveStrings.endConnection,
+          kind: SenseButtonKind.danger,
+          onPressed: onEnd,
+        ),
+      ]),
+    );
+  }
+}
+
+/// A peer waits for an answer (approve mode "click").
+class _RequestBox extends StatelessWidget {
+  const _RequestBox({
+    required this.name,
+    required this.canAccept,
+    required this.onAccept,
+    required this.onReject,
+  });
+
+  final String name;
+  final bool canAccept;
+  final VoidCallback onAccept;
+  final VoidCallback onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Box(
+      key: const Key('sense-host-request'),
+      child: Row(children: [
+        Expanded(child: _BoxText(title: SenseHostLiveStrings.wantsToConnect(name))),
+        const SizedBox(width: SenseHostCardSize.boxGap),
+        SenseButton(
+          key: const Key('sense-host-reject'),
+          label: SenseHostLiveStrings.reject,
+          onPressed: onReject,
+        ),
+        if (canAccept) ...[
+          const SizedBox(width: SenseHostCardSize.boxGap),
+          SenseButton(
+            key: const Key('sense-host-accept'),
+            label: SenseHostLiveStrings.accept,
+            kind: SenseButtonKind.on,
+            onPressed: onAccept,
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _EndedBox extends StatelessWidget {
+  const _EndedBox({required this.onClose});
+
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Box(
+      key: const Key('sense-host-ended'),
+      child: Row(children: [
+        const Expanded(
+          child: _BoxText(title: SenseHostLiveStrings.ended, titleColor: SenseColors.textMuted),
+        ),
+        SenseButton(
+          key: const Key('sense-host-close'),
+          label: SenseHostLiveStrings.close,
+          onPressed: onClose,
+        ),
+      ]),
+    );
+  }
+}
+
+/// `.ringin`: green frame, pulsing dot, "Sense Department sesli arıyor",
+/// Reddet / Kabul et.
+class _IncomingCall extends StatelessWidget {
+  const _IncomingCall({required this.onAnswer});
+
+  final ValueChanged<bool> onAnswer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('sense-host-incoming'),
+      margin: const EdgeInsets.only(bottom: SenseHostCardSize.boxGap),
+      padding: SenseHostCardSize.boxPadding,
+      decoration: BoxDecoration(
+        color: SenseColors.ok.withOpacity(SenseHostCardSize.callFillOpacity),
+        border: Border.all(color: SenseColors.ok.withOpacity(SenseHostCardSize.callBorderOpacity)),
+        borderRadius: BorderRadius.circular(SenseRadii.categoryLarge),
+      ),
+      child: Row(children: [
+        const SenseBlink(
+          spec: SenseMotion.blinkFast,
+          child: SenseStatusDot(color: SenseColors.ok, size: SenseHostCardSize.callDot),
+        ),
+        const SizedBox(width: SenseHostCardSize.titleGap),
+        Expanded(
+          child: Text(
+            SenseHostLiveStrings.incomingCall,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: SenseTextStyles.of(
+                size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold),
+          ),
+        ),
+        const SizedBox(width: SenseHostCardSize.boxGap),
+        SenseButton(
+          key: const Key('sense-host-call-reject'),
+          label: SenseHostLiveStrings.reject,
+          onPressed: () => onAnswer(false),
+        ),
+        const SizedBox(width: SenseHostCardSize.boxGap),
+        SenseButton(
+          key: const Key('sense-host-call-accept'),
+          label: SenseHostLiveStrings.accept,
+          kind: SenseButtonKind.on,
+          onPressed: () => onAnswer(true),
+        ),
+      ]),
+    );
+  }
+}

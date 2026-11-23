@@ -758,6 +758,15 @@ class ServerModel with ChangeNotifier {
     }
   }
 
+  // Sense Remote (YH H3, H4; D1 `sense_recording` {id, on}): the Controller is
+  // recording this connection — red dot on the icon, strip on the card.
+  void senseUpdateRecording(int id, bool on) {
+    final client = _clients.firstWhereOrNull((c) => c.id == id);
+    if (client == null || client.senseRecording == on) return;
+    client.senseRecording = on;
+    notifyListeners();
+  }
+
   void updateVoiceCallState(Map<String, dynamic> evt) {
     try {
       final client = Client.fromJson(jsonDecode(evt["client"]));
@@ -832,6 +841,8 @@ class Client {
   bool fromSwitch = false;
   bool inVoiceCall = false;
   bool incomingVoiceCall = false;
+  // Sense Remote (S7-b, D1): the Controller records this connection.
+  bool senseRecording = false;
 
   RxInt unreadChatMessageCount = 0.obs;
 
@@ -861,6 +872,7 @@ class Client {
     fromSwitch = json['from_switch'];
     inVoiceCall = json['in_voice_call'];
     incomingVoiceCall = json['incoming_voice_call'];
+    senseRecording = json['sense_recording'] ?? false; // Sense Remote (D1)
   }
 
   Map<String, dynamic> toJson() {
@@ -886,6 +898,7 @@ class Client {
     data['from_switch'] = fromSwitch;
     data['in_voice_call'] = inVoiceCall;
     data['incoming_voice_call'] = incomingVoiceCall;
+    data['sense_recording'] = senseRecording; // Sense Remote (D1)
     return data;
   }
 

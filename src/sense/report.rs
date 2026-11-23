@@ -910,6 +910,50 @@ fn displays_hash(displays: &[SenseDisplay]) -> Option<String> {
     Some(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Sense Remote (Sürüm 4, H1 / S3; D3c): heartbeat answer field with the Host's selectable
+/// locations (contract `SenseLocationList` in `client-api/device-info.ts`).
+pub const KEY_LOCATIONS: &str = "sense_locations";
+/// Contract limits: at most 256 locations, names of at most 48 characters.
+const MAX_LOCATIONS: usize = 256;
+const MAX_LOCATION_NAME_CHARS: usize = 48;
+/// `rev` is the first 6 bytes of a SHA-256 (panel `locationListRev`), so at most 2^48.
+const MAX_LOCATION_REV: u64 = 1 << 48;
+
+/// The locations of the projects this Host belongs to, with the list's version (`rev`, sent back
+/// as `sense.loc_rev`). Unsigned: only a choice list; the panel checks the chosen location again
+/// when the signed `device-info` arrives.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SenseLocations {
+    pub rev: u64,
+    /// `(location_id, name)` in the panel's order.
+    pub items: Vec<(String, String)>,
+}
+
+/// Sense Remote (D3c): reads `sense_locations` out of a heartbeat answer body. `None` when the
+/// field is missing (the list the computer holds is still current) or not of the contract's
+/// shape; single items that break the rules are skipped.
+pub fn locations_from_answer(body: &str) -> Option<SenseLocations> {
+    let answer: Value = serde_json::from_str(body).ok()?;
+    let list = answer.get(KEY_LOCATIONS)?.as_object()?;
+    let rev = list.get("rev")?.as_u64().filter(|rev| *rev <= MAX_LOCATION_REV)?;
+    let items = list
+        .get("items")?
+        .as_array()?
+        .iter()
+        .take(MAX_LOCATIONS)
+        .filter_map(|item| {
+            let id = item.get("id")?.as_str()?;
+            let name = item.get("name")?.as_str()?.trim();
+            let name_ok = !name.is_empty()
+                && name.chars().count() <= MAX_LOCATION_NAME_CHARS
+                && !name.chars().any(char::is_control);
+            (super::identity_set::is_location_id(id) && name_ok)
+                .then(|| (id.to_owned(), name.to_owned()))
+        })
+        .collect();
+    Some(SenseLocations { rev, items })
+}
+
 /// JCS for the values this module produces: keys sorted (all ASCII, so byte order equals the
 /// UTF-16 order JCS asks for), whole floats written as integers like ECMAScript does, other
 /// numbers and strings as `serde_json` writes them (same shortest form / escapes as JSON.stringify
@@ -1743,5 +1787,73 @@ mod tests {
             assert!(keys(&n).is_subset(&set(&SCHEMA_NETWORK_KEYS)));
             assert!(SCHEMA_NETWORK_KINDS.contains(&n["kind"].as_str().unwrap()));
         }
+    }
+}
+
+// Sense Remote (D3c): `sense_locations` in the heartbeat answer.
+#[cfg(test)]
+mod locations_tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_contract_shape() {
+        let body = r#"{"sense_server_time":1,"sense_locations":{"rev":281474976710655,
+            "items":[{"id":"loc_01JX-a","name":" Galeri 1 "},{"id":"loc_2","name":"Giriş"}]}}"#;
+        let list = locations_from_answer(body).unwrap();
+        assert_eq!(list.rev, 281_474_976_710_655);
+        assert_eq!(
+            list.items,
+            vec![
+                ("loc_01JX-a".to_owned(), "Galeri 1".to_owned()),
+                ("loc_2".to_owned(), "Giriş".to_owned())
+            ]
+        );
+        // An empty list is a list (every location was removed).
+        let empty = locations_from_answer(r#"{"sense_locations":{"rev":7,"items":[]}}"#).unwrap();
+        assert_eq!(empty, SenseLocations { rev: 7, items: vec![] });
+    }
+
+    #[test]
+    fn missing_or_bad_list_is_none() {
+        for body in [
+            "",
+            "[]",
+            r#"{"sysinfo":true}"#,
+            r#"{"sense_locations":null}"#,
+            r#"{"sense_locations":{"items":[]}}"#,
+            r#"{"sense_locations":{"rev":-1,"items":[]}}"#,
+            r#"{"sense_locations":{"rev":1.5,"items":[]}}"#,
+            r#"{"sense_locations":{"rev":281474976710657,"items":[]}}"#,
+            r#"{"sense_locations":{"rev":1,"items":{}}}"#,
+        ] {
+            assert_eq!(locations_from_answer(body), None, "{body}");
+        }
+    }
+
+    #[test]
+    fn bad_items_are_skipped() {
+        let long = "x".repeat(MAX_LOCATION_NAME_CHARS + 1);
+        let body = serde_json::json!({ "sense_locations": { "rev": 1, "items": [
+            { "id": "prj_1", "name": "Not a location" },
+            { "id": "loc_", "name": "No id" },
+            { "id": "loc_a b", "name": "Space" },
+            { "id": "loc_ok", "name": "" },
+            { "id": "loc_ok", "name": "Line\nbreak" },
+            { "id": "loc_ok", "name": long },
+            { "id": 5, "name": "Number" },
+            { "id": "loc_ok", "name": "Ok" },
+        ] } })
+        .to_string();
+        let list = locations_from_answer(&body).unwrap();
+        assert_eq!(list.items, vec![("loc_ok".to_owned(), "Ok".to_owned())]);
+    }
+
+    #[test]
+    fn at_most_256_locations() {
+        let items: Vec<Value> = (0..300)
+            .map(|i| serde_json::json!({ "id": format!("loc_{i}"), "name": format!("Yer {i}") }))
+            .collect();
+        let body = serde_json::json!({ "sense_locations": { "rev": 3, "items": items } }).to_string();
+        assert_eq!(locations_from_answer(&body).unwrap().items.len(), MAX_LOCATIONS);
     }
 }
