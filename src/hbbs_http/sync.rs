@@ -345,6 +345,12 @@ async fn start_hbbs_sync_async() {
                         // Sense Remote (S4-4): signed report v2 and sysinfo only for a panel that
                         // checks them.
                         crate::sense::report_sig::set_panel_caps(answer.panel_caps.as_deref());
+                        // Sense Remote (karar #84): logs go to the panel when it takes them, and
+                        // when it asks for them.
+                        crate::sense::log_upload::on_answer(
+                            answer.panel_caps.as_deref(),
+                            answer.log_request,
+                        );
                         sense_report.server_time(answer.server_time, now_s());
                         sense_handle_envelopes(&answer.envelopes, &id, &mut sense_report).await;
                         // Sense Remote (update plan 2026-11-21, §3.4): hint, release notice and

@@ -458,6 +458,9 @@ pub fn extend_heartbeat(sense: &mut Value) {
     let Some(status) = heartbeat_status() else {
         return;
     };
+    // Sense Remote (karar #84): an update that turns `failed` sends the logs to the panel (once
+    // per failure; the hourly limit is in `log_upload`).
+    super::log_upload::on_update_state(status.state == UpdateState::Failed);
     match serde_json::to_value(&status) {
         Ok(status) => sense["update"] = status,
         Err(err) => log::error!("Sense Remote: update status not serialized: {err}"),

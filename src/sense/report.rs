@@ -294,13 +294,25 @@ pub fn heartbeat_base() -> Option<Value> {
 
 /// Sense Remote (permanent password plan U14): the `caps` this build sends, from the switches.
 fn heartbeat_caps(curtain_supported: bool) -> Vec<String> {
-    caps_with_password(
-        caps_with_update(
-            caps(curtain_supported, super::envelope_apply::APPLIES),
-            super::update::SUPPORTED,
+    caps_with_logs(
+        caps_with_password(
+            caps_with_update(
+                caps(curtain_supported, super::envelope_apply::APPLIES),
+                super::update::SUPPORTED,
+            ),
+            super::password::SUPPORTED,
         ),
-        super::password::SUPPORTED,
+        super::log_upload::SUPPORTED,
     )
+}
+
+/// Sense Remote (karar #84): `logs` is the last capability, added only where this build sends its
+/// logs to the panel (`log_upload::SUPPORTED`). The panel offers "Günlük iste" for such computers.
+fn caps_with_logs(mut caps: Vec<String>, logs_supported: bool) -> Vec<String> {
+    if logs_supported {
+        caps.push(super::log_upload::CAP_LOGS.to_owned());
+    }
+    caps
 }
 
 /// Sense Remote: `caps` of this computer: `CAPS`, plus `curtain` where it can be shown and
@@ -1599,6 +1611,20 @@ mod tests {
         assert!(password::CAP_PASSWORD.len() <= SCHEMA_CAP_MAX_CHARS);
     }
 
+    // Karar #84: `logs` follows its one switch and comes last.
+    #[test]
+    fn logs_cap_follows_the_switch() {
+        let base = || caps_with_password(caps_with_update(caps(true, true), true), true);
+        assert_eq!(caps_with_logs(base(), false), base());
+        assert_eq!(
+            caps_with_logs(base(), true),
+            ["role_all", "curtain", "apply", "update", "password", "logs"]
+        );
+        assert!(caps_with_logs(base(), true).len() <= SCHEMA_CAPS_MAX);
+        assert!(crate::sense::log_upload::CAP_LOGS.len() <= SCHEMA_CAP_MAX_CHARS);
+        assert_eq!(heartbeat_caps(true).contains(&"logs".to_owned()), cfg!(any(windows, target_os = "macos")));
+    }
+
     // U14: the heartbeat carries `password` on Windows and macOS (last, after `update`), and
     // never on Linux.
     #[test]
@@ -1608,7 +1634,10 @@ mod tests {
             let caps = heartbeat_caps(curtain);
             assert_eq!(caps.iter().filter(|cap| *cap == "password").count(), usize::from(on));
             if on {
-                assert_eq!(caps.last().map(String::as_str), Some("password"), "{caps:?}");
+                // Karar #84: `logs` comes right after `password` and is the last one.
+                let at = |name: &str| caps.iter().position(|cap| cap == name);
+                assert_eq!(at("password").map(|i| i + 1), at("logs"), "{caps:?}");
+                assert_eq!(caps.last().map(String::as_str), Some("logs"), "{caps:?}");
             }
             assert!(caps.len() <= SCHEMA_CAPS_MAX);
         }

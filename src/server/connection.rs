@@ -380,6 +380,9 @@ pub struct Connection {
     sense_recording_since: Option<Instant>,
     // Sense Remote (S12): chat messages and chat files of this connection, for the closing audit.
     sense_chat: crate::sense::chat_file::ConnCounts,
+    // Sense Remote (karar #84): a video frame went out on this connection (a desktop connection
+    // that closes without one sends the logs to the panel).
+    sense_video_sent: bool,
     // Sense Remote (S5): (offer id, real path) of the files the Host card offered on this
     // connection — the only Host files the Controller may read.
     sense_offers: Vec<(i32, String)>,
@@ -585,6 +588,7 @@ impl Connection {
             awaiting_2fa: false,
             sense_recording_since: None,
             sense_chat: Default::default(),
+            sense_video_sent: false,
             sense_offers: Vec::new(),
             sense_offers_reading: Vec::new(),
             sense_call_out: None,
@@ -1109,6 +1113,11 @@ impl Connection {
                     }
                 }
                 Some((instant, value)) = rx_video.recv() => {
+                    if !conn.sense_video_sent
+                        && matches!(&value.union, Some(message::Union::VideoFrame(_)))
+                    {
+                        conn.sense_video_sent = true;
+                    }
                     if !conn.video_ack_required {
                         if let Some(message::Union::VideoFrame(vf)) = &value.union {
                             video_service::notify_video_frame_fetched(vf.display as usize, id, Some(instant.into()));
@@ -1288,6 +1297,12 @@ impl Connection {
         conn.sense_set_recording(false);
         // Sense Remote (H2): the connection goes into the Host's "Son bağlantılar" list.
         crate::sense::host_recent::ended(conn.inner.id());
+        // Sense Remote (karar #84): no picture ever went out -> the logs go to the panel.
+        crate::sense::log_upload::host_closed(
+            conn.is_authed_remote_conn(),
+            conn.sense_video_sent,
+            &conn.lr.my_id,
+        );
         // Sense Remote (S12): counts only, never the chat text or file names.
         conn.post_conn_audit(json!({
             "action": "close",

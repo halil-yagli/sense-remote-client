@@ -91,6 +91,9 @@ pub struct Remote<T: InvokeUiSession> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     initial_clipboard_pending: bool,
     first_frame: bool,
+    // Sense Remote (karar #84): the Host sent its peer info (login succeeded); a session that ends
+    // after this and before the first frame sends the logs to the panel.
+    sense_logged_in: bool,
     #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
     client_conn_id: i32, // used for file clipboard
     data_count: Arc<AtomicUsize>,
@@ -147,6 +150,7 @@ impl<T: InvokeUiSession> Remote<T> {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             initial_clipboard_pending: false,
             first_frame: false,
+            sense_logged_in: false,
             #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
             client_conn_id: 0,
             data_count: Arc::new(AtomicUsize::new(0)),
@@ -436,6 +440,13 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                 }
                 log::debug!("Exit io_loop of id={}", self.handler.get_id());
+                // Sense Remote (karar #84): logged in but no picture ever came.
+                if self.handler.is_default() && self.sense_logged_in && !self.first_frame {
+                    crate::sense::log_upload::controller_closed(
+                        crate::sense::log_upload::Reason::ConnNoVideo,
+                        &self.handler.get_id(),
+                    );
+                }
                 // Stop client audio server.
                 if let Some(s) = self.stop_voice_call_sender.take() {
                     s.send(()).ok();
@@ -455,6 +466,13 @@ impl<T: InvokeUiSession> Remote<T> {
             }
             Err(err) => {
                 self.handler.on_establish_connection_error(err.to_string());
+                // Sense Remote (karar #84): the session could not be set up.
+                if self.handler.is_default() {
+                    crate::sense::log_upload::controller_closed(
+                        crate::sense::log_upload::Reason::ConnFailed,
+                        &self.handler.get_id(),
+                    );
+                }
             }
         }
         self.handle_disconnected(round);
@@ -1810,6 +1828,7 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                     }
                     Some(login_response::Union::PeerInfo(pi)) => {
+                        self.sense_logged_in = true;
                         let peer_version = pi.version.clone();
                         let peer_platform = pi.platform.clone();
                         self.set_peer_info(&pi);
