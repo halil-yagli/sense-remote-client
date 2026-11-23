@@ -25,10 +25,10 @@ const _legacy = <String, int>{
   'lib/sense/screens/host/sense_home_mac.dart': 1,
   'lib/sense/screens/host/sense_password_page.dart': 1,
   'lib/sense/screens/host_live/sense_cm_panel.dart': 35,
-  'lib/sense/screens/host_live/sense_cm_style.dart': 14,
+  'lib/sense/screens/host_live/sense_cm_style.dart': 1,
   'lib/sense/screens/host_live/sense_cm_widgets.dart': 32,
   'lib/sense/screens/install/sense_install_layout.dart': 58,
-  'lib/sense/screens/install/sense_install_model.dart': 13,
+  'lib/sense/screens/install/sense_install_model.dart': 1,
   'lib/sense/screens/install/sense_install_page.dart': 2,
   'lib/sense/screens/install/sense_install_steps_account.dart': 28,
   'lib/sense/screens/install/sense_install_steps_finish.dart': 18,
@@ -40,7 +40,7 @@ const _legacy = <String, int>{
   'lib/sense/screens/session/sense_remote_display_info.dart': 20,
   'lib/sense/screens/session/sense_remote_map.dart': 16,
   'lib/sense/screens/session/sense_remote_status.dart': 21,
-  'lib/sense/screens/session/sense_remote_strings.dart': 11,
+  'lib/sense/screens/session/sense_remote_strings.dart': 1,
   'lib/sense/screens/session/sense_remote_window.dart': 12,
 };
 

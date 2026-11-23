@@ -376,6 +376,8 @@ pub struct Connection {
     unauthorized_id: Option<UnauthorizedID>,
     require_2fa: Option<totp_rs::TOTP>,
     awaiting_2fa: bool,
+    // Sense Remote (S7-b): when the Controller started recording this connection, if it is.
+    sense_recording_since: Option<Instant>,
     trusted_device: Option<crate::trusted_devices::host::Attempt>,
     keyboard: bool,
     clipboard: bool,
@@ -572,6 +574,7 @@ impl Connection {
             },
             require_2fa: crate::auth_2fa::get_2fa(None),
             awaiting_2fa: false,
+            sense_recording_since: None,
             trusted_device: None,
             // Defer display enumeration until login succeeds. Monitor login replaces this
             // with the primary index returned with the refreshed display snapshot.
@@ -1242,6 +1245,8 @@ impl Connection {
             raii::AuthedConnID::check_remove_session(conn.inner.id(), conn.session_key());
         }
 
+        // Sense Remote (S7-b): a recording ends with its connection.
+        conn.sense_set_recording(false);
         conn.post_conn_audit(json!({
             "action": "close",
         }));
@@ -1909,6 +1914,13 @@ impl Connection {
         if !self.check_trusted_device().await {
             return false;
         }
+        // Sense Remote (S8): second check, held until this connection is in AUTHED_CONNS, so
+        // two logins racing past the first check cannot both get in.
+        let sense_admission = crate::sense::single_conn::ADMISSION.lock().await;
+        if !self.sense_single_conn_admits() {
+            self.send_login_error(crate::sense::single_conn::BUSY).await;
+            return false;
+        }
         self.lr.trusted_device_v2_token.clear();
         self.authorized = true;
         self.unauthorized_id = None;
@@ -1937,6 +1949,7 @@ impl Connection {
             self.tx_from_authed.clone(),
             self.lr.clone(),
         ));
+        drop(sense_admission);
         self.session_last_recv_time = SESSIONS
             .lock()
             .unwrap()
@@ -2404,6 +2417,27 @@ impl Connection {
     #[inline]
     fn send_to_cm(&mut self, data: ipc::Data) {
         self.tx_to_cm.send(data).ok();
+    }
+
+    // Sense Remote (S7-b): tells the connection manager (red dot, recording strip) and the
+    // audit log when the Controller starts or stops recording. Only the fact and the length
+    // are logged; the recording itself stays on the Controller's disk (S12).
+    fn sense_set_recording(&mut self, on: bool) {
+        if on == self.sense_recording_since.is_some() {
+            return;
+        }
+        let audit = if on {
+            self.sense_recording_since = Some(Instant::now());
+            json!({ "sense_recording": "start" })
+        } else {
+            let secs = self
+                .sense_recording_since
+                .take()
+                .map_or(0, |t| t.elapsed().as_secs());
+            json!({ "sense_recording": "stop", "duration_s": secs })
+        };
+        self.send_to_cm(ipc::Data::SenseRecording(on));
+        self.post_conn_audit(audit);
     }
 
     fn handle_port_forward_channel(&mut self, ch: PortForwardChannel) {
@@ -2983,6 +3017,14 @@ impl Connection {
                         return false;
                     }
                 }
+            }
+
+            // Sense Remote (S8): one Controller at a time; checked before the password so a
+            // busy Host does not spend a password try. Re-checked at authorization.
+            if !self.sense_single_conn_admits() {
+                self.send_login_error(crate::sense::single_conn::BUSY).await;
+                sleep(1.).await;
+                return false;
             }
 
             self.stream.set_send_timeout(
@@ -4046,10 +4088,14 @@ impl Connection {
                         .lock()
                         .unwrap()
                         .user_auto_adjust_fps(self.inner.id(), fps),
-                    Some(misc::Union::ClientRecordStatus(status)) => video_service::VIDEO_QOS
-                        .lock()
-                        .unwrap()
-                        .user_record(self.inner.id(), status),
+                    Some(misc::Union::ClientRecordStatus(status)) => {
+                        video_service::VIDEO_QOS
+                            .lock()
+                            .unwrap()
+                            .user_record(self.inner.id(), status);
+                        // Sense Remote (S7-b): the Host shows the recording; audit start / stop.
+                        self.sense_set_recording(status);
+                    }
                     #[cfg(windows)]
                     Some(misc::Union::SelectedSid(sid)) => {
                         if let Some(current_process_sid) =
@@ -5827,6 +5873,26 @@ impl Connection {
             name: self.lr.my_name.clone(),
             session_id: self.lr.session_id,
         }
+    }
+
+    // Sense Remote (S8): whether this login may join the connections already authorized here.
+    fn sense_single_conn_admits(&self) -> bool {
+        use crate::sense::single_conn::{admits, Existing};
+        let key = self.session_key();
+        let conns = AUTHED_CONNS.lock().unwrap();
+        let existing: Vec<Existing> = conns
+            .iter()
+            .filter(|c| c.conn_id != self.inner.id())
+            .map(|c| Existing {
+                peer_id: &c.session_key.peer_id,
+                same_session: c.session_key == key,
+            })
+            .collect();
+        let ok = admits(&existing, &key.peer_id);
+        if !ok {
+            log::info!("Sense: Host busy, second Controller turned away");
+        }
+        ok
     }
 
     fn is_authed_remote_conn(&self) -> bool {

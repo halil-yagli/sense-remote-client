@@ -707,6 +707,12 @@ impl InvokeUiSession for FlutterHandler {
         self.push_event::<&str>("update_privacy_mode", &[], &[]);
     }
 
+    // Sense Remote (S9-b): ghost mode could not be turned on / off; the session shows a short
+    // note in place (no dialog).
+    fn sense_privacy_note(&self, code: &str, details: &str) {
+        self.push_event("sense_privacy_note", &[("code", code), ("details", details)], &[]);
+    }
+
     fn set_permission(&self, name: &str, value: bool) {
         self.push_event("permission", &[(name, &value.to_string())], &[]);
     }
@@ -734,6 +740,12 @@ impl InvokeUiSession for FlutterHandler {
                     &status.codec_format.map_or(NULL, |it| it.to_string()),
                 ),
                 ("chroma", &status.chroma.map_or(NULL, |it| it.to_string())),
+                // Sense Remote (S10, O13): empty when not measured in this update.
+                (
+                    "last_frame_ms",
+                    &status.last_frame_ms.map_or(NULL, |it| it.to_string()),
+                ),
+                ("loss_est", &status.loss_est.map_or(NULL, |it| it.to_string())),
             ],
             &[],
         );
@@ -1589,6 +1601,14 @@ pub mod connection_manager {
 
         fn file_transfer_log(&self, action: &str, log: &str) {
             self.push_event("cm_file_transfer_log", &[(action, log)]);
+        }
+
+        // Sense Remote (S7-b): red dot on the Host icon, recording strip on the card.
+        fn sense_recording(&self, id: i32, on: bool) {
+            self.push_event(
+                "sense_recording",
+                &[("id", &id.to_string()), ("on", &on.to_string())],
+            );
         }
     }
 

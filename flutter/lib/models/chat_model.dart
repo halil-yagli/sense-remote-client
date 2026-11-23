@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_window.dart'; // Sense Remote
+import 'package:flutter_hbb/sense/screens/shared/chat/chat_controller.dart'; // Sense Remote
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/desktop/widgets/windows_cm_window_position.dart';
 import 'package:flutter_hbb/mobile/pages/home_page.dart';
@@ -154,6 +155,23 @@ class ChatModel with ChangeNotifier {
   }
 
   ChatUser? get currentUser => _messages[_currentKey]?.chatUser;
+
+  // Sense Remote: the Controller window's chat (sağ alttaki Sense simgesi, YH
+  // O10) takes the other side's messages and call events instead of RustDesk's
+  // floating chat window. Kept in memory only (S12).
+  SenseChatController? _senseChat;
+  SenseChatController? get senseChat => _senseChat;
+
+  void attachSenseChat(SenseChatController chat) {
+    _senseChat = chat;
+    hideChatOverlay();
+  }
+
+  void detachSenseChat(SenseChatController chat) {
+    if (identical(_senseChat, chat)) _senseChat = null;
+  }
+
+  void _senseCall(SenseCallPhase phase) => _senseChat?.setPhase(phase);
 
   showChatIconOverlay({Offset offset = const Offset(200, 50)}) {
     if (chatIconOverlayEntry != null) {
@@ -383,6 +401,11 @@ class ChatModel with ChangeNotifier {
       return;
     }
     if (text.isEmpty) return;
+    // Sense Remote: Controller window with the Sense chat attached.
+    if (id == clientModeID && _senseChat != null) {
+      _senseChat!.receiveText(text);
+      return;
+    }
     if (desktopType == DesktopType.cm) {
       await showCmWindow();
     }
@@ -544,11 +567,16 @@ class ChatModel with ChangeNotifier {
   close() {
     hideChatIconOverlay();
     hideChatWindowOverlay();
+    // Sense Remote: S12 (#56) — the chat ends with the connection.
+    resetClientMode();
+    _senseChat?.clear();
     notifyListeners();
   }
 
   resetClientMode() {
-    _messages[clientModeID]?.clear();
+    // Sense Remote: the map is keyed by MessageKey, so `_messages[clientModeID]`
+    // never matched; drop every Controller-side conversation.
+    _messages.removeWhere((key, _) => key.isOut);
   }
 
   void requestChatInputFocus() {
@@ -602,10 +630,12 @@ class ChatModel with ChangeNotifier {
 
   void onVoiceCallWaiting() {
     _voiceCallStatus.value = VoiceCallStatus.waitingForResponse;
+    _senseCall(SenseCallPhase.calling);
   }
 
   void onVoiceCallStarted() {
     _voiceCallStatus.value = VoiceCallStatus.connected;
+    _senseCall(SenseCallPhase.active);
     if (isAndroid) {
       parent.target?.invokeMethod("on_voice_call_started");
     }
@@ -613,6 +643,7 @@ class ChatModel with ChangeNotifier {
 
   void onVoiceCallClosed(String reason) {
     _voiceCallStatus.value = VoiceCallStatus.notStarted;
+    _senseCall(SenseCallPhase.idle);
     if (isAndroid) {
       // We can always invoke "on_voice_call_closed"
       // no matter if the `_voiceCallStatus` was `VoiceCallStatus.notStarted` or not.

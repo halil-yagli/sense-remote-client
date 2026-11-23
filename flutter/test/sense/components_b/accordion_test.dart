@@ -19,6 +19,9 @@ SenseAccordionItem _item(String id, {double height = 40, SenseLevel? level, Stri
 
 Finder _header(String id) => find.text('Kategori $id');
 
+SenseCaretDirection _caret(WidgetTester tester) =>
+    tester.widget<SenseCaret>(find.byType(SenseCaret)).direction;
+
 void main() {
   group('SenseAccordion (T7)', () {
     testWidgets('one open per level; pressing the open one closes it', (tester) async {
@@ -99,10 +102,10 @@ void main() {
 
     testWidgets('caret changes ▶ → ▼ without turning (T4)', (tester) async {
       await tester.pumpWidget(app(SingleChildScrollView(child: SenseAccordion(items: [_item('a')]))));
-      expect(find.text('▶'), findsOneWidget);
+      expect(_caret(tester), SenseCaretDirection.right);
       await tester.tap(_header('a'));
       await tester.pump();
-      expect(find.text('▼'), findsOneWidget);
+      expect(_caret(tester), SenseCaretDirection.down);
       expect(tester.hasRunningAnimations, isFalse);
       expectNoRotation(tester);
     });

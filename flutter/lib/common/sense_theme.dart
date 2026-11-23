@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../common.dart' show MyTheme;
 import '../models/platform_model.dart';
+import '../sense/tokens/sense_tokens.dart';
 
 /// Bundled font family (flutter/assets/fonts, SIL OFL 1.1).
 const kSenseFont = 'Poppins';
@@ -36,14 +37,22 @@ bool senseRoleInstalled() {
 
 typedef _C = SenseThemeColors;
 
+// Sense Remote (A1b, YH T1): bridge only, aliases of the one token set.
 class SenseThemeColors {
-  static const black = Color(0xFF000000);
-  static const white = Color(0xFFFFFFFF);
-  static const surface = Color(0xFF0A0A0E);
-  static const raised = Color(0xFF15151B);
-  static const line = Color(0xFF26262F);
-  static const hover = Color(0xFF1D1D25);
-  static const selection = Color(0xFF640164);
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const black = SenseColors.bg;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const white = SenseColors.text;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const surface = SenseColors.surface;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const raised = SenseColors.raised;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const line = SenseColors.line;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const hover = SenseColors.hover;
+  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
+  static const selection = SenseColors.glowEnd;
 }
 
 /// Pure: the Sense dark theme on top of RustDesk's dark theme (keeps its

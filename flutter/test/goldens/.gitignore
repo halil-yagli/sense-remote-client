@@ -1,0 +1,2 @@
+# Sense Remote: golden images are committed (the root .gitignore drops *png).
+!*.png
