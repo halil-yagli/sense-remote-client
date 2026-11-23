@@ -11,6 +11,7 @@ fn job() -> InstallJob {
         size: 1,
         source: UpdateSource::Panel,
         oid: Some("upd_0123456789abcdef".to_owned()),
+        now: false,
     }
 }
 

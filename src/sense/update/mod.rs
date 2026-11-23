@@ -81,6 +81,7 @@ pub mod apply_mac;
 pub mod apply_win;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod daemon_mac;
+pub mod cancel_log;
 pub mod download;
 pub mod engine;
 pub mod guard;
@@ -90,7 +91,12 @@ pub mod idle_ipc;
 pub mod keys;
 pub mod manifest;
 pub mod manual;
+// Sense Remote: window `now`, sessions closed with a notice before the installer.
+pub mod now;
 pub mod order;
+// Sense Remote (B1): open Controller session marker for the macOS root updater.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub mod outgoing;
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub mod runner;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -119,6 +125,8 @@ pub use store_win as store_os;
 pub const SUPPORTED: bool = cfg!(any(windows, target_os = "macos"));
 /// `SENSE_CAPS.update` (§3.5).
 pub const CAP_UPDATE: &str = "update";
+/// Sense Remote: this build knows the update window `now` (heartbeat `caps`, after `password`).
+pub const CAP_UPDATE_NOW: &str = "update_now";
 /// Largest version number of the contract (`Version`, §3.2).
 pub const MAX_VERSION: u32 = 999_999;
 /// What the skeleton and unsupported platforms answer.
@@ -329,6 +337,10 @@ pub enum SenseUpdateIpc {
     /// Sense Remote (D3e, #68): UI → `--server`: "Vazgeç" while downloading. On the macOS
     /// `_service` channel: agent → daemon, answered with `CancelAnswer`.
     CancelRequest,
+    /// Sense Remote (`now` window), macOS: daemon -> `--server` on the main channel: tell every
+    /// incoming connection of this session to close ([`now::NOTICE`]). No answer. Acts only in
+    /// the `--server` process; the `_service` channel does not accept it.
+    CloseSessions,
     /// `--server` → UI: the answer to `CancelRequest`, one of `request_cancel`'s codes.
     CancelAnswer(String),
 }
@@ -398,6 +410,8 @@ pub struct InstallJob {
     pub size: u64,
     pub source: UpdateSource,
     pub oid: Option<String>,
+    /// Sense Remote: the order's window is `now`: sessions are closed with a notice first.
+    pub now: bool,
 }
 
 /// Sense version of this build as the UI shows it; 0 without `SENSE_VERSION`.
@@ -472,6 +486,12 @@ pub fn extend_heartbeat(sense: &mut Value) {
 /// the daemon) and answers `None` everywhere else.
 pub async fn on_ipc(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
     if !SUPPORTED || !crate::is_server() {
+        return None;
+    }
+    // Sense Remote (`now` window): the daemon asks this session's connections to close.
+    if message == SenseUpdateIpc::CloseSessions {
+        let told = crate::server::sense_close_incoming(now::NOTICE);
+        log::info!("Sense Remote: update now, {told} connection(s) told to close");
         return None;
     }
     #[cfg(target_os = "macos")]
@@ -676,7 +696,7 @@ mod tests {
         );
         assert!(reasons.iter().all(|name| is_error_detail(name)));
         let windows: Vec<_> = order::Window::ALL.iter().map(|w| w.as_str()).collect();
-        assert_eq!(windows.join(" "), "idle night");
+        assert_eq!(windows.join(" "), "idle night now");
         assert_eq!(UpdateState::parse("rolled_back"), Some(UpdateState::RolledBack));
         assert_eq!(UpdateState::parse("Idle"), None);
         assert_eq!(json!(UpdateError::HashMismatch), json!("hash_mismatch"));
@@ -810,6 +830,7 @@ mod tests {
             SenseUpdateIpc::DaemonStatus("{}".to_owned()),
             SenseUpdateIpc::CancelRequest,
             SenseUpdateIpc::CancelAnswer("panel_order".to_owned()),
+            SenseUpdateIpc::CloseSessions,
         ] {
             let text = serde_json::to_string(&message).unwrap();
             assert_eq!(serde_json::from_str::<SenseUpdateIpc>(&text).unwrap(), message);

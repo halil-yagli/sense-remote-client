@@ -119,6 +119,10 @@ pub fn stop_auto_update() {
 /// Returns true when there are no active incoming or outgoing connections.
 /// Used to avoid updating while a remote session is in progress.
 pub fn has_no_active_conns() -> bool {
+    // Sense Remote: an installation of a `now` order has told the sessions to close.
+    if crate::sense::update::now::forcing() {
+        return true;
+    }
     let conns = crate::Connection::alive_conns();
     conns.is_empty() && has_no_controlling_conns()
 }
@@ -392,6 +396,10 @@ fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf, expe
 /// (`sense::update::idle_ipc`).
 #[cfg(target_os = "macos")]
 pub fn has_no_active_conns_ipc() -> bool {
+    // Sense Remote: as `has_no_active_conns`, for a `now` order.
+    if crate::sense::update::now::forcing() {
+        return true;
+    }
     let result = match hbb_common::tokio::runtime::Runtime::new() {
         Ok(rt) => rt.block_on(query_no_active_conns_ipc()),
         Err(err) => Err(hbb_common::anyhow::anyhow!(
@@ -422,6 +430,11 @@ async fn query_no_active_conns_ipc() -> ResultType<bool> {
             // serves a connection there (e.g. a Controller-only Mac): idle. Any other failure
             // still defers.
             Err(err) if crate::sense::update::idle_ipc::no_listener(&err) => {
+                // Sense Remote (B1): no `--server`, but the user may be in an outgoing session.
+                if crate::sense::update::outgoing::uid_has_outgoing(uid) {
+                    log::info!("[root-update] uid {uid} has an open Controller session; deferring");
+                    return Ok(false);
+                }
                 log::info!("[root-update] no main IPC listener for uid {uid}; no connection there");
                 continue;
             }

@@ -372,7 +372,10 @@ mod win {
         io::Error,
         mem::{size_of, zeroed},
         ptr::{null, null_mut},
-        sync::{atomic::Ordering, mpsc, Mutex},
+        sync::{
+            atomic::{AtomicU32, Ordering},
+            mpsc, Mutex,
+        },
         time::{Duration, Instant},
     };
     use winapi::{
@@ -504,6 +507,11 @@ mod win {
 
     static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 
+    // Sense Remote (B5): the curtain thread, readable without `RUNNING` (`show` holds that lock
+    // up to START_TIMEOUT while the video service, under the Server lock, reports watched
+    // screens). 0 = none.
+    static THREAD_ID: AtomicU32 = AtomicU32::new(0);
+
     /// Shows the curtain on every screen; returns once it is painted (or failed).
     pub fn show() -> ResultType<()> {
         let mut running = RUNNING.lock().unwrap();
@@ -524,6 +532,9 @@ mod win {
                     thread_id,
                     done: done_rx,
                 });
+                THREAD_ID.store(thread_id, Ordering::SeqCst);
+                // A change reported before the id was known would be missed: read again once.
+                watched_changed();
                 SHOWN.store(true, Ordering::SeqCst);
                 log::info!("Sense curtain on");
                 Ok(())
@@ -537,6 +548,7 @@ mod win {
     /// Removes the curtain from every screen.
     pub fn hide() {
         let running = RUNNING.lock().unwrap().take();
+        THREAD_ID.store(0, Ordering::SeqCst);
         if let Some(running) = running {
             unsafe {
                 PostThreadMessageW(running.thread_id, WM_QUIT, 0, 0);
@@ -551,9 +563,10 @@ mod win {
 
     /// Sense Remote (H5): tells a running curtain to re-read the watched screens.
     pub(super) fn watched_changed() {
-        if let Some(running) = RUNNING.lock().unwrap().as_ref() {
+        let thread_id = THREAD_ID.load(Ordering::SeqCst);
+        if thread_id != 0 {
             unsafe {
-                PostThreadMessageW(running.thread_id, WM_SENSE_WATCHED, 0, 0);
+                PostThreadMessageW(thread_id, WM_SENSE_WATCHED, 0, 0);
             }
         }
     }

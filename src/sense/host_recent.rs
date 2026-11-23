@@ -15,7 +15,7 @@ use hbb_common::{config::Config, log};
 use serde_derive::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -99,8 +99,14 @@ fn now_s() -> i64 {
 // `--server` process
 // ---------------------------------------------------------------------------------------------
 
+/// Sense Remote (B6): a lock a panicking thread poisoned is still taken; the list is plain data and a
+/// connection must not panic because of another one.
+fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn with_list<R>(f: impl FnOnce(&mut Vec<Entry>) -> R) -> R {
-    let mut list = LIST.lock().unwrap();
+    let mut list = locked(&LIST);
     let list = list.get_or_insert_with(|| {
         std::fs::read_to_string(Config::path(FILE))
             .map(|text| parse(&text))
@@ -117,17 +123,14 @@ pub fn started(conn_id: i32, name: &str) {
         started: Instant::now(),
         screens: 0,
     };
-    OPEN.lock()
-        .unwrap()
+    locked(&OPEN)
         .get_or_insert_with(HashMap::new)
         .insert(conn_id, open);
 }
 
 /// The connection now watches `count` screens; the most it watched at once is kept.
 pub fn screens(conn_id: i32, count: usize) {
-    if let Some(open) = OPEN
-        .lock()
-        .unwrap()
+    if let Some(open) = locked(&OPEN)
         .get_or_insert_with(HashMap::new)
         .get_mut(&conn_id)
     {
@@ -137,9 +140,7 @@ pub fn screens(conn_id: i32, count: usize) {
 
 /// The connection closed: it goes into the list (and the file).
 pub fn ended(conn_id: i32) {
-    let Some(open) = OPEN
-        .lock()
-        .unwrap()
+    let Some(open) = locked(&OPEN)
         .get_or_insert_with(HashMap::new)
         .remove(&conn_id)
     else {
@@ -151,13 +152,36 @@ pub fn ended(conn_id: i32) {
         seconds: open.started.elapsed().as_secs() as i64,
         screens: open.screens,
     };
-    let text = with_list(|list| {
-        push(list, entry);
-        to_json(list)
-    });
-    if let Err(err) = std::fs::write(Config::path(FILE), text) {
+    with_list(|list| push(list, entry));
+    // Sense Remote (B6): not on the connection's task (a slow disk would hold its loop).
+    if let Err(err) = std::thread::Builder::new()
+        .name("sense-recent".to_owned())
+        .spawn(persist)
+    {
         log::warn!("Sense Remote: recent connections not stored: {err}");
     }
+}
+
+static WRITE: Mutex<()> = Mutex::new(());
+
+/// Writes the current list. One writer at a time, each writes the latest list, so a slow older
+/// write can never leave an older list behind.
+fn persist() {
+    let _one = locked(&WRITE);
+    let text = with_list(|list| to_json(list));
+    if let Err(err) = write_atomic(&Config::path(FILE), &text) {
+        log::warn!("Sense Remote: recent connections not stored: {err}");
+    }
+}
+
+/// Temporary file, then rename: a crash leaves the old file or the new one, never half of one.
+fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path).map_err(|err| {
+        let _ = std::fs::remove_file(&tmp);
+        err
+    })
 }
 
 /// `main_sense_host_recent_conns`: `[{name, at, seconds, screens}]`, newest first.
@@ -223,6 +247,32 @@ mod tests {
                 Entry { name: "A".to_owned(), at: 10, seconds: 5, screens: 1 },
             ]
         );
+    }
+
+    #[test]
+    fn poisoned_lock_is_still_usable() {
+        let mutex = std::sync::Arc::new(Mutex::new(5));
+        let m = mutex.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = m.lock().unwrap();
+            panic!("poison it");
+        })
+        .join();
+        assert!(mutex.is_poisoned());
+        assert_eq!(*locked(&mutex), 5);
+    }
+
+    #[test]
+    fn write_replaces_the_file_whole() {
+        let dir = std::env::temp_dir().join(format!("sense-recent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE);
+        write_atomic(&path, "[1]").unwrap();
+        write_atomic(&path, "[2]").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[2]");
+        assert!(!path.with_extension("json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

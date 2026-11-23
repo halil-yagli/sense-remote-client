@@ -664,3 +664,25 @@ fn cancel_answers_and_never_stops_a_panel_order_or_an_installation() {
     assert_eq!(same, verifying);
     assert!(actions.is_empty());
 }
+
+// Sense Remote: a `now` order starts at once and installs at once, with sessions open, at
+// night or not, without the random delay; `idle` and `night` still wait.
+#[test]
+fn now_order_waits_for_nothing() {
+    let busy = Ctx { idle_s: 0, local_hour: 12, jitter_s: 600, ..ctx() };
+    let (state, actions) = next(available(4), Event::Order(Ok(order(OID, 4, Window::Now))), &busy);
+    assert_eq!(state.phase, UpdateState::Downloading);
+    assert_eq!(state.blocked, None);
+    assert!(actions.contains(&Action::Download));
+    let (state, _) = next(state, Event::Downloaded, &busy);
+    assert_eq!(state.phase, UpdateState::Verifying);
+    let (state, actions) = next(state, Event::Verified, &busy);
+    assert_eq!(state.phase, UpdateState::Installing);
+    assert!(actions.contains(&Action::Install));
+    // The same situation with the other windows waits.
+    for window in [Window::Idle, Window::Night] {
+        let (state, actions) = next(available(4), Event::Order(Ok(order(OID, 4, window))), &busy);
+        assert_ne!(state.phase, UpdateState::Downloading, "{window:?}");
+        assert!(!actions.contains(&Action::Download), "{window:?}");
+    }
+}

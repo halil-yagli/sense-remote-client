@@ -294,13 +294,26 @@ pub fn heartbeat_base() -> Option<Value> {
 
 /// Sense Remote (permanent password plan U14): the `caps` this build sends, from the switches.
 fn heartbeat_caps(curtain_supported: bool) -> Vec<String> {
-    caps_with_password(
-        caps_with_update(
-            caps(curtain_supported, super::envelope_apply::APPLIES),
-            super::update::SUPPORTED,
+    caps_with_update_now(
+        caps_with_password(
+            caps_with_update(
+                caps(curtain_supported, super::envelope_apply::APPLIES),
+                super::update::SUPPORTED,
+            ),
+            super::password::SUPPORTED,
         ),
-        super::password::SUPPORTED,
+        super::update::SUPPORTED,
     )
+}
+
+/// Sense Remote: `update_now` comes after `password`, where this build installs signed updates.
+/// It means "I know the update window `now`"; older builds refuse an order with a window they do
+/// not know, so the panel sends `now` only to a computer that reports it.
+fn caps_with_update_now(mut caps: Vec<String>, update_supported: bool) -> Vec<String> {
+    if update_supported {
+        caps.push(super::update::CAP_UPDATE_NOW.to_owned());
+    }
+    caps
 }
 
 /// Sense Remote: `caps` of this computer: `CAPS`, plus `curtain` where it can be shown and
@@ -1585,6 +1598,18 @@ mod tests {
         assert!(!heartbeat_caps(true).contains(&"update".to_owned()));
     }
 
+    // Sense Remote: `update_now` follows the update switch and comes last.
+    #[test]
+    fn update_now_cap_follows_the_switch() {
+        let base = || vec!["role_all".to_owned()];
+        assert_eq!(caps_with_update_now(base(), false), base());
+        assert_eq!(caps_with_update_now(base(), true), ["role_all", "update_now"]);
+        assert!(crate::sense::update::CAP_UPDATE_NOW.len() <= SCHEMA_CAP_MAX_CHARS);
+        assert!(heartbeat_caps(true).len() <= SCHEMA_CAPS_MAX);
+        let on = cfg!(any(windows, target_os = "macos"));
+        assert_eq!(heartbeat_caps(true).contains(&"update_now".to_owned()), on);
+    }
+
     // Permanent password plan §3.5: `password` follows its one switch.
     #[test]
     fn password_cap_follows_the_switch() {
@@ -1608,7 +1633,9 @@ mod tests {
             let caps = heartbeat_caps(curtain);
             assert_eq!(caps.iter().filter(|cap| *cap == "password").count(), usize::from(on));
             if on {
-                assert_eq!(caps.last().map(String::as_str), Some("password"), "{caps:?}");
+                let at = |name: &str| caps.iter().position(|cap| cap == name);
+                assert_eq!(at("password").map(|i| i + 1), at("update_now"), "{caps:?}");
+                assert_eq!(caps.last().map(String::as_str), Some("update_now"), "{caps:?}");
             }
             assert!(caps.len() <= SCHEMA_CAPS_MAX);
         }
