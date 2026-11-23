@@ -33,6 +33,11 @@ import 'mobile/pages/server_page.dart';
 import 'mobile/widgets/deploy_dialog.dart';
 import 'models/platform_model.dart';
 import 'common/sense_theme.dart'; // Sense Remote
+import 'sense/router.dart'; // Sense Remote (A2c)
+import 'sense/screens/controller/sense_home_strings.dart' // Sense Remote (A2c)
+    show SenseHomeRole, senseHomeRoleFrom;
+import 'sense/screens/controller/sense_update_model.dart'; // Sense Remote (A2c)
+import 'sense/strings/common.dart'; // Sense Remote (A2c)
 
 /// Basic window and launch properties.
 int? kWindowId;
@@ -158,7 +163,10 @@ void runMainApp(bool startService, {bool envReady = false}) async {
   }
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
-  runApp(App());
+  senseRegisterScreens(); // Sense Remote (A2c): B/C home screens
+  // Sense Remote (A2c, T8): right after an update the opening screen says
+  // which version was installed.
+  runApp(App(justUpdatedTo: await _senseJustUpdatedTo()));
 
   bool? alwaysOnTop;
   if (isDesktop) {
@@ -188,6 +196,22 @@ void runMainApp(bool startService, {bool envReady = false}) async {
     // Do not use `windowManager.setResizable()` here.
     setResizable(!bind.isIncomingOnly());
   });
+}
+
+/// Sense Remote (A2c, T8): the version just installed, when the app opens
+/// right after an update; null otherwise (or when the status is unreadable).
+Future<int?> _senseJustUpdatedTo() async {
+  try {
+    final last =
+        SenseUpdateStatus.parse(await bind.mainSenseUpdateStatus()).lastResult;
+    return senseJustUpdatedTo(
+        installed: last?.state == SenseUpdateState.installed,
+        to: last?.to,
+        atSeconds: last?.at,
+        nowSeconds: DateTime.now().millisecondsSinceEpoch ~/ 1000);
+  } catch (_) {
+    return null;
+  }
 }
 
 void runMobileApp() async {
@@ -390,9 +414,10 @@ void _runApp(
       navigatorKey: globalKey,
       debugShowCheckedModeBanner: false,
       title: title,
-      theme: MyTheme.lightTheme,
-      darkTheme: senseAppDarkTheme(), // Sense Remote
-      themeMode: themeMode,
+      // Sense Remote (A2c, T1): only dark, also when the system is light.
+      theme: senseAppDarkTheme(),
+      darkTheme: senseAppDarkTheme(),
+      themeMode: ThemeMode.dark,
       home: home,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
@@ -453,6 +478,10 @@ WindowOptions getHiddenTitleBarWindowOptions(
 }
 
 class App extends StatefulWidget {
+  // Sense Remote (A2c, T8): version installed just before this start.
+  App({Key? key, this.justUpdatedTo}) : super(key: key);
+  final int? justUpdatedTo;
+
   @override
   State<App> createState() => _AppState();
 }
@@ -461,26 +490,8 @@ class _AppState extends State<App> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.window.onPlatformBrightnessChanged = () {
-      final userPreference = MyTheme.getThemeModePreference();
-      if (userPreference != ThemeMode.system) return;
-      WidgetsBinding.instance.handlePlatformBrightnessChanged();
-      final systemIsDark =
-          WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-              Brightness.dark;
-      final ThemeMode to;
-      if (systemIsDark) {
-        to = ThemeMode.dark;
-      } else {
-        to = ThemeMode.light;
-      }
-      Get.changeThemeMode(to);
-      // Synchronize the window theme of the system.
-      updateSystemWindowTheme();
-      if (desktopType == DesktopType.main) {
-        bind.mainChangeTheme(dark: to.toShortString());
-      }
-    };
+    // Sense Remote (A2c, T1): no theme follows the system; the app stays dark
+    // when the system switches to light (the stock brightness handler is gone).
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateOrientation());
   }
@@ -529,14 +540,19 @@ class _AppState extends State<App> with WidgetsBindingObserver {
         child: GetMaterialApp(
           navigatorKey: globalKey,
           debugShowCheckedModeBanner: false,
-          title: isWeb
-              ? '${bind.mainGetAppNameSync()} Web Client V2 (Preview)'
-              : bind.mainGetAppNameSync(),
-          theme: MyTheme.lightTheme,
-          darkTheme: senseAppDarkTheme(), // Sense Remote
-          themeMode: MyTheme.currentThemeMode(),
+          // Sense Remote (A2c, T2): "Sense Remote", never "SenseRemote".
+          title: SenseCommonStrings.appName,
+          // Sense Remote (A2c, T1): only dark, also when the system is light.
+          theme: senseAppDarkTheme(),
+          darkTheme: senseAppDarkTheme(),
+          themeMode: ThemeMode.dark,
+          // Sense Remote (A2c): role → Sense home (router); the existing
+          // screens while a B/C entry is not registered. Opening screen (T8).
           home: isDesktop
-              ? const DesktopTabPage()
+              ? SenseSplashGate(
+                  updatingToVersion: widget.justUpdatedTo,
+                  child: senseHomeFor(_senseRole(),
+                      fallback: () => const DesktopTabPage()))
               : isWeb
                   ? WebHomePage()
                   : HomePage(),
@@ -578,6 +594,19 @@ class _AppState extends State<App> with WidgetsBindingObserver {
   }
 }
 
+/// Sense Remote (A2c): role the installer applied; none before the native
+/// side is ready.
+SenseHomeRole _senseRole() {
+  try {
+    return senseHomeRoleFrom(
+        incomingOnly: bind.isIncomingOnly(),
+        outgoingOnly: bind.isOutgoingOnly(),
+        settingsDisabled: bind.isDisableSettings());
+  } catch (_) {
+    return SenseHomeRole.none;
+  }
+}
+
 Widget _keepScaleBuilder(BuildContext context, Widget? child) {
   return MediaQuery(
     data: MediaQuery.of(context).copyWith(
@@ -591,8 +620,9 @@ _registerEventHandler() {
   if (isDesktop && desktopType != DesktopType.main) {
     platformFFI.registerEventHandler('theme', 'theme', (evt) async {
       String? dark = evt['dark'];
+      // Sense Remote (A2c, T1): only dark; changeDarkMode keeps it dark.
       if (dark != null) {
-        await MyTheme.changeDarkMode(MyTheme.themeModeFromString(dark));
+        await MyTheme.changeDarkMode(ThemeMode.dark);
       }
     });
     platformFFI.registerEventHandler('language', 'language', (_) async {
