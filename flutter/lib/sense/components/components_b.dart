@@ -3,6 +3,7 @@
 export 'accordion.dart';
 export 'blink.dart';
 export 'breathe.dart';
+export 'caret.dart';
 export 'glow_scene.dart';
 export 'inline_confirm.dart';
 export 'popup_host.dart';

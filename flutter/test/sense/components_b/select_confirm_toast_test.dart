@@ -117,7 +117,7 @@ void main() {
     });
 
     testWidgets('golden: open list', (tester) async {
-      setWindow(tester, const Size(360, 260));
+      setWindow(tester, const Size(360, 380));
       await tester.pumpWidget(app(const RepaintBoundary(
         key: Key('golden'),
         child: Padding(padding: EdgeInsets.all(16), child: Align(alignment: Alignment.topLeft, child: _SelectHarness())),
