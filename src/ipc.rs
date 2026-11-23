@@ -404,6 +404,10 @@ pub enum Data {
     // Sense Remote (S7-b): the Controller started (true) / stopped (false) recording this
     // connection; connection -> connection manager (red dot, recording strip).
     SenseRecording(bool),
+    // Sense Remote (Sürüm 4 S3 / H1 / H2, D3c): the Host's name and location (read, change) and
+    // its last connections, UI -> `--server` and, on macOS, `--server` -> root daemon
+    // (`_service` channel, `Store` only).
+    SenseIdentitySet(crate::sense::identity_set::SenseIdentityIpc),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -754,6 +758,8 @@ fn sense_service_accepts(data: &Data) -> bool {
                     | SensePasswordIpc::Cancel
                     | SensePasswordIpc::StatusQuery
             )
+            // Sense Remote (D3c): storing the name / location the panel took; never an answer.
+            | Data::SenseIdentitySet(crate::sense::identity_set::SenseIdentityIpc::Store { .. })
     )
 }
 
@@ -764,7 +770,32 @@ async fn sense_service_message(data: Data, stream: &mut Connection) {
     match data {
         Data::SenseUpdate(message) => sense_service_update(message, stream).await,
         Data::SensePassword(message) => sense_service_password(message, stream).await,
+        Data::SenseIdentitySet(message) => sense_service_identity(message, stream).await,
         data => sense_service_envelope(data, stream).await,
+    }
+}
+
+// Sense Remote (D3c): the root daemon checks the values itself and writes them into the state
+// file (`identity_set::on_service_ipc`; file work, so off the async loop). Nothing is logged.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn sense_service_identity(
+    message: crate::sense::identity_set::SenseIdentityIpc,
+    stream: &mut Connection,
+) {
+    #[cfg(target_os = "macos")]
+    let reply = tokio::task::spawn_blocking(move || {
+        crate::sense::identity_set::on_service_ipc(message)
+    })
+    .await
+    .ok()
+    .flatten();
+    #[cfg(not(target_os = "macos"))]
+    let reply = {
+        let _ = message;
+        None
+    };
+    if let Some(reply) = reply {
+        allow_err!(stream.send(&Data::SenseIdentitySet(reply)).await);
     }
 }
 
@@ -1303,6 +1334,13 @@ async fn handle(data: Data, stream: &mut Connection) {
         Data::SensePassword(message) => {
             if let Some(reply) = crate::sense::password::on_main_ipc(message).await {
                 allow_err!(stream.send(&Data::SensePassword(reply)).await);
+            }
+        }
+        // Sense Remote (D3c): `--server` answers the Host window (name / location, signed to the
+        // panel with the device key; last connections).
+        Data::SenseIdentitySet(message) => {
+            if let Some(reply) = crate::sense::identity_set::on_main_ipc(message).await {
+                allow_err!(stream.send(&Data::SenseIdentitySet(reply)).await);
             }
         }
         Data::NatType(_) => {
@@ -2731,6 +2769,43 @@ mod test {
         assert!(body.contains(
             "crate::sense::password::ipc_mac::on_service_ipc(message, peer_pid, peer_uid)"
         ));
+        assert!(!body.contains("on_main_ipc(message)"));
+    }
+
+    // Sense Remote (D3c): of the identity messages the `_service` channel takes only `Store`;
+    // the UI's requests and the daemon's answer are not something a client may send there.
+    #[test]
+    fn sense_service_channel_takes_only_the_identity_store() {
+        use super::{sense_service_accepts, Data};
+        use crate::sense::identity_set::SenseIdentityIpc;
+        assert!(sense_service_accepts(&Data::SenseIdentitySet(SenseIdentityIpc::Store {
+            name: "Kiosk".to_owned(),
+            location: String::new(),
+            location_id: String::new(),
+        })));
+        for rejected in [
+            SenseIdentityIpc::Query,
+            SenseIdentityIpc::Set {
+                name: "Kiosk".to_owned(),
+                location_id: String::new(),
+            },
+            SenseIdentityIpc::RecentQuery,
+            SenseIdentityIpc::Answer("{}".to_owned()),
+            SenseIdentityIpc::Stored(true),
+        ] {
+            assert!(!sense_service_accepts(&Data::SenseIdentitySet(rejected.clone())), "{rejected:?}");
+        }
+        let source = include_str!("ipc.rs").replace("\r\n", "\n");
+        let start = source.find("async fn sense_service_message(").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains(
+            "Data::SenseIdentitySet(message) => sense_service_identity(message, stream).await"
+        ));
+        let start = source.find("async fn sense_service_identity(").unwrap();
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains("crate::sense::identity_set::on_service_ipc(message)"));
         assert!(!body.contains("on_main_ipc(message)"));
     }
 

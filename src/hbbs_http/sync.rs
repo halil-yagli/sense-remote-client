@@ -297,12 +297,17 @@ async fn start_hbbs_sync_async() {
                     // Sense Remote (permanent password plan §3.5): `sense.access`, likewise
                     // outside the signed report (the ack signs itself); left out while `None`.
                     crate::sense::password::status::extend_heartbeat(&mut sense);
+                    // Sense Remote (D3c, H1): `sense.loc_rev`, likewise unsigned.
+                    crate::sense::identity_set::extend_heartbeat(&mut sense);
                     v["sense"] = sense;
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
                 if let Err(err) = &response {
                     hbb_common::throttled_log!(API_LOG_INTERVAL, warn, "Heartbeat failed: {err:?}");
                 }
+                // Sense Remote (D3c, H1): panel reachability and the Host's location list
+                // (`sense_locations`) for the Host window.
+                crate::sense::identity_set::on_heartbeat_answer(response.as_deref().ok());
                 // Sense Remote: only `sysinfo`, signed `sense_envelopes` and `sense_server_time`
                 // are acted on. The unsigned upstream `strategy`, `disconnect` and `modified_at`
                 // are never applied (anyone answering in the panel's name could set them).

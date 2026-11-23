@@ -1,6 +1,8 @@
 // Sense Remote: last incoming connections (YH H2 "Son bağlantılar": kişi · tarih
-// · süre · ekran sayısı). There is no bridge for the Host's incoming history yet.
+// · süre · ekran sayısı). Bridge `main_sense_host_recent_conns` (D3c).
 import 'dart:convert';
+
+import '../../../../models/platform_model.dart';
 
 class SenseRecentConnection {
   const SenseRecentConnection({required this.who, required this.at, this.seconds, this.screens});
@@ -31,6 +33,5 @@ List<SenseRecentConnection> senseRecentParse(String raw) {
   }
 }
 
-// TODO(bridge): plan §2.6 has no function for the Host's incoming history
-// (asked in the B2 report); empty until then.
-Future<String> senseRecentRaw() async => '[]';
+// D3c: the service keeps the Host's last 20 incoming connections (no secrets).
+Future<String> senseRecentRaw() => bind.mainSenseHostRecentConns();

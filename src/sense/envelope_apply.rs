@@ -94,6 +94,8 @@ pub fn parse_answer(body: &str) -> Option<HeartbeatAnswer> {
                 Some(caps) => answer.panel_caps = Some(caps),
                 None => answer.ignored.push(key),
             },
+            // Sense Remote (D3c, H1): read by `identity_set::on_heartbeat_answer`, not here.
+            super::report::KEY_LOCATIONS => {}
             _ => answer.ignored.push(key),
         }
     }

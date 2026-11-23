@@ -1,0 +1,44 @@
+{
+  "v": 1,
+  "description": "Sense Remote device-info imza test vektoru (panel packages/shared client-api/device-info.ts; panel verifyDeviceInfoSignature ile uretildi ve dogrulandi). Imzalanan veri = prefix (ASCII) || JCS({id, uuid, ts, name, location_id}). sig: Ed25519 ayrik imza, dolgusuz base64url. device_pk: ham 32 bayt acik anahtar, base64url. Anahtar bellekte uretildi; gizli anahtar hicbir yerde yok. signed_text yalniz gecerli vakalarda.",
+  "prefix": "sense-remote/device-info/v1\n",
+  "device_pk": "j-YgHcD-9jC45ah9YdUgmMXoOu49NRc68AC1J2DGL6w",
+  "cases": [
+    {
+      "name": "ok_with_location",
+      "body": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "ts": 1795000000,
+        "name": "Kiosk 1",
+        "location_id": "loc_01JXa-b",
+        "sig": "9B5-YE3Et4onnXfHnJ7zm0bTiFUyZr7m5N8m-SfN0ncNBw8ZLhfRoAgDQvuOeXrNGWzahipCHPJ0beaUq44PDg"
+      },
+      "signed_text": "sense-remote/device-info/v1\n{\"id\":\"123456789\",\"location_id\":\"loc_01JXa-b\",\"name\":\"Kiosk 1\",\"ts\":1795000000,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "ok_no_location",
+      "body": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "ts": 1795000001,
+        "name": "Giriş Ekranı \"A\" — Ön",
+        "location_id": null,
+        "sig": "jynMFb3uP1mhKd95NUlVGC4etsClFN4PJFZtwR3P3H0AG6ivbfb61wU42ikNGYzYiysMNxuEik3lkOrqRqFaCA"
+      },
+      "signed_text": "sense-remote/device-info/v1\n{\"id\":\"123456789\",\"location_id\":null,\"name\":\"Giriş Ekranı \\\"A\\\" — Ön\",\"ts\":1795000001,\"uuid\":\"dGVzdC11dWlk\"}"
+    },
+    {
+      "name": "bad_signature_name_changed",
+      "body": {
+        "id": "123456789",
+        "uuid": "dGVzdC11dWlk",
+        "ts": 1795000000,
+        "name": "Kiosk 2",
+        "location_id": "loc_01JXa-b",
+        "sig": "9B5-YE3Et4onnXfHnJ7zm0bTiFUyZr7m5N8m-SfN0ncNBw8ZLhfRoAgDQvuOeXrNGWzahipCHPJ0beaUq44PDg"
+      },
+      "signed_text": null
+    }
+  ]
+}
