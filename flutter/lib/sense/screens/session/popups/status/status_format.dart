@@ -30,6 +30,9 @@ String _group(String digits) {
 /// "%23" (whole), "%0,2" under 1.
 String sensePct(double v) => v > 0 && v < 1 ? '%${senseNum(v, digits: 1)}' : '%${v.round()}';
 
+/// "%5,1", "%100", "%0": one decimal at most, trailing ",0" dropped (G9).
+String sensePctDecimal(double v) => '%${senseNum(v)}';
+
 /// "58 °C".
 String senseTemp(double c) => '${c.round()} °C';
 
@@ -70,9 +73,12 @@ String senseMBps(int bps) => '${(bps / 1e6).round()}';
 String senseLinkSpeed(int mbps) =>
     mbps >= 1000 ? '${senseNum(mbps / 1000)} Gbit/s' : '$mbps Mbit/s';
 
-/// "↓ 12 · ↑ 3 Mbit/s".
+/// "↓ 12 · ↑ 3 Mbit/s" — copy text only; the popup draws the arrows as icons.
 String senseTraffic(double rxMbit, double txMbit) =>
     '↓ ${_mbit(rxMbit)} · ↑ ${_mbit(txMbit)} Mbit/s';
+
+/// "12" / "3,4" (no unit).
+String senseMbitText(double v) => _mbit(v);
 
 String _mbit(double v) => v >= 10 || v == 0 ? '${v.round()}' : senseNum(v);
 

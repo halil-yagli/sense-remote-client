@@ -180,7 +180,6 @@ abstract class SenseSessionBackend extends ChangeNotifier {
   void addNote();
   void openTerminal();
   void openTunnel();
-  void openCamera();
 
   /// The connection fingerprint, or empty.
   String get fingerprint;

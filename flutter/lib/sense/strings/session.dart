@@ -184,10 +184,9 @@ abstract final class SenseSessionStrings {
   static const String lockAfterEnd = 'Oturum bitince uzak ekranı kilitle';
   static const String note = 'Oturuma not ekle';
   static const String advanced = 'Gelişmiş';
-  static const String advancedSummary = 'terminal, tünel, kamera…';
+  static const String advancedSummary = 'terminal, tünel…';
   static const String terminal = 'Terminal aç';
   static const String tunnel = 'TCP tüneli';
-  static const String camera = 'Kamerayı görüntüle';
   static const String fingerprint = 'Parmak izini kopyala';
   static const String fingerprintCopied = 'Parmak izi kopyalandı';
   static const String fingerprintNone = 'Parmak izi yok';

@@ -92,12 +92,37 @@ class SenseMeterRowView extends StatelessWidget {
           const SizedBox(width: _kMeterGap),
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: _kMeterValue),
-            child: Text(row.text ?? SenseStatusStrings.unreadable,
-                textAlign: TextAlign.right, style: _valueStyle(row.text, row.valueLevel)),
+            child: row.traffic != null && row.text != null
+                ? _TrafficValue(traffic: row.traffic!, style: _valueStyle(row.text, row.valueLevel))
+                : Text(row.text ?? SenseStatusStrings.unreadable,
+                    textAlign: TextAlign.right, style: _valueStyle(row.text, row.valueLevel)),
           ),
         ]),
       ),
     );
+  }
+}
+
+/// "↓ 12 · ↑ 3 Mbit/s" with drawn arrows (Poppins has no ↓ ↑).
+class _TrafficValue extends StatelessWidget {
+  const _TrafficValue({required this.traffic, required this.style});
+  final SenseTraffic traffic;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = (style.fontSize ?? SenseFontSize.hintLarge) + 1;
+    Widget arrow(SenseGlyphKind k) => Padding(
+          padding: const EdgeInsets.only(right: 2),
+          child: SenseGlyph(k, key: ValueKey('sense-traffic-${k.name}'), size: size, color: style.color),
+        );
+    return Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.end, children: [
+      arrow(SenseGlyphKind.down),
+      Text(traffic.down, style: style),
+      Text(' · ', style: style),
+      arrow(SenseGlyphKind.up),
+      Text('${traffic.up} Mbit/s', style: style),
+    ]);
   }
 }
 
@@ -192,7 +217,7 @@ class SenseStatusTagView extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: _kTagPadH, vertical: _kTagPadV),
         decoration: BoxDecoration(
-          color: strong ? SenseColors.text : SenseColors.line,
+          color: strong ? SenseColors.textSecondary : SenseColors.line,
           borderRadius: BorderRadius.circular(_kTagRadius),
         ),
         child: Text(label, style: style(strong)),
@@ -262,17 +287,22 @@ class SenseStatusCardView extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: _kCardHeadBottom),
           child: Row(children: [
-            Flexible(
-              child: Text(card.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold)),
+            // The title takes all the room the tags and the button leave (a Spacer next to a
+            // Flexible split it in half and cut "Samsung SSD 9…", G7).
+            Expanded(
+              child: Row(children: [
+                Flexible(
+                  child: Text(card.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold)),
+                ),
+                for (final t in card.tags) ...[
+                  const SizedBox(width: _kCardHeadGap),
+                  SenseStatusTagView(label: t),
+                ],
+              ]),
             ),
-            for (final t in card.tags) ...[
-              const SizedBox(width: _kCardHeadGap),
-              SenseStatusTagView(label: t),
-            ],
-            const Spacer(),
             const SizedBox(width: _kCardHeadGap),
             SenseCopyButton(key: Key('sense-copy-${card.title}'), text: card.copyText, onCopied: onCopied),
           ]),

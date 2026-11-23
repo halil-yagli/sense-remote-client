@@ -95,6 +95,9 @@ void main() {
     await pumpWizard(tester, backend);
     await toSummary(tester, backend);
     await tap(tester, 'sense-advanced');
+    // The window scrolls: bring the last row (Sense Remote yazıcısı) into the image.
+    await tester.ensureVisible(find.byKey(const Key('sense-printer')));
+    await tester.pump();
     await golden(tester, 'i06_summary');
   }, skip: _missing('i06_summary'), tags: const ['golden']);
 

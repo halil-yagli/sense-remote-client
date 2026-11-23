@@ -226,11 +226,17 @@ class SenseControllerShellView extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(SenseUi.iconGap, 0, SenseUi.iconGap, _kRailBottom),
-              child: Row(children: [
-                Expanded(
-                  child: Text(SenseControllerStrings.thisComputer,
-                      style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textMuted)),
-                ),
+              // Wrap: "Bu bilgisayar" never breaks; a long badge ("Host + Controller") drops below it.
+              child: Wrap(
+                  spacing: SenseUi.iconGap,
+                  runSpacing: SenseUi.iconGap,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                Text(SenseControllerStrings.thisComputer,
+                    key: const Key('sense-controller-rail-title'),
+                    maxLines: 1,
+                    softWrap: false,
+                    style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textMuted)),
                 Container(
                   key: const Key('sense-controller-role-chip'),
                   padding: const EdgeInsets.symmetric(vertical: _kChipPadV, horizontal: _kChipPadH),
@@ -332,7 +338,7 @@ class _NavItem extends StatelessWidget {
                         color: selected || s.hovered ? SenseColors.text : SenseColors.textSecondary)),
               ),
               if (count != null && count! > 0)
-                Text('$count', style: SenseTextStyles.of(size: SenseFontSize.caps, color: SenseColors.textDim)),
+                Text('$count', style: SenseTextStyles.of(size: SenseFontSize.caps, color: SenseColors.textMuted)),
             ]),
           ),
         ),

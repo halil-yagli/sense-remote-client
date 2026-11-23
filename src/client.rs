@@ -2381,8 +2381,9 @@ impl AudioHandler {
     /// Start the audio playback.
     #[cfg(not(target_os = "linux"))]
     fn start_audio(&mut self, format0: AudioFormat) -> ResultType<()> {
-        let device = AUDIO_HOST
-            .default_output_device()
+        // Sense Remote (O11): the sound output chosen for the call; system default otherwise.
+        let device = crate::sense::chat_file::call_output_device(&AUDIO_HOST)
+            .or_else(|| AUDIO_HOST.default_output_device())
             .with_context(|| "Failed to get default output device")?;
         log::info!(
             "Using default output device: \"{}\"",
@@ -4142,6 +4143,8 @@ pub fn start_audio_thread() -> MediaSender {
     let (audio_sender, audio_receiver) = mpsc::channel::<MediaData>();
     std::thread::spawn(move || {
         let mut audio_handler = AudioHandler::default();
+        // Sense Remote (O11): last format, to reopen playback on a new sound output.
+        let mut sense_format: Option<AudioFormat> = None;
         loop {
             #[cfg(target_os = "windows")]
             let received = audio_handler.receive_audio(&audio_receiver);
@@ -4150,10 +4153,17 @@ pub fn start_audio_thread() -> MediaSender {
             if let Ok(data) = received {
                 match data {
                     MediaData::AudioFrame(af) => {
+                        // Sense Remote (O11): a sound output chosen during the call takes effect.
+                        if crate::sense::chat_file::take_output_change() {
+                            if let Some(f) = sense_format.clone() {
+                                audio_handler.handle_format(f);
+                            }
+                        }
                         audio_handler.handle_frame(*af);
                     }
                     MediaData::AudioFormat(f) => {
                         log::debug!("recved audio format, sample rate={}", f.sample_rate);
+                        sense_format = Some(f.clone()); // Sense Remote (O11)
                         audio_handler.handle_format(f);
                     }
                     _ => {}

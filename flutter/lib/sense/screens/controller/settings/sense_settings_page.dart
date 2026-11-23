@@ -15,7 +15,7 @@ import '../../../strings/settings.dart';
 import '../../../router.dart' show senseRoleChangeReopen;
 import '../../host/data/role.dart' show SenseRoleBackend, SenseRoleBridge;
 import '../../host/role/role_category.dart' show SenseRoleController, SenseRoleCategoryBody, senseRoleSummary;
-import '../../host/sense_password_page.dart' show SensePasswordAboutRow;
+import '../../host/password/password_about_row.dart' show SensePasswordAboutRow;
 import '../sense_home_strings.dart' show SenseHomeRole, senseRoleLabel;
 import 'data/settings_backend.dart';
 import 'widgets.dart';
@@ -363,6 +363,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
           key: const Key('sense-set-enable-lan-discovery')),
       lockedRow(SenseSettingsStrings.directIp,
           directOn ? (port.isEmpty ? SenseSettingsStrings.on : SenseSettingsStrings.directIpPort(port)) : SenseSettingsStrings.off,
+          hint: SenseSettingsStrings.directIpHint,
           key: const Key('sense-set-direct-server')),
       lockedRow(SenseSettingsStrings.login, SenseSettingsStrings.loginValue, last: true, key: const Key('sense-set-login')),
     ];

@@ -3,7 +3,6 @@
 // Controller records the connection (D1 CM event `sense_recording` {id, on},
 // also in the client JSON as `sense_recording`).
 
-import 'dart:async';
 import 'dart:convert';
 
 import '../../../../models/platform_model.dart';
@@ -87,27 +86,24 @@ class SenseHostClock {
   }
 }
 
-/// Keeps `Client.senseRecording` current. D1 pushes `sense_recording` on the
-/// CM event stream, but RustDesk's event switch (models/model.dart) does not
-/// route it yet, so the state is read from `cm_get_clients_state` (which
-/// carries the same flag) every [every].
-// TODO(D1): route the `sense_recording` CM event in models/model.dart to
-// `serverModel.senseUpdateRecording(id, on)`; then this poll can go.
+/// Keeps `Client.senseRecording` current. Changes arrive as the CM event
+/// `sense_recording` {id, on} (routed in models/model.dart to
+/// `serverModel.senseUpdateRecording`); this reads the state once when the
+/// card opens (`cm_get_clients_state` carries the same flag), for a recording
+/// that started before.
 class SenseHostRecordingWatch {
   SenseHostRecordingWatch({
     required this.onRecording,
     Future<String> Function()? readState,
-    this.every = const Duration(seconds: 1),
   }) : _read = readState ?? (() => bind.cmGetClientsState());
 
   final void Function(int id, bool on) onRecording;
   final Future<String> Function() _read;
-  final Duration every;
-  Timer? _t;
   bool _busy = false;
 
+  /// One reading of the current state; later changes come as events.
   void start() {
-    _t ??= Timer.periodic(every, (_) => poll());
+    poll();
   }
 
   Future<void> poll() async {
@@ -116,14 +112,11 @@ class SenseHostRecordingWatch {
     try {
       senseParseRecording(await _read()).forEach(onRecording);
     } catch (_) {
-      // The CM may be closing; the next tick tries again.
+      // The CM may be closing; the events keep the state from here on.
     } finally {
       _busy = false;
     }
   }
 
-  void stop() {
-    _t?.cancel();
-    _t = null;
-  }
+  void stop() {}
 }

@@ -4,6 +4,7 @@
 // group with a computer in trouble breathes its frame very slowly (4.5 s).
 // Inside, tiles in a grid; dragging a tile sorts it inside the group (personal
 // order). Moving to another project is not done here (panel only).
+import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/widgets.dart';
 
 import '../../../sense.dart';
@@ -198,11 +199,9 @@ class _SenseProjectGroupState extends State<SenseProjectGroup> with SingleTicker
       tooltip: SenseControllerStrings.dragToSort,
       builder: (_, s) => Padding(
         padding: const EdgeInsets.only(right: _kGripGap),
-        child: Text('⋮⋮',
-            style: SenseTextStyles.of(
-              size: SenseFontSize.bodySmall,
-              color: s.hovered ? SenseColors.textMuted : SenseColors.lineStrong,
-            ).copyWith(letterSpacing: -_kGripGap)),
+        child: Icon(Icons.drag_indicator,
+            size: SenseFontSize.body,
+            color: s.hovered ? SenseColors.textMuted : SenseColors.lineStrong),
       ),
     );
     final draggableGrip = widget.onGroupDrop == null

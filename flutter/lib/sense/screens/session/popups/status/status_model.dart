@@ -47,8 +47,13 @@ class SenseStatusLine extends SenseStatusRow {
 /// Meter row (`.mt`): label, 6 px bar, value. [pct] null = bar empty and the
 /// value "okunamadı".
 class SenseStatusMeter extends SenseStatusRow {
-  const SenseStatusMeter(this.label, this.pct, this.text, {required this.barLevel, SenseLevel? valueLevel})
+  const SenseStatusMeter(this.label, this.pct, this.text,
+      {required this.barLevel, SenseLevel? valueLevel, this.traffic})
       : _valueLevel = valueLevel;
+
+  /// Download / upload figures of a traffic row; drawn with arrow icons ([text] stays the
+  /// plain copy text).
+  final SenseTraffic? traffic;
 
   final String label;
   final double? pct;
@@ -64,6 +69,13 @@ class SenseStatusMeter extends SenseStatusRow {
 
   @override
   String get copyText => '$label: ${text ?? _S.unreadable}';
+}
+
+/// "12" down, "3" up, in Mbit/s.
+class SenseTraffic {
+  const SenseTraffic(this.down, this.up);
+  final String down;
+  final String up;
 }
 
 /// Small upper-case group title (`.gt2`).
@@ -255,7 +267,8 @@ SenseStatusMeter _trafficMeter(
   }
   final shown = pct?.clamp(0, 100).toDouble();
   return SenseStatusMeter(label, shown ?? 0, senseTraffic(rx, tx),
-      barLevel: shown == null ? SenseLevel.ok : _usage(shown));
+      barLevel: shown == null ? SenseLevel.ok : _usage(shown),
+      traffic: SenseTraffic(senseMbitText(rx), senseMbitText(tx)));
 }
 
 SenseInvNetwork? _adapterFor(String name, List<SenseInvNetwork>? adapters) {
@@ -432,10 +445,11 @@ SenseStatusCategory _storage(SenseHealthDetail? h, SenseInventory? inv) {
 }
 
 SenseStatusMeter _volumeMeter(String mount, SenseHealthDisk? v) {
+  final name = v?.label == null ? mount : '$mount ${v!.label}';
   if (v == null) return SenseStatusMeter(mount, null, null, barLevel: SenseLevel.unknown);
   final total = v.totalGb;
   final text = total == null ? sensePct(v.usedPct) : senseUsedOfTotalGb(total * v.usedPct / 100, total);
-  return SenseStatusMeter(mount, v.usedPct, text, barLevel: _usage(v.usedPct));
+  return SenseStatusMeter(name, v.usedPct, text, barLevel: _usage(v.usedPct));
 }
 
 String? _diskTag(SenseInvDisk d) {
@@ -465,6 +479,9 @@ SenseStatusLine _diskHealth(SenseInvDisk d) {
 
 // ------------------------------------------------------------------ Ağ
 
+/// "192.168.10.42/24" → "192.168.10.42 /24" (prefix only when the peer sends one).
+String _ipText(String ip) => ip.contains('/') ? ip.replaceFirst('/', ' /') : ip;
+
 SenseStatusCategory _network(SensePeerStatus st, SenseHealthDetail? h, SenseInventory? inv) {
   // Adapters: the base list (IPs) joined with the inventory by name; inventory-only
   // adapters (unplugged ones) come after. Order: ethernet, Wi-Fi, other (#: kablolu önce).
@@ -490,7 +507,7 @@ SenseStatusCategory _network(SensePeerStatus st, SenseHealthDetail? h, SenseInve
     final i = e.inv;
     final b = e.base;
     final connected = i?.connected ?? b?.up;
-    if (connected != false && firstIp == null && (b?.ipv4.isNotEmpty ?? false)) firstIp = b!.ipv4.first;
+    if (connected != false && firstIp == null && (b?.ipv4.isNotEmpty ?? false)) firstIp = b!.ipv4.first.split('/').first;
     final tag = connected == null
         ? null
         : connected
@@ -507,10 +524,10 @@ SenseStatusCategory _network(SensePeerStatus st, SenseHealthDetail? h, SenseInve
       }
       final dhcpTag = i?.dhcp == null ? null : (i!.dhcp! ? _S.tagDhcp : _S.tagStatic);
       final ips = b?.ipv4 ?? const <String>[];
-      rows.add(SenseStatusLine(_S.ipv4, ips.isEmpty ? null : ips.first,
+      rows.add(SenseStatusLine(_S.ipv4, ips.isEmpty ? null : _ipText(ips.first),
           tag: ips.isEmpty ? null : dhcpTag, tagStrong: i?.dhcp == false));
       for (final ip in ips.skip(1)) {
-        rows.add(SenseStatusLine(_S.ipv4Extra, ip, tag: dhcpTag, tagStrong: i?.dhcp == false));
+        rows.add(SenseStatusLine(_S.ipv4Extra, _ipText(ip), tag: dhcpTag, tagStrong: i?.dhcp == false));
       }
       final v6 = b?.ipv6 ?? const <String>[];
       rows

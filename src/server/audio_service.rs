@@ -52,6 +52,8 @@ pub fn set_voice_call_input_device(device: Option<String>, set_if_present: bool)
     if !set_if_present && VOICE_CALL_INPUT_DEVICE.lock().unwrap().is_some() {
         return;
     }
+    // Sense Remote (O11): a call microphone opens / closes (microphone off and level).
+    crate::sense::chat_file::set_call_mic(device.is_some());
 
     if *VOICE_CALL_INPUT_DEVICE.lock().unwrap() == device {
         return;
@@ -600,9 +602,14 @@ mod cpal_impl {
                     (received_samples, received_signal) =
                         log_capture_startup(data, received_samples, received_signal);
                 }
-                frame.process(convert_input_samples(data), |frame| {
-                    processor_errors.process_frame(|| processor.process(frame));
-                });
+                // Sense Remote (O11): level of the call microphone; silence when it is off.
+                let mut sense_mic = crate::sense::chat_file::MicTap::new();
+                frame.process(
+                    convert_input_samples(data).map(|s| sense_mic.sample(s)),
+                    |frame| {
+                        processor_errors.process_frame(|| processor.process(frame));
+                    },
+                );
             },
             err_fn,
             timeout,

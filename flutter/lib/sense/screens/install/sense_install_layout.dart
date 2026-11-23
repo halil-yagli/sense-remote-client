@@ -56,7 +56,7 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
                 const SizedBox(width: _L.titleGap),
                 Text(_t('title-suffix'),
                     style: SenseTextStyles.of(
-                        size: SenseFontSize.hintLarge, color: SenseColors.textDim)),
+                        size: SenseFontSize.hintLarge, color: SenseColors.textMuted)),
               ]),
             ),
           ),
@@ -148,7 +148,7 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
             child: Text(
               version.isEmpty ? os : '${_t('version')} $version · $os',
               key: const Key('sense-version'),
-              style: SenseTextStyles.of(size: SenseFontSize.caps, color: SenseColors.textDim),
+              style: SenseTextStyles.of(size: SenseFontSize.caps, color: SenseColors.textMuted),
             ),
           ),
         ],
@@ -185,7 +185,7 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
                     style: SenseTextStyles.of(
                         size: SenseFontSize.caps,
                         weight: current ? SenseFontWeight.bold : SenseFontWeight.regular,
-                        color: current ? SenseColors.bg : SenseColors.textDim)),
+                        color: current ? SenseColors.bg : SenseColors.textMuted)),
           ),
           const SizedBox(width: _L.gap),
           Expanded(
@@ -199,7 +199,7 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
                         ? SenseColors.text
                         : done
                             ? SenseColors.textSecondary
-                            : SenseColors.textDim)),
+                            : SenseColors.textMuted)),
           ),
         ]),
       ),
@@ -292,14 +292,14 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
             key: key,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textDim)),
+            style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textMuted)),
       );
 
   /// Small hint (`.hint2`).
   Widget _hint(String text, {Key? key}) => Text(text,
       key: key,
       style: SenseTextStyles.of(
-          size: SenseFontSize.hintSmall, color: SenseColors.textDim, height: 1.5));
+          size: SenseFontSize.hintSmall, color: SenseColors.textMuted, height: 1.5));
 
   /// Small grey text inside a box (`.hmeta`).
   Widget _meta(String text, {Color color = SenseColors.textMuted, Key? key}) => Text(text,
@@ -389,7 +389,7 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
           decoration: InputDecoration.collapsed(
             hintText: hint,
             hintStyle: SenseTextStyles.of(
-                size: SenseFontSize.bodySmall, color: SenseColors.textDim),
+                size: SenseFontSize.bodySmall, color: SenseColors.textMuted),
           ),
         ),
       );
@@ -475,9 +475,15 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label,
-                style: SenseTextStyles.of(size: SenseFontSize.caps, color: SenseColors.textDim)),
+                style: SenseTextStyles.of(size: SenseFontSize.caps, color: SenseColors.textMuted)),
             const SizedBox(height: 2),
+            // A value without a space (the e-mail) stays on one line with an ellipsis
+            // instead of breaking in the middle of a word (K5).
             Text(value,
+                key: Key('sense-tile-value-$label'),
+                maxLines: value.contains(RegExp(r'\s')) ? null : 1,
+                // Ellipsis only on the single line: on a wrapping value it would cut the 2nd line.
+                overflow: value.contains(RegExp(r'\s')) ? TextOverflow.clip : TextOverflow.ellipsis,
                 style: SenseTextStyles.of(
                     size: valueSize,
                     weight: SenseFontWeight.bold,

@@ -5,6 +5,7 @@ import '../../../../../common.dart' show closeConnection;
 import '../../../../../models/chat_model.dart';
 import '../../../../../models/model.dart';
 import '../../../../../models/platform_model.dart';
+import '../../../shared/chat/data/files.dart' show senseParseFileJobs;
 import '../../bar/session_popups.dart' show SenseSessionPopups;
 import '../layer_controller.dart';
 
@@ -16,6 +17,7 @@ class SenseFfiLayerHost implements SenseLayerHost {
 
   @override
   SenseLinkRaw readLink() {
+    _readFiles();
     final d = ffi.qualityMonitorModel.data;
     return SenseLinkRaw(
       delay: d.delay,
@@ -33,9 +35,24 @@ class SenseFfiLayerHost implements SenseLayerHost {
     return body?.chatMessages.length ?? 0;
   }
 
-  // TODO(C3, D3d1): files sent in the chat (`session_sense_file_jobs`); 0 until then.
+  /// Chat files of this session, both directions (`chat_file::file_count` = the
+  /// rows of `session_sense_file_jobs`). The bridge call is async, so the last
+  /// count is kept and read again on every link reading (once a second).
+  int _files = 0;
+
+  void _readFiles() {
+    bind.sessionSenseFileJobs(sessionId: ffi.sessionId).then((raw) {
+      final n = senseParseFileJobs(raw).length;
+      // The list is dropped when the session closes (S12); keep the last count.
+      if (n > 0) _files = n;
+    }).catchError((_) {});
+  }
+
   @override
-  int chatFiles() => 0;
+  int chatFiles() {
+    _readFiles();
+    return _files;
+  }
 
   @override
   void goHome() => closeConnection(id: id);

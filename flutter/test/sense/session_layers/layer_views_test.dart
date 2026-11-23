@@ -113,11 +113,11 @@ void main() {
       expect(find.text('Bağlantı zayıf'), findsOneWidget);
       expect(find.text('Bağlantı bir süredir zayıf; tepkiler gecikiyor.'), findsOneWidget);
       expect(find.text('272 ms'), findsOneWidget);
-      expect(find.text('%5.1'), findsOneWidget);
+      expect(find.text('%5,1'), findsOneWidget);
       expect(find.text('8 fps'), findsOneWidget);
       expect(find.text('tahmini kayıp'), findsOneWidget, reason: '#69: loss is not measured');
       expect(_valueColor(tester, '272 ms'), SenseColors.warn);
-      expect(_valueColor(tester, '%5.1'), SenseColors.dangerText);
+      expect(_valueColor(tester, '%5,1'), SenseColors.dangerText);
       expect(_valueColor(tester, '8 fps'), SenseColors.warn);
       expect(
           find.text(
@@ -185,7 +185,7 @@ void main() {
       expect(find.text('Son görüntü 9 sn önce geldi. Uzak bilgisayar çalışıyor olabilir.'),
           findsOneWidget);
       expect(find.text('—'), findsOneWidget);
-      expect(find.text('%100.0'), findsOneWidget);
+      expect(find.text('%100'), findsOneWidget);
       expect(find.text('0 fps'), findsOneWidget);
       expect(_valueColor(tester, '0 fps'), SenseColors.dangerText);
       expect(find.text('Yeniden bağlanılıyor · 3. deneme · 21 sn sonra oturum kapanır'),
