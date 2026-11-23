@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/sense/sense.dart';
+import 'package:flutter_hbb/sense/screens/session/bar/sense_session_frame.dart';
+import 'package:flutter_hbb/sense/screens/session/data/session_state.dart' show SenseBarPopup;
 import 'package:flutter_hbb/sense/screens/session/layers/data/session_hub.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_controller.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_spec.dart';
@@ -14,56 +16,45 @@ import 'package:flutter_hbb/sense/screens/session/layers/session_end.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/session_layers.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../session_bar/fake_backend.dart' show FakeBackend, FakePopups;
 import 'support.dart';
 
 const String _goldenDir = 'test/goldens/session_layers';
 String _golden(String name) => '../../goldens/session_layers/$name.png';
 bool _skip(String name) => !autoUpdateGoldenFiles && !File('$_goldenDir/$name.png').existsSync();
 
-/// A stand-in for the connection window: top bar, glow "remote screen", status box.
+/// The connection window behind the layers (G10): the real session bar
+/// (`SenseSessionFrame` with the test backend), the glow "remote screen" and an
+/// open Bilgisayar durumu popup drawn with the real popup frame and status box.
 class _FakeWindow extends StatelessWidget {
   const _FakeWindow();
 
   @override
   Widget build(BuildContext context) {
-    final t = SenseTextStyles.of(size: SenseFontSize.body, weight: SenseFontWeight.medium);
-    return Stack(children: [
-      const Positioned.fill(child: SenseGlowScene(style: SenseGlowStyle.scene)),
-      Positioned(
-        top: 0,
-        left: 0,
-        right: 0,
-        height: SenseSizes.sessionToolbarHeight,
-        child: Container(
-          color: SenseColors.bg,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(children: [
-            const SenseMark(width: 22, height: 20),
-            const SizedBox(width: 8),
-            Text('Giriş Salonu PC-2', style: t),
-            const Spacer(),
-            Text('Ekranlar   Görüntü   Klavye   Eylemler   Durum   Ekran', style: t),
-            const Spacer(),
-            SenseButton(label: 'Bitir', kind: SenseButtonKind.danger, onPressed: () {}),
-          ]),
-        ),
-      ),
-      Positioned(
-        top: 60,
-        right: 14,
-        width: 370,
-        height: 420,
-        child: Container(
-          decoration: BoxDecoration(
-            color: SenseColors.surface,
-            border: Border.all(color: SenseColors.line),
-            borderRadius: BorderRadius.circular(SenseRadii.popup),
+    final popups = FakePopups()
+      ..statusLevel = SenseLevel.ok
+      ..infoLevel = null
+      ..open.add(SenseBarPopup.status);
+    return SenseSessionFrame(
+      backend: FakeBackend(),
+      popups: popups,
+      child: Stack(children: [
+        const Positioned.fill(child: SenseGlowScene(style: SenseGlowStyle.scene)),
+        Positioned(
+          top: 10,
+          right: 10,
+          width: SenseSizes.popupWidthMedium,
+          child: SensePopupShell(
+            title: 'Bilgisayar durumu',
+            subtitle: 'Canlı · 8 sn önce',
+            animateIn: false,
+            onClose: () {},
+            onMinimizedChanged: (_) {},
+            body: const SenseStatusBox(level: SenseLevel.ok, title: 'Her şey yolunda'),
           ),
-          padding: const EdgeInsets.all(14),
-          child: Text('Bilgisayar durumu', style: t),
         ),
-      ),
-    ]);
+      ]),
+    );
   }
 }
 
