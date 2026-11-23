@@ -42,8 +42,7 @@ abstract final class SenseHostLiveStrings {
   static const String accept = 'Kabul et';
   static const String reject = 'Reddet';
 
-  // Incoming voice call (#67: voice only).
-  static const String incomingCall = 'Sense Department sesli arıyor';
+  // Incoming voice call: SenseChatLabels.host.incomingCall (shared box, #73).
 
   // Ended connection.
   static const String ended = 'Bağlantı bitti';

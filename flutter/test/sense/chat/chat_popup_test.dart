@@ -9,6 +9,7 @@ import 'package:flutter_hbb/sense/screens/shared/chat/chat_controller.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_entry.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_popup.dart';
 import 'package:flutter_hbb/sense/strings/chat.dart';
+import 'package:flutter_hbb/sense/components/glyph.dart';
 import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
 
 import 'support.dart';
@@ -258,5 +259,92 @@ void main() {
     await tester.pumpWidget(popup(c, labels: SenseChatLabels.host));
     expect(find.text('Sense Department ile'), findsOneWidget);
     expect(find.text('Sense Department · 17:14'), findsOneWidget);
+  });
+
+  group('#73: the Host calls the Controller', () {
+    testWidgets('green "Sahadaki kişi sesli arıyor" box; Kabul et answers', (tester) async {
+      final call = FakeCall();
+      var t = at(17, 0);
+      final c = makeController(call: call, now: () => t);
+      await tester.pumpWidget(popup(c));
+      expect(find.byKey(const Key('sense-chat-incoming')), findsNothing);
+
+      c.setPhase(SenseCallPhase.incoming);
+      await tester.pump();
+      expect(find.byKey(const Key('sense-chat-incoming')), findsOneWidget);
+      expect(find.text('Sahadaki kişi sesli arıyor'), findsOneWidget);
+      expect(find.textContaining('görüntülü'), findsNothing, reason: '#67 voice only');
+      expect(find.text(SenseChatStrings.reject), findsOneWidget);
+      expect(find.text(SenseChatStrings.accept), findsOneWidget);
+      // No Mikrofon list before the call is answered.
+      expect(find.byKey(const Key('sense-mic-button')), findsNothing);
+      // Kabul et sits right of Reddet.
+      expect(tester.getCenter(find.byKey(const Key('sense-chat-call-accept'))).dx,
+          greaterThan(tester.getCenter(find.byKey(const Key('sense-chat-call-reject'))).dx));
+
+      await tester.tap(find.byKey(const Key('sense-chat-call-accept')));
+      await tester.pump();
+      expect(call.starts, 1, reason: 'answering is session_request_voice_call (D3d2)');
+      expect(call.ends, 0);
+      expect(find.byKey(const Key('sense-chat-incoming')), findsNothing);
+
+      c.setPhase(SenseCallPhase.active);
+      t = t.add(const Duration(seconds: 5));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Görüşmede · 00:05'), findsOneWidget);
+      expect(find.byKey(const Key('sense-mic-button')), findsOneWidget);
+    });
+
+    testWidgets('Reddet refuses: back to "Ara", nothing started', (tester) async {
+      final call = FakeCall();
+      final c = makeController(call: call);
+      c.setPhase(SenseCallPhase.incoming);
+      await tester.pumpWidget(popup(c));
+      await tester.tap(find.byKey(const Key('sense-chat-call-reject')));
+      await tester.pump();
+      expect(call.ends, 1);
+      expect(call.starts, 0);
+      expect(c.phase, SenseCallPhase.idle);
+      expect(find.byKey(const Key('sense-chat-incoming')), findsNothing);
+      expect(find.byKey(const Key('sense-call-start')), findsOneWidget);
+    });
+
+    testWidgets('the Host hangs up while ringing: the box goes', (tester) async {
+      final c = makeController();
+      c.setPhase(SenseCallPhase.incoming);
+      await tester.pumpWidget(popup(c));
+      expect(find.byKey(const Key('sense-chat-incoming')), findsOneWidget);
+      c.setPhase(SenseCallPhase.idle);
+      await tester.pump();
+      expect(find.byKey(const Key('sense-chat-incoming')), findsNothing);
+    });
+
+    testWidgets('both call at once (#83): one call, no ringing box', (tester) async {
+      // The Controller rings first; the Host's Ara answers it (core: D3d2
+      // fix), so here only "started" arrives.
+      final call = FakeCall();
+      final c = makeController(call: call);
+      await tester.pumpWidget(popup(c));
+      await tester.tap(find.byKey(const Key('sense-call-start')));
+      await tester.pump();
+      expect(find.text(SenseChatStrings.calling), findsOneWidget);
+      c.setPhase(SenseCallPhase.active);
+      await tester.pump();
+      expect(call.starts, 1);
+      expect(find.byKey(const Key('sense-chat-incoming')), findsNothing);
+      expect(find.byKey(const Key('sense-call-end')), findsOneWidget);
+    });
+
+    testWidgets('mic caret is drawn, not a ▾ character (G1)', (tester) async {
+      final c = makeController();
+      c.setPhase(SenseCallPhase.active);
+      await tester.pumpWidget(popup(c));
+      await tester.pump();
+      expect(find.text('▾'), findsNothing);
+      expect(
+          find.descendant(
+              of: find.byKey(const Key('sense-mic-button')), matching: find.byType(SenseGlyph)),
+          findsOneWidget);
+    });
   });
 }

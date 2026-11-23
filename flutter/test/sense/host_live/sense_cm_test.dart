@@ -451,6 +451,16 @@ void main() {
           senseHostCallPhase(
               inCall: false, incoming: false, current: SenseCallPhase.active),
           SenseCallPhase.idle);
+      // Both call at once (#83): the Controller's call reaches this side
+      // while "Aranıyor…" — the ringing box shows, Kabul et answers it.
+      expect(
+          senseHostCallPhase(
+              inCall: false, incoming: true, current: SenseCallPhase.calling),
+          SenseCallPhase.incoming);
+      expect(
+          senseHostCallPhase(
+              inCall: true, incoming: true, current: SenseCallPhase.incoming),
+          SenseCallPhase.active);
     });
 
     test('Host calling and Host files are on the bridge (D3d2)', () async {

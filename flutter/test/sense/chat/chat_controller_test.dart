@@ -139,6 +139,26 @@ void main() {
       expect(c.phase, SenseCallPhase.idle);
       expect(c.callStart, isNull);
     });
+
+    test('#73: a call from the other side opens the chat; Kabul et / Reddet', () async {
+      final call = FakeCall();
+      final c = makeController(call: call);
+      c.receiveText('Selam');
+      expect(c.isOpen, isFalse);
+      c.setPhase(SenseCallPhase.incoming);
+      expect(c.isOpen, isTrue, reason: 'the ringing box must be seen');
+      expect(c.unread, 0);
+      await c.startCall(); // Kabul et
+      expect(call.starts, 1);
+      expect(c.phase, SenseCallPhase.calling);
+
+      c.setPhase(SenseCallPhase.idle);
+      c.minimize();
+      c.setPhase(SenseCallPhase.incoming);
+      await c.endCall(); // Reddet
+      expect(call.ends, 1);
+      expect(c.phase, SenseCallPhase.idle);
+    });
   });
 
   group('S12: the chat is gone when the connection ends (#56)', () {

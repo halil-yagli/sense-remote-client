@@ -6,7 +6,8 @@
 // only "–" (back to the icon; no close).
 //
 // Used by the Controller window (session/chat_icon) and by the Host card (C5,
-// with [SenseChatLabels.host]).
+// with [SenseChatLabels.host]). A call from the Host shows the green
+// "Sahadaki kişi sesli arıyor · Reddet / Kabul et" box above the call row (#73).
 
 import 'package:flutter/material.dart';
 
@@ -123,6 +124,14 @@ class _SenseChatPopupState extends State<SenseChatPopup> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // #73: the other side calls — its own box, not "Ara".
+                  if (c.phase == SenseCallPhase.incoming) ...[
+                    SenseIncomingCallBox(
+                      text: widget.labels.incomingCall,
+                      onAnswer: (accept) => accept ? c.startCall() : c.endCall(),
+                    ),
+                    const SizedBox(height: SenseChatCallSize.ringGap),
+                  ],
                   SenseCallTicker(
                     controller: c,
                     builder: (context, elapsed) => SenseCallRow(
