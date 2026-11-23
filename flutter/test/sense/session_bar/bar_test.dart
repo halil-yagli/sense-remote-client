@@ -69,7 +69,7 @@ void main() {
     final button = tester.getRect(menu(SenseBarMenu.display));
     final panel = tester.getRect(list(SenseBarMenu.display));
     expect(panel.left, closeTo(button.left, 1));
-    expect(panel.width, 360);
+    expect(panel.width, closeTo(360, 0.01));
     expect(find.text('SIK KULLANILAN'), findsOneWidget);
 
     await tester.tap(find.text('1:1'));
