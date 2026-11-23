@@ -33,6 +33,8 @@ class _FakeBind extends Fake implements RustdeskImpl {
   @override
   dynamic noSuchMethod(Invocation invocation) {
     final name = invocation.memberName.toString().split('"')[1];
+    // Answers the models parse as JSON.
+    if (name == 'mainGetConnectStatus') return Future<String>.value('{"status_num":0}');
     final make = kBindDefaults[name];
     if (make == null) throw UnimplementedError('fake bridge: $name');
     return make();
