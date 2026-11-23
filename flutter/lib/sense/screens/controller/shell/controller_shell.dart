@@ -23,7 +23,7 @@ import '../settings/sense_settings_page.dart';
 import '../update/sense_update_view.dart' show SenseUpdateWatch;
 import 'account_box.dart';
 import '../../../../desktop/pages/desktop_tab_page.dart' show DesktopTabPage;
-import '../../../router.dart' show senseShowSplash;
+import '../../../router.dart' show senseRoleChangeReopen;
 
 enum SenseControllerNav { computers, thisComputer, settings, about }
 
@@ -102,7 +102,8 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
         return _scroll(SenseThisComputerPage(
           role: SenseHomeRole.both,
           // T8: the opening screen with "yeni rolle açılıyor" (A2c router).
-          onRoleRestart: () => senseShowSplash(message: SenseCommonStrings.splashRoleChange),
+          // Sense Remote (D3b): splash, then the app reopens with the new role.
+          onRoleRestart: senseRoleChangeReopen,
           onOpenSettingsPassword: () => setState(() => _nav = SenseControllerNav.settings),
         ));
       case SenseControllerNav.settings:

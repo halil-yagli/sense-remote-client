@@ -12,6 +12,7 @@ import '../../../../consts.dart' show kRemoteViewStyleAdaptive, kRemoteViewStyle
 import '../../../data/option_keys.dart';
 import '../../../sense.dart';
 import '../../../strings/settings.dart';
+import '../../../router.dart' show senseRoleChangeReopen;
 import '../../host/data/role.dart' show SenseRoleBackend, SenseRoleBridge;
 import '../../host/role/role_category.dart' show SenseRoleController, SenseRoleCategoryBody, senseRoleSummary;
 import '../../host/sense_password_page.dart' show SensePasswordAboutRow;
@@ -87,6 +88,8 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
   late final SenseRoleController _role = SenseRoleController(widget.roleBackend,
       onRestart: () {
     if (mounted) setState(() => _restarting = true);
+    // Sense Remote (D3b): the app reopens with the new role.
+    senseRoleChangeReopen();
   });
 
   SenseSettingsBackend get _b => widget.backend;

@@ -154,6 +154,28 @@ void main() {
     });
   });
 
+  group('role change → reopen (D3b)', () {
+    testWidgets('splash with the role text, then the app starts again once',
+        (tester) async {
+      final saved = senseReopenApp;
+      var reopened = 0;
+      senseReopenApp = () async => reopened++;
+      addTearDown(() => senseReopenApp = saved);
+      await tester.pumpWidget(_app(SenseSplashGate(
+          showAtStart: false, animate: false, child: const Text('ana'))));
+      senseRoleChangeReopen();
+      await tester.pump();
+      expect(senseSplashRequest.value?.message,
+          SenseCommonStrings.splashRoleChange);
+      expect(find.byKey(const Key('sense-splash-gate')), findsOneWidget);
+      expect(reopened, 0);
+      await tester.pump(SenseMotion.breatheFast.duration);
+      expect(reopened, 1);
+      await _waitSplashOut(tester);
+      expect(reopened, 1);
+    });
+  });
+
   group('only dark theme (T1)', () {
     testWidgets('dark also when the system is light; no theme choice',
         (tester) async {

@@ -12,8 +12,11 @@
 //
 // Only dark theme (T1), only Turkish (T2). main.dart is not touched by B or C.
 import 'dart:async';
+import 'dart:io' show exit;
 
 import 'package:flutter/widgets.dart';
+
+import '../models/platform_model.dart';
 
 import 'screens/controller/about/sense_about_page.dart' show senseAboutScreen;
 import 'screens/controller/sense_home_strings.dart' show SenseHomeRole;
@@ -21,6 +24,7 @@ import 'screens/controller/settings/sense_settings_page.dart' show senseControll
 import 'screens/controller/shell/controller_shell.dart' show senseControllerScreen;
 import 'screens/host/shell/host_shell.dart' show senseHostScreen;
 import 'screens/splash/sense_splash.dart';
+import 'strings/common.dart';
 import 'tokens/sense_tokens.dart';
 
 /// Entry points the B/C screens provide. Expected functions (by name):
@@ -99,6 +103,26 @@ final ValueNotifier<SenseSplashRequest?> senseSplashRequest =
 void senseShowSplash({String? message, int? updatingToVersion}) =>
     senseSplashRequest.value = SenseSplashRequest(
         message: message, updatingToVersion: updatingToVersion);
+
+/// Sense Remote (D3b): the service stored the new role. The opening screen
+/// covers the window for one breath ("Rol uygulanıyor · Sense Remote yeni
+/// rolle açılıyor"), then the app starts again so the new role's shell opens
+/// (the home screen is chosen once, at start).
+void senseRoleChangeReopen() {
+  senseShowSplash(message: SenseCommonStrings.splashRoleChange);
+  Timer(SenseMotion.breatheFast.duration, () => senseReopenApp());
+}
+
+/// Starts the app again and ends this process; when the helper can not be
+/// started the window stays (the role is applied at the next start). Tests
+/// replace it.
+@visibleForTesting
+Future<void> Function() senseReopenApp = _reopenApp;
+
+Future<void> _reopenApp() async {
+  final error = await bind.mainSenseRoleReopen();
+  if (error.isEmpty) exit(0);
+}
 
 /// Pure: the version just installed when the app opens right after an update
 /// (`main_sense_update_status` `last_result`: state installed, [atSeconds]

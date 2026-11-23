@@ -41,6 +41,9 @@ pub enum LoginPurpose {
     // Sense Remote (permanent password plan §3.4): unlocking the permanent password; the token
     // is short-lived and never saved as the app sign-in.
     Password,
+    // Sense Remote (Sürüm 4, S4 / TK4): changing this computer's role from the app; the token is
+    // short-lived, single-use and never saved as the app sign-in.
+    Role,
 }
 
 impl LoginPurpose {
@@ -49,6 +52,7 @@ impl LoginPurpose {
             Self::App => "app",
             Self::Install => "install",
             Self::Password => "password",
+            Self::Role => "role",
         }
     }
 }
@@ -529,6 +533,7 @@ mod sense_tests {
             (LoginPurpose::App, "app"),
             (LoginPurpose::Install, "install"),
             (LoginPurpose::Password, "password"),
+            (LoginPurpose::Role, "role"),
         ] {
             let body = auth_request_body(
                 "Google",
