@@ -388,6 +388,8 @@ fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf, expe
 /// all GUI users, including the login-window server at UID 0. Falls back to
 /// false (assumes sessions active) on any IPC error to avoid updating during
 /// an unknown session state.
+/// Sense Remote (#77): a session where nothing listens on the main IPC counts as idle
+/// (`sense::update::idle_ipc`).
 #[cfg(target_os = "macos")]
 pub fn has_no_active_conns_ipc() -> bool {
     let result = match hbb_common::tokio::runtime::Runtime::new() {
@@ -414,11 +416,17 @@ async fn query_no_active_conns_ipc() -> ResultType<bool> {
     // An empty GUI user set maps to UID 0 so LoginWindow must also confirm it is idle.
     let uids = crate::platform::get_logged_in_uids();
     for uid in uids {
-        let mut conn = crate::ipc::connect_for_uid(IPC_TIMEOUT_MS, uid, "")
-            .await
-            .map_err(|err| {
-                hbb_common::anyhow::anyhow!("IPC connection failed for uid {uid}: {err}")
-            })?;
+        let mut conn = match crate::ipc::connect_for_uid(IPC_TIMEOUT_MS, uid, "").await {
+            Ok(conn) => conn,
+            // Sense Remote (#77): nothing listens on this session's main IPC, so no `--server`
+            // serves a connection there (e.g. a Controller-only Mac): idle. Any other failure
+            // still defers.
+            Err(err) if crate::sense::update::idle_ipc::no_listener(&err) => {
+                log::info!("[root-update] no main IPC listener for uid {uid}; no connection there");
+                continue;
+            }
+            Err(err) => bail!("IPC connection failed for uid {uid}: {err}"),
+        };
         conn.send(&crate::ipc::Data::HasNoActiveConns(None))
             .await
             .map_err(|err| hbb_common::anyhow::anyhow!("IPC send failed for uid {uid}: {err}"))?;

@@ -84,6 +84,9 @@ pub mod daemon_mac;
 pub mod download;
 pub mod engine;
 pub mod guard;
+// Sense Remote (#77): a session without an IPC listener has no connection (macOS updater).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub mod idle_ipc;
 pub mod keys;
 pub mod manifest;
 pub mod manual;
