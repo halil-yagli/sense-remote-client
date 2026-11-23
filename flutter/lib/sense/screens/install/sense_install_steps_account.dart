@@ -1,224 +1,288 @@
-// Sense Remote: step 1 (Sense sign-in) of the Sense setup wizard (part of sense_install_wizard.dart,
-// code review K3-6; behaviour unchanged).
+// Sense Remote: "Sense hesabı" (YH K2, i01–i02) and "Bu bilgisayarın rolü" (YH K3, i03).
 
 part of 'sense_install_wizard.dart';
 
+/// Google's own "G" (brand colours of the sign-in button, not Sense colours).
 const String _googleLogo =
     '<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">'
-    '<path fill="#4285F4" d="M45 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.5-9.4 6.5-16.1z"/>'
-    '<path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.5 46 24 46z"/>'
-    '<path fill="#FBBC05" d="M11.8 28.3c-.4-1.3-.7-2.7-.7-4.3s.3-3 .7-4.3V14H4.5C3 17 2.2 20.4 2.2 24s.8 7 2.3 10l7.3-5.7z"/>'
-    '<path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 4.2 29.9 2 24 2 15.5 2 8.1 6.9 4.5 14l7.3 5.7c1.7-5.2 6.5-9 12.2-9z"/>'
+    '<path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.2l7.8 6.1C12.3 13.6 17.6 9.5 24 9.5z"/>'
+    '<path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 7.1-10 7.1-17.5z"/>'
+    '<path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C1 16.5 0 20.1 0 24s1 7.5 2.6 10.8l7.8-6.1z"/>'
+    '<path fill="#34A853" d="M24 48c6.2 0 11.6-2 15.4-5.5l-7.5-5.8c-2.1 1.4-4.8 2.3-7.9 2.3-6.4 0-11.7-4.1-13.6-9.8l-7.8 6.1C6.6 42.6 14.6 48 24 48z"/>'
     '</svg>';
 
 extension _SenseInstallAccountStep on _SenseInstallWizardState {
-  // ---- Step 1: Sense sign-in ----
-
-  Widget _accountPage() {
+  (List<Widget>, List<Widget>) _accountPage() {
     final s = _login;
-    final content = <Widget>[
-      _heading(_t('account-title-a'), _t('account-title-b'), boldFirst: true),
-      _lead(_t('account-lead')),
-    ];
-    if (s.isDone) {
-      content.add(_accountRow(s));
-    } else if (s.isWaiting) {
-      content.add(_pairingPanel(s));
-    } else if (s.isRequesting) {
-      // A still icon (no endless animation): the wizard waits at most a few seconds here.
-      content.add(_statusLine(Icons.sync, _t('requesting'),
-          key: const Key('sense-login-requesting')));
+    final Widget box;
+    if (s.isWaiting && s.pairingCode.isNotEmpty) {
+      box = _codeBox(s);
+    } else if (s.isDone && !senseCompanyEmail(s.email)) {
+      box = _statusBox(SenseLevel.hot, _t('login-domain'), [
+        _meta(_t('login-domain-hint')),
+        _boxActions([
+          _button(_t('other-account'), _startLogin,
+              primary: true, key: const Key('sense-login-other')),
+        ]),
+      ], key: const Key('sense-login-domain'));
+    } else if (s.isDone) {
+      box = _signedInBox(s);
+    } else if (s.isFailed && s.error == 'timeout') {
+      box = _statusBox(SenseLevel.hot, _t('login-timeout'), [
+        _meta(_t('login-timeout-hint')),
+        _boxActions([
+          _button(_t('new-code'), _startLogin, primary: true, key: const Key('sense-login-new-code')),
+        ]),
+      ], key: const Key('sense-login-timeout'));
+    } else if (s.isFailed) {
+      box = _statusBox(SenseLevel.hot, _t('login-failed'), [
+        _meta(s.detail.isNotEmpty ? s.detail : _t('login-failed-hint')),
+        _boxActions([
+          _button(_t('retry'), _startLogin, primary: true, key: const Key('sense-login-retry')),
+        ]),
+      ], key: const Key('sense-login-failed'));
     } else {
-      if (s.isFailed) {
-        final text = s.error == 'timeout'
-            ? _t('login-timeout')
-            : [_t('login-failed'), if (s.detail.isNotEmpty) s.detail]
-                .join('\n');
-        content.add(Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: _errorRow(text, key: const Key('sense-login-error')),
-        ));
-      }
-      final label = !s.isFailed
-          ? _t('google-sign-in')
-          : s.error == 'timeout'
-              ? _t('new-code')
-              : _t('retry');
-      content.add(Align(
-        alignment: Alignment.centerLeft,
-        child: _googleButton(label),
-      ));
-      content.add(Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: Text(_t('sign-in-note'),
-            style: const TextStyle(fontSize: 11, color: SenseTokens.dim)),
-      ));
+      // Idle, or asking the panel for a code.
+      final requesting = s.isRequesting || (s.isWaiting && s.pairingCode.isEmpty);
+      box = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _googleButton(requesting ? null : _startLogin),
+          const SizedBox(height: 8),
+          if (requesting)
+            Row(children: [
+              const SenseSpinner(size: 11),
+              const SizedBox(width: SenseUi.iconGap),
+              _hint(_t('requesting'), key: const Key('sense-login-requesting')),
+            ])
+          else
+            _hint(_t('sign-in-note')),
+        ],
+      );
     }
-    return _page(content, [
-      Expanded(
-        child: Text(_t('domain-hint'),
-            style: const TextStyle(fontSize: 11, color: SenseTokens.dim)),
-      ),
-      const SizedBox(width: 12),
-      _primaryButton(
-          _t('next'),
-          !s.isDone
-              ? null
-              : _installed
-                  ? _registerAgain
-                  : () => _go(SenseInstallStep.role),
-          key: const Key('sense-next')),
-    ]);
-  }
-
-  Widget _googleButton(String label) {
-    return FilledButton.icon(
-      key: const Key('sense-login'),
-      onPressed: _startLogin,
-      icon: SvgPicture.string(_googleLogo, width: 18, height: 18),
-      label: Text(label),
-      style: FilledButton.styleFrom(
-        backgroundColor: SenseTokens.white,
-        foregroundColor: SenseTokens.black,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(SenseTokens.radius)),
-        textStyle: const TextStyle(
-            fontFamily: SenseTokens.font,
-            fontFamilyFallback: SenseTokens.fontFallback,
-            fontWeight: FontWeight.w500,
-            fontSize: 14),
-      ),
+    return (
+      [
+        _header([(_t('account-title-a'), true), (_t('account-title-b'), false)], _t('account-lead')),
+        box,
+      ],
+      [
+        _note(_t('domain-note')),
+        _button(_t('next'), _loginAccepted ? _accountNext : null,
+            primary: true, key: const Key('sense-account-next')),
+      ],
     );
   }
 
-  /// The code the panel's approval page also shows (3+3, like `ClientApprove.tsx`). The browser
-  /// opens only when asked, so the code is on screen before the approval page.
-  Widget _pairingPanel(SenseLoginStatus s) {
-    final code = s.pairingCode;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (code.isNotEmpty)
-          Container(
-            key: const Key('sense-pairing'),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(SenseTokens.radiusCard),
-              border: Border.all(color: SenseTokens.border),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  SenseTokens.accent1.withAlpha(90),
-                  SenseTokens.accent2.withAlpha(45),
-                ],
+  Widget _googleButton(VoidCallback? onTap) => Opacity(
+        opacity: onTap == null ? SenseUi.disabledOpacity : 1,
+        child: SenseInteractive(
+          key: const Key('sense-google'),
+          onTap: onTap,
+          semanticLabel: _t('google-sign-in'),
+          builder: (_, s) => SenseFocusRing(
+            visible: s.focused,
+            radius: _L.boxRadius,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+              decoration: BoxDecoration(
+                color: s.hovered ? SenseColors.textSecondary : SenseColors.text,
+                borderRadius: BorderRadius.circular(_L.boxRadius),
               ),
-            ),
-            child: Column(
-              children: [
-                Text(_t('pairing-label'),
-                    style: const TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 1.2,
-                        color: SenseTokens.muted)),
-                const SizedBox(height: 6),
-                Semantics(
-                  container: true,
-                  label: _t('pairing-spoken') + spokenSensePairingCode(code),
-                  excludeSemantics: true,
-                  child: Text(
-                    formatSensePairingCode(code),
-                    key: const Key('sense-pairing-code'),
-                    style: const TextStyle(
-                      fontSize: 44,
-                      height: 1.15,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 5,
-                      fontFeatures: [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(_t('pairing-hint'),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 12, color: SenseTokens.soft)),
-              ],
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                SvgPicture.string(_googleLogo, width: 18, height: 18),
+                const SizedBox(width: _L.gap),
+                Text(_t('google-sign-in'),
+                    style: SenseTextStyles.of(
+                        size: SenseFontSize.categoryTitle,
+                        weight: SenseFontWeight.bold,
+                        color: SenseColors.bg)),
+              ]),
             ),
           ),
-        const SizedBox(height: 16),
-        // Wrap, not Row: long labels (or a larger system font) move to a second line instead
-        // of overflowing.
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        ),
+      );
+
+  /// K2 "Kod": the 6-digit code the panel's approval page also shows (phishing defence G-2).
+  Widget _codeBox(SenseLoginStatus s) => _box(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _primaryButton(
-                _t('open-browser'), () => widget.backend.openUrl(s.url),
-                key: const Key('sense-open-browser')),
-            _textButton(_t('copy-link'), _copyLink,
-                key: const Key('sense-copy-link')),
-            _textButton(_t('cancel'), _cancelLogin,
-                key: const Key('sense-login-cancel')),
+            _meta(_t('pairing-label')),
+            Semantics(
+              container: true,
+              label: _t('pairing-spoken') + spokenSensePairingCode(s.pairingCode),
+              excludeSemantics: true,
+              child: Text(
+                formatSensePairingCode(s.pairingCode),
+                key: const Key('sense-pairing-code'),
+                style: SenseTextStyles.of(
+                  size: SenseFontSize.code,
+                  weight: SenseFontWeight.bold,
+                  letterSpacingEm: SenseLetterSpacing.code,
+                ).copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
+              ),
+            ),
+            _meta(_t('pairing-hint')),
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Wrap(spacing: 6, runSpacing: 6, children: [
+                _button(_t('open-browser'),
+                    s.url.isEmpty ? null : () => widget.backend.openUrl(s.url),
+                    primary: true, key: const Key('sense-login-open')),
+                _button(_t(_copied ? 'link-copied' : 'copy-link'),
+                    s.url.isEmpty ? null : _copyLink,
+                    key: const Key('sense-login-copy')),
+                _button(_t('cancel'), _cancelLogin, key: const Key('sense-login-cancel')),
+              ]),
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              const SenseSpinner(size: 11),
+              const SizedBox(width: SenseUi.iconGap),
+              Expanded(child: _meta(_t('waiting'), key: const Key('sense-login-waiting'))),
+            ]),
           ],
         ),
-        const SizedBox(height: 12),
-        _statusLine(Icons.schedule, _notice ?? _t('waiting')),
+        key: const Key('sense-login-code'),
+      );
+
+  /// K2 "Tamam": the verified company account.
+  Widget _signedInBox(SenseLoginStatus s) {
+    final name = s.displayName.trim().isNotEmpty ? s.displayName.trim() : s.email;
+    final initials = name
+        .split(RegExp(r'[\s.@_-]+'))
+        .where((w) => w.isNotEmpty)
+        .take(2)
+        .map((w) => w.characters.first.toUpperCase())
+        .join();
+    // YH K2 "Tamam": green frame.
+    return _box(
+      Row(children: [
+        Container(
+          width: 34,
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: SenseColors.raised,
+            border: Border.all(color: SenseColors.line),
+          ),
+          child: Text(initials,
+              style: SenseTextStyles.of(size: SenseFontSize.hint, weight: SenseFontWeight.bold)),
+        ),
+        const SizedBox(width: _L.gap),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(s.email,
+                key: const Key('sense-login-email'),
+                style: SenseTextStyles.of(
+                    size: SenseFontSize.categoryTitleSmall,
+                    weight: SenseFontWeight.bold,
+                    color: SenseColors.ok)),
+            _meta(_t('verified')),
+          ]),
+        ),
+        if (!_busy)
+          _button(_t('other-account'), _cancelLogin, key: const Key('sense-login-other')),
+      ]),
+      border: SenseColors.ok.withOpacity(0.5),
+      key: const Key('sense-login-done'),
+    );
+  }
+
+  // ---- Role (K3) ----
+
+  (List<Widget>, List<Widget>) _rolePage() {
+    final summary = _host && _controller
+        ? 'role-sum-both'
+        : _host
+            ? 'role-sum-host'
+            : _controller
+                ? 'role-sum-controller'
+                : 'role-none';
+    return (
+      [
+        _header([(_t('role-title-a'), false), (_t('role-title-b'), true)], _t('role-lead')),
+        IntrinsicHeight(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Expanded(
+                child: _roleCard(_t('host'), _t('host-desc'), _host,
+                    () => _update(() => _host = !_host),
+                    key: const Key('sense-role-host'))),
+            const SizedBox(width: _L.gap),
+            Expanded(
+                child: _roleCard(_t('controller'), _t('controller-desc'), _controller,
+                    () => _update(() => _controller = !_controller),
+                    key: const Key('sense-role-controller'))),
+          ]),
+        ),
+        _box(_meta(_t(summary), color: SenseColors.textSecondary, key: const Key('sense-role-summary'))),
+      ],
+      [
+        _button(_t('back'), () => _go(SenseInstallStep.account), key: const Key('sense-back')),
+        const Spacer(),
+        _button(_t('next'), _host || _controller ? () => _go(SenseInstallStep.info) : null,
+            primary: true, key: const Key('sense-role-next')),
       ],
     );
   }
 
-  Widget _accountRow(SenseLoginStatus s) {
-    final source = s.displayName.isNotEmpty ? s.displayName : s.email.split('@').first;
-    final initials = source
-        .split(RegExp(r'[\s._-]+'))
-        .where((part) => part.isNotEmpty)
-        .take(2)
-        .map((part) => part.characters.first.toUpperCase())
-        .join();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          key: const Key('sense-account'),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(SenseTokens.radius),
-            border: Border.all(color: SenseTokens.border),
-            color: SenseTokens.field,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                alignment: Alignment.center,
-                decoration: const BoxDecoration(
-                    gradient: SenseTokens.gradient, shape: BoxShape.circle),
-                child: Text(initials,
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w600)),
+  Widget _roleCard(String title, String description, bool selected, VoidCallback onTap,
+          {Key? key}) =>
+      SenseInteractive(
+        key: key,
+        onTap: onTap,
+        toggled: selected,
+        semanticLabel: title,
+        builder: (_, s) => SenseFocusRing(
+          visible: s.focused,
+          radius: _L.cardRadius,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: selected ? SenseColors.bg : SenseColors.surface,
+              border: Border.all(
+                  color: selected
+                      ? SenseColors.text
+                      : s.hovered
+                          ? SenseColors.lineStrong
+                          : SenseColors.line),
+              borderRadius: BorderRadius.circular(_L.cardRadius),
+            ),
+            child: Stack(children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 24),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title,
+                      style: SenseTextStyles.of(
+                          size: SenseFontSize.categoryTitle, weight: SenseFontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text(description,
+                      style: SenseTextStyles.of(
+                          size: SenseFontSize.hintLarge,
+                          color: SenseColors.textMuted,
+                          height: 1.5)),
+                ]),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(s.email,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14)),
+              Positioned(
+                right: -2,
+                top: -2,
+                child: Container(
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: selected ? SenseColors.text : null,
+                    border: Border.all(
+                        color: selected ? SenseColors.text : SenseColors.lineStrong),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: selected
+                      ? const Icon(Icons.check, size: SenseFontSize.bodySmall, color: SenseColors.bg)
+                      : null,
+                ),
               ),
-              const Icon(Icons.check, size: 14, color: SenseTokens.soft),
-              const SizedBox(width: 4),
-              Text(_t('verified'),
-                  style:
-                      const TextStyle(fontSize: 12, color: SenseTokens.soft)),
-            ],
+            ]),
           ),
         ),
-        const SizedBox(height: 6),
-        _textButton(_t('other-account'), _cancelLogin,
-            key: const Key('sense-other-account')),
-      ],
-    );
-  }
+      );
 }

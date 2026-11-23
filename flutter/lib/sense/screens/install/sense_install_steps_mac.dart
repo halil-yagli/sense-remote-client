@@ -1,16 +1,15 @@
-// Sense Remote (Mac M3, plan 2026-11-21 §4.1): the two macOS-only steps of the Sense setup
-// wizard (part of sense_install_wizard.dart).
+// Sense Remote: the macOS-only steps (YH K1 "Uygulamalar klasörü", YH K6 "macOS izinleri", i07).
 //
-// 0. Applications folder: macOS can not install from the disk image (or from an App
-//    Translocation copy), so the wizard stops there until the app runs from /Applications.
-// 6. Privacy permissions: Apple lets these be approved only at the computer itself, once. A
-//    Host needs Screen Recording, Accessibility and Input Monitoring; a Controller only Input
-//    Monitoring. Each row shows the live state and opens its pane of System Settings.
+// Applications folder: macOS can not install from the disk image (or an App Translocation
+// copy), so the wizard stops there until the app runs from /Applications.
+// Permissions: Apple lets them be approved only at the computer itself, once. A Host needs
+// Screen Recording, Accessibility and Input Monitoring; a Controller only Input Monitoring.
+// The state is read every second; a granted row turns green by itself.
 
 part of 'sense_install_wizard.dart';
 
 extension _SenseInstallMacSteps on _SenseInstallWizardState {
-  // ---- Step 0: Applications folder ----
+  // ---- Applications folder ----
 
   Future<void> _checkApplications({bool recheck = false}) async {
     bool inside;
@@ -29,35 +28,34 @@ extension _SenseInstallMacSteps on _SenseInstallWizardState {
     });
   }
 
-  Widget _applicationsPage() {
+  (List<Widget>, List<Widget>) _applicationsPage() {
     final checking = _inApplications == null;
-    return _page([
-      _heading(_t('apps-title-a'), _t('apps-title-b'), boldFirst: true),
-      _lead(_t('apps-lead')),
-      if (checking)
-        _statusLine(Icons.sync, _t('apps-checking'),
-            key: const Key('sense-apps-checking'))
-      else ...[
-        Text(_t('apps-detail'),
-            key: const Key('sense-apps-detail'),
-            style: const TextStyle(fontSize: 13, color: SenseTokens.soft)),
-        if (_appsRechecked)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: _errorRow(_t('apps-still-outside'),
-                key: const Key('sense-apps-outside')),
-          ),
+    return (
+      [
+        _header([(_t('apps-title-a'), true), (_t('apps-title-b'), false)], _t('apps-lead')),
+        if (checking)
+          Row(children: [
+            const SenseSpinner(size: 11),
+            const SizedBox(width: SenseUi.iconGap),
+            _hint(_t('apps-checking'), key: const Key('sense-apps-checking')),
+          ])
+        else
+          _statusBox(
+              _appsRechecked ? SenseLevel.hot : SenseLevel.warn,
+              _t('apps-outside'),
+              [_meta(_t('apps-outside-hint'))],
+              key: const Key('sense-apps-outside')),
       ],
-    ], [
-      _secondaryButton(_t('close'), _close, key: const Key('sense-apps-close')),
-      const Spacer(),
-      _primaryButton(_t('apps-recheck'),
-          checking ? null : () => _checkApplications(recheck: true),
-          key: const Key('sense-apps-recheck')),
-    ]);
+      [
+        const Spacer(),
+        _button(_t('close'), _close, key: const Key('sense-apps-close')),
+        _button(_t('apps-recheck'), checking ? null : () => _checkApplications(recheck: true),
+            primary: true, key: const Key('sense-apps-recheck')),
+      ],
+    );
   }
 
-  // ---- Step 6: privacy permissions ----
+  // ---- Permissions (K6) ----
 
   List<SenseMacPermission> get _neededPermissions =>
       senseMacPermissionsFor(host: _host, controller: _controller);
@@ -65,8 +63,7 @@ extension _SenseInstallMacSteps on _SenseInstallWizardState {
   void _startPermissionPoll() {
     _permissionPoll?.cancel();
     unawaited(_pollPermissions());
-    _permissionPoll =
-        Timer.periodic(widget.pollInterval, (_) => _pollPermissions());
+    _permissionPoll = Timer.periodic(widget.pollInterval, (_) => _pollPermissions());
   }
 
   Future<void> _pollPermissions() async {
@@ -81,19 +78,13 @@ extension _SenseInstallMacSteps on _SenseInstallWizardState {
       _permissionPolling = false;
     }
     final read = now;
-    if (!mounted || read == null || _step != SenseInstallStep.permissions) {
-      return;
-    }
+    if (!mounted || read == null || _step != SenseInstallStep.permissions) return;
     final before = _permissions;
     if (before != null && before.sameAs(read)) return;
     _update(() => _permissions = read);
-    // The agent that captures the screen was started before the permission existed; macOS
-    // gives it the new permission only after a restart. Only on a change seen here: a
-    // permission that was already there needs no restart.
-    if (_host &&
-        before != null &&
-        !before.screenRecording &&
-        read.screenRecording) {
+    // The capturing agent started before the permission existed; macOS gives it the new
+    // permission only after a restart.
+    if (_host && before != null && !before.screenRecording && read.screenRecording) {
       String error;
       try {
         error = await widget.backend.restartAgent();
@@ -112,29 +103,28 @@ extension _SenseInstallMacSteps on _SenseInstallWizardState {
     }
   }
 
-  /// `skipped`: left with "Daha sonra" while something is missing (the done page says so).
+  /// `skipped`: left with "Yine de devam et" while something is missing.
   void _finishPermissions({required bool skipped}) {
     _permissionPoll?.cancel();
     // Code review K4-4: macOS may keep answering "no Screen Recording" to this running
-    // process after the permission was given, so a Host does not wait to see the change:
-    // leaving the step (either button) restarts the agent unconditionally.
+    // process, so leaving the step restarts the agent of a Host unconditionally.
     if (_host) {
-      unawaited(widget.backend
-          .restartAgent()
-          .then((error) {
-            if (error.isNotEmpty) {
-              debugPrint('Sense Remote: agent restart failed: $error');
-            }
-          })
-          .catchError((_) {}));
+      unawaited(widget.backend.restartAgent().then((error) {
+        if (error.isNotEmpty) debugPrint('Sense Remote: agent restart failed: $error');
+      }).catchError((_) {}));
     }
     _update(() {
       _permissionsSkipped = skipped;
-      _step = SenseInstallStep.done;
+      if (widget.upgrade != null) {
+        _upgradeDone = true;
+        _step = SenseInstallStep.upgrade;
+      } else {
+        _step = SenseInstallStep.done;
+      }
     });
   }
 
-  Widget _permissionsPage() {
+  (List<Widget>, List<Widget>) _permissionsPage() {
     final needed = _neededPermissions;
     final state = _permissions;
     final missing = [
@@ -143,131 +133,87 @@ extension _SenseInstallMacSteps on _SenseInstallWizardState {
     ];
     final allGranted = state != null && missing.isEmpty;
     final controllerOnly = _controller && !_host;
-    return _page([
-      _heading(_t('perm-title-a'), _t('perm-title-b')),
-      _lead(_t(controllerOnly ? 'perm-lead-controller' : 'perm-lead')),
-      for (var i = 0; i < needed.length; i++)
-        _permissionRow(
-          i + 1,
-          needed[i],
-          granted: state?.granted(needed[i]),
-          // They are asked in order: the first missing one is the one to do now.
-          current: missing.isNotEmpty && missing.first == needed[i],
+    return (
+      [
+        _header([(_t('perm-title-a'), false), (_t('perm-title-b'), true)],
+            _t(needed.length == 1 ? 'perm-lead-one' : 'perm-lead')),
+        _box(
+          Column(children: [
+            for (var i = 0; i < needed.length; i++)
+              _permissionRow(needed[i],
+                  granted: state?.granted(needed[i]),
+                  // Asked in order: the first missing one is the one to do now.
+                  current: missing.isNotEmpty && missing.first == needed[i],
+                  last: i == needed.length - 1),
+          ]),
+          key: const Key('sense-perm-box'),
         ),
-      if (allGranted)
-        _statusLine(Icons.check_circle_outline, _t('perm-all-granted'),
-            key: const Key('sense-perm-all-granted'))
-      else if (state != null)
-        Text(_t('perm-open-hint'),
-            style: const TextStyle(fontSize: 12, color: SenseTokens.muted)),
-      if (_agentRestartFailed)
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: _errorRow(_t('perm-agent-error'),
+        if (!allGranted) _hint(_t('perm-hint')),
+        if (_agentRestartFailed)
+          _statusBox(SenseLevel.warn, _t('perm-agent-failed'), const [],
               key: const Key('sense-perm-agent-error')),
-        ),
-      if (_laterWarned && !allGranted)
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: _errorRow(
-              _t(controllerOnly
-                  ? 'perm-later-warning-controller'
-                  : 'perm-later-warning'),
+        if (_laterWarned && !allGranted)
+          _statusBox(
+              SenseLevel.warn,
+              _t(controllerOnly ? 'perm-later-warning-controller' : 'perm-later-warning'),
+              [
+                _meta(_t(controllerOnly
+                    ? 'perm-later-warning-controller-hint'
+                    : 'perm-later-warning-hint'))
+              ],
               key: const Key('sense-perm-warning')),
-        ),
-    ], [
-      const Spacer(),
-      if (allGranted)
-        _primaryButton(_t('next'), () => _finishPermissions(skipped: false),
-            key: const Key('sense-perm-next'))
-      else
-        // "Daha sonra" only after the warning was shown: the first press explains what
-        // will not work, the second one leaves.
-        _secondaryButton(
-            _t(_laterWarned ? 'perm-later-confirm' : 'perm-later'),
-            _laterWarned
-                ? () => _finishPermissions(skipped: true)
-                : () => _update(() => _laterWarned = true),
-            key: const Key('sense-perm-later')),
-    ]);
+      ],
+      [
+        const Spacer(),
+        if (allGranted)
+          _button(_t('next'), () => _finishPermissions(skipped: false),
+              primary: true, key: const Key('sense-perm-next'))
+        else
+          // The first press explains what will not work (in place), the second one leaves.
+          _button(_t(_laterWarned ? 'perm-later-confirm' : 'perm-later'),
+              _laterWarned
+                  ? () => _finishPermissions(skipped: true)
+                  : () => _update(() => _laterWarned = true),
+              key: const Key('sense-perm-later')),
+      ],
+    );
   }
 
-  Widget _permissionRow(int number, SenseMacPermission permission,
-      {required bool? granted, required bool current}) {
+  Widget _permissionRow(SenseMacPermission permission,
+      {required bool? granted, required bool current, required bool last}) {
     final name = permission.name;
     final isGranted = granted == true;
-    final status = granted == null
-        ? _t('perm-reading')
-        : isGranted
-            ? _t('perm-granted')
-            : _t('perm-missing');
-    return Container(
+    final row = Padding(
       key: Key('sense-perm-$name'),
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(SenseTokens.radiusCard),
-        border: Border.all(
-            color: current ? SenseTokens.soft : SenseTokens.line),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 22,
-            height: 22,
-            alignment: Alignment.center,
-            decoration: isGranted
-                ? const BoxDecoration(
-                    gradient: SenseTokens.gradient, shape: BoxShape.circle)
-                : BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: SenseTokens.border)),
-            child: isGranted
-                ? const Icon(Icons.check, size: 13, color: SenseTokens.white)
-                : Text('$number',
-                    style: const TextStyle(
-                        fontSize: 11, color: SenseTokens.muted)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 10,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(permission.label,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w600)),
-                    Text(status,
-                        key: Key('sense-perm-status-$name'),
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: isGranted
-                                ? SenseTokens.white
-                                : SenseTokens.muted)),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(_t('perm-${permission.textKey}-desc'),
-                    style: const TextStyle(
-                        fontSize: 12, color: SenseTokens.muted)),
-              ],
-            ),
-          ),
-          if (granted == false) ...[
-            const SizedBox(width: 10),
-            current
-                ? _primaryButton(
-                    _t('perm-open'), () => _openPermission(permission),
-                    key: Key('sense-perm-open-$name'))
-                : _secondaryButton(
-                    _t('perm-open'), () => _openPermission(permission),
-                    key: Key('sense-perm-open-$name')),
-          ],
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(permission.label,
+                style: SenseTextStyles.of(weight: SenseFontWeight.bold)),
+            Text(_t('perm-${permission.textKey}-desc'),
+                style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textDim)),
+          ]),
+        ),
+        const SizedBox(width: _L.gap),
+        SenseChip(
+          key: Key('sense-perm-status-$name'),
+          label: _t(granted == null ? 'perm-reading' : isGranted ? 'perm-granted' : 'perm-missing'),
+          level: isGranted ? SenseLevel.ok : null,
+        ),
+        if (granted == false) ...[
+          const SizedBox(width: _L.gap),
+          _button(_t('perm-open'), () => _openPermission(permission),
+              primary: current, key: Key('sense-perm-open-$name')),
         ],
+      ]),
+    );
+    if (last) return row;
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: SenseColors.hover)),
       ),
+      child: row,
     );
   }
 }
