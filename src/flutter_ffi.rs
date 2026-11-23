@@ -2579,6 +2579,125 @@ pub fn install_sense_upgrade_in_place() -> String {
     crate::sense::update::manual::upgrade_in_place()
 }
 
+// Sense Remote (Sürüm 4, plan 2026-11-23 §2.6 and "Ek", D3-0): the remaining bridge functions.
+// Bodies live in `crate::sense::<module>`; most are skeletons until D3a–D3e (valid empty JSON or
+// `unsupported`). Names match the Dart adapters (`flutter/lib/sense/screens/**/data/`).
+
+// Install wizard (B1 K4): projects of the signed-in installer, each with its panel locations.
+pub fn main_sense_install_options() -> String {
+    crate::sense::enroll::install_options()
+}
+
+// S11 (D3a): the signed per-person permission envelope.
+pub fn main_sense_grants() -> String {
+    crate::sense::grants::ffi_grants()
+}
+
+pub fn main_sense_grants_refresh() {
+    crate::sense::grants::ffi_grants_refresh()
+}
+
+// S4 / H2 (D3b): changing this computer's role from the app.
+pub fn main_sense_role_status() -> String {
+    crate::sense::role_change::ffi_role_status()
+}
+
+pub fn main_sense_role_change_begin(target: String) -> String {
+    crate::sense::role_change::ffi_role_change_begin(&target)
+}
+
+pub fn main_sense_role_change_status() -> String {
+    crate::sense::role_change::ffi_role_change_status()
+}
+
+pub fn main_sense_role_change_cancel() {
+    crate::sense::role_change::ffi_role_change_cancel()
+}
+
+// S3 / H1 (D3c): name and location changed on the Host.
+pub fn main_sense_identity() -> String {
+    crate::sense::identity_set::ffi_identity()
+}
+
+pub fn main_sense_identity_set(name: String, location_id: String) -> String {
+    crate::sense::identity_set::ffi_identity_set(&name, &location_id)
+}
+
+// H2 "Son bağlantılar" (Ek, #70): the Host's last incoming connections.
+pub fn main_sense_host_recent_conns() -> String {
+    crate::sense::host_recent::ffi_host_recent_conns()
+}
+
+// S5 / O12 (D3d1): files from the chat, Controller side.
+pub fn main_sense_incoming_dir() -> String {
+    crate::sense::chat_file::ffi_incoming_dir()
+}
+
+pub fn main_sense_set_incoming_dir(path: String) {
+    crate::sense::chat_file::ffi_set_incoming_dir(&path)
+}
+
+pub fn session_sense_send_files(session_id: SessionID, paths: Vec<String>) -> String {
+    let _ = session_id;
+    crate::sense::chat_file::ffi_send_files(&paths)
+}
+
+pub fn session_sense_file_jobs(session_id: SessionID) -> String {
+    let _ = session_id;
+    crate::sense::chat_file::ffi_file_jobs()
+}
+
+// S5 / O11 (D3d2): Host side of chat files and the voice call; call controls (Ek).
+pub fn main_sense_host_file_jobs() -> String {
+    crate::sense::chat_file::ffi_host_file_jobs()
+}
+
+pub fn main_sense_host_offer_files(conn_id: i32, paths: Vec<String>) -> String {
+    crate::sense::chat_file::ffi_host_offer_files(conn_id, &paths)
+}
+
+pub fn main_sense_host_start_call(conn_id: i32) {
+    crate::sense::chat_file::ffi_host_start_call(conn_id)
+}
+
+pub fn main_sense_sound_outputs() -> String {
+    crate::sense::chat_file::ffi_sound_outputs()
+}
+
+pub fn main_sense_set_call_output(device: String) -> bool {
+    crate::sense::chat_file::ffi_set_call_output(&device)
+}
+
+pub fn session_sense_call_set_muted(session_id: SessionID, muted: bool) -> bool {
+    let _ = session_id;
+    crate::sense::chat_file::ffi_call_set_muted(muted)
+}
+
+pub fn session_sense_call_level(session_id: SessionID) -> f64 {
+    let _ = session_id;
+    crate::sense::chat_file::ffi_call_level()
+}
+
+// C3 (D3e): "Panelden yönetilir". Sync: the settings rows ask while they build.
+pub fn main_sense_option_locked(key: String) -> SyncReturn<bool> {
+    SyncReturn(crate::sense::option_lock::ffi_option_locked(&key))
+}
+
+// C5 / H6 (D3e): tray menu data; operating-system notification of a new chat message (Ek, #62).
+pub fn main_sense_tray_recent() -> String {
+    crate::sense::tray_menu::ffi_tray_recent()
+}
+
+pub fn main_sense_notify(title: String, body: String) -> String {
+    crate::sense::tray_menu::ffi_notify(&title, &body)
+}
+
+// Update "Vazgeç" while downloading (Ek, #68; D3e): "" when stopped, otherwise a code. The
+// updater has no way to stop a download yet; D3e moves the body into `sense::update`.
+pub fn main_sense_update_cancel() -> String {
+    "unsupported".to_owned()
+}
+
 pub fn main_account_auth(op: String, remember_me: bool) {
     let id = get_id();
     let uuid = get_uuid();
