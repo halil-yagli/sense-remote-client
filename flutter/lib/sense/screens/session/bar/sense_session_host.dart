@@ -36,10 +36,6 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
   bool _retryScheduled = false;
   final Set<String> _synced = {};
 
-  /// Keeps the remote pages' subtree alive when the layout around it changes (the first
-  /// frame has no session yet); otherwise the pages are rebuilt and closed.
-  final GlobalKey _childKey = GlobalKey(debugLabel: 'sense-session-pages');
-
   @override
   void initState() {
     super.initState();
@@ -121,18 +117,14 @@ class _SenseSessionTabFrameState extends State<SenseSessionTabFrame> {
       // Rebuild on tab changes and selection.
       widget.controller.state.value.selected;
       final cur = _current();
-      if (cur == null) {
-        return Column(children: [
-          const SizedBox(height: SenseSizes.sessionToolbarHeight, child: ColoredBox(color: SenseColors.bg)),
-          Expanded(child: KeyedSubtree(key: _childKey, child: widget.child)),
-        ]);
-      }
+      // One layout for every state (no session yet, tab switches): the remote pages never
+      // change place in the tree, so RemotePage is built once and never rebuilt.
       return SenseSessionFrame(
-        backend: cur.backend,
-        popups: cur.popups,
+        backend: cur?.backend,
+        popups: cur?.popups,
         onDragStart: () => startDragging(false),
         onDoubleTap: () => toggleMaximize(false).then((v) => stateGlobal.setMaximized(v)),
-        child: KeyedSubtree(key: _childKey, child: widget.child),
+        child: widget.child,
       );
     });
   }

@@ -100,8 +100,8 @@ void main() {
     expect(Get.isRegistered<FFI>(tag: 'peerA'), isTrue);
     expect(() => FingerprintState.find('peerA'), returnsNormally);
     expect(() => CurrentDisplayState.find('peerA'), returnsNormally);
-    expect(find.byKey(const ValueKey('sense-bar-slot')), findsOneWidget,
-        reason: 'the Sense frame is reached');
+    expect(find.byKey(const ValueKey('sense-bar-empty')), findsNothing,
+        reason: 'the session bar replaced the empty placeholder');
 
     // A second tab, then back and forth: sessions are not rebuilt. (The controller moves the
     // page 100 ms after a jump, so the test lets that time pass.)
