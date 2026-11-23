@@ -17,8 +17,9 @@ Widget _app(Widget child) => MaterialApp(home: child);
 /// One breath, then the fade out.
 Future<void> _waitSplashOut(WidgetTester tester) async {
   await tester.pump(SenseMotion.breatheFast.duration);
+  await tester.pump(); // fade-out starts
   await tester.pump(SenseMotion.layerFade.duration);
-  await tester.pump();
+  await tester.pump(); // fade-out done → splash removed
 }
 
 void main() {

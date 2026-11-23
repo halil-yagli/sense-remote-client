@@ -135,14 +135,15 @@ class SenseSplashGate extends StatefulWidget {
 
 class _SenseSplashGateState extends State<SenseSplashGate>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _out =
-      AnimationController(vsync: this, duration: SenseMotion.layerFade.duration);
+  late final AnimationController _out;
   SenseSplashRequest? _shown;
   int _serial = 0;
 
   @override
   void initState() {
     super.initState();
+    _out = AnimationController(
+        vsync: this, duration: SenseMotion.layerFade.duration);
     senseSplashRequest.addListener(_onRequest);
     if (widget.showAtStart || widget.updatingToVersion != null) {
       _show(SenseSplashRequest(updatingToVersion: widget.updatingToVersion));
