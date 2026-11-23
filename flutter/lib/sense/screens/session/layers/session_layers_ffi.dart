@@ -19,13 +19,11 @@ class SenseConnectionLayers extends StatelessWidget {
 
   /// One controller per connection tab; it lives as long as the page (a rebuild or a
   /// reconnect keeps the timers and the ended card).
-  static SenseLayerController controllerFor(String id, FFI ffi) => _byId.putIfAbsent(
-        id,
-        () => SenseLayerController(
-          host: SenseFfiLayerHost(id, ffi),
-          idleLimit: SenseIdlePolicy.limitFor(id),
-        ),
-      );
+  static SenseLayerController controllerFor(String id, FFI ffi) => _byId.putIfAbsent(id, () {
+        final c = SenseLayerController(host: SenseFfiLayerHost(id, ffi));
+        SenseIdlePolicy.load(id, c);
+        return c;
+      });
 
   static void remove(String id) => _byId.remove(id)?.dispose();
 

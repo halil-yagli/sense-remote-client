@@ -178,6 +178,7 @@ class SensePeerStatus {
     this.lastSeenAt,
     this.appVersion,
     this.role,
+    this.idleDisconnectMin,
     this.health,
     this.displays = const [],
     this.network = const [],
@@ -191,6 +192,10 @@ class SensePeerStatus {
   /// Sense version number: 1, 2, 3 …
   final int? appVersion;
   final String? role;
+
+  /// "Hareketsiz bağlantıyı kes" of the computer, minutes; null = off (or the
+  /// panel did not send it).
+  final int? idleDisconnectMin;
   final SensePeerHealth? health;
   final List<SensePeerDisplay> displays;
 
@@ -206,6 +211,7 @@ class SensePeerStatus {
       lastSeenAt: _int(json['last_seen_at']),
       appVersion: _int(json['app_version']),
       role: _str(json['role']),
+      idleDisconnectMin: _int(json['idle_disconnect_min']),
       health: SensePeerHealth.fromJson(json['health']),
       displays: _list(json['displays'], SensePeerDisplay.fromJson),
       network: senseOrderNetwork(
