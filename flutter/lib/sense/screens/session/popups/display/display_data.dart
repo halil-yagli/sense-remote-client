@@ -119,8 +119,7 @@ class SenseSessionVideoSource extends ChangeNotifier implements ValueListenable<
       codec: (q.codecFormat == null || q.codecFormat!.isEmpty) ? null : q.codecFormat,
       quality: _quality,
       bandwidthMbit: senseParseSpeedMbit(q.speed),
-      // TODO(D1): loss_est — QualityMonitorData keeps it once D1's model change lands.
-      lossEstPct: null,
+      lossEstPct: q.lossEst,
       displays: [
         for (var i = 0; i < pi.displays.length; i++)
           SenseSessionDisplay(

@@ -412,6 +412,22 @@ jobs:
         shell: bash
         run: cargo test --locked --release -p rustdesk-portable-packer
 
+      # Sense Remote: acilis duman testi. Paketlenmis SenseRemote.exe kurulmadan baslatilir;
+      # ana pencerenin cizildigi (siyah olmadigi) ve ciktida EXCEPTION CAUGHT / Unhandled
+      # bulunmadigi dogrulanir. Golden testler gercek sarmalayiciyi calistirmaz (S4 siyah ekran).
+      - name: Startup smoke test
+        shell: powershell
+        run: ./tools/smoke/acilis-dumani.ps1 -Exe ./rustdesk/SenseRemote.exe -OutDir smoke-out -Rol both
+
+      - name: Upload startup smoke test output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sense-remote-windows-smoke
+          path: smoke-out/
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Upload Windows build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -304,5 +304,33 @@ void main() {
       expect(n, 2);
       w.dispose();
     });
+
+    test('a failed read keeps the last good answer (P3, B11)', () async {
+      final fake = _ThrowingGrants();
+      final w = SenseGrantsWatch(fake, interval: const Duration(hours: 1));
+      w.start();
+      await pumpEventQueue();
+      expect(w.grants.can(SensePerm.connect), isTrue);
+      fake.fail = true;
+      await w.refresh();
+      expect(w.grants.can(SensePerm.connect), isTrue);
+      w.dispose();
+    });
+
+    test('a first read that fails is missing', () async {
+      final fake = _ThrowingGrants()..fail = true;
+      final w = SenseGrantsWatch(fake, interval: const Duration(hours: 1));
+      w.start();
+      await pumpEventQueue();
+      expect(w.loaded, isTrue);
+      expect(w.grants.can(SensePerm.connect), isFalse);
+      w.dispose();
+    });
   });
+}
+
+class _ThrowingGrants extends FakeGrants {
+  bool fail = false;
+  @override
+  Future<String> grants() => fail ? Future.error(StateError('no')) : super.grants();
 }

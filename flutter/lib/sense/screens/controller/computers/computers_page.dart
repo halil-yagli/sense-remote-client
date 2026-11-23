@@ -126,12 +126,25 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
     // A busy computer cannot be connected to (kabul C2): one person at a time.
     if (c != null && c.busy) return;
     if (!widget.grants.grants.can(SensePerm.connect) && widget.grants.loaded) return;
+    // P3 (B7): the "Bağlanıyor" state ends when the window call returns (or fails, with a
+    // note); the timer is only a safety net. A second click meanwhile is ignored.
+    if (_connecting == id) return;
     _connectTimer?.cancel();
     setState(() => _connecting = id);
-    _connectTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) setState(() => _connecting = null);
-    });
-    connect(context, id);
+    _connectTimer = Timer(kSenseConnectSafety, _endConnecting);
+    unawaited(_open(id));
+  }
+
+  Future<void> _open(String id) async {
+    final ok = await senseOpenConnection(() => connect(context, id));
+    if (!mounted) return;
+    _connectTimer?.cancel();
+    _endConnecting();
+    if (!ok) SenseToast.show(context, SenseControllerStrings.connectFailed);
+  }
+
+  void _endConnecting() {
+    if (mounted) setState(() => _connecting = null);
   }
 
   List<SenseProject> _ordered(List<SenseProject> projects) {
@@ -176,5 +189,18 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
         },
       );
     });
+  }
+}
+
+/// Longest the "Bağlanıyor" state of a tile lasts if the window call never returns (B7).
+const Duration kSenseConnectSafety = Duration(seconds: 30);
+
+/// Runs [open]; `false` when it throws (B7: the person is told instead of a silent end).
+Future<bool> senseOpenConnection(Future<void> Function() open) async {
+  try {
+    await open();
+    return true;
+  } catch (_) {
+    return false;
   }
 }

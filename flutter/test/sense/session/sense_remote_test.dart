@@ -2,6 +2,7 @@
 // sense/screens/session/data/sense_peer_status.dart) — display map, ghost toggle,
 // panel peer-status parsing.
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -187,6 +188,18 @@ void main() {
         get: (url, headers) async => throw Exception('offline'),
       );
       expect((await c.fetch('1')).error, SensePeerStatusError.failed);
+    });
+
+    testWidgets('client: a request that never answers ends as failed (P3, B8)', (tester) async {
+      final c = SensePeerStatusClient(
+        apiServer: () async => 'https://panel.example.test',
+        accessToken: () => 'test-key',
+        get: (url, headers) => Completer<({int statusCode, String body})>().future,
+      );
+      SensePeerStatusResult? r;
+      c.fetch('1').then((v) => r = v);
+      await tester.pump(kSensePeerStatusTimeout + const Duration(seconds: 1));
+      expect(r?.error, SensePeerStatusError.failed);
     });
   });
 

@@ -132,6 +132,9 @@ class SenseGrantsWatch extends ChangeNotifier {
     try {
       g = SenseGrants.parse(await backend.grants());
     } catch (_) {
+      // P3 (B11): a failed read keeps the last good answer; only a first read that fails
+      // is `missing`.
+      if (_loaded || _disposed) return;
       g = SenseGrants.missing;
     }
     if (_disposed) return;
