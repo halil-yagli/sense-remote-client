@@ -164,6 +164,7 @@ void runMainApp(bool startService, {bool envReady = false}) async {
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
   senseRegisterScreens(); // Sense Remote (A2c): B/C home screens
+  senseListenMacMenu(); // Sense Remote (D3f): macOS menu "Sense Remote Hakkında"
   // Sense Remote (A2c, T8): right after an update the opening screen says
   // which version was installed.
   runApp(App(justUpdatedTo: await _senseJustUpdatedTo()));

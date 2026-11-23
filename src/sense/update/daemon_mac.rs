@@ -77,6 +77,9 @@ pub enum Call {
     /// "Güncelle" for this version (`engine::check_install` decides).
     Install(u32),
     Status,
+    /// Sense Remote (#68): "Vazgeç" while the user's own download runs (`engine::check_cancel`
+    /// decides).
+    Cancel,
 }
 
 fn offer_bytes(release: &str, order: Option<&str>, hint_oid: Option<&str>) -> usize {
@@ -185,12 +188,12 @@ pub fn classify(
         ))),
         SenseUpdateIpc::Install { version } => Some(Call::Install(*version)),
         SenseUpdateIpc::StatusQuery => Some(Call::Status),
+        // Sense Remote (#68): the macOS "Vazgeç", forwarded by the agent as on Windows.
+        SenseUpdateIpc::CancelRequest => Some(Call::Cancel),
         SenseUpdateIpc::Status(_)
         | SenseUpdateIpc::InstallRequest { .. }
         | SenseUpdateIpc::InstallAnswer(_)
         | SenseUpdateIpc::DaemonStatus(_)
-        // Sense Remote (D3e): "Vazgeç" is not taken by the daemon yet.
-        | SenseUpdateIpc::CancelRequest
         | SenseUpdateIpc::CancelAnswer(_) => None,
     }
 }
@@ -287,7 +290,10 @@ pub async fn request_daemon(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
         conn.send(&Data::SenseUpdate(message)).await.ok()?;
         match conn.next_timeout(DAEMON_TIMEOUT_MS).await {
             Ok(Some(Data::SenseUpdate(
-                reply @ (SenseUpdateIpc::DaemonStatus(_) | SenseUpdateIpc::InstallAnswer(_)),
+                reply @ (SenseUpdateIpc::DaemonStatus(_)
+                | SenseUpdateIpc::InstallAnswer(_)
+                // Sense Remote (#68): the daemon's answer to "Vazgeç".
+                | SenseUpdateIpc::CancelAnswer(_)),
             ))) => Some(reply),
             _ => None,
         }

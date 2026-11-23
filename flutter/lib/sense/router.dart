@@ -27,6 +27,9 @@ import 'screens/splash/sense_splash.dart';
 import 'strings/common.dart';
 import 'tokens/sense_tokens.dart';
 
+// Sense Remote (D3f): main.dart starts the macOS app menu's channel with one line.
+export 'platform/sense_mac_menu.dart' show senseListenMacMenu;
+
 /// Entry points the B/C screens provide. Expected functions (by name):
 /// - [hostHome]: `Widget senseHostScreen()` — B2, `screens/host/` (H1, H2).
 /// - [controllerHome]: `Widget senseControllerScreen()` — B3,
@@ -92,6 +95,13 @@ class SenseSplashRequest {
   final int? updatingToVersion;
   final String? message;
 }
+
+/// Sense Remote (D3f): the open shell shows its Hakkında page whenever this
+/// changes (macOS app menu "Sense Remote Hakkında", `sense_mac_menu.dart`).
+final ValueNotifier<int> senseAboutRequest = ValueNotifier<int>(0);
+
+/// Asks the open shell (Host or Controller) for its Hakkında page.
+void senseShowAbout() => senseAboutRequest.value++;
 
 /// The splash currently asked for; null = none.
 final ValueNotifier<SenseSplashRequest?> senseSplashRequest =

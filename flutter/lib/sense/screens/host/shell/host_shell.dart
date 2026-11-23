@@ -5,7 +5,7 @@
 // H1): Hakkında and the version open the Sense About inside this window.
 import 'package:flutter/widgets.dart';
 
-import '../../../router.dart' show senseRoleChangeReopen;
+import '../../../router.dart' show senseAboutRequest, senseRoleChangeReopen;
 import '../../../sense.dart';
 import '../../../strings/host.dart';
 import '../../controller/sense_update_view.dart' show SenseUpdateWatch;
@@ -37,6 +37,21 @@ class SenseHostShell extends StatefulWidget {
 
 class _SenseHostShellState extends State<SenseHostShell> {
   SenseHostNav _nav = SenseHostNav.thisComputer;
+
+  // Sense Remote (D3f): macOS app menu "Sense Remote Hakkında".
+  @override
+  void initState() {
+    super.initState();
+    senseAboutRequest.addListener(_showAbout);
+  }
+
+  @override
+  void dispose() {
+    senseAboutRequest.removeListener(_showAbout);
+    super.dispose();
+  }
+
+  void _showAbout() => setState(() => _nav = SenseHostNav.about);
 
   @override
   Widget build(BuildContext context) => SenseUpdateWatch(
