@@ -712,10 +712,17 @@ void main() {
       // The Host branch of the home page builds only the Sense window.
       // Line endings differ per platform (CRLF on Windows checkouts).
       final home = File('lib/desktop/pages/desktop_home_page.dart').readAsStringSync().replaceAll(RegExp(r'\r\n?'), '\n');
-      final start = home.indexOf('if (senseHomeRole() == SenseHomeRole.host) {\n      return _buildBlock(');
+      final start = home.indexOf('if (senseHomeRole() == SenseHomeRole.host) {\n');
       expect(start, greaterThan(0));
-      final branch = home.substring(start, home.indexOf('}', start));
+      // The whole `if` block (it ends at the next line with only `    }`).
+      final end = home.indexOf('\n    }\n', start);
+      expect(end, greaterThan(start));
+      final branch = home.substring(start, end);
+      expect(branch, contains('return _buildBlock('));
+      // The shell fills the tab (a loose Stack laid it out 0 × 0: black body).
+      expect(branch, contains('senseHomeBody('));
       expect(branch, contains('SenseHostShell()'));
+      expect(RegExp(r'\breturn\b').allMatches(branch).length, 1);
       expect(branch, isNot(contains('buildLeftPane')));
       expect(branch, isNot(contains('Password')));
     });

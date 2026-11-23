@@ -2,7 +2,7 @@
 // Connects the Sense setup wizard to the native side (data/install_bridge.dart); the wizard
 // itself is pure UI. No dialogs: the only windows are the UAC prompt / macOS password.
 
-import 'dart:async' show unawaited;
+import 'dart:async' show TimeoutException, unawaited;
 import 'dart:convert';
 import 'dart:io' show exit, Process;
 
@@ -72,18 +72,15 @@ class _SenseInstallPageState extends State<SenseInstallPage>
   /// Sense Remote (U7): a computer with a Sense role gets the upgrade screen (or the "already
   /// installed" note) instead of the sign-in and registration of a new installation.
   Future<void> _readUpgrade() async {
-    SenseUpgrade? upgrade;
-    try {
-      upgrade = await senseUpgradeOf(
-        roleInstalled: senseRoleInstalled(),
-        current: int.tryParse(_senseVersion()) ?? 0,
-        host: !bind.isOutgoingOnly(),
-        controller: !bind.isIncomingOnly(),
-        run: () => _backend.busy(() => bind.installSenseUpgradeInPlace()),
-      );
-    } catch (_) {
-      upgrade = null;
-    }
+    // Sense Remote: never longer than kSenseUpgradeReadTimeout; a read that hangs or fails
+    // opens the wizard instead of leaving the black frame for ever.
+    final upgrade = await senseReadUpgradeOrNull(() => senseUpgradeOf(
+          roleInstalled: senseRoleInstalled(),
+          current: int.tryParse(_senseVersion()) ?? 0,
+          host: !bind.isOutgoingOnly(),
+          controller: !bind.isIncomingOnly(),
+          run: () => _backend.busy(() => bind.installSenseUpgradeInPlace()),
+        ));
     if (!mounted) return;
     setState(() {
       _upgrade = upgrade;
@@ -135,6 +132,23 @@ String _senseVersion() {
           bind.mainGetBuildinOption(key: kSenseVersionOption)) ??
       senseVersionFrom(kSenseVersionDefine);
   return n == null ? '' : '$n';
+}
+
+/// Sense Remote: how long the setup page waits for the upgrade check before it shows the wizard.
+const Duration kSenseUpgradeReadTimeout = Duration(seconds: 10);
+
+/// Sense Remote: [read] with a time limit; `null` (the normal wizard) when it fails or takes
+/// longer than [timeout], so the setup window never stays on its black frame.
+Future<SenseUpgrade?> senseReadUpgradeOrNull(Future<SenseUpgrade?> Function() read,
+    {Duration timeout = kSenseUpgradeReadTimeout}) async {
+  try {
+    return await read().timeout(timeout);
+  } on TimeoutException {
+    debugPrint('Sense Remote: upgrade check timed out, wizard shown');
+    return null;
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Sense Remote (update plan §8, U7): the upgrade for a computer that already has a role.

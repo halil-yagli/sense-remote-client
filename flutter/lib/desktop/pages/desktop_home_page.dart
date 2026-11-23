@@ -29,6 +29,7 @@ import '../../sense/screens/controller/shell/controller_shell.dart';
 import '../../sense/screens/host/sense_home_mac.dart';
 // Sense Remote (B2, YH H1): the Host window, same size as the Controller (#36).
 import '../../sense/screens/host/shell/host_shell.dart';
+import '../../sense/screens/home_body.dart'; // Sense Remote
 import '../../sense/tokens/sense_tokens.dart' show SenseSizes;
 import '../../sense/screens/controller/sense_home_strings.dart';
 
@@ -78,11 +79,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     // tab page (TK9 Risk H1). The stock status widget stays mounted (hidden)
     // because it refreshes `stateGlobal.svcStatus`.
     if (senseHomeRole() == SenseHomeRole.host) {
+      // Sense Remote: senseHomeBody fills the tab (a loose Stack left it black).
       return _buildBlock(
-          child: Stack(children: [
-        Offstage(child: OnlineStatusWidget()),
-        const Positioned.fill(child: SenseHostShell()),
-      ]));
+          child: senseHomeBody(
+              status: OnlineStatusWidget(), shell: const SenseHostShell()));
     }
     // Sense Remote (B3, YH C1, C2): Controller and Host + Controller get the
     // Sense Controller window: "Sense hesabınla gir" when not signed in (the
@@ -92,10 +92,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     if (senseRole == SenseHomeRole.controller ||
         senseRole == SenseHomeRole.both) {
       return _buildBlock(
-          child: Stack(children: [
-        Offstage(child: OnlineStatusWidget()),
-        Positioned.fill(child: SenseControllerShell(role: senseRole)),
-      ]));
+          child: senseHomeBody(
+              status: OnlineStatusWidget(),
+              shell: SenseControllerShell(role: senseRole)));
     }
     final isIncomingOnly = bind.isIncomingOnly();
     return _buildBlock(
