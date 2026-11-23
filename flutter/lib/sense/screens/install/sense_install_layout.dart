@@ -482,7 +482,8 @@ extension _SenseInstallLayout on _SenseInstallWizardState {
             Text(value,
                 key: Key('sense-tile-value-$label'),
                 maxLines: value.contains(RegExp(r'\s')) ? null : 1,
-                overflow: TextOverflow.ellipsis,
+                // Ellipsis only on the single line: on a wrapping value it would cut the 2nd line.
+                overflow: value.contains(RegExp(r'\s')) ? TextOverflow.clip : TextOverflow.ellipsis,
                 style: SenseTextStyles.of(
                     size: valueSize,
                     weight: SenseFontWeight.bold,
