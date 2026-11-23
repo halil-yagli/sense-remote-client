@@ -37,6 +37,9 @@ class SenseSessionPopups extends ChangeNotifier implements SenseBarPopups {
 
   static void remove(String peerId) => _byId.remove(peerId)?.dispose();
 
+  /// Closes whatever holds the popup place (the session ended, O14).
+  static void closeAllOf(String peerId) => _byId[peerId]?.controller.close();
+
   /// Popup id the bar's lists hold while one is open.
   static const String listId = 'sense-bar-list';
 
