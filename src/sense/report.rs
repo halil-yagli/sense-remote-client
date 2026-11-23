@@ -121,6 +121,26 @@ pub struct SenseDisk {
     pub used_pct: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_gb: Option<f64>,
+    /// Sense Remote (Sürüm 4, session status popup #86): volume name ("Sistem"; Windows volume
+    /// label, macOS volume name). Only with the panel capability `disk_label`
+    /// (`report_sig::CAP_DISK_LABEL`): the panel's strict schema refuses unknown fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// Longest volume name sent (characters).
+const MAX_DISK_LABEL_CHARS: usize = 64;
+
+/// Sense Remote (Sürüm 4): the volume name as sent: trimmed, without control characters, at
+/// most `MAX_DISK_LABEL_CHARS`; `None` when empty or not asked for.
+fn disk_label(raw: &str, with_label: bool) -> Option<String> {
+    if !with_label {
+        return None;
+    }
+    let clean: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let label: String = clean.trim().chars().take(MAX_DISK_LABEL_CHARS).collect();
+    let label = label.trim_end().to_owned();
+    (!label.is_empty()).then_some(label)
 }
 
 /// `SenseHealth`. `gpu_pct` / `gpu_temp_c` are filled by the GPU task (I5).
@@ -556,6 +576,7 @@ fn cpu_pct(usage: f32) -> Option<f64> {
 }
 
 fn measure_disks() -> Vec<SenseDisk> {
+    let with_label = super::report_sig::panel_has(super::report_sig::CAP_DISK_LABEL);
     let disks = Disks::new_with_refreshed_list();
     let mut out: Vec<SenseDisk> = Vec::new();
     for disk in disks.list() {
@@ -568,7 +589,10 @@ fn measure_disks() -> Vec<SenseDisk> {
         if out.iter().any(|d| d.mount == mount) {
             continue;
         }
-        if let Some(entry) = disk_entry(mount, disk.total_space(), disk.available_space()) {
+        if let Some(mut entry) = disk_entry(mount, disk.total_space(), disk.available_space()) {
+            // Sense Remote (Sürüm 4): `Disk::name` is the volume label on Windows and the
+            // volume name on macOS.
+            entry.label = disk_label(&disk.name().to_string_lossy(), with_label);
             out.push(entry);
         }
         if out.len() >= MAX_DISKS {
@@ -606,6 +630,7 @@ fn disk_entry(mount: String, total: u64, available: u64) -> Option<SenseDisk> {
         mount,
         used_pct,
         total_gb: Some(total_gb),
+        label: None,
     })
 }
 
@@ -1023,6 +1048,23 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    /// Sense Remote (Sürüm 4): the volume name only when the panel takes it, cleaned.
+    #[test]
+    fn disk_label_only_when_asked_for() {
+        assert_eq!(disk_label("Sistem", false), None);
+        assert_eq!(disk_label("Sistem", true).as_deref(), Some("Sistem"));
+        assert_eq!(disk_label("  İçerik\u{0} ", true).as_deref(), Some("İçerik"));
+        assert_eq!(disk_label("   ", true), None);
+        assert_eq!(disk_label("", true), None);
+        let long = "Ş".repeat(100);
+        assert_eq!(disk_label(&long, true).unwrap().chars().count(), MAX_DISK_LABEL_CHARS);
+        // Without a label the disk serialises exactly as before (older panels).
+        let d = disk_entry("C:".into(), 1 << 30, 1 << 29).unwrap();
+        assert!(serde_json::to_value(&d).unwrap().get("label").is_none());
+        let d = SenseDisk { label: Some("Sistem".into()), ..d };
+        assert_eq!(serde_json::to_value(&d).unwrap()["label"], "Sistem");
+    }
+
     /// Sense Remote (S4-4): floats are written as ECMAScript `JSON.stringify` writes them.
     #[test]
     fn canonical_numbers_match_ecmascript() {
@@ -1144,6 +1186,7 @@ mod tests {
                 mount: "C:".into(),
                 used_pct: 41.2,
                 total_gb: Some(953.8),
+                label: None,
             }]),
             uptime_s: Some(3600),
             ..Default::default()

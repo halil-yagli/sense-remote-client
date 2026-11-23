@@ -37,7 +37,10 @@ use hbb_common::{
     sodiumoxide::{self, crypto::sign},
 };
 use serde_json::{json, Map, Value};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Mutex,
+};
 
 /// Domain separation, same bytes as the panel.
 pub const PREFIX: &[u8] = b"sense-remote/hb-report/v1\n";
@@ -71,6 +74,11 @@ pub const SYSINFO_PREFIX: &[u8] = b"sense-remote/sysinfo/v1\n";
 /// Sense Remote (S4-4): the panel capability (`PANEL_CAPS.signedIngest`) and the client
 /// capability in the signed `caps` (`SENSE_CAPS.signedIngest`) carry the same name.
 pub const CAP_SIGNED_INGEST: &str = "signed_ingest";
+/// Sense Remote (Sürüm 4, proposed panel contract): IPv4 addresses in `sense.network` may carry
+/// their prefix (`"192.168.1.20/24"`).
+pub const CAP_IP_PREFIX: &str = "ip_prefix";
+/// Sense Remote (Sürüm 4, proposed panel contract): `health.disks[].label` (volume name).
+pub const CAP_DISK_LABEL: &str = "disk_label";
 
 /// `ts` of the next report: the local clock, but always above the last one sent, so the panel's
 /// replay check (`ts > last report_ts`) never drops a report of this process because two
@@ -286,6 +294,19 @@ pub fn panel_takes_signed_ingest(caps: Option<&[String]>) -> bool {
     caps.is_some_and(|caps| caps.iter().any(|cap| cap == CAP_SIGNED_INGEST))
 }
 
+/// Sense Remote (Sürüm 4): `sense_panel_caps` of the last parsed heartbeat answer (empty before
+/// the first answer of this run: then only what every panel takes is sent).
+static PANEL_CAPS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Sense Remote (Sürüm 4): whether the last heartbeat answer named `cap` (e.g. `CAP_IP_PREFIX`).
+pub fn panel_has(cap: &str) -> bool {
+    PANEL_CAPS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|c| c == cap)
+}
+
 /// Stored panel capability (LocalConfig of the process that sends the heartbeat).
 const OPTION_PANEL_SIGNED_INGEST: &str = "sense-panel-signed-ingest";
 /// 0 = not read yet, 1 = off, 2 = on.
@@ -295,6 +316,7 @@ static PANEL_SIGNED_INGEST: AtomicU8 = AtomicU8::new(0);
 /// changes, so the heartbeat and sysinfo right after a restart are signed the same way (a v1
 /// report would make the panel drop `signed_ingest` from this computer until the next v2).
 pub fn set_panel_caps(caps: Option<&[String]>) {
+    *PANEL_CAPS.lock().unwrap_or_else(|e| e.into_inner()) = caps.map(<[String]>::to_vec).unwrap_or_default();
     let on = panel_takes_signed_ingest(caps);
     if panel_signed_ingest() != on {
         hbb_common::config::LocalConfig::set_option(
