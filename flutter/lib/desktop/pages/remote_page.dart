@@ -25,6 +25,8 @@ import '../widgets/remote_toolbar.dart';
 import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
 import '../../sense/screens/session/sense_remote_window.dart'
     show SenseRemoteOverlay, SenseRemoteSession;
+import '../../sense/screens/session/layers/session_layers_ffi.dart'
+    show SenseConnectionLayers;
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
 import 'macos_full_screen_focus_recovery.dart';
@@ -706,6 +708,8 @@ class _RemotePageState extends State<RemotePage>
     removeSharedStates(widget.id);
     // Sense Remote: drop the connection window's Sense state (timers, data).
     SenseRemoteSession.remove(widget.id);
+    // Sense Remote: stop the connection layers' timers (O13–O15).
+    SenseConnectionLayers.remove(widget.id);
   }
 
   Widget emptyOverlay() => BlockableOverlay(
@@ -805,6 +809,11 @@ class _RemotePageState extends State<RemotePage>
               _ffi.ffiModel.pi.isSet.isFalse ? emptyOverlay() : Offstage(),
             ],
           ),
+          // Sense Remote: connection problem, connection ended and idle warning
+          // (O13–O15) over everything, the top bar included.
+          if (kSenseRemoteWindow && _ffi.ffiModel.pi.isSet.isTrue)
+            Positioned.fill(
+                child: SenseConnectionLayers(id: widget.id, ffi: _ffi)),
         ],
       );
     }
