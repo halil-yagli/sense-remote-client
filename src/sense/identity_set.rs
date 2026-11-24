@@ -24,6 +24,16 @@
 //! The same IPC message carries the H2 "Son bağlantılar" query (`RecentQuery`): the list lives in
 //! the `--server` process too (`host_recent`).
 //!
+//! Karar #93: the name and location can be edited in the panel too. The panel announces
+//! `name_push` in `sense_panel_caps` and, while this computer reports an `id_rev` that is not its
+//! current one, sends `sense_identity: {rev, name, location_id}` in the heartbeat answer. A Host
+//! with a newer `rev` than the one it applied writes the values locally exactly as the Host window
+//! does (`store` + `update_builtin`, so the Host window shows them) and reports the new `rev` as
+//! `sense.id_rev`. A change made on the Host window still goes out through the signed
+//! `device-info` (above); the panel keeps the newer of the two per field and answers with the
+//! winner, which is what gets stored. Only for a panel that announces `name_push`; the location must
+//! be one the panel's list names (or the stored one).
+//!
 //! Nothing here logs a name, a location or a key.
 
 use super::{report::SenseLocations, SenseRole};
@@ -50,6 +60,16 @@ const OPTION_INFO_TS: &str = "sense-info-ts";
 /// The registry value / state field the installer writes (`sense::REG_VALUE_SETUP`).
 #[cfg(windows)]
 const SETUP_VALUE: &str = "Setup";
+/// Karar #93: heartbeat answer field with the name / location edited in the panel (contract
+/// `SenseIdentityPush`), and the panel capability that announces it.
+pub const KEY_IDENTITY: &str = "sense_identity";
+pub const CAP_NAME_PUSH: &str = "name_push";
+/// `rev` of the last panel edit applied here (local config of the `--server` process).
+const OPTION_IDENTITY_REV: &str = "sense-identity-rev";
+/// `rev` is a panel time in ms (JavaScript safe integer).
+const MAX_IDENTITY_REV: u64 = 9_007_199_254_740_991;
+/// A panel edit and a Host edit never write at the same time.
+static IDENTITY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// A heartbeat answer older than this does not count as "panel reachable" any more.
 const PANEL_FRESH_S: u64 = 90;
 /// UI waits for `--server`: the POST (panel) plus the local write.
@@ -194,6 +214,68 @@ fn location_name_for(
         return stored.location.clone();
     }
     String::new()
+}
+
+/// A name / location edit made in the panel (`sense_identity`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanelPush {
+    pub rev: u64,
+    pub name: String,
+    pub location_id: Option<String>,
+}
+
+/// Reads `sense_identity` out of a heartbeat answer body. `None` unless the same answer announces
+/// `name_push` and the field has the contract's shape (name and location id pass the same rules
+/// as an edit made here).
+pub fn push_from_answer(body: &str) -> Option<PanelPush> {
+    let answer: Value = serde_json::from_str(body).ok()?;
+    let announced = answer
+        .get("sense_panel_caps")?
+        .as_array()?
+        .iter()
+        .any(|cap| cap.as_str() == Some(CAP_NAME_PUSH));
+    if !announced {
+        return None;
+    }
+    let push = answer.get(KEY_IDENTITY)?.as_object()?;
+    let rev = push
+        .get("rev")?
+        .as_u64()
+        .filter(|rev| (1..=MAX_IDENTITY_REV).contains(rev))?;
+    let name = clean_name(push.get("name")?.as_str()?)?;
+    let location_id = match push.get("location_id")? {
+        Value::Null => None,
+        Value::String(id) if is_location_id(id) => Some(id.clone()),
+        _ => return None,
+    };
+    Some(PanelPush {
+        rev,
+        name,
+        location_id,
+    })
+}
+
+/// What to store for a panel edit: `None` when it is not newer than the one applied, or its
+/// location is neither on the panel's list nor the stored one (the list comes with the same
+/// answer when it changed, so the next heartbeat tries again).
+pub fn plan_push(
+    push: &PanelPush,
+    applied_rev: u64,
+    locations: Option<&SenseLocations>,
+    stored: &StoredIdentity,
+) -> Option<StoredIdentity> {
+    if push.rev <= applied_rev {
+        return None;
+    }
+    let location = match push.location_id.as_deref() {
+        None => String::new(),
+        Some(id) => match locations.and_then(|list| list.items.iter().find(|(item, _)| item == id)) {
+            Some((_, name)) => name.clone(),
+            None if stored_location_id(stored, locations) == id => stored.location.clone(),
+            None => return None,
+        },
+    };
+    StoredIdentity::checked(&push.name, &location, push.location_id.as_deref().unwrap_or(""))
 }
 
 /// `main_sense_identity`: `{name, location_id, location_name, locations: [{id, name}], panel:
@@ -347,6 +429,23 @@ pub fn extend_heartbeat(sense: &mut Value) {
     }
 }
 
+/// Sync loop: `sense.id_rev`, the panel edit applied here (0 = none). Only for a panel that
+/// announces `name_push`; the panel sends nothing to a computer that reports no `id_rev`.
+pub fn extend_heartbeat_rev(sense: &mut Value) {
+    if !super::report_sig::panel_has(CAP_NAME_PUSH) {
+        return;
+    }
+    if let Some(object) = sense.as_object_mut() {
+        object.insert("id_rev".to_owned(), json!(applied_rev()));
+    }
+}
+
+fn applied_rev() -> u64 {
+    config::LocalConfig::get_option(OPTION_IDENTITY_REV)
+        .parse()
+        .unwrap_or(0)
+}
+
 fn locations() -> Option<SenseLocations> {
     STATE.lock().unwrap().locations.clone()
 }
@@ -497,10 +596,41 @@ pub async fn on_main_ipc(message: SenseIdentityIpc) -> Option<SenseIdentityIpc> 
     }
 }
 
+/// Sync loop, right after `on_heartbeat_answer` (which has taken the location list of the same
+/// answer): applies a name / location edited in the panel to this Host, as the Host window would.
+/// Does nothing unless this is a Host, the panel announces `name_push` and the edit is newer.
+pub async fn apply_pushed(body: Option<&str>) {
+    let Some(push) = body.and_then(push_from_answer) else {
+        return;
+    };
+    if !is_host(super::installed_role()) {
+        return;
+    }
+    let _guard = IDENTITY_LOCK.lock().await;
+    let stored = tokio::task::spawn_blocking(read_stored)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let Some(next) = plan_push(&push, applied_rev(), locations().as_ref(), &stored) else {
+        return;
+    };
+    if next != stored {
+        if let Err(err) = store(next.clone()).await {
+            log::error!("Sense Remote: panel name / location not stored here: {err}");
+            return;
+        }
+        update_builtin(&next);
+        log::info!("Sense Remote: name / location changed in the panel and applied here");
+    }
+    config::LocalConfig::set_option(OPTION_IDENTITY_REV.to_owned(), push.rev.to_string());
+}
+
 async fn set_in_server(name: &str, location_id: &str) -> String {
     if !is_host(super::installed_role()) {
         return error(ERR_UNAVAILABLE);
     }
+    let _guard = IDENTITY_LOCK.lock().await;
     let (Some(name), Some(location_id)) = (clean_name(name), clean_location_id(location_id)) else {
         return error(ERR_INVALID);
     };
@@ -875,6 +1005,83 @@ mod tests {
         on_heartbeat_answer(None);
         assert_eq!(locations().unwrap().rev, 42);
         assert_eq!(panel_ok(), Some(false));
+    }
+
+    fn push_body(rev: u64, name: &str, location_id: Option<&str>) -> String {
+        json!({
+            "sense_panel_caps": ["health_v2", "name_push"],
+            "sense_identity": { "rev": rev, "name": name, "location_id": location_id },
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn panel_push_is_read_only_when_announced_and_well_formed() {
+        let ok = push_from_answer(&push_body(5, " Salon 1 ", Some("loc_1"))).unwrap();
+        assert_eq!(
+            ok,
+            PanelPush { rev: 5, name: "Salon 1".to_owned(), location_id: Some("loc_1".to_owned()) }
+        );
+        assert_eq!(push_from_answer(&push_body(5, "Kiosk", None)).unwrap().location_id, None);
+        // Not announced (older panel) or no field: nothing.
+        let silent = json!({ "sense_identity": { "rev": 5, "name": "K", "location_id": null } });
+        assert_eq!(push_from_answer(&silent.to_string()), None);
+        assert_eq!(push_from_answer(r#"{"sense_panel_caps":["name_push"]}"#), None);
+        assert_eq!(push_from_answer("{}"), None);
+        assert_eq!(push_from_answer("nope"), None);
+        // Out-of-contract values.
+        for bad in [
+            push_body(0, "K", None),
+            push_body(5, "", None),
+            push_body(5, &"x".repeat(65), None),
+            push_body(5, "a\u{7}b", None),
+            push_body(5, "K", Some("kok_1")),
+            push_body(5, "K", Some("loc_")),
+            push_body(MAX_IDENTITY_REV + 1, "K", None),
+        ] {
+            assert_eq!(push_from_answer(&bad), None, "{bad}");
+        }
+        let wrong_shape = json!({
+            "sense_panel_caps": ["name_push"],
+            "sense_identity": { "rev": -1, "name": "K", "location_id": null },
+        });
+        assert_eq!(push_from_answer(&wrong_shape.to_string()), None);
+    }
+
+    #[test]
+    fn panel_push_plan() {
+        let panel = list(&[("loc_1", "Galeri 1"), ("loc_2", "Galeri 2")]);
+        let old = stored("Eski", "Galeri 1", "loc_1");
+        let push = |rev, name: &str, loc: Option<&str>| PanelPush {
+            rev,
+            name: name.to_owned(),
+            location_id: loc.map(str::to_owned),
+        };
+        // Newer edit: name and the location NAME from the panel's list.
+        assert_eq!(
+            plan_push(&push(7, "Yeni", Some("loc_2")), 3, Some(&panel), &old),
+            Some(stored("Yeni", "Galeri 2", "loc_2"))
+        );
+        // No location.
+        assert_eq!(
+            plan_push(&push(7, "Yeni", None), 3, Some(&panel), &old),
+            Some(stored("Yeni", "", ""))
+        );
+        // Not newer than the applied one (replay / equal): nothing.
+        assert_eq!(plan_push(&push(3, "Yeni", None), 3, Some(&panel), &old), None);
+        assert_eq!(plan_push(&push(2, "Yeni", None), 3, Some(&panel), &old), None);
+        // A location the panel's list does not name: not applied (retried when the list comes).
+        assert_eq!(plan_push(&push(7, "Yeni", Some("loc_9")), 3, Some(&panel), &old), None);
+        assert_eq!(plan_push(&push(7, "Yeni", Some("loc_9")), 3, None, &old), None);
+        // Without a list the stored location is still a valid choice.
+        assert_eq!(
+            plan_push(&push(7, "Yeni", Some("loc_1")), 3, None, &old),
+            Some(stored("Yeni", "Galeri 1", "loc_1"))
+        );
+        // Values the store would refuse (location name too long) are refused here too.
+        let long_name = "g".repeat(MAX_LOCATION_CHARS + 1);
+        let long = list(&[("loc_3", long_name.as_str())]);
+        assert_eq!(plan_push(&push(7, "Yeni", Some("loc_3")), 3, Some(&long), &old), None);
     }
 
     #[test]
