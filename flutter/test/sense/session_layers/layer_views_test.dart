@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/sense/sense.dart';
 import 'package:flutter_hbb/sense/screens/session/bar/sense_session_frame.dart';
-import 'package:flutter_hbb/sense/screens/session/data/session_state.dart' show SenseBarPopup;
+import 'package:flutter_hbb/sense/screens/session/data/session_state.dart' as bar show SenseBarPopup, SenseLinkSample, SenseLinkPath;
 import 'package:flutter_hbb/sense/screens/session/layers/data/session_hub.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_controller.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_spec.dart';
@@ -27,16 +27,19 @@ bool _skip(String name) => !autoUpdateGoldenFiles && !File('$_goldenDir/$name.pn
 /// (`SenseSessionFrame` with the test backend), the glow "remote screen" and an
 /// open Bilgisayar durumu popup drawn with the real popup frame and status box.
 class _FakeWindow extends StatelessWidget {
-  const _FakeWindow();
+  const _FakeWindow({this.link});
+
+  /// What the bar's logo / status area shows (null = the healthy default).
+  final bar.SenseLinkSample? link;
 
   @override
   Widget build(BuildContext context) {
     final popups = FakePopups()
       ..statusLevel = SenseLevel.ok
       ..infoLevel = null
-      ..open.add(SenseBarPopup.status);
+      ..open.add(bar.SenseBarPopup.status);
     return SenseSessionFrame(
-      backend: FakeBackend(),
+      backend: link == null ? FakeBackend() : FakeBackend(link: link!),
       popups: popups,
       child: Stack(children: [
         const Positioned.fill(child: SenseGlowScene(style: SenseGlowStyle.scene)),
@@ -58,7 +61,7 @@ class _FakeWindow extends StatelessWidget {
   }
 }
 
-Future<void> _pump(WidgetTester tester, Widget layer) async {
+Future<void> _pump(WidgetTester tester, Widget layer, {bar.SenseLinkSample? link}) async {
   tester.view.physicalSize = const Size(1280, 720);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -75,7 +78,7 @@ Future<void> _pump(WidgetTester tester, Widget layer) async {
       body: RepaintBoundary(
         key: const Key('golden'),
         child: Stack(children: [
-          const Positioned.fill(child: _FakeWindow()),
+          Positioned.fill(child: _FakeWindow(link: link)),
           Positioned.fill(child: layer),
         ]),
       ),
@@ -172,10 +175,31 @@ void main() {
       expect(find.text('Bağlantı toparlandı · 2 sn iyi kalırsa kapanır'), findsOneWidget);
     });
 
+    testWidgets('x on the weak card calls onMinimize; the lost card has none', (tester) async {
+      var n = 0;
+      await _pump(tester, SenseLinkLayer(view: _weak, onEnd: () {}, onMinimize: () => n++));
+      await tester.tap(find.byKey(const Key('sense-layer-minimize')));
+      expect(n, 1);
+      await _pump(tester, SenseLinkLayer(view: _lost, onEnd: () {}, onMinimize: () => n++));
+      expect(find.byKey(const Key('sense-layer-minimize')), findsNothing);
+    });
+
     testWidgets('golden c11', (tester) async {
-      await _pump(tester, SenseLinkLayer(view: _weak, onEnd: () {}));
+      await _pump(tester, SenseLinkLayer(view: _weak, onEnd: () {}, onMinimize: () {}));
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(_golden('o13_weak_c11')));
     }, skip: _skip('o13_weak_c11'), tags: ['golden']);
+
+    testWidgets('golden: card shrunk into the logo area (warning colour kept)', (tester) async {
+      await _pump(
+        tester,
+        const SizedBox.shrink(),
+        link: bar.SenseLinkSample(
+            path: bar.SenseLinkPath.direct, fps: 3, rttMs: 20, wavy: true, onRestoreLayer: () {}),
+      );
+      expect(find.textContaining('Dalgalı'), findsOneWidget);
+      await expectLater(
+          find.byKey(const Key('golden')), matchesGoldenFile(_golden('o13_weak_minimized')));
+    }, skip: _skip('o13_weak_minimized'), tags: ['golden']);
   });
 
   group('O13 lost (c12)', () {
@@ -343,12 +367,38 @@ void main() {
 
     testWidgets('weak layer comes and goes with the "Bağlantı düzeldi" toast', (tester) async {
       await _pump(tester, SenseSessionLayers(id: 'p1', controller: c, listenToInput: false));
-      await seconds(tester, 6, host.slow);
+      await seconds(tester, 16, host.weakFps);
       expect(find.text(SenseLayerStrings.weakTitle), findsOneWidget);
       await seconds(tester, 4, host.healthy);
       expect(find.text(SenseLayerStrings.weakTitle), findsNothing);
       expect(find.text('Bağlantı düzeldi'), findsOneWidget);
       await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('x shrinks the weak card; the logo area opens it again', (tester) async {
+      await _pump(tester, SenseSessionLayers(id: 'p1', controller: c, listenToInput: false));
+      await seconds(tester, 16, host.weakFps);
+      expect(find.byKey(const Key('sense-layer-minimize')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-layer-minimize')));
+      await tester.pump();
+      expect(c.minimized, isTrue);
+      expect(find.text(SenseLayerStrings.weakTitle), findsNothing);
+      expect(find.byKey(const Key('sense-layer-minimize')), findsNothing);
+      await seconds(tester, 40, host.weakFps);
+      expect(find.text(SenseLayerStrings.weakTitle), findsNothing, reason: 'does not reopen itself');
+      c.restoreCard(); // what the bar's logo area calls
+      await tester.pump();
+      expect(find.text(SenseLayerStrings.weakTitle), findsOneWidget);
+    });
+
+    testWidgets('lost card keeps showing and has no x', (tester) async {
+      await _pump(tester, SenseSessionLayers(id: 'p1', controller: c, listenToInput: false));
+      await seconds(tester, 1, host.healthy);
+      await seconds(tester, 10);
+      expect(SenseSessionHub.onMessage('p1', 'restarting-show', 'Connecting...', 'Connection in progress.'), isTrue);
+      await tester.pump();
+      expect(find.text(SenseLayerStrings.lostTitle), findsOneWidget);
+      expect(find.byKey(const Key('sense-layer-minimize')), findsNothing);
     });
 
     testWidgets('a Host message reaches the card through the hub', (tester) async {

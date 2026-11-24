@@ -20,6 +20,15 @@ const _bad = SenseLinkSample(
   probeAge: Duration(milliseconds: 900),
 );
 
+/// Low frame rate on an otherwise answering link: the weak card's one condition.
+const _weakFps = SenseLinkSample(
+  rttMs: 20,
+  lossPct: 0.1,
+  fps: 3,
+  frameAge: Duration(milliseconds: 300),
+  probeAge: Duration(milliseconds: 400),
+);
+
 /// No picture and no probe for [s] seconds.
 SenseLinkSample _frozen(int s) => SenseLinkSample(
       rttMs: 20,
@@ -143,22 +152,56 @@ void main() {
     });
   });
 
-  group('weak', () {
-    test('bad 5 s without a break: weak layer', () {
+  group('weak (karar #94: fps < 5 for 15 s)', () {
+    test('fps 3: 14 s no card, 16 s the card', () {
       final r = _Run();
-      var v = r.steps(5, _bad); // seconds 0..4
-      expect(v.phase, SenseLinkPhase.normal, reason: '4 s since the first bad tick');
-      v = r.step(_bad); // second 5
+      var v = r.steps(15, _weakFps); // seconds 0..14
+      expect(v.phase, SenseLinkPhase.normal, reason: '14 s since the first low second');
+      expect(v.layerUp, isFalse);
+      v = r.step(_weakFps); // second 15
       expect(v.phase, SenseLinkPhase.weak);
       expect(v.layerUp, isTrue);
-      expect(v.wavy, isFalse, reason: 'the layer is up; the bar word is for the short shake');
+      expect(v.wavy, isFalse);
       expect(v.recoveringIn, isNull);
-      expect(v.sample.rttMs, 272);
+    });
+
+    test('high delay (900 ms) with fps 20 never opens the card', () {
+      final r = _Run();
+      const slowButAlive = SenseLinkSample(
+          rttMs: 900, lossPct: 0.1, fps: 20, frameAge: Duration(milliseconds: 30), probeAge: Duration(seconds: 2));
+      final v = r.steps(120, slowButAlive);
+      expect(v.layerUp, isFalse);
+      expect(v.wavy, isTrue, reason: 'the bar still says Dalgalı');
+      expect(r.events, everyElement(SenseLinkEvent.none));
+    });
+
+    test('high loss alone never opens the card', () {
+      final r = _Run();
+      final v = r.steps(
+          120,
+          const SenseLinkSample(
+              rttMs: 20, lossPct: 5.1, fps: 30, frameAge: Duration(milliseconds: 30), probeAge: Duration(milliseconds: 400)));
+      expect(v.layerUp, isFalse);
+    });
+
+    test('0 fps (still screen, probes answer) is not weak', () {
+      final r = _Run();
+      final v = r.steps(60, const SenseLinkSample(
+          rttMs: 20, lossPct: 0, fps: 0, frameAge: Duration(seconds: 40), probeAge: Duration(milliseconds: 800)));
+      expect(v.layerUp, isFalse);
+    });
+
+    test('a single good second starts the 15 s over', () {
+      final r = _Run();
+      r.steps(14, _weakFps);
+      r.step(_good);
+      final v = r.steps(14, _weakFps);
+      expect(v.phase, SenseLinkPhase.normal);
     });
 
     test('good 3 s: "toparlandı" counts down, then the layer goes once', () {
       final r = _Run();
-      r.steps(6, _bad);
+      r.steps(16, _weakFps);
       var v = r.step(_good);
       expect(v.phase, SenseLinkPhase.weak);
       expect(v.recoveringIn, 3);
@@ -174,11 +217,11 @@ void main() {
       expect(r.events.where((e) => e == SenseLinkEvent.recovered), hasLength(1));
     });
 
-    test('bad again while recovering: the 3 s start over', () {
+    test('low again while recovering: the 3 s start over', () {
       final r = _Run();
-      r.steps(6, _bad);
+      r.steps(16, _weakFps);
       r.steps(2, _good);
-      var v = r.step(_bad);
+      var v = r.step(_weakFps);
       expect(v.recoveringIn, isNull);
       expect(v.phase, SenseLinkPhase.weak);
       v = r.steps(3, _good);
@@ -188,29 +231,45 @@ void main() {
     });
   });
 
-  group('lost', () {
-    test('3 s without picture and probe: lost layer', () {
+  group('lost and dropped (karar #94)', () {
+    test('29 s without frame and probe: no card, no drop', () {
       final r = _Run();
-      r.steps(2, _good);
-      var v = r.step(_frozen(2));
+      r.step(_good);
+      final v = r.step(_frozen(29));
       expect(v.layerUp, isFalse);
-      v = r.step(_frozen(4));
-      expect(v.phase, SenseLinkPhase.lost);
-      expect(v.stallSeconds, 3);
+      expect(v.dropped, isFalse);
+      expect(r.m.lastEvent, SenseLinkEvent.none);
+      expect(v.wavy, isTrue, reason: 'the bar warns');
     });
 
-    test('weak turns lost when the picture stops', () {
+    test('31 s without frame and probe: lost, dropped once, then the machine stays put', () {
       final r = _Run();
-      r.steps(6, _bad);
-      expect(r.m.view.phase, SenseLinkPhase.weak);
-      final v = r.step(_frozen(4));
+      r.step(_frozen(29));
+      expect(r.m.lastEvent, SenseLinkEvent.none);
+      final v = r.step(_frozen(31));
+      expect(v.dropped, isTrue);
       expect(v.phase, SenseLinkPhase.lost);
+      expect(v.layerUp, isFalse, reason: 'the ended card takes over');
+      expect(r.m.lastEvent, SenseLinkEvent.dropped);
+      r.step(_good);
+      expect(r.m.lastEvent, SenseLinkEvent.none);
+      expect(r.m.view.dropped, isTrue);
     });
 
-    test('lost text: attempt every 4 s and seconds to the 30 s close', () {
+    test('data keeps coming: the machine never drops', () {
       final r = _Run();
+      r.steps(600, _weakFps);
+      r.steps(600, _bad);
+      expect(r.m.view.dropped, isFalse);
+      expect(r.events, isNot(contains(SenseLinkEvent.dropped)));
+    });
+
+    test('transport lost: the lost card shows at once, text counts attempts and seconds', () {
+      final r = _Run();
+      r.m.transportLost(Duration.zero);
       var v = r.step(_frozen(9));
       expect(v.phase, SenseLinkPhase.lost);
+      expect(v.layerUp, isTrue);
       expect(v.stallSeconds, 8);
       expect(v.attempt, 3, reason: '8.98 s / 4 s, rounded up');
       expect(v.closeIn, 22);
@@ -218,28 +277,29 @@ void main() {
       expect(v.attempt, 1);
     });
 
-    test('back after an outage: 3 s good, then normal', () {
+    test('transport lost without data: dropped after 30 s', () {
       final r = _Run();
-      r.step(_frozen(5));
-      var v = r.step(_good);
+      r.m.transportLost(Duration.zero);
+      var v = r.steps(30, _frozen(2)); // seconds 0..29
+      expect(v.dropped, isFalse);
+      v = r.step(_frozen(2)); // second 30
+      expect(v.dropped, isTrue);
+    });
+
+    test('transport lost but data flows again: 3 s good, then normal, never dropped', () {
+      final r = _Run();
+      r.step(_good);
+      r.m.transportLost(const Duration(seconds: 1));
+      var v = r.step(_frozen(2));
+      expect(v.phase, SenseLinkPhase.lost);
+      v = r.step(_good);
       expect(v.phase, SenseLinkPhase.lost);
       expect(v.recoveringIn, 3);
       v = r.steps(3, _good);
       expect(v.phase, SenseLinkPhase.normal);
       expect(r.m.lastEvent, SenseLinkEvent.recovered);
-    });
-
-    test('30 s stalled: dropped once, then the machine stays put', () {
-      final r = _Run();
-      r.step(_frozen(29));
-      expect(r.m.lastEvent, SenseLinkEvent.none);
-      final v = r.step(_frozen(32));
-      expect(v.dropped, isTrue);
-      expect(v.layerUp, isFalse, reason: 'the ended card takes over');
-      expect(r.m.lastEvent, SenseLinkEvent.dropped);
-      r.step(_good);
-      expect(r.m.lastEvent, SenseLinkEvent.none);
-      expect(r.m.view.dropped, isTrue);
+      r.steps(120, _good);
+      expect(r.m.view.dropped, isFalse);
     });
 
     test('reset after a reconnect starts clean', () {
@@ -254,8 +314,8 @@ void main() {
 
   test('ticks with uneven gaps still use the clock, not the tick count', () {
     final m = SenseLinkMachine();
-    m.tick(Duration.zero, _bad);
-    expect(m.tick(const Duration(milliseconds: 4900), _bad).phase, SenseLinkPhase.normal);
-    expect(m.tick(const Duration(seconds: 5), _bad).phase, SenseLinkPhase.weak);
+    m.tick(Duration.zero, _weakFps);
+    expect(m.tick(const Duration(milliseconds: 14900), _weakFps).phase, SenseLinkPhase.normal);
+    expect(m.tick(const Duration(seconds: 15), _weakFps).phase, SenseLinkPhase.weak);
   });
 }

@@ -203,8 +203,14 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
           name: b.peerName,
           line: line.text,
           level: line.level,
+          // Karar #94: while the weak card sits minimized here, a click opens it again.
           onTap: ready
               ? () {
+                  final restore = b.link.onRestoreLayer;
+                  if (restore != null) {
+                    restore();
+                    return;
+                  }
                   menus.close();
                   if (!widget.popups.isOpen(SenseBarPopup.info)) widget.popups.toggle(SenseBarPopup.info);
                 }

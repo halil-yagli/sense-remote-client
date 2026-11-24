@@ -9,16 +9,26 @@ abstract final class SenseLinkTiming {
   /// The machine's own tick: no event arrives while the link is frozen (TK7).
   static const Duration tick = Duration(seconds: 1);
 
-  /// Values bad without a break for this long: "Bağlantı zayıf".
-  static const Duration showWeak = Duration(seconds: 5);
+  /// Frame rate below [weakFpsBelow] without a break for this long: "Bağlantı zayıf"
+  /// (karar #94). High delay or loss alone never opens the card; the bar reports them.
+  static const Duration showWeak = Duration(seconds: 15);
 
-  /// No picture for this long: "Bağlantı kesildi".
-  static const Duration showLost = Duration(seconds: 3);
+  /// The weak card's frame rate limit (frames per second; 0 is excluded: a still screen).
+  static const double weakFpsBelow = 5;
+
+  /// After the weak card was closed with "×", it opens by itself again at most this often.
+  static const Duration reopenEvery = Duration(minutes: 5);
+
+  /// Card shrinks to the top-left logo area and back (the "×"), karar #94.
+  static const Duration shrink = Duration(milliseconds: 250);
 
   /// Good without a break for this long: the layer goes ("Bağlantı düzeldi").
   static const Duration hideOk = Duration(seconds: 3);
 
-  /// The session closes (RustDesk io_loop gives up after 30 s, TK7 `io_loop.rs:337`).
+  /// Neither frame nor delay measurement for this long: "Bağlantı kesildi" and the
+  /// session closes (RustDesk io_loop gives up after 30 s, TK7 `io_loop.rs:337`).
+  /// Same value as the bar's `kSenseNoImageMs`. While data keeps coming the layer
+  /// never closes or reconnects the session by itself.
   static const Duration drop = Duration(seconds: 30);
 
   /// The Host sends the next delay probe one second after the last answer
@@ -66,6 +76,12 @@ abstract final class SenseLayerLook {
   static const double cardShadowBlur = 60;
   static const double cardShadowY = 20;
   static const double cardShadowOpacity = 0.6;
+
+  // "x" of the weak card (karar #94): 26 px target, 7 px from the card corner; the card
+  // shrinks to 6 % of its size into the logo area.
+  static const double closeSize = 26;
+  static const double closeInset = 7;
+  static const double shrinkScale = 0.06;
 
   // `.nc svg` 40 × 36, 4 px below.
   static const double logoWidth = 40;

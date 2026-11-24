@@ -282,6 +282,40 @@ void main() {
 
     test('no privacy mode offered → disabled', () {
       expect(senseGhostToggle([], false), isNull);
+    });
+
+    test('karar #95: ghost mode starts on once per session; the next session starts on again', () {
+      var turned = 0;
+      void toggle() => turned++;
+      final first = SenseAutoGhost();
+      expect(first.run(ready: true, on: false, available: true, needsDisplay1: false, toggle: toggle), isTrue);
+      expect(turned, 1);
+      // The user switches it off inside the session: it is not switched on again.
+      expect(first.run(ready: true, on: false, available: true, needsDisplay1: false, toggle: toggle), isFalse);
+      expect(turned, 1);
+      // The next session starts on again (nothing was kept).
+      final second = SenseAutoGhost();
+      expect(second.run(ready: true, on: false, available: true, needsDisplay1: false, toggle: toggle), isTrue);
+      expect(turned, 2);
+    });
+
+    test('karar #95: where ghost mode cannot be used nothing happens, no error', () {
+      var turned = 0;
+      void toggle() => turned++;
+      bool go({bool ready = true, bool on = false, bool available = true, bool d1 = false, VoidCallback? t}) =>
+          SenseAutoGhost().run(
+              ready: ready, on: on, available: available, needsDisplay1: d1, toggle: t ?? toggle);
+      expect(go(available: false), isFalse);
+      expect(go(d1: true), isFalse);
+      expect(go(ready: false), isFalse);
+      expect(go(on: true), isFalse);
+      expect(SenseAutoGhost().run(ready: true, on: false, available: true, needsDisplay1: false, toggle: null),
+          isFalse);
+      expect(turned, 0);
+    });
+
+    test('senseGhostToggle: nothing offered, nothing to call', () {
+      expect(senseGhostToggle([], false), isNull);
       expect(senseGhostToggle([menu(false, [], enabled: false)], false), isNull);
     });
 
