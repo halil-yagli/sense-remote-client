@@ -47,30 +47,48 @@ void main() {
       expect(c.ended, isNull);
     });
 
-    test('slow 2 s: "Dalgalı" only; slow 5 s: weak layer', () {
+    test('slow 2 s: "Dalgalı" only; slow forever: never a card', () {
       seconds(2, host.slow);
       expect(c.wavy.value, isTrue);
       expect(c.link.layerUp, isFalse);
-      seconds(3, host.slow);
-      expect(c.link.layerUp, isFalse, reason: '4 s since the first bad second');
-      seconds(1, host.slow);
-      expect(c.link.phase, SenseLinkPhase.weak);
-      expect(c.wavy.value, isFalse);
+      seconds(120, host.slow);
+      expect(c.link.layerUp, isFalse, reason: 'delay and loss alone never open the card');
+      expect(c.ended, isNull);
     });
 
-    test('frozen link (no event at all): lost after 3 s, by the own tick', () {
-      seconds(2, host.healthy);
-      // From here no event arrives: raw stays as it was, only time passes.
+    test('fps 3: 14 s no card, 16 s the weak card; the bar keeps the warning', () {
+      seconds(14, host.weakFps);
+      expect(c.link.layerUp, isFalse);
+      seconds(2, host.weakFps);
+      expect(c.link.phase, SenseLinkPhase.weak);
+      expect(c.wavy.value, isTrue);
+    });
+
+    test('delay 900 ms with fps 20: no card', () {
+      seconds(90, host.highDelay);
+      expect(c.link.layerUp, isFalse);
+      expect(c.ended, isNull);
+    });
+
+    test('no data for 29 s: no card; 32 s: the ended card', () {
+      seconds(1, host.healthy);
+      seconds(29);
+      expect(c.link.layerUp, isFalse);
+      expect(c.ended, isNull);
       seconds(3);
-      expect(c.link.layerUp, isFalse, reason: '3 s since the last frame, probe late 2 s');
-      seconds(1);
-      expect(c.link.layerUp, isFalse, reason: 'probe 4 s old: late 2.98 s');
-      seconds(1);
-      expect(c.link.phase, SenseLinkPhase.lost);
+      expect(c.ended, isNotNull);
+    });
+
+    test('data keeps coming: the layer never closes or reconnects the session', () {
+      seconds(300, host.weakFps);
+      seconds(300, host.highDelay);
+      expect(c.ended, isNull);
+      expect(host.calls, isNot(contains('home')));
+      expect(host.calls, isNot(contains('reconnect')));
     });
 
     test('recovered: the toast serial goes up once', () {
-      seconds(6, host.slow);
+      seconds(16, host.weakFps);
       expect(c.link.layerUp, isTrue);
       final before = c.recoveredSerial;
       seconds(3, host.healthy);
@@ -162,15 +180,53 @@ void main() {
       expect(host.calls, contains('home'));
     });
 
-    test('RustDesk reconnect after its 30 s timeout while "Kesildi" is up ends the session', () {
+    test('transport lost (restarting) with no data: "Kesildi" card, session ends after 30 s', () {
       seconds(1, host.healthy);
       seconds(10);
-      expect(c.link.phase, SenseLinkPhase.lost);
+      expect(c.link.layerUp, isFalse);
       expect(c.onMessage('restarting-show', 'Connecting...', 'Connection in progress.'), isTrue);
+      expect(c.link.phase, SenseLinkPhase.lost);
+      expect(c.ended, isNull);
+      seconds(22);
       expect(c.ended!.reason, SenseEndReason.peerGone);
     });
 
-    test('a restart without an outage is left to RustDesk', () {
+    test('lost card has no "x": minimize does nothing', () {
+      seconds(1, host.healthy);
+      seconds(10);
+      c.onMessage('restarting-show', 'Connecting...', 'Connection in progress.');
+      c.minimize();
+      expect(c.minimized, isFalse);
+    });
+
+    test('"x": the weak card minimizes, stays closed, opens on request', () {
+      seconds(16, host.weakFps);
+      c.minimize();
+      expect(c.minimized, isTrue);
+      expect(c.wavy.value, isTrue);
+      seconds(60, host.weakFps);
+      expect(c.minimized, isTrue, reason: 'the same trouble does not reopen it');
+      c.restoreCard();
+      expect(c.minimized, isFalse);
+      expect(c.link.phase, SenseLinkPhase.weak);
+    });
+
+    test('closed card: after recovery a new weak spell reopens it at most every 5 min', () {
+      seconds(16, host.weakFps);
+      c.minimize();
+      seconds(4, host.healthy);
+      expect(c.link.phase, SenseLinkPhase.normal);
+      seconds(16, host.weakFps);
+      expect(c.link.phase, SenseLinkPhase.weak);
+      expect(c.minimized, isTrue, reason: 'under 5 min since the "x"');
+      seconds(10, host.healthy);
+      seconds(5 * 60, host.healthy);
+      seconds(16, host.weakFps);
+      expect(c.link.phase, SenseLinkPhase.weak);
+      expect(c.minimized, isFalse, reason: '5 min passed: the card opens');
+    });
+
+    test('a restart on a working link is left to RustDesk', () {
       seconds(3, host.healthy);
       expect(c.onMessage('restarting-show', 'Connecting...', 'Connection in progress.'), isFalse);
     });

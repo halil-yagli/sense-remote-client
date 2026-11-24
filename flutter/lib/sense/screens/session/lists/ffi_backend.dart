@@ -262,6 +262,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
             ? SenseLinkPath.direct
             : SenseLinkPath.relay;
     final at = d.lastFrameAt;
+    final layer = SenseLayerController.find(ffi.id);
     return SenseLinkSample(
       path: path,
       fps: senseParseFps(d.fps),
@@ -272,6 +273,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       lossPct: d.lossEst,
       // O13: the connection layer decides "Dalgalı" (C4); the T6 limits only without it.
       wavy: SenseLayerController.find(ffi.id)?.wavy.value,
+      onRestoreLayer: layer != null && layer.minimized ? layer.restoreCard : null,
     );
   }
 

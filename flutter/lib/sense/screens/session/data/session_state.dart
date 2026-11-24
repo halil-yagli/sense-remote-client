@@ -55,6 +55,7 @@ class SenseLinkSample {
     this.lastFrameMs,
     this.lossPct,
     this.wavy,
+    this.onRestoreLayer,
   });
 
   final SenseLinkPath path;
@@ -71,6 +72,10 @@ class SenseLinkSample {
   /// null where no layer runs (then the T6 limits decide here).
   final bool? wavy;
 
+  /// Set while the weak card sits minimized in the logo area (karar #94): a click on
+  /// the logo / status area opens it again instead of opening Ekran bilgisi.
+  final VoidCallback? onRestoreLayer;
+
   SenseLinkSample copyWith({
     SenseLinkPath? path,
     int? fps,
@@ -78,6 +83,7 @@ class SenseLinkSample {
     int? lastFrameMs,
     double? lossPct,
     bool? wavy,
+    VoidCallback? onRestoreLayer,
   }) =>
       SenseLinkSample(
         path: path ?? this.path,
@@ -86,6 +92,7 @@ class SenseLinkSample {
         lastFrameMs: lastFrameMs ?? this.lastFrameMs,
         lossPct: lossPct ?? this.lossPct,
         wavy: wavy ?? this.wavy,
+        onRestoreLayer: onRestoreLayer ?? this.onRestoreLayer,
       );
 }
 
@@ -94,7 +101,8 @@ enum SenseLinkHealth { connecting, good, wavy, noImage }
 
 /// No frame for this long and no delay answer either: "Görüntü gelmiyor". A still
 /// Host screen sends no frames, so the frame age alone is not enough (D1 note).
-const int kSenseNoImageMs = 5000;
+/// Karar #94: the same 30 s as the connection layer's drop (`SenseLinkTiming.drop`).
+const int kSenseNoImageMs = 30000;
 
 SenseLinkHealth senseLinkHealth(SenseLinkSample s) {
   if (s.fps == null && s.rttMs == null && s.lastFrameMs == null) {
