@@ -39,6 +39,13 @@ final SimpleWrapper<bool> _firstEnterImage = SimpleWrapper(false);
 // Used to skip session close if "move to new window" is clicked.
 final Map<String, bool> closeSessionOnDispose = {};
 
+// Sense Remote: ids of the RemotePage instances that are in the widget tree now. A page torn
+// down while its tab is still in the controller (tree churn) keeps its session; if no page
+// of that id is mounted again after [senseOrphanGrace] the session is an orphan (ghost
+// connection) and is closed.
+final Set<String> _mountedRemotePages = {};
+Duration senseOrphanGrace = const Duration(seconds: 10);
+
 class RemotePage extends StatefulWidget {
   RemotePage({
     Key? key,
@@ -156,6 +163,7 @@ class _RemotePageState extends State<RemotePage>
   @override
   void initState() {
     super.initState();
+    _mountedRemotePages.add(widget.id); // Sense Remote: see senseOrphanGrace
     _ffi = FFI(widget.sessionId);
     if (isMacOS) {
       // SchedulerBinding.instance.lifecycleState is null in the first connection in a new window.
@@ -666,6 +674,7 @@ class _RemotePageState extends State<RemotePage>
         (widget.tabController?.state.value.tabs.any((t) => t.key == widget.id) ??
             false);
     final closeSession = explicitClose ?? !treeChurn;
+    _mountedRemotePages.remove(widget.id);
 
     // https://github.com/flutter/flutter/issues/64935
     if (isMacOS) {
@@ -711,7 +720,25 @@ class _RemotePageState extends State<RemotePage>
           overlays: SystemUiOverlay.values);
     }
     WakelockManager.disable(_uniqueKey);
-    if (treeChurn) return; // Sense Remote: not a close, keep shared state.
+    if (treeChurn) {
+      // Sense Remote: not a close, keep shared state; but if the tree never builds this tab
+      // again, close the session so no ghost connection stays open.
+      final id = widget.id;
+      final sid = sessionId;
+      final ffi = _ffi;
+      Timer(senseOrphanGrace, () async {
+        if (_mountedRemotePages.contains(id)) return;
+        debugPrint("REMOTE PAGE orphan session $sid $id closed");
+        await bind.sessionClose(sessionId: sid);
+        if (Get.isRegistered<FFI>(tag: id) && identical(Get.find<FFI>(tag: id), ffi)) {
+          await Get.delete<FFI>(tag: id);
+          removeSharedStates(id);
+          SenseRemoteSession.remove(id);
+          SenseConnectionLayers.remove(id);
+        }
+      });
+      return;
+    }
     await Get.delete<FFI>(tag: widget.id);
     removeSharedStates(widget.id);
     // Sense Remote: drop the connection window's Sense state (timers, data).
