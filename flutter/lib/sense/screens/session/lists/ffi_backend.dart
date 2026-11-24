@@ -33,7 +33,7 @@ import '../../../tokens/sense_tokens.dart' show SenseSizes;
 import '../data/grants.dart';
 import '../data/session_state.dart';
 import '../layers/layer_controller.dart' show SenseLayerController;
-import '../sense_remote_window.dart' show senseGhostToggle;
+import '../sense_remote_window.dart' show SenseAutoGhost, senseGhostToggle;
 import 'backend.dart';
 import 'rules.dart';
 
@@ -133,6 +133,9 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
     watch(toolbarState.hide);
     _workers.add(ever(_pi.isSet, (_) => syncInset()));
     watch(ffi.inputModel.relativeMouseMode);
+    // Karar #95: ghost mode opens by itself when the first image arrives.
+    _workers.add(ever(_m.waitForFirstImage, (_) => _autoGhostOnImage()));
+    _autoGhostOnImage();
     for (final find in <RxInterface<Object?> Function()>[
       () => PrivacyModeState.find(ffi.id),
       () => BlockInputState.find(ffi.id),
@@ -346,6 +349,25 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   void end() => closeConnection(id: ffi.id);
 
   RxString? get _privacy => _try<RxString?>(() => PrivacyModeState.find(ffi.id), null);
+
+  final SenseAutoGhost _autoGhost = SenseAutoGhost();
+
+  /// Not written to the peer's saved options by us: the next session simply starts
+  /// on again (each backend has its own [SenseAutoGhost]).
+  void _autoGhostOnImage() {
+    if (_disposed || _m.waitForFirstImage.value) return;
+    try {
+      _autoGhost.run(
+        ready: ready,
+        on: ghostOn,
+        available: ghostAvailable,
+        needsDisplay1: ghostNeedsDisplay1,
+        toggle: senseGhostToggle(_ghostMenus, ghostOn),
+      );
+    } catch (e) {
+      debugPrint('Sense ghost auto start: $e'); // never breaks the connection
+    }
+  }
 
   @override
   bool get ghostOn => (_privacy?.value ?? '').isNotEmpty;

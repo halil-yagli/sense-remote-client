@@ -91,6 +91,29 @@ class SenseRemoteToolbarMap extends StatelessWidget {
   }
 }
 
+/// Karar #95: ghost mode starts on in every session, once, when the first image
+/// arrives. The choice made inside a session is not carried to the next one (a new
+/// instance starts again). Quietly does nothing where ghost mode cannot be used
+/// (no right, Host cannot, "switch to display 1 first"): no error, no card.
+class SenseAutoGhost {
+  bool _done = false;
+
+  /// True when it switched ghost mode on now.
+  bool run({
+    required bool ready,
+    required bool on,
+    required bool available,
+    required bool needsDisplay1,
+    required VoidCallback? toggle,
+  }) {
+    if (_done) return false;
+    _done = true;
+    if (!ready || on || !available || needsDisplay1 || toggle == null) return false;
+    toggle();
+    return true;
+  }
+}
+
 /// What the ghost button does: turn the active privacy mode off, or the first
 /// available one on. Null when RustDesk offers no privacy mode (no permission,
 /// unsupported peer, view only). Pure; covered by tests.
