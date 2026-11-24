@@ -6,6 +6,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_hbb/common.dart' as common show isTest;
 import 'package:flutter_hbb/common.dart' show MyTheme, SessionID;
 import 'package:flutter_hbb/common/shared_state.dart';
@@ -188,6 +189,11 @@ void main() {
     tester.view.physicalSize = const Size(1280, 720);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
+    // The texture plugin has no implementation in tests; answer its calls.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('texture_rgba_renderer'), (call) async => null);
+    addTearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('texture_rgba_renderer'), null));
     _closedSessions.clear();
     final controller = DesktopTabController(tabType: DesktopTabType.remoteScreen);
     controller.add(_tab(controller, id));
