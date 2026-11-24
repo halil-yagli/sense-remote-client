@@ -22,6 +22,7 @@ import 'package:window_size/window_size.dart' as window_size;
 
 import '../../../common.dart';
 import '../../../models/platform_model.dart';
+import '../../window/sense_window_scale.dart';
 import 'sense_cm_geometry.dart';
 import 'sense_cm_region.dart';
 
@@ -224,7 +225,25 @@ class SenseCm {
     // `rect` is in points and the pixel ratio is not used at all.
     await windowManager.setMinimumSize(kSenseCmEdgeSize);
     await windowManager.setBounds(rect, ignoreDevicePixelRatio: true);
+    await _settleBounds(rect);
     _applyRegion(rect);
+  }
+
+  /// Windows (S7, #88): a window moved to a monitor with another scale is resized by the
+  /// system to that scale (WM_DPICHANGED), so the card ended up at the wrong size with the
+  /// Flutter surface still at the old one. The bounds are read back and set again (now on the
+  /// right monitor, the system leaves the size alone) until they are the asked-for ones.
+  static Future<void> _settleBounds(Rect rect) async {
+    if (!isWindows) return;
+    try {
+      for (var i = 0; i < kSenseBoundsRetries; i++) {
+        final got = (await window_size.getWindowInfo()).frame;
+        if (senseBoundsMatch(rect, got)) return;
+        await windowManager.setBounds(rect, ignoreDevicePixelRatio: true);
+      }
+    } catch (e) {
+      debugPrint('Sense CM: bounds check failed: $e');
+    }
   }
 
   /// Windows: clear corners of the icon let clicks through (H3).

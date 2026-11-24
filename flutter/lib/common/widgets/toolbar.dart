@@ -1351,6 +1351,9 @@ List<TToggleMenu> toolbarKeyboardToggles(FFI ffi) {
         bind.sessionGetToggleOptionSync(sessionId: sessionId, arg: option);
     onChanged(bool? value) {
       if (value == null) return;
+      // Sense Remote (S7, #91): the choice is remembered for this computer.
+      bind.sessionPeerOption(
+          sessionId: sessionId, name: 'sense-swap-key-decided', value: 'Y');
       bind.sessionToggleOption(sessionId: sessionId, value: option);
     }
 

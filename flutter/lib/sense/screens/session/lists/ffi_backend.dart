@@ -6,6 +6,7 @@
 //    custom quality is set in the list (no custom quality dialog);
 //  - ghost mode never opens a window (S9-b): a short note next to the button instead;
 //  - Bitir closes without the note window (decision 4).
+import 'package:flutter_hbb/sense/screens/session/sense_swap_key_default.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -667,7 +668,11 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   bool get swapCtrlCmd => _toggleOpt('allow_swap_key');
 
   @override
-  void setSwapCtrlCmd(bool v) => _set('allow_swap_key', v);
+  void setSwapCtrlCmd(bool v) {
+    // Sense Remote (S7, #91): the user's choice is remembered for this computer.
+    bind.sessionPeerOption(sessionId: _sid, name: kSenseSwapKeyDecidedOption, value: 'Y');
+    _set(kSenseSwapKeyOption, v);
+  }
 
   @override
   String get localKbLayout => KBLayoutType.value;

@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/sense/screens/session/sense_swap_key_default.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -1504,6 +1505,28 @@ class FfiModel with ChangeNotifier {
     }
 
     _pi.isSet.value = true;
+    // Sense Remote (S7, #91): Mac Controller to a Windows Host swaps Ctrl and Cmd by default.
+    if (isDesktop) {
+      final sid = parent.target?.sessionId;
+      if (sid != null) {
+        try {
+          await senseApplySwapKeyDefault(
+            controllerIsMac: isMacOS,
+            peerPlatform: _pi.platform,
+            readDecided: () async =>
+                (await bind.sessionGetPeerOption(
+                    sessionId: sid, name: kSenseSwapKeyDecidedOption)) ==
+                'Y',
+            isOn: () => bind.sessionGetToggleOptionSync(
+                sessionId: sid, arg: kSenseSwapKeyOption),
+            turnOn: () => bind.sessionToggleOption(
+                sessionId: sid, value: kSenseSwapKeyOption),
+          );
+        } catch (e) {
+          debugPrint('Sense: swap key default failed: $e');
+        }
+      }
+    }
     stateGlobal.resetLastResolutionGroupValues(peerId);
 
     if (isDesktop || isWebDesktop) {

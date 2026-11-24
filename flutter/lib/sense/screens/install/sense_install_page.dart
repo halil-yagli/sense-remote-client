@@ -14,6 +14,7 @@ import 'package:flutter_hbb/sense/screens/controller/sense_home_strings.dart' sh
 import 'package:flutter_hbb/sense/screens/install/data/install_bridge.dart';
 import 'package:flutter_hbb/sense/screens/install/sense_install_wizard.dart';
 import 'package:flutter_hbb/sense/sense.dart' show SenseColors, senseTheme;
+import 'package:flutter_hbb/sense/window/sense_window_scale.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
@@ -45,31 +46,12 @@ class _SenseInstallPageState extends State<SenseInstallPage>
   void initState() {
     super.initState();
     unawaited(_readUpgrade());
-    // Sense Remote (YH K1, B6): the wizard window is 860 × 620, at least 760 × 540, but never
-    // bigger than the screen; set in one place, in order (no race with the first 800 × 600).
-    unawaited(_sizeWindow());
+    // Sense Remote (YH K1, B6, S7 #89): the window size is set by [senseInstallSizeWindow]
+    // from runInstallPage, before the window is shown (it used to race with the first 800 × 600).
     if (isMacOS) {
       windowManager.addListener(this);
       windowManager.setPreventClose(true);
     }
-  }
-
-  /// Sense Remote (B6): size from the visible screen, then the minimum, then the centre.
-  Future<void> _sizeWindow() async {
-    Size? visible;
-    try {
-      final screen = await window_size.getCurrentScreen();
-      if (screen != null && screen.scaleFactor > 0) {
-        visible = Size(screen.visibleFrame.width / screen.scaleFactor,
-            screen.visibleFrame.height / screen.scaleFactor);
-      }
-    } catch (_) {}
-    final f = senseInstallWindowFor(visible);
-    try {
-      await windowManager.setMinimumSize(f.min);
-      await windowManager.setSize(f.size);
-      await windowManager.center();
-    } catch (_) {}
   }
 
   @override
@@ -233,4 +215,37 @@ Future<bool> senseMacNeedsMove() async {
   } catch (_) {
     return false;
   }
+}
+
+
+/// Sense Remote (B6, S7 #89): size from the visible screen, then the minimum, then the centre.
+/// Called once from `runInstallPage`, after the first 800 × 600 and before the window shows, so
+/// no later call can bring the first size back. The size is checked after it was set: a window
+/// that crosses to a monitor with another scale gets resized by the system (see
+/// `sense_window_scale.dart`).
+Future<void> senseInstallSizeWindow() async {
+  Size? visible;
+  try {
+    final screen = await window_size.getCurrentScreen();
+    if (screen != null) {
+      visible = senseLogicalVisible(screen.visibleFrame, screen.scaleFactor);
+    }
+  } catch (_) {}
+  final f = senseInstallWindowFor(visible);
+  try {
+    await windowManager.setMinimumSize(f.min);
+    await windowManager.setSize(f.size);
+    await windowManager.center();
+    for (var i = 0; i < kSenseBoundsRetries; i++) {
+      final win = await window_size.getWindowInfo();
+      final scale = win.scaleFactor;
+      final want = senseScaledSize(f.size, scale);
+      if (senseBoundsMatch(Rect.fromLTWH(0, 0, want.width, want.height),
+          Rect.fromLTWH(0, 0, win.frame.width, win.frame.height))) {
+        break;
+      }
+      await windowManager.setSize(f.size);
+      await windowManager.center();
+    }
+  } catch (_) {}
 }
