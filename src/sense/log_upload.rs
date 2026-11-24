@@ -239,14 +239,40 @@ fn value_end(chars: &[char], start: usize, to_eol: bool) -> usize {
         }
         return chars.len();
     }
+    // Sense Remote: brackets, parentheses and quotes inside the value are taken balanced up to
+    // their close (`[1, 2, 3]`, `Some("x y")`, `{"a":"b"}`), so no part of a secret is left.
     let mut k = start;
-    while k < chars.len()
-        && !chars[k].is_whitespace()
-        && !matches!(chars[k], ',' | ';' | '&' | ')' | '}' | ']' | '"' | '\'')
-    {
+    let mut stack: Vec<char> = Vec::new();
+    while k < chars.len() {
+        let c = chars[k];
+        if let Some(&q) = stack.last() {
+            if q == '"' || q == '\'' {
+                if c == '\\' {
+                    k += 2;
+                    continue;
+                }
+                if c == q {
+                    stack.pop();
+                }
+            } else if c == '"' || c == '\'' {
+                stack.push(c);
+            } else if matches!(c, '[' | '(' | '{') {
+                stack.push(c);
+            } else if (q == '[' && c == ']') || (q == '(' && c == ')') || (q == '{' && c == '}') {
+                stack.pop();
+            }
+            k += 1;
+            continue;
+        }
+        if c.is_whitespace() || matches!(c, ',' | ';' | '&' | ')' | '}' | ']') {
+            break;
+        }
+        if matches!(c, '"' | '\'' | '[' | '(' | '{') {
+            stack.push(c);
+        }
         k += 1;
     }
-    k
+    k.min(chars.len())
 }
 
 /// `name = value` / `name: value` / `"name":"value"` with a secret name: the value becomes `***`.
@@ -310,9 +336,17 @@ fn mask_bearer(line: &str) -> String {
         let value_start = at + needle.len();
         out.push_str(&line[from..value_start]);
         let rest = &line[value_start..];
-        let token_len = rest
-            .find(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '"' | '\''))
-            .unwrap_or(rest.len());
+        // Sense Remote: a bracketed token (`Bearer [1, 2]`, `Bearer Some("x")`) is taken balanced.
+        let token_len = if rest.starts_with(['[', '(', '{']) || rest.starts_with("Some(") {
+            let rest_chars: Vec<char> = rest.chars().collect();
+            rest_chars[..value_end(&rest_chars, 0, false)]
+                .iter()
+                .map(|c| c.len_utf8())
+                .sum()
+        } else {
+            rest.find(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '"' | '\''))
+                .unwrap_or(rest.len())
+        };
         if token_len > 0 {
             out.push_str("***");
         }
@@ -654,8 +688,45 @@ pub type Offsets = HashMap<PathBuf, u64>;
 /// somewhere else).
 fn is_plain_dir(path: &Path) -> bool {
     fs::symlink_metadata(path)
-        .map(|m| m.is_dir() && !m.file_type().is_symlink())
+        .map(|m| m.is_dir() && !is_link(&m))
         .unwrap_or(false)
+}
+
+/// True for a link, junction or any other reparse point.
+fn is_link(meta: &fs::Metadata) -> bool {
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_REPARSE_POINT (what GetFileAttributesW reports).
+        if meta.file_attributes() & 0x400 != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Sense Remote: `dir` is a real directory under `root` and no component from `root` down to
+/// it (itself included) is a link / junction: the SYSTEM service must not be sent elsewhere by
+/// a link a user planted in a folder they can write. Checked on the canonical path too.
+fn is_safe_dir_under(root: &Path, dir: &Path) -> bool {
+    let Ok(rel) = dir.strip_prefix(root) else {
+        return false;
+    };
+    let mut cur = root.to_path_buf();
+    for part in rel.components() {
+        cur.push(part);
+        match fs::symlink_metadata(&cur) {
+            Ok(m) if m.is_dir() && !is_link(&m) => {}
+            _ => return false,
+        }
+    }
+    match (fs::canonicalize(root), fs::canonicalize(dir)) {
+        (Ok(r), Ok(d)) => d.starts_with(r),
+        _ => false,
+    }
 }
 
 /// The newest `.log` files of `dir` (written within [`RECENT_S`]), newest first.
@@ -672,7 +743,7 @@ fn recent_log_files(dir: &Path, now: SystemTime) -> Vec<(PathBuf, u64)> {
         let Ok(meta) = fs::symlink_metadata(&path) else {
             continue;
         };
-        if !meta.is_file() || meta.file_type().is_symlink() {
+        if !meta.is_file() || is_link(&meta) {
             continue;
         }
         let Ok(modified) = meta.modified() else {
@@ -760,7 +831,7 @@ fn log_roots() -> Vec<(String, PathBuf)> {
                     continue;
                 }
                 let dir = entry.path().join("AppData").join("Roaming").join(&app).join("log");
-                if dir == own || !is_plain_dir(&entry.path()) {
+                if dir == own || !is_plain_dir(&entry.path()) || !is_safe_dir_under(&users, &dir) {
                     continue;
                 }
                 found += 1;
@@ -1735,5 +1806,56 @@ connected peer 123456789
         let text = read_recent(&dir, 1000, SystemTime::now(), Some(&stale)).unwrap();
         assert!(text.contains("before 1"), "{text}");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sanitize_masks_array_debug_and_json_secrets() {
+        for (line, secret) in [
+            ("password: [1, 2, 3]", "1, 2"),
+            ("{\"token\":[\"abc\",\"def\"]}", "abc"),
+            ("key=Some(\"sEcReT value\")", "sEcReT"),
+            ("secret: {\"a\":\"zzz\", \"b\": 7}", "zzz"),
+            ("Authorization: Bearer abcXYZ123", "abcXYZ"),
+            ("x Bearer Some(\"tok en\") y", "tok"),
+            ("passwd=(1, 2)", "1, 2"),
+        ] {
+            let out = sanitize_line(line);
+            assert!(out.contains("***") && !out.contains(secret), "{line} -> {out}");
+        }
+        assert!(!sanitize_line("x Bearer Some(\"tok en\") y").contains("en\""));
+        assert_eq!(sanitize_line("password: [1, 2, 3] ok"), "password: *** ok");
+        assert_eq!(sanitize_line("key=Some(\"a b\") ok"), "key=*** ok");
+        assert_eq!(sanitize_line("{\"token\":[\"a\",\"b\"],\"n\":1}"), "{\"token\":***,\"n\":1}");
+    }
+
+    #[test]
+    fn safe_dir_rejects_links_in_any_component() {
+        let root = temp_dir("safe_root");
+        let real = root.join("a").join("b");
+        fs::create_dir_all(&real).unwrap();
+        assert!(is_safe_dir_under(&root, &real));
+        assert!(!is_safe_dir_under(&root, &root.join("missing")));
+        assert!(!is_safe_dir_under(&root, &temp_dir("safe_other")));
+        // A link in the middle of the path.
+        let target = temp_dir("safe_target");
+        fs::create_dir_all(target.join("b")).unwrap();
+        let link = root.join("l");
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&target, &link).is_ok();
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        #[cfg(not(any(unix, windows)))]
+        let made = false;
+        if made {
+            assert!(!is_safe_dir_under(&root, &link.join("b")));
+            assert!(!is_safe_dir_under(&root, &link));
+            assert!(!is_plain_dir(&link));
+        }
     }
 }

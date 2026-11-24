@@ -6,10 +6,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_hbb/common.dart' as common show isTest;
 import 'package:flutter_hbb/common.dart' show MyTheme, SessionID;
 import 'package:flutter_hbb/common/shared_state.dart';
-import 'package:flutter_hbb/desktop/pages/remote_page.dart' show RemotePage;
+import 'package:flutter_hbb/desktop/pages/remote_page.dart' show RemotePage, senseOrphanGrace;
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart' show ToolbarState;
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
@@ -23,7 +24,14 @@ import 'package:get/get.dart';
 
 import 'bind_defaults.g.dart';
 
+final List<String> _closedSessions = [];
+
 class _FakeBind extends Fake implements RustdeskImpl {
+  @override
+  Future<void> sessionClose({required SessionID sessionId, dynamic hint}) async {
+    _closedSessions.add(sessionId.toString());
+  }
+
   @override
   String translate({required String name, required String locale, dynamic hint}) => name;
 
@@ -172,6 +180,65 @@ void main() {
     SenseSessionPopups.remove('peerB');
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
+  });
+
+  Future<DesktopTabController> mountOne(WidgetTester tester, String id) async {
+    platformFFI.setBindingForTesting(_FakeBind());
+    common.isTest = true;
+    addTearDown(() => common.isTest = false);
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    // The texture plugin has no implementation in tests; answer its calls.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('texture_rgba_renderer'), (call) async => null);
+    addTearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('texture_rgba_renderer'), null));
+    _closedSessions.clear();
+    final controller = DesktopTabController(tabType: DesktopTabType.remoteScreen);
+    controller.add(_tab(controller, id));
+    await tester.pumpWidget(MaterialApp(
+      theme: MyTheme.darkTheme,
+      home: Scaffold(
+        body: SenseSessionTabFrame(controller: controller, child: _Pages(controller)),
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 100));
+    return controller;
+  }
+
+  testWidgets('closing the tab closes the session (K12)', (tester) async {
+    final controller = await mountOne(tester, 'peerC');
+    expect(_closedSessions, isEmpty);
+    controller.remove(0);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
+    // dispose awaits several futures before it drops the shared state: let them finish.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(seconds: 1));
+    expect(_closedSessions, isNotEmpty, reason: 'the session must be closed with its tab');
+    expect(Get.isRegistered<FFI>(tag: 'peerC'), isFalse, reason: 'FFI deleted with the tab');
+    expect(() => FingerprintState.find('peerC'), throwsA(anything),
+        reason: 'shared state removed with the tab');
+    SenseSessionPopups.remove('peerC');
+  });
+
+  testWidgets('a page torn down while its tab stays: kept at first, closed after the grace (K12)',
+      (tester) async {
+    final oldGrace = senseOrphanGrace;
+    senseOrphanGrace = const Duration(seconds: 10);
+    addTearDown(() => senseOrphanGrace = oldGrace);
+    await mountOne(tester, 'peerD');
+    // The tree drops the page but the controller still has the tab.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 5));
+    expect(_closedSessions, isEmpty, reason: 'kept during the grace');
+    expect(Get.isRegistered<FFI>(tag: 'peerD'), isTrue);
+    await tester.pump(const Duration(seconds: 6));
+    expect(_closedSessions, isNotEmpty, reason: 'orphan session closed after the grace');
+    expect(Get.isRegistered<FFI>(tag: 'peerD'), isFalse);
+    SenseSessionPopups.remove('peerD');
   });
 
   testWidgets('SensePopupHost in a loose Stack still gives its child the full area (B2)', (tester) async {
