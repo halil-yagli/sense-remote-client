@@ -208,7 +208,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
+    // dispose awaits several futures before it drops the shared state: let them finish.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(seconds: 1));
     expect(_closedSessions, isNotEmpty, reason: 'the session must be closed with its tab');
+    expect(Get.isRegistered<FFI>(tag: 'peerC'), isFalse, reason: 'FFI deleted with the tab');
+    expect(() => FingerprintState.find('peerC'), throwsA(anything),
+        reason: 'shared state removed with the tab');
     SenseSessionPopups.remove('peerC');
   });
 
