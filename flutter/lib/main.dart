@@ -10,7 +10,7 @@ import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/sense/screens/install/sense_install_page.dart'
-    show senseInstallBoot; // Sense Remote (Mac M3, U7)
+    show senseInstallBoot, senseInstallSizeWindow; // Sense Remote (Mac M3, U7, S7)
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
@@ -465,7 +465,9 @@ void runInstallPage({bool envReady = false}) async {
     // Sense Remote: taskbar title of the setup window.
     windowManager.setTitle('Sense Remote Kurulum');
     // Sense Remote: the wizard layout needs the prototype size (T3-17).
-    windowManager.setMinimumSize(const Size(760, 540));
+    await windowManager.setMinimumSize(const Size(760, 540));
+    // Sense Remote (S7, #89): the wizard size in this one place, before show.
+    await senseInstallSizeWindow();
     windowManager.show();
     windowManager.focus();
     windowManager.setOpacity(1);
