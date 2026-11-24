@@ -36,7 +36,9 @@ void main() {
       final l = senseLinkLine(const SenseLinkSample(fps: 0, lastFrameMs: kSenseNoImageMs));
       expect(l.text, 'Görüntü gelmiyor');
       expect(l.level, SenseLevel.hot);
-      final slow = senseLinkLine(const SenseLinkSample(fps: 0, rttMs: 320, lastFrameMs: 6000));
+      final slow = senseLinkLine(const SenseLinkSample(fps: 0, rttMs: 320, lastFrameMs: kSenseNoImageMs + 1000));
+      // Under 30 s the line does not claim it (karar #94).
+      expect(senseLinkLine(const SenseLinkSample(fps: 0, lastFrameMs: 6000)).text, isNot('Görüntü gelmiyor'));
       expect(slow.text, 'Görüntü gelmiyor');
     });
 

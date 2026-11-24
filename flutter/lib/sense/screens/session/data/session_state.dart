@@ -104,13 +104,17 @@ enum SenseLinkHealth { connecting, good, wavy, noImage }
 /// Karar #94: the same 30 s as the connection layer's drop (`SenseLinkTiming.drop`).
 const int kSenseNoImageMs = 30000;
 
+/// No frame for this long: a still screen. Its 0 fps does not colour the line.
+const int kSenseStillMs = 5000;
+
 SenseLinkHealth senseLinkHealth(SenseLinkSample s) {
   if (s.fps == null && s.rttMs == null && s.lastFrameMs == null) {
     return SenseLinkHealth.connecting;
   }
-  final frameOld = (s.lastFrameMs ?? 0) >= kSenseNoImageMs;
+  final noImage = (s.lastFrameMs ?? 0) >= kSenseNoImageMs;
+  final frameOld = (s.lastFrameMs ?? 0) >= kSenseStillMs;
   final rtt = s.rttMs;
-  if (frameOld && (rtt == null || SenseThresholds.latency.levelOf(rtt.toDouble()) == SenseLevel.hot)) {
+  if (noImage && (rtt == null || SenseThresholds.latency.levelOf(rtt.toDouble()) == SenseLevel.hot)) {
     return SenseLinkHealth.noImage;
   }
   final decided = s.wavy;
