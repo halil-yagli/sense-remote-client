@@ -246,15 +246,15 @@ fn value_end(chars: &[char], start: usize, to_eol: bool) -> usize {
     while k < chars.len() {
         let c = chars[k];
         if let Some(&q) = stack.last() {
-            if q == '"' || q == ''' {
-                if c == '\' {
+            if q == '"' || q == '\'' {
+                if c == '\\' {
                     k += 2;
                     continue;
                 }
                 if c == q {
                     stack.pop();
                 }
-            } else if c == '"' || c == ''' {
+            } else if c == '"' || c == '\'' {
                 stack.push(c);
             } else if matches!(c, '[' | '(' | '{') {
                 stack.push(c);
@@ -267,7 +267,7 @@ fn value_end(chars: &[char], start: usize, to_eol: bool) -> usize {
         if c.is_whitespace() || matches!(c, ',' | ';' | '&' | ')' | '}' | ']') {
             break;
         }
-        if matches!(c, '"' | ''' | '[' | '(' | '{') {
+        if matches!(c, '"' | '\'' | '[' | '(' | '{') {
             stack.push(c);
         }
         k += 1;
@@ -344,7 +344,7 @@ fn mask_bearer(line: &str) -> String {
                 .map(|c| c.len_utf8())
                 .sum()
         } else {
-            rest.find(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '"' | '''))
+            rest.find(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '"' | '\''))
                 .unwrap_or(rest.len())
         };
         if token_len > 0 {
