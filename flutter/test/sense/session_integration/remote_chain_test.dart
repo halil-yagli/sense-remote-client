@@ -204,7 +204,7 @@ void main() {
   testWidgets('closing the tab closes the session (K12)', (tester) async {
     final controller = await mountOne(tester, 'peerC');
     expect(_closedSessions, isEmpty);
-    controller.closeBy('peerC');
+    controller.remove(0);
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
