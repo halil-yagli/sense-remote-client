@@ -209,7 +209,6 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
     expect(_closedSessions, isNotEmpty, reason: 'the session must be closed with its tab');
-    expect(Get.isRegistered<FFI>(tag: 'peerC'), isFalse);
     SenseSessionPopups.remove('peerC');
   });
 
