@@ -64,6 +64,20 @@ void main() {
       expect(c.wavy.value, isTrue);
     });
 
+    test('fps 0 while the delay measurement keeps coming (still screen): no card, no end', () {
+      void still() => host.raw = SenseLinkRaw(
+            delay: '20',
+            fps: '0',
+            lossEst: 0,
+            lastFrameMs: 60000,
+            lastFrameAt: clock.wall,
+            probeAt: clock.wall,
+          );
+      seconds(120, still);
+      expect(c.link.layerUp, isFalse);
+      expect(c.ended, isNull);
+    });
+
     test('delay 900 ms with fps 20: no card', () {
       seconds(90, host.highDelay);
       expect(c.link.layerUp, isFalse);
