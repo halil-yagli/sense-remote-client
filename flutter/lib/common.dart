@@ -41,6 +41,7 @@ import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'models/model.dart';
 import 'models/platform_model.dart';
 import 'common/sense_theme.dart'; // Sense Remote
+import 'sense/tokens/sense_tokens.dart'; // Sense Remote (T1)
 import 'sense/strings/common.dart'; // Sense Remote (A2c)
 import 'sense/screens/controller/data/tray_link.dart'; // Sense Remote (D3e)
 
@@ -252,9 +253,11 @@ class MyTheme {
   MyTheme._();
 
   static const Color grayBg = Color(0xFFEFEFF2);
-  static const Color accent = Color(0xFF0071FF);
-  static const Color accent50 = Color(0x770071FF);
-  static const Color accent80 = Color(0xAA0071FF);
+  // Sense Remote (T1): Sense has no blue; the accent is the token white.
+  // The alpha forms keep the same white (const needs the literal).
+  static const Color accent = SenseColors.text;
+  static const Color accent50 = Color(0x77FFFFFF);
+  static const Color accent80 = Color(0xAAFFFFFF);
   static const Color canvasColor = Color(0xFF212121);
   static const Color border = Color(0xFFCCCCCC);
   static const Color idColor = Color(0xFF00B6F0);
@@ -433,6 +436,7 @@ class MyTheme {
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: MyTheme.accent,
+        foregroundColor: SenseColors.bg, // Sense Remote (T1)
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
@@ -536,7 +540,7 @@ class MyTheme {
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: MyTheme.accent,
-        foregroundColor: Colors.white,
+        foregroundColor: SenseColors.bg, // Sense Remote (T1): text on the white accent
         disabledForegroundColor: Colors.white70,
         disabledBackgroundColor: Colors.white10,
         shape: RoundedRectangleBorder(

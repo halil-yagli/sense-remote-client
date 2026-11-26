@@ -18,12 +18,10 @@ final _rules = <String, RegExp>{
 /// Count per legacy file on 2026-11-23 (A2a). Only lower is allowed.
 const _legacy = <String, int>{
   'lib/sense/screens/controller/sense_update_view.dart': 1,
-  'lib/sense/screens/host/sense_home_mac.dart': 1,
   'lib/sense/screens/host_live/sense_cm_panel.dart': 35,
   'lib/sense/screens/host_live/sense_cm_style.dart': 1,
   'lib/sense/screens/host_live/sense_cm_widgets.dart': 32,
   'lib/sense/screens/install/sense_install_layout.dart': 58,
-  'lib/sense/screens/install/sense_install_model.dart': 1,
   'lib/sense/screens/install/sense_install_page.dart': 2,
   'lib/sense/screens/install/sense_install_steps_account.dart': 28,
   'lib/sense/screens/install/sense_install_steps_finish.dart': 18,

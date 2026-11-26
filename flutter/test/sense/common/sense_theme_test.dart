@@ -7,8 +7,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/sense_theme.dart';
+import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_style.dart';
-import 'package:flutter_hbb/sense/screens/install/sense_install_wizard.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 double _channel(int value) {
@@ -35,9 +35,9 @@ double contrast(Color a, Color b) {
 void main() {
   group('contrast (WCAG AA, 4.5:1 for small text)', () {
     test('small setup texts on black', () {
-      expect(contrast(SenseTokens.dim, SenseTokens.black),
+      expect(contrast(SenseColors.textMuted, SenseColors.bg),
           greaterThanOrEqualTo(4.5));
-      expect(contrast(SenseTokens.muted, SenseTokens.black),
+      expect(contrast(SenseColors.textMuted, SenseColors.bg),
           greaterThanOrEqualTo(4.5));
     });
 
@@ -75,13 +75,13 @@ void main() {
     test('black surfaces, white accent, Poppins', () {
       final theme = senseDarkTheme(ThemeData.dark());
       expect(theme.brightness, Brightness.dark);
-      expect(theme.scaffoldBackgroundColor, SenseThemeColors.black);
-      expect(theme.colorScheme.primary, SenseThemeColors.white);
-      expect(theme.colorScheme.secondary, SenseThemeColors.white);
+      expect(theme.scaffoldBackgroundColor, SenseColors.bg);
+      expect(theme.colorScheme.primary, SenseColors.text);
+      expect(theme.colorScheme.secondary, SenseColors.text);
       expect(theme.textTheme.bodyMedium?.fontFamily, kSenseFont);
       final button = theme.elevatedButtonTheme.style!;
-      expect(button.backgroundColor?.resolve({}), SenseThemeColors.white);
-      expect(button.foregroundColor?.resolve({}), SenseThemeColors.black);
+      expect(button.backgroundColor?.resolve({}), SenseColors.text);
+      expect(button.foregroundColor?.resolve({}), SenseColors.bg);
     });
 
     test('no RustDesk branding lines', () {
@@ -107,6 +107,5 @@ void main() {
     expect(File('assets/fonts/Poppins-OFL.txt').readAsStringSync(),
         contains('SIL Open Font License'));
     expect(kSenseFont, SenseCmTokens.font);
-    expect(kSenseFont, SenseTokens.font);
   });
 }

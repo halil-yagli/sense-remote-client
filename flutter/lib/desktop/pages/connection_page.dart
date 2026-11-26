@@ -1,5 +1,6 @@
 // main window right pane
 
+import '../../sense/tokens/sense_tokens.dart'; // Sense Remote (T2)
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -456,7 +457,7 @@ class _ConnectionPageState extends State<ConnectionPage>
                           keyboardType: TextInputType.visiblePassword,
                           focusNode: fieldFocusNode,
                           style: const TextStyle(
-                            fontFamily: 'WorkSans',
+                            fontFamily: SenseFont.family,
                             fontSize: 22,
                             height: 1.4,
                           ),
