@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/sense/screens/session/sense_indiv_windows_reset.dart';
 import 'package:flutter_hbb/sense/screens/session/sense_swap_key_default.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -1524,6 +1525,29 @@ class FfiModel with ChangeNotifier {
           );
         } catch (e) {
           debugPrint('Sense: swap key default failed: $e');
+        }
+      }
+    }
+    // Sense Remote (S9, #97): one-time reset of a stuck "separate windows" value.
+    if (isDesktop) {
+      final sid = parent.target?.sessionId;
+      if (sid != null) {
+        try {
+          await senseApplyIndivWindowsReset(
+            readDone: () async =>
+                (await bind.sessionGetPeerOption(
+                    sessionId: sid, name: kSenseIndivResetOption)) ==
+                'Y',
+            readValue: () async =>
+                bind.sessionGetDisplaysAsIndividualWindows(sessionId: sid) ??
+                '',
+            writeValue: (v) async => bind.sessionSetDisplaysAsIndividualWindows(
+                sessionId: sid, value: v),
+            writeDone: () async => bind.sessionPeerOption(
+                sessionId: sid, name: kSenseIndivResetOption, value: 'Y'),
+          );
+        } catch (e) {
+          debugPrint('Sense: separate windows reset failed: $e');
         }
       }
     }
