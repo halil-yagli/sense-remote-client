@@ -424,8 +424,8 @@ SenseStatusCategory _storage(SenseHealthDetail? h, SenseInventory? inv) {
     rows
       ..add(SenseStatusLine(_S.temperature, temp == null ? null : senseTemp(temp), valueLevel: _diskT(temp)))
       ..add(_diskHealth(d))
-      // Not in the contract on any platform yet (§5): always "okunamadı", never guessed.
-      ..add(const SenseStatusLine(_S.totalWritten, null))
+      // Sürüm 9 (O8): lifetime total if read; macOS only knows since boot (own label); else "okunamadı".
+      ..add(senseWrittenLine(live))
       ..add(SenseStatusLine(_S.readWrite,
           live?.readBps == null || live?.writeBps == null ? null : '${senseMBps(live!.readBps!)} / ${senseMBps(live.writeBps!)} MB/s'))
       ..add(SenseStatusLine(_S.firmware, d.firmware));
@@ -670,4 +670,14 @@ SenseStatusCategory _software(SensePeerStatus st, SenseHealthDetail? h, SenseInv
       SenseStatusLine(_S.service, st.online ? _S.serviceRunning : null),
     ],
   );
+}
+
+/// "Toplam yazılan" row: lifetime GB when read, else the since-boot figure under its own honest
+/// label (macOS), else unread. Nothing is estimated.
+SenseStatusLine senseWrittenLine(SenseHealthPhysicalDisk? live) {
+  final total = live?.writtenGb;
+  if (total != null) return SenseStatusLine(_S.totalWritten, senseDiskSize(total));
+  final boot = live?.writtenBootGb;
+  if (boot != null) return SenseStatusLine(_S.writtenSinceBoot, senseDiskSize(boot));
+  return const SenseStatusLine(_S.totalWritten, null);
 }

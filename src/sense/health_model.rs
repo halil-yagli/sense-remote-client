@@ -28,6 +28,8 @@ use std::{
 
 /// Capability the panel announces in its heartbeat answer when it accepts the fields below.
 pub const CAP_HEALTH_V2: &str = "health_v2";
+/// Sense Remote (Sürüm 9, O8): `physical_disks[].written_gb` / `written_boot_gb`.
+pub const CAP_DISK_WRITTEN: &str = "disk_written";
 /// Health interval while a session is open (O8 "Canlı · 8 sn önce"); only the live values, never
 /// the inventory. The sync loop runs every 3 s with a session, so it is sent about every 9 s.
 pub const HEALTH_INTERVAL_CONNECTED: Duration = Duration::from_secs(8);
@@ -304,6 +306,15 @@ pub struct DiskLive {
     pub write_bps: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temp_c: Option<f64>,
+    /// Sense Remote (Sürüm 9, O8): data the disk has written over its whole life, GB (decimal),
+    /// from the drive's own SMART counter. Only with the panel capability `disk_written`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_gb: Option<f64>,
+    /// Sense Remote (Sürüm 9, O8): data written since the computer started, GB. macOS has no
+    /// lifetime counter without root; this one restarts from 0 at every boot, so it is its own
+    /// field and never shown as "total written". Only with the panel capability `disk_written`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_boot_gb: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -343,6 +354,25 @@ pub fn round_to(value: f64, decimals: i32) -> f64 {
 /// A percentage; a small overshoot from summed counters is capped, anything else is dropped.
 pub fn pct(value: f64) -> Option<f64> {
     (value.is_finite() && (0.0..=101.0).contains(&value)).then(|| round_to(value.min(100.0), 1))
+}
+
+/// Written data in GB (decimal, one decimal place). Above 10 million GB (10 PB) is a broken
+/// counter, not a disk.
+pub fn written_gb(bytes: u128) -> Option<f64> {
+    let gb = bytes as f64 / 1.0e9;
+    (gb.is_finite() && gb <= 1.0e7).then(|| round_to(gb, 1))
+}
+
+/// NVMe SMART / Health log page (id 2, 512 bytes): "Data Units Written" is the 128-bit
+/// little-endian value at bytes 48..64, in units of 1000 x 512 bytes. An all-zero value is not
+/// trusted (a bridge or driver that returns an empty page), so it is "not read".
+pub fn nvme_written_bytes(log: &[u8]) -> Option<u128> {
+    let raw: [u8; 16] = log.get(48..64)?.try_into().ok()?;
+    let units = u128::from_le_bytes(raw);
+    if units == 0 {
+        return None;
+    }
+    units.checked_mul(512_000)
 }
 
 /// CPU / GPU / disk temperature in °C; outside -20..150 is a broken sensor.
@@ -738,6 +768,33 @@ mod tests {
         assert_eq!(parse_luid("luid_zz_0x1"), None);
         assert_eq!(physical_disk_id("0 C: D:"), Some("0".into()));
         assert_eq!(physical_disk_id("_Total"), None);
+    }
+
+    #[test]
+    fn written_data_rules() {
+        assert_eq!(written_gb(1_500_000_000_000), Some(1500.0));
+        assert_eq!(written_gb(123_456_789_012), Some(123.5));
+        assert_eq!(written_gb(u128::MAX), None);
+        let mut page = vec![0u8; 512];
+        assert_eq!(nvme_written_bytes(&page), None);
+        page[48] = 0x10;
+        page[49] = 0x27; // 10000 units
+        assert_eq!(nvme_written_bytes(&page), Some(5_120_000_000));
+        assert_eq!(nvme_written_bytes(&page[..60]), None);
+        page[63] = 0xFF; // overflowing counter
+        assert_eq!(nvme_written_bytes(&page), None);
+    }
+
+    #[test]
+    fn written_fields_are_optional_in_the_contract() {
+        let old = serde_json::json!({ "id": "0", "write_bps": 5 });
+        let disk: DiskLive = serde_json::from_value(old).unwrap();
+        assert_eq!(disk.written_gb, None);
+        let new = DiskLive { id: "0".into(), written_gb: Some(12.5), ..Default::default() };
+        assert_eq!(
+            serde_json::to_value(new).unwrap(),
+            serde_json::json!({ "id": "0", "written_gb": 12.5 })
+        );
     }
 
     #[test]
