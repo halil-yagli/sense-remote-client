@@ -13,6 +13,7 @@ import '../../../strings/controller.dart';
 import '../data/peers.dart';
 import 'computer_tile.dart';
 import 'project_group.dart';
+import 'tile_more.dart';
 import 'widgets.dart';
 
 // Prototype `.amain` gap 10; `.ahead` gap 10, padding 4/0/8; search min 240;
