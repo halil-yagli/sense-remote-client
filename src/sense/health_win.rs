@@ -7,6 +7,8 @@
 //!   documented temperature, so it is not sent.
 //! - Disks: read / write bytes per second from `\PhysicalDisk(*)`; temperature from the Storage
 //!   reliability counters (PowerShell, at most every `DISK_TEMP_INTERVAL`, in the background).
+//!   Lifetime data written (NVMe SMART log, `nvme_written_gb`) only with the panel capability
+//!   `disk_written`.
 //! - CPU current clock: `\Processor Information(_Total)\% Processor Performance` x base clock
 //!   (inventory).
 //! - Wi-Fi: `netsh wlan show interfaces` (SSID needs location access on Windows 11 24H2; without
@@ -322,6 +324,87 @@ fn disk_temps() -> HashMap<String, f64> {
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Total written (Sense Remote Sürüm 9, O8): NVMe SMART / Health log page
+// ---------------------------------------------------------------------------------------------
+
+/// Lifetime data written by NVMe disk number `disk` (GB), from the drive's SMART / Health log
+/// page 2 via `IOCTL_STORAGE_QUERY_PROPERTY` on `\.\PhysicalDriveN`. The handle is opened with
+/// no access rights (a query needs none); the service runs as SYSTEM anyway. SATA, USB bridges
+/// and RAID volumes refuse the request, so they stay "not read" (nothing is estimated).
+fn nvme_written_gb(disk: u32) -> Option<f64> {
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    use windows::Win32::{Foundation::HANDLE, System::IO::DeviceIoControl};
+
+    const IOCTL_STORAGE_QUERY_PROPERTY: u32 = 0x002D_1400;
+    const STORAGE_DEVICE_PROTOCOL_SPECIFIC_PROPERTY: u32 = 50;
+    const PROTOCOL_TYPE_NVME: u32 = 3;
+    const NVME_DATA_TYPE_LOG_PAGE: u32 = 2;
+    const NVME_LOG_PAGE_HEALTH_INFO: u32 = 2;
+    /// STORAGE_PROPERTY_QUERY header (id + query type) and STORAGE_PROTOCOL_SPECIFIC_DATA.
+    const QUERY_HEADER: usize = 8;
+    const SPECIFIC_DATA: usize = 40;
+    const LOG_LEN: usize = 512;
+
+    let file = std::fs::OpenOptions::new()
+        .access_mode(0)
+        .share_mode(3)
+        .open(format!("\\.\PhysicalDrive{disk}"))
+        .ok()?;
+    let handle = HANDLE(file.as_raw_handle());
+    // Namespace 0 first (Microsoft's sample), then "all namespaces" (what some tools send).
+    for namespace in [0u32, 0xFFFF_FFFF] {
+        let mut input = vec![0u8; QUERY_HEADER + SPECIFIC_DATA];
+        let mut put = |at: usize, value: u32| input[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        put(0, STORAGE_DEVICE_PROTOCOL_SPECIFIC_PROPERTY);
+        put(4, 0); // PropertyStandardQuery
+        put(QUERY_HEADER, PROTOCOL_TYPE_NVME);
+        put(QUERY_HEADER + 4, NVME_DATA_TYPE_LOG_PAGE);
+        put(QUERY_HEADER + 8, NVME_LOG_PAGE_HEALTH_INFO);
+        put(QUERY_HEADER + 12, namespace);
+        put(QUERY_HEADER + 16, SPECIFIC_DATA as u32); // ProtocolDataOffset
+        put(QUERY_HEADER + 20, LOG_LEN as u32); // ProtocolDataLength
+        let mut output = vec![0u8; 1024];
+        let mut returned = 0u32;
+        let ok = unsafe {
+            DeviceIoControl(
+                handle,
+                IOCTL_STORAGE_QUERY_PROPERTY,
+                Some(input.as_ptr() as *const std::ffi::c_void),
+                input.len() as u32,
+                Some(output.as_mut_ptr() as *mut std::ffi::c_void),
+                output.len() as u32,
+                Some(&mut returned),
+                None,
+            )
+        }
+        .is_ok();
+        if !ok {
+            continue;
+        }
+        // STORAGE_PROTOCOL_DATA_DESCRIPTOR: 8 bytes, then the specific data whose
+        // `ProtocolDataOffset` (+16) / `ProtocolDataLength` (+20) locate the log page.
+        let word = |at: usize| -> Option<usize> {
+            let raw: [u8; 4] = output.get(at..at + 4)?.try_into().ok()?;
+            Some(u32::from_le_bytes(raw) as usize)
+        };
+        let (Some(offset), Some(len)) = (word(8 + 16), word(8 + 20)) else {
+            continue;
+        };
+        let start = 8usize.saturating_add(offset);
+        let end = start.saturating_add(len.min(LOG_LEN)).min(returned as usize);
+        if let Some(gb) = output
+            .get(start..end)
+            .and_then(nvme_written_bytes)
+            .and_then(written_gb)
+        {
+            return Some(gb);
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tools
 // ---------------------------------------------------------------------------------------------
@@ -428,6 +511,13 @@ pub fn extend(health: &mut super::report::SenseHealth, base_mhz: Option<u32>) {
         }
         disks.sort_by(|a, b| a.id.cmp(&b.id));
         disks.truncate(MAX_ITEMS);
+        // Sense Remote (Sürüm 9, O8): lifetime data written, only with the panel capability
+        // `disk_written`; disks that do not answer (SATA, USB, RAID) send no value.
+        if super::report_sig::panel_has(CAP_DISK_WRITTEN) {
+            for disk in &mut disks {
+                disk.written_gb = disk.id.parse::<u32>().ok().and_then(nvme_written_gb);
+            }
+        }
         health.physical_disks = non_empty(disks);
         health.cpu_mhz = match (sample.cpu_performance_pct, base_mhz) {
             (Some(perf), Some(base)) => mhz(perf * base as f64 / 100.0),

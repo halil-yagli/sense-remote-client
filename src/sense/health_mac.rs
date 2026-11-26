@@ -40,6 +40,13 @@ pub fn extend(health: &mut super::report::SenseHealth, inventory_gpu: Option<Str
 
     if let Some(out) = ioreg(&["-r", "-w", "0", "-l", "-d", "2", "-c", "IOBlockStorageDriver"]) {
         let totals = health_parse::mac_disk_counters(&out);
+        // Sense Remote (Sürüm 9, O8): the driver's write counter restarts at every boot, so it is
+        // sent as `written_boot_gb`, never as the lifetime total (only with `disk_written`).
+        let with_written = super::report_sig::panel_has(CAP_DISK_WRITTEN);
+        let written: std::collections::HashMap<String, u64> = totals
+            .iter()
+            .map(|(id, _, write)| (id.clone(), *write))
+            .collect();
         let rates = DISK_COUNTERS
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -47,12 +54,21 @@ pub fn extend(health: &mut super::report::SenseHealth, inventory_gpu: Option<Str
         health.physical_disks = non_empty(
             rates
                 .into_iter()
-                .filter(|(_, read, write)| read.is_some() || write.is_some())
-                .map(|(id, read_bps, write_bps)| DiskLive {
-                    id,
-                    read_bps,
-                    write_bps,
-                    temp_c: None,
+                .map(|(id, read_bps, write_bps)| {
+                    let written_boot_gb = written
+                        .get(&id)
+                        .filter(|_| with_written)
+                        .and_then(|b| written_gb(*b as u128));
+                    DiskLive {
+                        id,
+                        read_bps,
+                        write_bps,
+                        written_boot_gb,
+                        ..Default::default()
+                    }
+                })
+                .filter(|d| {
+                    d.read_bps.is_some() || d.write_bps.is_some() || d.written_boot_gb.is_some()
                 })
                 .take(MAX_ITEMS)
                 .collect(),
