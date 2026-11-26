@@ -1,0 +1,535 @@
+{
+  "v": 1,
+  "description": "Sense Remote Wake-on-LAN emri ortak test vektoru (panel packages/shared ve istemci src/sense/testdata). Zarf bicimi strategy zarfiyla ayni ({k,p,s}, Ed25519, ayni panel anahtari) ama imza alani ayri: imzalanan veri = prefix (ASCII) || base64url_decode(p). Cihaz seq sayacina dokunmaz. Dogrulama sirasi: zarf bicimi -> k listede -> p/s cozumu (s 64 bayt) -> imza (wol oneki) -> JSON + sema (bilinmeyen alan yok; typ wol; wid wol_ + 16-32 base64url; macs 1..max_macs, buyuk harf iki noktali, tekrarsiz, 00:..:00 ve FF:..:FF degil; 0 < exp - iat <= max_lifetime_s) -> iss -> did ve duuid (araci Host) -> iat - clock_skew_s <= now_s <= exp + clock_skew_s -> wid seen icinde degil. Gecerli emirde istemci macs icin sihirli paket yayinlar ve wid'i seen'e ekler. Her vakada tek kusur vardir. Gizli anahtar hicbir yerde yok.",
+  "prefix": "sense-remote/wol/v1\n",
+  "clock_skew_s": 300,
+  "max_lifetime_s": 120,
+  "max_macs": 8,
+  "keys": [
+    {
+      "k": "e8430e9b14eb6d66",
+      "public_key": "C14nAfdSLXTd6yDQeya98PK4SRpxd7IMCaWn245ZNag"
+    },
+    {
+      "k": "edea343f2d00bb4d",
+      "public_key": "F_4LFkIUXeWC3jWTkDzP_18p_6lOG_Tec5yS9p2meg4"
+    }
+  ],
+  "cases": [
+    {
+      "name": "ok_two_macs",
+      "description": "Gecerli: iki MAC, ilk kez",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "ok",
+      "macs": ["0A:1B:2C:3D:4E:5F", "0A:1B:2C:3D:4E:60"],
+      "wid": "wol_AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_max_macs",
+      "description": "Gecerli: max_macs MAC (sinir dahil)",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1MCIsIjBBOjFCOjJDOjNEOjRFOjUxIiwiMEE6MUI6MkM6M0Q6NEU6NTIiLCIwQToxQjoyQzozRDo0RTo1MyIsIjBBOjFCOjJDOjNEOjRFOjU0IiwiMEE6MUI6MkM6M0Q6NEU6NTUiLCIwQToxQjoyQzozRDo0RTo1NiIsIjBBOjFCOjJDOjNEOjRFOjU3Il0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "s6KUCrVR5UwYayc7qSa2WURLgs4Cy4v0CWvBCkpTtr4ZZSs_piIf5CoufvJxWGRa6M54vECtlfbZSh8s3WkZAA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "ok",
+      "macs": [
+        "0A:1B:2C:3D:4E:50",
+        "0A:1B:2C:3D:4E:51",
+        "0A:1B:2C:3D:4E:52",
+        "0A:1B:2C:3D:4E:53",
+        "0A:1B:2C:3D:4E:54",
+        "0A:1B:2C:3D:4E:55",
+        "0A:1B:2C:3D:4E:56",
+        "0A:1B:2C:3D:4E:57"
+      ],
+      "wid": "wol_AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_other_wid_seen",
+      "description": "Baska bir emir daha once uygulanmis; bu wid yeni",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": ["wol_BBBBBBBBBBBBBBBBBBBBBB"]
+      },
+      "result": "ok",
+      "macs": ["0A:1B:2C:3D:4E:5F", "0A:1B:2C:3D:4E:60"],
+      "wid": "wol_AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_second_key",
+      "description": "Listedeki ikinci anahtarla imzali (anahtar dondurme)",
+      "envelope": {
+        "k": "edea343f2d00bb4d",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "8vPe9Zha8fAmcECPxpB2_9A2k5SEsBg63LMJcPzPP6kRqFg3r4ExEIUeDh02yRM_4mCaauywTsfPTAaThj7qDw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "ok",
+      "macs": ["0A:1B:2C:3D:4E:5F", "0A:1B:2C:3D:4E:60"],
+      "wid": "wol_AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_iat_boundary",
+      "description": "now_s = iat - clock_skew_s (sinir dahil)",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1799999700,
+        "seen": []
+      },
+      "result": "ok",
+      "macs": ["0A:1B:2C:3D:4E:5F", "0A:1B:2C:3D:4E:60"],
+      "wid": "wol_AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_exp_boundary",
+      "description": "now_s = exp + clock_skew_s (sinir dahil)",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000420,
+        "seen": []
+      },
+      "result": "ok",
+      "macs": ["0A:1B:2C:3D:4E:5F", "0A:1B:2C:3D:4E:60"],
+      "wid": "wol_AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "malformed_extra_field",
+      "description": "Zarfta k/p/s disinda alan",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg",
+        "x": "1"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "malformed_padded_s",
+      "description": "s dolgulu base64url",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg=="
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "unknown_key",
+      "description": "Listede olmayan anahtarla imzali",
+      "envelope": {
+        "k": "cd4e791145de63c1",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "wnQiV05OJcBHhwj3KCrXnDBRzFW6sW4NR3WbQe9VYyauvPN6c1FI-Vwv59cCrQQRJF6RIm2nC26g96O0g1s4Ag"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "unknown_key"
+    },
+    {
+      "name": "bad_signature_payload_bit",
+      "description": "p'nin ilk baytinda bir bit degisti",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eiJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_envelope_prefix",
+      "description": "Gecerli wol yuku ama strategy zarfi onekiyle imzali (imza alani ayrimi)",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "DJANJrFpZmo5ZlZXo-u4JZ75J4eqv6h0ghXvXNkPv4M0QRFhZDOOVTIvjzURWqGmLEwssWXLBiutRpMGYbtSBQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_grants_prefix",
+      "description": "Gecerli wol yuku ama grants onekiyle imzali",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "qHmC0SSn8CsYcjm8qeyT6Tvdei7DQD2KTSCQQqyVs2TflkdYgGKom02Q6o25Fu7dplYO5WpHT-Spg_O18S9KBA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_payload_wrong_typ",
+      "description": "typ grants",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6ImdyYW50cyIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "XYTZg7tvc0nD3N1Lk1F_bhTCPsooCL1AxEtO8LKLo2I7WJSegpFOFxS8ZAH8DhPMuw6wVq_WADFEqi_asGV6Dg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_unknown_field",
+      "description": "Yukte bilinmeyen ust duzey alan",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInBvcnQiOjksInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "yPVpUPYxqjku0TAeiMt4l_FAOCwA6u-h-mXltgTubjkL4WArMC2VegpN-h-0CAIT4A79s_-PzZEikT-zA43SBw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_no_macs",
+      "description": "macs bos",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6W10sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BKOPalbUoWc-id0N5_mPU5VonICvEqn1IiZR4tW-guKV8CrLq7UJeR6Cklf8uT-Q75qE9-HXXv6WKzvN3dziBA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_too_many_macs",
+      "description": "macs max_macs + 1",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1MCIsIjBBOjFCOjJDOjNEOjRFOjUxIiwiMEE6MUI6MkM6M0Q6NEU6NTIiLCIwQToxQjoyQzozRDo0RTo1MyIsIjBBOjFCOjJDOjNEOjRFOjU0IiwiMEE6MUI6MkM6M0Q6NEU6NTUiLCIwQToxQjoyQzozRDo0RTo1NiIsIjBBOjFCOjJDOjNEOjRFOjU3IiwiMEE6MUI6MkM6M0Q6NEU6NzAiXSwidHlwIjoid29sIiwidiI6MSwid2lkIjoid29sX0FBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ",
+        "s": "IzftCfUrYa8mAdN1kbEs7rt-mcsI0fmFCC-CTQJZAdP4xyIiLDKOveadX0rujvR00fWAQuRao-Zm0emvYgQ4AQ"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_lowercase_mac",
+      "description": "MAC kucuk harfli",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwYToxYjoyYzozZDo0ZTo1ZiJdLCJ0eXAiOiJ3b2wiLCJ2IjoxLCJ3aWQiOiJ3b2xfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSJ9",
+        "s": "ZtE9ip2qe7BQlPnhR1_hVwgy1NFPmb-wQECeJF_Ye57hyG-7rXMuAXZIwQcWu83hct8ugKKmh0Q7lNesBluVBg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_broadcast_mac",
+      "description": "FF:FF:FF:FF:FF:FF",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyJGRjpGRjpGRjpGRjpGRjpGRiJdLCJ0eXAiOiJ3b2wiLCJ2IjoxLCJ3aWQiOiJ3b2xfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSJ9",
+        "s": "b0G8fU3vlIWy8sOvtmh65vZlY5r_LH7-6EVJ3Xsa9bjIcQhZjWgn-hDWhNNv3vR2spMF4gluVJ9mErQ0GiwvAA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_zero_mac",
+      "description": "00:00:00:00:00:00",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwMDowMDowMDowMDowMDowMCJdLCJ0eXAiOiJ3b2wiLCJ2IjoxLCJ3aWQiOiJ3b2xfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSJ9",
+        "s": "E1DumnRd8YVqdOuuFf6RGKGVX2304bzt-VWndME8GRGuTrlaZsRCi92TIijDl64eXMrTGNQ4tiVDi7fzLJE9CA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_duplicate_mac",
+      "description": "macs tekrarli",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjVGIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BSnvlUK-PIFIgvr3WBMntlX9OtbHUz37YSDFU3VtWqlqxw3cJQxsfjkdGEKIioaKRg5aYWQgz4YpJts6LbeyDg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_bad_wid",
+      "description": "wid oneksiz",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ",
+        "s": "YnzuRrAkpZMFJ4sjGzXq5egtZWfm5PQGLmhXUGdbVyrzFH2_cZwJPGnJQJG0OrVQhVyG3e8wfQQYXXc_lnrzBA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_lifetime_too_long",
+      "description": "exp - iat = max_lifetime_s + 1",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMSwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "QYKkObT_CjES1dTMMu0WebSiJiOLGUbDx36BSRPm9Tdlm8-X5Ce2pJpJ31uHQvQCz99Mxgox93VVDQ1eP-VwCw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_exp_before_iat",
+      "description": "exp = iat",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDAwMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "sNthbNHWtPzZvIWWxVa6MXLeX3vD6rlhxagVIGLfFKO7uX59SdgOY9NUP7X98vREU1pyGgvz2gT6WaMkwNj9BA"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "wrong_issuer",
+      "description": "iss baska alan adi",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJldmlsLmV4YW1wbGUudGVzdCIsIm1hY3MiOlsiMEE6MUI6MkM6M0Q6NEU6NUYiLCIwQToxQjoyQzozRDo0RTo2MCJdLCJ0eXAiOiJ3b2wiLCJ2IjoxLCJ3aWQiOiJ3b2xfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSJ9",
+        "s": "gbGTyaRm0TQWa6WNpFJAssvaqyl3emC7qbV5gek9a6IHNJ3cHKhdk3RhOJnZc36zSV_tyRxYTu5hFd9_vY0sBg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "wrong_issuer"
+    },
+    {
+      "name": "wrong_device_did",
+      "description": "did baska cihaz (emir baska araciya)",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiI5ODc2NTQzMjEiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "1izNmTJB9UieqIpF94tlWO7L1FpmibMRo3wHjA_s2OYuTTHMONO89q8wm3tsh9sqwAMXLd_5H09YwPq1s3d3Ag"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "wrong_device"
+    },
+    {
+      "name": "wrong_device_duuid",
+      "description": "did dogru, duuid baska",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6IlltRnphMkV0ZFhWcFpBIiwiZXhwIjoxODAwMDAwMTIwLCJpYXQiOjE4MDAwMDAwMDAsImlzcyI6InJlbW90ZS5leGFtcGxlLnRlc3QiLCJtYWNzIjpbIjBBOjFCOjJDOjNEOjRFOjVGIiwiMEE6MUI6MkM6M0Q6NEU6NjAiXSwidHlwIjoid29sIiwidiI6MSwid2lkIjoid29sX0FBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ",
+        "s": "6-tgSljF5Ad5qYmXbwInKFcBNqk0yT7WqSkKPOPQgN1Cm_bbwBIWZvfUHW9jFd2osOMvxiEr6FVbpZuO5R2eBw"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "wrong_device"
+    },
+    {
+      "name": "not_yet_valid",
+      "description": "now_s = iat - clock_skew_s - 1",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1799999699,
+        "seen": []
+      },
+      "result": "not_yet_valid"
+    },
+    {
+      "name": "expired",
+      "description": "now_s = exp + clock_skew_s + 1",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000421,
+        "seen": []
+      },
+      "result": "expired"
+    },
+    {
+      "name": "replayed_same_wid",
+      "description": "Ayni wid daha once uygulandi (panel ayni emri her heartbeat'te yeniden verir)",
+      "envelope": {
+        "k": "e8430e9b14eb6d66",
+        "p": "eyJkaWQiOiIxMjM0NTY3ODkiLCJkdXVpZCI6ImRHVnpkQzExZFdsayIsImV4cCI6MTgwMDAwMDEyMCwiaWF0IjoxODAwMDAwMDAwLCJpc3MiOiJyZW1vdGUuZXhhbXBsZS50ZXN0IiwibWFjcyI6WyIwQToxQjoyQzozRDo0RTo1RiIsIjBBOjFCOjJDOjNEOjRFOjYwIl0sInR5cCI6IndvbCIsInYiOjEsIndpZCI6IndvbF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBIn0",
+        "s": "BMmmPDV07U86DCmvs534d19L-owjaPoCKw3R7kYtvRLpOjxGJEuC5g1P3JhyL6Furyw8FJ0P7DZ-BndgDJBTAg"
+      },
+      "expect": {
+        "iss": "remote.example.test",
+        "did": "123456789",
+        "duuid": "dGVzdC11dWlk",
+        "now_s": 1800000005,
+        "seen": ["wol_AAAAAAAAAAAAAAAAAAAAAA"]
+      },
+      "result": "replayed"
+    }
+  ]
+}
