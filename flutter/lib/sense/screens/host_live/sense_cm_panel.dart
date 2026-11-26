@@ -84,6 +84,7 @@ class SenseHostCard extends StatefulWidget {
     this.dropBuilder,
     this.from = SensePopupFrom.bottom,
     this.animateIn = true,
+    this.endedClosingIn,
   });
 
   /// The one connection (#40: one Controller at a time).
@@ -108,6 +109,10 @@ class SenseHostCard extends StatefulWidget {
   final SenseFileDropBuilder? dropBuilder;
   final SensePopupFrom from;
   final bool animateIn;
+
+  /// #101: seconds until the window closes after every connection ended;
+  /// null when it is not closing by itself.
+  final int? endedClosingIn;
 
   @override
   State<SenseHostCard> createState() => _SenseHostCardState();
@@ -179,7 +184,9 @@ class _SenseHostCardState extends State<SenseHostCard> {
                     if (widget.recording != null && !client.disconnected)
                       _RecordingStrip(elapsed: widget.recording!),
                     if (client.disconnected)
-                      _EndedBox(onClose: widget.actions.onCloseEnded)
+                      _EndedBox(
+                          onClose: widget.actions.onCloseEnded,
+                          closingIn: widget.endedClosingIn)
                     else if (!client.authorized)
                       _RequestBox(
                         name: client.name,
@@ -487,17 +494,22 @@ class _RequestBox extends StatelessWidget {
 }
 
 class _EndedBox extends StatelessWidget {
-  const _EndedBox({required this.onClose});
+  const _EndedBox({required this.onClose, this.closingIn});
 
   final VoidCallback onClose;
+  final int? closingIn;
 
   @override
   Widget build(BuildContext context) {
     return _Box(
       key: const Key('sense-host-ended'),
       child: Row(children: [
-        const Expanded(
-          child: _BoxText(title: SenseHostLiveStrings.ended, titleColor: SenseColors.textMuted),
+        Expanded(
+          child: _BoxText(
+            title: SenseHostLiveStrings.ended,
+            titleColor: SenseColors.textMuted,
+            meta: closingIn == null ? null : SenseHostLiveStrings.endedClosing(closingIn!),
+          ),
         ),
         SenseButton(
           key: const Key('sense-host-close'),

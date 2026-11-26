@@ -11,6 +11,7 @@ import 'package:flutter_hbb/sense/screens/host_live/data/call.dart';
 import 'package:flutter_hbb/sense/screens/host_live/data/chat.dart';
 import 'package:flutter_hbb/sense/screens/host_live/data/files.dart';
 import 'package:flutter_hbb/sense/screens/host_live/data/overlay.dart';
+import 'package:flutter_hbb/sense/screens/host_live/sense_cm_ended.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_geometry.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_page.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_window.dart';
@@ -699,10 +700,50 @@ void main() {
       final calls = <String>[];
       await pumpCard(tester, client(1, 'Halil Y.')..disconnected = true,
           makeController(), calls);
-      expect(find.text('Bağlantı bitti'), findsOneWidget);
+      expect(find.text('Bağlantı sona erdi'), findsOneWidget);
+      expect(find.textContaining('sn sonra kapanıyor'), findsNothing);
       expect(find.byKey(const Key('sense-host-end')), findsNothing);
       await tester.tap(find.byKey(const Key('sense-host-close')));
       expect(calls, ['close']);
+    });
+
+    testWidgets('#101: after every connection ended the card counts down',
+        (tester) async {
+      final calls = <String>[];
+      await pumpCard(tester, client(1, 'Halil Y.')..disconnected = true,
+          makeController(), calls,
+          endedClosingIn: 4);
+      expect(find.text('Bağlantı sona erdi'), findsOneWidget);
+      expect(find.text('4 sn sonra kapanıyor'), findsOneWidget);
+      expect(find.byType(SenseChatComposer), findsNothing);
+      await tester.tap(find.byKey(const Key('sense-host-close')));
+      expect(calls, ['close']);
+    });
+  });
+
+  group('#101 ended connection closes the window', () {
+    test('only when there are connections and all of them ended', () {
+      expect(senseCmAllEnded(const []), isFalse);
+      expect(senseCmAllEnded(const [false]), isFalse);
+      expect(senseCmAllEnded(const [true, false]), isFalse);
+      expect(senseCmAllEnded(const [true]), isTrue);
+      expect(senseCmAllEnded(const [true, true]), isTrue);
+    });
+
+    test('the card counts 5, 4, 3, 2, 1 and then closes', () {
+      final at = DateTime(2026, 11, 26, 10);
+      expect(kSenseCmEndedLinger, const Duration(seconds: 5));
+      expect(senseCmEndedSecondsLeft(at, at), 5);
+      expect(senseCmEndedSecondsLeft(at, at.add(const Duration(milliseconds: 1))), 5);
+      expect(senseCmEndedSecondsLeft(at, at.add(const Duration(milliseconds: 1001))), 4);
+      expect(senseCmEndedSecondsLeft(at, at.add(const Duration(seconds: 4, milliseconds: 500))), 1);
+      expect(senseCmEndedSecondsLeft(at, at.add(const Duration(seconds: 5))), 0);
+      expect(senseCmEndedSecondsLeft(at, at.add(const Duration(minutes: 1))), 0);
+    });
+
+    test('nothing counts down before every connection ended', () {
+      SenseCm.cancelEnded();
+      expect(SenseCm.endedSecondsLeft(DateTime.now()), isNull);
     });
   });
 }
@@ -721,6 +762,7 @@ Future<void> pumpCard(
   Duration? recording,
   bool canAccept = true,
   bool canCall = false,
+  int? endedClosingIn,
 }) async {
   setWindow(tester, kSenseCmPanelSize);
   await tester.pumpWidget(app(
@@ -732,6 +774,7 @@ Future<void> pumpCard(
       canAccept: canAccept,
       canCall: canCall,
       animateIn: false,
+      endedClosingIn: endedClosingIn,
       actions: SenseHostCardActions(
         onMinimize: () => calls.add('minimize'),
         onEnd: () => calls.add('end'),

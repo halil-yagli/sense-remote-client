@@ -12,6 +12,17 @@
 // macOS (plan 2026-11-21, M6): the icon is placed in points inside
 // `NSScreen.visibleFrame` (no menu bar, no Dock), follows the user to every
 // Space and stays above full screen apps. Stage Manager is checked on a Mac.
+//
+// Windows (#99, Sürüm 9): the window is frameless. With the hidden title bar
+// style, window_manager keeps an 8 px resize border left, right and below
+// (WM_NCCALCSIZE, not scaled with the monitor), so the Flutter view was 16 px
+// narrower and 8 px lower than the window these rules size: the 64 px icon did
+// not fit (half a logo inside the click region) and the card sat 8 px in with
+// dark strips beside it. Frameless, the view is the whole window. After every
+// resize the Flutter view is made to present a frame at the final size (see
+// senseCmRefreshFlutterView), and the sizes go into the record (`[ui] cm.window`).
+
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -22,7 +33,10 @@ import 'package:window_size/window_size.dart' as window_size;
 
 import '../../../common.dart';
 import '../../../models/platform_model.dart';
+import '../../diag_log.dart';
+import '../../diag_text.dart';
 import '../../window/sense_window_scale.dart';
+import 'sense_cm_ended.dart';
 import 'sense_cm_geometry.dart';
 import 'sense_cm_region.dart';
 
@@ -97,6 +111,7 @@ class SenseCm {
     if (open.value || _busy) return;
     if (edge.value != null) await restoreFromEdge();
     _busy = true;
+    senseUiPopup('host.card', open: true);
     try {
       final info = await _windowInfo();
       if (info != null) {
@@ -119,6 +134,7 @@ class SenseCm {
   static Future<void> closePanel() async {
     if (!open.value || _busy) return;
     _busy = true;
+    senseUiPopup('host.card', open: false);
     try {
       open.value = false;
       final info = await _windowInfo();
@@ -138,6 +154,55 @@ class SenseCm {
 
   static Future<void> toggle() => open.value ? closePanel() : openPanel();
 
+  /// #101: when every connection ended (null while one is live).
+  static final Rxn<DateTime> endedAt = Rxn<DateTime>();
+  static Timer? _endedTimer;
+
+  /// #101: every connection has ended. The card opens with "Bağlantı sona erdi"
+  /// and the window closes by itself after [kSenseCmEndedLinger].
+  static void onAllEnded() {
+    if (_endedTimer != null) return;
+    endedAt.value = DateTime.now();
+    senseUiEvent('cm.ended', {'closeInS': kSenseCmEndedLinger.inSeconds});
+    if (!open.value) unawaited(openPanel());
+    _endedTimer = Timer(kSenseCmEndedLinger, () {
+      _endedTimer = null;
+      unawaited(_closeAfterEnd());
+    });
+  }
+
+  /// A new connection came in before the window closed: it stays.
+  static void cancelEnded() {
+    _endedTimer?.cancel();
+    _endedTimer = null;
+    endedAt.value = null;
+  }
+
+  /// Seconds left on the "Bağlantı sona erdi" card; null when not closing.
+  static int? endedSecondsLeft(DateTime now) {
+    final at = endedAt.value;
+    return at == null ? null : senseCmEndedSecondsLeft(at, now);
+  }
+
+  /// Same as the card's "Kapat": drop the ended connections, then close the
+  /// window once none is left (the CM process ends with it).
+  static Future<void> _closeAfterEnd() async {
+    endedAt.value = null;
+    try {
+      final clients = gFFI.serverModel.clients;
+      if (!senseCmAllEnded(clients.map((c) => c.disconnected))) return;
+      for (final id in clients.map((c) => c.id).toList()) {
+        await bind.cmRemoveDisconnectedConnection(connId: id);
+      }
+      if (await bind.cmGetClientsLength() == 0) {
+        senseUiEvent('cm.closed', {'reason': 'ended'});
+        await windowManager.close();
+      }
+    } catch (e) {
+      debugPrint('Sense CM: closing after the end failed: $e');
+    }
+  }
+
   /// Called after the user dragged the window. Dropped at the left or right
   /// edge, the icon becomes the edge tab.
   static Future<void> onMoved() async {
@@ -155,6 +220,7 @@ class SenseCm {
       final tab = senseCmEdgeRect(frame, area, side, kSenseCmEdgeSize * scale,
           kSenseCmEdgeTopShift * scale);
       edge.value = side;
+      senseUiEvent('cm.edge', {'side': side.name, 'hidden': true});
       await _setBounds(tab);
       // The next connection shows the icon where the tab gives it back.
       _remember(senseCmIconFromEdge(tab, area, side, kSenseCmIconSize * scale,
@@ -173,6 +239,7 @@ class SenseCm {
     try {
       final info = await _windowInfo();
       edge.value = null;
+      senseUiEvent('cm.edge', {'side': side.name, 'hidden': false});
       if (info == null) {
         await windowManager.setSize(kSenseCmIconSize);
         return;
@@ -219,6 +286,19 @@ class SenseCm {
     }
   }
 
+  /// Windows (#99): frameless window, no system border or rounded corners.
+  /// Runs before the first bounds are set (startup).
+  static Future<void> _prepareWindowsWindow() async {
+    if (!isWindows) return;
+    try {
+      await windowManager.setAsFrameless();
+      await windowManager.setHasShadow(false);
+      senseCmPlainFrame();
+    } catch (e) {
+      debugPrint('Sense CM: Windows window setup failed: $e');
+    }
+  }
+
   static Future<void> _setBounds(Rect rect) async {
     // Window sizes below the system minimum track size get clamped by
     // Windows; the window manager reports this minimum instead. On macOS
@@ -227,6 +307,86 @@ class SenseCm {
     await windowManager.setBounds(rect, ignoreDevicePixelRatio: true);
     await _settleBounds(rect);
     _applyRegion(rect);
+    await _settleView(rect);
+  }
+
+  static String get _mode =>
+      open.value ? 'card' : (edge.value != null ? 'edge' : 'icon');
+
+  /// Windows (#99): after the resizes, the Flutter view presents a frame at
+  /// the final size (a stretched old frame was the squeezed card), and the
+  /// asked-for / real window size, client and view size, DPI, monitor and the
+  /// Flutter drawing size go into the record, so a device run proves it.
+  static Future<void> _settleView(Rect want) async {
+    if (!isWindows) return;
+    try {
+      final before = senseCmWindowMetrics();
+      await senseCmRefreshFlutterView();
+      await _nextFrame();
+      final after = senseCmWindowMetrics();
+      final view = WidgetsBinding.instance.platformDispatcher.views.first;
+      final info = await window_size.getWindowInfo();
+      final screen = info.screen;
+      senseUiEvent('cm.window', {
+        'mode': _mode,
+        'want': senseUiRect(want.left, want.top, want.width, want.height),
+        if (after != null) ...{
+          'got': senseUiRect(after.window.left, after.window.top,
+              after.window.width, after.window.height),
+          'client': senseUiSize(after.client.width, after.client.height),
+          'view': senseUiSize(after.view.width, after.view.height),
+          'dpi': after.dpi,
+        },
+        if (before != null)
+          'viewBefore': senseUiSize(before.view.width, before.view.height),
+        'flutter':
+            senseUiSize(view.physicalSize.width, view.physicalSize.height),
+        'dpr': view.devicePixelRatio.toStringAsFixed(2),
+        'scale': info.scaleFactor.toStringAsFixed(2),
+        if (screen != null) ...{
+          'monitor': senseUiRect(screen.frame.left, screen.frame.top,
+              screen.frame.width, screen.frame.height),
+          'monitorScale': screen.scaleFactor.toStringAsFixed(2),
+        },
+        'match': after == null
+            ? '-'
+            : senseViewMatches(
+                want: want,
+                window: after.window,
+                client: after.client,
+                flutter: view.physicalSize),
+      });
+    } catch (e) {
+      debugPrint('Sense CM: view check failed: $e');
+    }
+  }
+
+  /// The next frame (or a short wait when none comes, e.g. hidden window).
+  static Future<void> _nextFrame() async {
+    WidgetsBinding.instance.scheduleFrame();
+    await WidgetsBinding.instance.endOfFrame
+        .timeout(const Duration(milliseconds: 300), onTimeout: () {});
+  }
+
+  /// Every monitor once per start, for the record (#99: 3 monitors, mixed DPI).
+  static Future<void> _logScreens() async {
+    if (!isWindows) return;
+    try {
+      final list = await window_size.getScreenList();
+      for (var i = 0; i < list.length; i++) {
+        final s = list[i];
+        senseUiEvent('cm.screen', {
+          'n': i,
+          'frame': senseUiRect(
+              s.frame.left, s.frame.top, s.frame.width, s.frame.height),
+          'work': senseUiRect(s.visibleFrame.left, s.visibleFrame.top,
+              s.visibleFrame.width, s.visibleFrame.height),
+          'scale': s.scaleFactor.toStringAsFixed(2),
+        });
+      }
+    } catch (e) {
+      debugPrint('Sense CM: screen record failed: $e');
+    }
   }
 
   /// Windows (S7, #88): a window moved to a monitor with another scale is resized by the
@@ -312,9 +472,13 @@ Future<bool> senseCmShowWindow(
     {required bool isStartup,
     required bool readyToShow,
     required WindowOptions Function(Size size) startupOptions}) async {
+  // #101: a new connection while the "Bağlantı sona erdi" card was up.
+  SenseCm.cancelEnded();
   if (isStartup) {
     WindowOptions windowOptions = startupOptions(kSenseCmIconSize);
     await windowManager.waitUntilReadyToShow(windowOptions, null);
+    await SenseCm._prepareWindowsWindow();
+    await SenseCm._logScreens();
     bind.mainHideDock();
     await windowManager.setSkipTaskbar(true);
     await SenseCm.showIcon();
