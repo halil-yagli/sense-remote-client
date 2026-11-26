@@ -641,7 +641,12 @@ impl Client {
             .parse::<f64>()
         {
             Ok(secs) if secs.is_finite() && secs > 0.0 => (secs * 1000.0).round() as u64,
-            _ => Self::RELAY_FALLBACK_DELAY_MS,
+            // Sense Remote (A, #100): the panel's signed envelope writes this option to
+            // `Config`; it applies when the local setting is unset, within 1–30 s.
+            _ => crate::sense::link_quality::panel_relay_fallback_delay_ms(&Config::get_option(
+                keys::OPTION_RELAY_FALLBACK_DELAY,
+            ))
+            .unwrap_or(Self::RELAY_FALLBACK_DELAY_MS),
         }
     }
 

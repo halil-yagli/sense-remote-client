@@ -205,9 +205,32 @@ pub fn relay_reason(
     }
 }
 
+/// Sense Remote (A, #100): relay fallback delay set by the panel (`Config`, seconds), in ms.
+/// `None` when unset or not a number; otherwise clamped to 1–30 s.
+pub fn panel_relay_fallback_delay_ms(value: &str) -> Option<u64> {
+    match value.trim().parse::<f64>() {
+        Ok(secs) if secs.is_finite() && secs > 0.0 => {
+            Some((secs.clamp(1.0, 30.0) * 1000.0).round() as u64)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_relay_fallback_delay_is_bounded() {
+        assert_eq!(panel_relay_fallback_delay_ms(""), None);
+        assert_eq!(panel_relay_fallback_delay_ms("abc"), None);
+        assert_eq!(panel_relay_fallback_delay_ms("0"), None);
+        assert_eq!(panel_relay_fallback_delay_ms("-3"), None);
+        assert_eq!(panel_relay_fallback_delay_ms("NaN"), None);
+        assert_eq!(panel_relay_fallback_delay_ms(" 2.5 "), Some(2_500));
+        assert_eq!(panel_relay_fallback_delay_ms("0.2"), Some(1_000));
+        assert_eq!(panel_relay_fallback_delay_ms("90"), Some(30_000));
+    }
 
     #[test]
     fn key_gate_skips_delta_frames_until_a_key_frame() {
