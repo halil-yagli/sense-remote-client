@@ -65,6 +65,11 @@ pub const CAP_CURTAIN: &str = "curtain";
 /// envelope (`envelope_apply::APPLIES`). The panel looks at it on macOS: a Mac without it gets
 /// no policy.
 pub const CAP_APPLY: &str = "apply";
+/// Sense Remote (Sürüm 9, paket A): added where this build takes the panel-managed Host settings
+/// (`envelope::EXTENDED_OPTIONS`: audio input, keep awake, relay delay, UDP) in an envelope. The
+/// panel adds them only for a computer that reports it; an older build would refuse the whole
+/// envelope (`not_allowed`).
+pub const CAP_HOST_OPTS: &str = "host_opts";
 /// Health goes into the heartbeat at most this often (contract: "en çok 60 sn'de bir").
 pub const HEALTH_INTERVAL: Duration = Duration::from_secs(60);
 /// The heartbeat's `displays_hash` is recomputed at most this often (the heartbeat runs every
@@ -294,19 +299,31 @@ pub fn heartbeat_base() -> Option<Value> {
 
 /// Sense Remote (permanent password plan U14): the `caps` this build sends, from the switches.
 fn heartbeat_caps(curtain_supported: bool) -> Vec<String> {
-    caps_with_logs(
-        caps_with_update_now(
-            caps_with_password(
-                caps_with_update(
-                    caps(curtain_supported, super::envelope_apply::APPLIES),
-                    super::update::SUPPORTED,
+    caps_with_host_opts(
+        caps_with_logs(
+            caps_with_update_now(
+                caps_with_password(
+                    caps_with_update(
+                        caps(curtain_supported, super::envelope_apply::APPLIES),
+                        super::update::SUPPORTED,
+                    ),
+                    super::password::SUPPORTED,
                 ),
-                super::password::SUPPORTED,
+                super::update::SUPPORTED,
             ),
-            super::update::SUPPORTED,
+            super::log_upload::SUPPORTED,
         ),
-        super::log_upload::SUPPORTED,
+        super::envelope_apply::APPLIES,
     )
+}
+
+/// Sense Remote (Sürüm 9, paket A): `host_opts` is the last capability, added where envelopes are
+/// applied (`envelope_apply::APPLIES`: Windows and macOS).
+fn caps_with_host_opts(mut caps: Vec<String>, applies: bool) -> Vec<String> {
+    if applies {
+        caps.push(CAP_HOST_OPTS.to_owned());
+    }
+    caps
 }
 
 /// Sense Remote: `update_now` comes after `password`, where this build installs signed updates.
@@ -1648,6 +1665,24 @@ mod tests {
         assert!(caps_with_logs(base(), true).len() <= SCHEMA_CAPS_MAX);
         assert!(crate::sense::log_upload::CAP_LOGS.len() <= SCHEMA_CAP_MAX_CHARS);
         assert_eq!(heartbeat_caps(true).contains(&"logs".to_owned()), cfg!(any(windows, target_os = "macos")));
+    }
+
+    // Sürüm 9, paket A: `host_opts` follows `APPLIES` and comes last.
+    #[test]
+    fn host_opts_cap_follows_apply_and_comes_last() {
+        let base = || vec!["role_all".to_owned(), "apply".to_owned()];
+        assert_eq!(caps_with_host_opts(base(), false), base());
+        assert_eq!(
+            caps_with_host_opts(base(), true),
+            ["role_all", "apply", "host_opts"]
+        );
+        assert!(CAP_HOST_OPTS.len() <= SCHEMA_CAP_MAX_CHARS);
+        let heartbeat = heartbeat_caps(true);
+        assert_eq!(heartbeat.contains(&"host_opts".to_owned()), cfg!(any(windows, target_os = "macos")));
+        if cfg!(any(windows, target_os = "macos")) {
+            assert_eq!(heartbeat.last().map(String::as_str), Some("host_opts"));
+        }
+        assert!(heartbeat.len() <= SCHEMA_CAPS_MAX);
     }
 
     // U14: the heartbeat carries `password` on Windows and macOS (last, after `update`), and

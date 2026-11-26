@@ -6,8 +6,10 @@
 //!     `security_overwrite_settings`): the same answer as `main_is_option_fixed`;
 //! (b) the code-level `HARD_SETTINGS` (the installed role's keys: `conn-type`,
 //!     `disable-settings`, `disable-ab`);
-//! (c) the keys the signed panel envelope may set (`envelope::ALLOWED_OPTIONS`): only the panel
-//!     writes them, so the app never offers to change them;
+//! (c) the keys the signed panel envelope may set (`envelope::ALLOWED_OPTIONS` and, since
+//!     Sürüm 9, `EXTENDED_OPTIONS` + the `audio-input` option the panel's audio choice becomes,
+//!     `envelope::is_panel_option`): only the panel writes them, so the app never offers to
+//!     change them;
 //! (d) the proxy keys (`sense::SOCKS_OPTION_KEYS`, decision #68 (5)): locked in
 //!     `ui_interface::set_socks`, not pinned (a pinned `proxy-url` would turn the proxy on).
 
@@ -17,9 +19,7 @@ use hbb_common::config;
 pub fn locked(key: &str, fixed: bool, hard: bool) -> bool {
     fixed
         || hard
-        || super::envelope::ALLOWED_OPTIONS
-            .iter()
-            .any(|(allowed, _)| *allowed == key)
+        || super::envelope::is_panel_option(key)
         || (super::SOCKS_LOCKED && super::SOCKS_OPTION_KEYS.contains(&key))
 }
 
@@ -91,6 +91,29 @@ mod tests {
         assert!(locked("allow-auto-disconnect", false, false));
         assert!(locked("auto-disconnect-timeout", false, false));
         assert!(locked("allow-remove-wallpaper", false, false));
+    }
+
+    // Sürüm 9, paket A: the panel-managed Host settings are locked in the app as well.
+    #[test]
+    fn extended_host_settings_are_locked() {
+        for (key, _) in super::super::envelope::EXTENDED_OPTIONS {
+            assert!(locked(key, false, false), "{key}");
+        }
+        for key in [
+            "audio-input",
+            "keep-awake-during-incoming-sessions",
+            "relay-fallback-delay",
+            "disable-udp",
+        ] {
+            assert!(locked(key, false, false), "{key}");
+        }
+        // The macOS daemon keeps its own value for them too (`mac_apply::is_protected_option`).
+        for key in ["audio-input", "disable-udp", "keep-awake-during-incoming-sessions"] {
+            assert!(super::super::mac_apply::is_protected_option(key), "{key}");
+        }
+        // Not managed: stays open (the Controller-side counterpart and the user's own settings).
+        assert!(!locked("keep-awake-during-outgoing-sessions", false, false));
+        assert!(!locked("voice-call-input", false, false));
     }
 
     #[test]
