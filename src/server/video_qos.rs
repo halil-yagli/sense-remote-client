@@ -65,6 +65,8 @@ const ADJUST_RATIO_INTERVAL: usize = 3; // Adjust quality ratio every 3 seconds
 const DYNAMIC_SCREEN_THRESHOLD: usize = 2; // Allow increase quality ratio if encode more than 2 times in one second
 const DELAY_THRESHOLD_150MS: u32 = 150; // 150ms is the threshold for good network condition
 const RESTORE_GUARD_SAMPLES: u8 = 5; // A restored level that congests this soon is lowered
+// Sense Remote (#100): one summary line per this many delay replies (about 15 s).
+const SENSE_LOG_EVERY_REPLIES: u32 = 15;
 
 #[derive(Default, Debug, Clone)]
 struct UserDelay {
@@ -82,6 +84,7 @@ struct UserDelay {
     samples_since_restore: Option<u8>,  // set by a restore, cleared once it proved stable
     stall_reference_fps: Option<u32>,   // fps when the outstanding probe passed two seconds
     startup_good_samples: u8,           // u8::MAX permanently ends startup acceleration
+    sense_replies: u32,                 // Sense Remote (#100): replies since the last summary line
 }
 
 impl UserDelay {
@@ -571,6 +574,24 @@ impl VideoQoS {
             adjust_ratio = user.delay.fps.is_none();
             user.delay.fps = Some(fps);
             let base = user.delay.rtt_calculator.get_rtt().unwrap_or_default();
+            // Sense Remote (#100): the decisions go to the log (info), so a measurement shows
+            // whether a low frame rate was this controller (a reduction line) or the screen
+            // (no line: a still screen sends no frames). The delay here is the probe's round
+            // trip; `excess` is what the queue adds above the path's own baseline.
+            user.delay.sense_replies += 1;
+            if fps < current_fps {
+                log::info!(
+                    "Sense Remote qos: fps {current_fps} -> {fps}, id={id} delay={delay} base={base} excess_avg={avg_delay} bitrate_first={bitrate_first} braked={braked}"
+                );
+            }
+            if user.delay.sense_replies >= SENSE_LOG_EVERY_REPLIES {
+                user.delay.sense_replies = 0;
+                log::info!(
+                    "Sense Remote qos: id={id} fps={fps} cap={user_cap} delay={delay} base={base} excess_avg={avg_delay} ratio={:.2} bitrate={}kbps",
+                    self.ratio,
+                    self.bitrate_store
+                );
+            }
             log::trace!(
                 "qos_trace t={} id={id} delay={delay} base={base} excess={} avg={avg_delay} bad={} good={} braked={braked} fps={fps} ratio={:.3} reduce_bitrate={reduce_bitrate}",
                 hbb_common::get_time(),
@@ -614,6 +635,10 @@ impl VideoQoS {
                 let reference = user.delay.fps.unwrap_or(INIT_FPS.min(user.fps_cap()));
                 user.delay.stall_reference_fps = Some(reference);
                 user.delay.on_reduction(reference);
+                // Sense Remote (#100): one line per stall, not per tick.
+                log::info!(
+                    "Sense Remote qos: delay probe unanswered for {elapsed} ms, id={id} fps from {reference}"
+                );
                 reference
             }
         };
@@ -808,6 +833,13 @@ impl VideoQoS {
                         });
                 }
             }
+        }
+        // Sense Remote (#100): bitrate cuts go to the log like fps reductions.
+        if reduction.is_some() && v.clamp(min, max) < current_ratio {
+            log::info!(
+                "Sense Remote qos: bitrate ratio {current_ratio:.2} -> {:.2}, excess_max={max_delay}",
+                v.clamp(min, max)
+            );
         }
         self.ratio = v.clamp(min, max);
         self.reset_send_counters();

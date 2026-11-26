@@ -125,9 +125,139 @@ impl LinkMeter {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Sense Remote (#100): decoder start after a reset.
+//
+// A decoder that was just created or reset (new codec, `SwitchDisplay` after a privacy-mode
+// switch, a decode error) can only start from a key frame. Frames and the reset travel on two
+// different paths (the frame queue and the media channel), so after a reset the first frames can
+// still be the old encoder's delta frames. Fed to a fresh H.264 / H.265 decoder they fail ("PPS
+// id out of range"), the stock client takes the failed first frame as a broken decoder, marks the
+// codec unsupported and the Host renegotiates: H.265 -> H.264 -> AV1 (software, slow). So until a
+// key frame arrives delta frames are skipped, and a key frame is requested from the Host.
+
+/// Skipped delta frames after which a key frame is requested from the Host (a fresh encoder
+/// sends one by itself; this only covers the case where none is on its way).
+pub const KEY_WAIT_REQUEST_AFTER: u32 = 3;
+/// Upper bound on skipped frames: an encoder that never flags key frames falls back to the
+/// stock behaviour (decode everything) instead of a black screen.
+pub const KEY_WAIT_MAX_FRAMES: u32 = 60;
+/// At most one key frame request in this window; each request rebuilds the Host's encoder.
+pub const KEY_REQUEST_INTERVAL_MS: u64 = 2_000;
+
+/// What to do with an incoming frame while the decoder may be waiting for a key frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyGate {
+    Decode,
+    Skip,
+    SkipAndRequestKey,
+}
+
+/// `skipped`: delta frames already skipped in this wait.
+pub fn key_gate(waiting_for_key: bool, is_key: bool, skipped: u32) -> KeyGate {
+    if !waiting_for_key || is_key || skipped >= KEY_WAIT_MAX_FRAMES {
+        return KeyGate::Decode;
+    }
+    if skipped + 1 == KEY_WAIT_REQUEST_AFTER {
+        KeyGate::SkipAndRequestKey
+    } else {
+        KeyGate::Skip
+    }
+}
+
+/// Whether a key frame request may go out now (`since_last_ms`: time since the previous one).
+pub fn key_request_due(since_last_ms: Option<u64>) -> bool {
+    since_last_ms.map_or(true, |ms| ms >= KEY_REQUEST_INTERVAL_MS)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sense Remote (#100): why a connection went through the relay.
+//
+// Our ID server is the open-source hbbs (1.1.16). It forwards only the TCP punch: it does not
+// answer the UDP NAT test and drops `udp_port`, `socket_addr_v6`, `force_relay` and the WebRTC
+// offer, so UDP / IPv6 / WebRTC punching cannot work with it (the client already turns them off
+// for a non-public server). What is left is the TCP punch, and the controlled side relays at once
+// when either side's NAT is symmetric (the controller sends SYMMETRIC also when it is forced to
+// relay). These names go to the log so a measurement says which of them it was.
+
+/// The controlled side's reason for answering a punch request with a relay; `None` = it punches.
+pub fn relay_reason(
+    peer_nat_symmetric: bool,
+    my_nat_symmetric: bool,
+    local_proxy: bool,
+    force_relay: bool,
+    tcp_listen_off_without_udp: bool,
+) -> Option<&'static str> {
+    if local_proxy {
+        Some("own proxy or websocket")
+    } else if force_relay {
+        Some("controller forced relay")
+    } else if peer_nat_symmetric && my_nat_symmetric {
+        Some("both NATs symmetric")
+    } else if peer_nat_symmetric {
+        Some("controller NAT symmetric (or controller forced relay)")
+    } else if my_nat_symmetric {
+        Some("own NAT symmetric")
+    } else if tcp_listen_off_without_udp {
+        Some("TCP listen off and no UDP punch")
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_gate_skips_delta_frames_until_a_key_frame() {
+        // Not waiting: everything is decoded.
+        assert_eq!(key_gate(false, false, 0), KeyGate::Decode);
+        // Waiting: a key frame ends the wait at once.
+        assert_eq!(key_gate(true, true, 0), KeyGate::Decode);
+        assert_eq!(key_gate(true, true, 10), KeyGate::Decode);
+        // Delta frames are skipped; one of them asks for a key frame.
+        assert_eq!(key_gate(true, false, 0), KeyGate::Skip);
+        assert_eq!(key_gate(true, false, KEY_WAIT_REQUEST_AFTER - 1), KeyGate::SkipAndRequestKey);
+        assert_eq!(key_gate(true, false, KEY_WAIT_REQUEST_AFTER), KeyGate::Skip);
+    }
+
+    #[test]
+    fn key_gate_gives_up_after_the_bound() {
+        // Exactly one request per wait.
+        let requests = (0..KEY_WAIT_MAX_FRAMES)
+            .filter(|s| key_gate(true, false, *s) == KeyGate::SkipAndRequestKey)
+            .count();
+        assert_eq!(requests, 1);
+        // An encoder that never flags key frames still gets decoded (stock behaviour).
+        assert_eq!(key_gate(true, false, KEY_WAIT_MAX_FRAMES), KeyGate::Decode);
+    }
+
+    #[test]
+    fn key_requests_are_throttled() {
+        assert!(key_request_due(None));
+        assert!(!key_request_due(Some(0)));
+        assert!(!key_request_due(Some(KEY_REQUEST_INTERVAL_MS - 1)));
+        assert!(key_request_due(Some(KEY_REQUEST_INTERVAL_MS)));
+    }
+
+    #[test]
+    fn relay_reason_names_the_cause() {
+        assert_eq!(relay_reason(false, false, false, false, false), None);
+        assert_eq!(
+            relay_reason(true, false, false, false, false),
+            Some("controller NAT symmetric (or controller forced relay)")
+        );
+        assert_eq!(relay_reason(false, true, false, false, false), Some("own NAT symmetric"));
+        assert_eq!(relay_reason(true, true, false, false, false), Some("both NATs symmetric"));
+        // Configuration wins over NAT: it relays whatever the NAT.
+        assert_eq!(relay_reason(true, true, true, false, false), Some("own proxy or websocket"));
+        assert_eq!(relay_reason(false, false, false, true, false), Some("controller forced relay"));
+        assert_eq!(
+            relay_reason(false, false, false, false, true),
+            Some("TCP listen off and no UDP punch")
+        );
+    }
 
     #[test]
     fn on_time_probes_mean_no_loss() {

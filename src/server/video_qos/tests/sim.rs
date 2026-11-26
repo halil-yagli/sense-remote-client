@@ -612,6 +612,22 @@ fn intercontinental_link() -> Link {
     }
 }
 
+/// Sense Remote (#100): our relay path as measured (2026-11-25): controller and host on two
+/// home lines, both legs through one relay about 180 ms away from each, so a round trip of
+/// about 400 ms with the jitter of two consumer uplinks; capacity enough for the stream.
+fn sense_relay_link() -> Link {
+    Link {
+        capacity_kbps: vec![(0, 20_000.0)],
+        wobble: 0.15,
+        base_rtt_ms: 400.0,
+        jitter_median_ms: 15.0,
+        jitter_sigma: 0.7,
+        loss_per_s: 0.05,
+        stall_mean_interval_s: 0.0,
+        stall_ms: (0.0, 0.0),
+    }
+}
+
 /// 8 Mbps for a minute, 2.5 Mbps for the next, 8 Mbps again.
 fn halved_link() -> Link {
     Link {
@@ -670,6 +686,7 @@ pub fn scenarios() -> Vec<Scenario> {
             true,
             Cbr,
         ),
+        base("sense_relay_30", 30, sense_relay_link(), true, Cbr),
         base("bandwidth_halved_30", 30, halved_link(), true, Cbr),
         base(
             "bandwidth_halved_fixed_rate_30",
@@ -809,6 +826,22 @@ pub fn bound_violations(s: &Summary) -> Vec<&'static str> {
             "cold start below INIT_FPS",
         );
         // Frame age excludes the round trip, so a high RTT earns no allowance.
+        check(s.frame_age_p95_p90 < 150, "frame age over 150 ms");
+        check(
+            s.time_to_90pct_worst_ms.is_some_and(|ms| ms <= 10_000),
+            "cold start over 10 s",
+        );
+    } else if name == "sense_relay_30" {
+        // Sense Remote (#100): a high round trip with ample bandwidth must not lower the frame
+        // rate; the same requirement as intercontinental_30, at our relay's round trip.
+        check(
+            s.mean_target_median >= 0.9 * limit,
+            "median target below 90%",
+        );
+        check(
+            s.cold_start_min_median >= INIT_FPS,
+            "cold start below INIT_FPS",
+        );
         check(s.frame_age_p95_p90 < 150, "frame age over 150 ms");
         check(
             s.time_to_90pct_worst_ms.is_some_and(|ms| ms <= 10_000),
