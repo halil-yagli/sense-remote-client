@@ -641,7 +641,12 @@ impl Client {
             .parse::<f64>()
         {
             Ok(secs) if secs.is_finite() && secs > 0.0 => (secs * 1000.0).round() as u64,
-            _ => Self::RELAY_FALLBACK_DELAY_MS,
+            // Sense Remote (A, #100): the panel's signed envelope writes this option to
+            // `Config`; it applies when the local setting is unset, within 1–30 s.
+            _ => crate::sense::link_quality::panel_relay_fallback_delay_ms(&Config::get_option(
+                keys::OPTION_RELAY_FALLBACK_DELAY,
+            ))
+            .unwrap_or(Self::RELAY_FALLBACK_DELAY_MS),
         }
     }
 
@@ -947,6 +952,19 @@ impl Client {
         } else {
             transports.join("+")
         };
+        // Sense Remote (#100): what this round can try and why, so a relayed session's log says
+        // whether the relay was forced here or chosen by the peer (`sense::link_quality`).
+        log::info!(
+            "Sense Remote path: transports={}, nat={:?}, force_relay={}, policy_relay={}, udp_punch={}, ipv6_punch={}, webrtc={}, public_server={}",
+            punch_type,
+            nat_type,
+            interface.is_force_relay(),
+            interface.is_policy_relay(),
+            crate::get_udp_punch_enabled(),
+            crate::get_ipv6_punch_enabled(),
+            crate::get_webrtc_enabled(),
+            crate::is_public(&rendezvous_server),
+        );
         msg_out.set_punch_hole_request(PunchHoleRequest {
             id: peer.to_owned(),
             // Sense Remote: never send the panel access token to the ID server.
@@ -1051,6 +1069,14 @@ impl Client {
                             "relay requested from peer, time used: {:?}, relay_server: {}",
                             start.elapsed(),
                             rr.relay_server
+                        );
+                        // Sense Remote (#100): the peer relays when either NAT is symmetric or
+                        // this side asked for relay (it then sends SYMMETRIC); its own log names
+                        // which ("Sense Remote path: relay").
+                        log::info!(
+                            "Sense Remote path: relay chosen by peer, own nat={:?}, force_relay={}",
+                            nat_type,
+                            interface.is_force_relay()
                         );
                         start = Instant::now();
                         let mut connect_futures = Vec::new();
@@ -2654,6 +2680,12 @@ pub struct VideoHandler {
     _display: usize, // useful for debug
     fail_counter: usize,
     first_frame: bool,
+    // Sense Remote (#100): after a reset, delta frames wait for a key frame
+    // (`sense::link_quality::key_gate`).
+    sense_wait_key: bool,
+    sense_skipped: u32,
+    sense_key_request: bool,
+    sense_last_key_request: Option<std::time::Instant>,
 }
 
 impl VideoHandler {
@@ -2686,7 +2718,48 @@ impl VideoHandler {
             _display,
             fail_counter: 0,
             first_frame: true,
+            sense_wait_key: true,
+            sense_skipped: 0,
+            sense_key_request: false,
+            sense_last_key_request: None,
         }
+    }
+
+    /// Sense Remote (#100): whether the frame carries a key frame. Unknown kinds (raw
+    /// frames) count as key frames, so they are never held back.
+    fn sense_is_key(vf: &VideoFrame) -> bool {
+        match &vf.union {
+            Some(video_frame::Union::Vp8s(f))
+            | Some(video_frame::Union::Vp9s(f))
+            | Some(video_frame::Union::Av1s(f))
+            | Some(video_frame::Union::H264s(f))
+            | Some(video_frame::Union::H265s(f)) => f.frames.iter().any(|x| x.key),
+            _ => true,
+        }
+    }
+
+    /// Sense Remote (#100): ask for a key frame, at most once per
+    /// `KEY_REQUEST_INTERVAL_MS`; the decoder loop sends it (`take_key_request`).
+    fn sense_request_key(&mut self) {
+        let since = self
+            .sense_last_key_request
+            .map(|t| t.elapsed().as_millis() as u64);
+        if crate::sense::link_quality::key_request_due(since) {
+            self.sense_last_key_request = Some(std::time::Instant::now());
+            self.sense_key_request = true;
+        }
+    }
+
+    /// Sense Remote (#100): a pending key frame request, cleared on read.
+    pub fn take_key_request(&mut self) -> bool {
+        std::mem::take(&mut self.sense_key_request)
+    }
+
+    /// Sense Remote (#100): the decoder loop requested a refresh on its own (decode error);
+    /// it counts as this handler's key frame request for the throttle.
+    pub fn refresh_requested(&mut self) {
+        self.sense_key_request = false;
+        self.sense_last_key_request = Some(std::time::Instant::now());
     }
 
     /// Handle a new video frame.
@@ -2700,6 +2773,42 @@ impl VideoHandler {
         let format = CodecFormat::from(&vf);
         if format != self.decoder.format() {
             self.reset(Some(format));
+        }
+        // Sense Remote (#100): a fresh decoder starts at a key frame; delta frames of the old
+        // stream would fail and get the codec marked unsupported (see `key_gate`).
+        {
+            use crate::sense::link_quality::{key_gate, KeyGate};
+            match key_gate(self.sense_wait_key, Self::sense_is_key(&vf), self.sense_skipped) {
+                KeyGate::Skip => {
+                    self.sense_skipped += 1;
+                    // Still waiting after the first request: ask again (throttled).
+                    if self.sense_skipped > crate::sense::link_quality::KEY_WAIT_REQUEST_AFTER {
+                        self.sense_request_key();
+                    }
+                    return Ok(false);
+                }
+                KeyGate::SkipAndRequestKey => {
+                    self.sense_skipped += 1;
+                    log::info!(
+                        "Sense Remote: display #{} waits for a key frame ({} delta frames skipped), requesting one",
+                        self._display,
+                        self.sense_skipped
+                    );
+                    self.sense_request_key();
+                    return Ok(false);
+                }
+                KeyGate::Decode => {
+                    if self.sense_wait_key && self.sense_skipped > 0 {
+                        log::info!(
+                            "Sense Remote: display #{} resumes decoding after {} skipped delta frames",
+                            self._display,
+                            self.sense_skipped
+                        );
+                    }
+                    self.sense_wait_key = false;
+                    self.sense_skipped = 0;
+                }
+            }
         }
         match &vf.union {
             Some(frame) => {
@@ -2724,6 +2833,15 @@ impl VideoHandler {
                             "Failed to handle video frame, fail counter: {}",
                             self.fail_counter
                         );
+                    }
+                    // Sense Remote (#100): the delta frames after a decode error reference the
+                    // broken picture, so wait for the next key frame instead of failing on each
+                    // of them (the decoder loop requests a refresh on an error). A decoder that
+                    // also fails on key frames still reaches MAX_DECODE_FAIL_COUNTER, one key
+                    // frame per failure. An empty result keeps the stock handling.
+                    if res.is_err() {
+                        self.sense_wait_key = true;
+                        self.sense_skipped = 0;
                     }
                 }
                 self.first_frame = false;
@@ -2756,6 +2874,9 @@ impl VideoHandler {
         self.decoder = Decoder::new(format, luid);
         self.fail_counter = 0;
         self.first_frame = true;
+        // Sense Remote (#100): the new decoder starts at a key frame.
+        self.sense_wait_key = true;
+        self.sense_skipped = 0;
     }
 
     /// Start or stop screen record.
@@ -3704,11 +3825,11 @@ impl LoginConfigHandler {
         }
         // peer_relay only — see `initialize`: neither the proxy nor the WebSocket transport is a
         // fact about this peer, and writing one here makes it permanent.
-        if self.peer_relay {
-            config
-                .options
-                .insert("force-always-relay".to_owned(), "Y".to_owned());
-        }
+        // Sense Remote (#100): not written here. One "Connect via relay" retry made every later
+        // connection to this computer relay-only, silently and for good (the controller then
+        // sends a SYMMETRIC NAT type and the peer never punches). The retry still relays its own
+        // round; the per-computer "Always connect via relay" setting is written where it is set.
+        // Stock code: `if self.peer_relay { config.options.insert("force-always-relay", "Y") }`.
         #[cfg(feature = "flutter")]
         {
             // sync connected password to personal ab automatically if it is not shared password
@@ -4077,6 +4198,8 @@ pub fn start_video_thread<F, T>(
                                     );
                                 }
                                 Err(e) => {
+                                    // Sense Remote (#100): the refresh below is the key frame request.
+                                    handler.refresh_requested();
                                     // This is a simple workaround.
                                     //
                                     // I only see the following error:
@@ -4092,6 +4215,10 @@ pub fn start_video_thread<F, T>(
                                     session.refresh_video(display as _);
                                 }
                                 _ => {}
+                            }
+                            // Sense Remote (#100): the decoder waits for a key frame.
+                            if handler.take_key_request() {
+                                session.refresh_video(display as _);
                             }
                         }
 

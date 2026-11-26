@@ -1146,6 +1146,24 @@ impl RendezvousMediator {
             || Config::get_nat_type() == NatType::SYMMETRIC as i32
             || relay
             || (config::is_disable_tcp_listen() && ph.udp_port <= 0);
+        // Sense Remote (#100): name the reason in the log; with our open-source hbbs only the TCP
+        // punch is forwarded, so this decides between a direct path and the relay.
+        if let Some(reason) = crate::sense::link_quality::relay_reason(
+            ph.nat_type.enum_value() == Ok(NatType::SYMMETRIC),
+            Config::get_nat_type() == NatType::SYMMETRIC as i32,
+            local_proxy,
+            ph.force_relay,
+            config::is_disable_tcp_listen() && ph.udp_port <= 0,
+        ) {
+            log::info!("Sense Remote path: relay, {}", reason);
+        } else {
+            log::info!(
+                "Sense Remote path: punching, peer nat={:?}, own nat={}, udp_port={}",
+                ph.nat_type.enum_value(),
+                Config::get_nat_type(),
+                ph.udp_port
+            );
+        }
         let punch_udp = !relay_v4 && ph.udp_port > 0;
         let punch_tcp = !relay_v4 && ph.udp_port <= 0 && ph.webrtc_sdp_offer.is_empty();
         let punch_v6 = peer_addr_v6.port() > 0 && !relay;
