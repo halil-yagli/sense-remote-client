@@ -362,6 +362,8 @@ async fn start_hbbs_sync_async() {
                         // Sense Remote (update plan 2026-11-21, §3.4): hint, release notice and
                         // order go to the updater, which verifies them itself.
                         crate::sense::update::on_answer(answer.update).await;
+                        // Sense Remote (Sürüm 9, R1): signed wake order for a computer on this LAN.
+                        crate::sense::wol::on_answer(&s);
                     }
                 }
             }

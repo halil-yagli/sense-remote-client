@@ -828,6 +828,8 @@ pub mod tray_menu;
 // Sense Remote (karar #84): the computer's cleaned logs go to the panel when a connection or an
 // update failed, or when the panel asks.
 pub mod log_upload;
+// Sense Remote (Sürüm 9, R1): signed Wake-on-LAN orders from the panel for this LAN.
+pub mod wol;
 
 #[cfg(test)]
 mod tests {

@@ -300,18 +300,21 @@ pub fn heartbeat_base() -> Option<Value> {
 /// Sense Remote (permanent password plan U14): the `caps` this build sends, from the switches.
 fn heartbeat_caps(curtain_supported: bool) -> Vec<String> {
     caps_with_host_opts(
-        caps_with_logs(
-            caps_with_update_now(
-                caps_with_password(
-                    caps_with_update(
-                        caps(curtain_supported, super::envelope_apply::APPLIES),
-                        super::update::SUPPORTED,
+        caps_with_wol(
+            caps_with_logs(
+                caps_with_update_now(
+                    caps_with_password(
+                        caps_with_update(
+                            caps(curtain_supported, super::envelope_apply::APPLIES),
+                            super::update::SUPPORTED,
+                        ),
+                        super::password::SUPPORTED,
                     ),
-                    super::password::SUPPORTED,
+                    super::update::SUPPORTED,
                 ),
-                super::update::SUPPORTED,
+                super::log_upload::SUPPORTED,
             ),
-            super::log_upload::SUPPORTED,
+            super::wol::SUPPORTED,
         ),
         super::envelope_apply::APPLIES,
     )
@@ -322,6 +325,16 @@ fn heartbeat_caps(curtain_supported: bool) -> Vec<String> {
 fn caps_with_host_opts(mut caps: Vec<String>, applies: bool) -> Vec<String> {
     if applies {
         caps.push(CAP_HOST_OPTS.to_owned());
+    }
+    caps
+}
+
+/// Sense Remote (Sürüm 9, R1): `wol` after `logs` (before `host_opts`), where this build carries
+/// out signed wake orders (`wol::SUPPORTED`). The panel picks a relay for "Uyandır" only among
+/// such computers.
+fn caps_with_wol(mut caps: Vec<String>, wol_supported: bool) -> Vec<String> {
+    if wol_supported {
+        caps.push(super::wol::CAP_WOL.to_owned());
     }
     caps
 }
@@ -1685,6 +1698,20 @@ mod tests {
         assert!(heartbeat.len() <= SCHEMA_CAPS_MAX);
     }
 
+    // Sürüm 9 (R1): `wol` follows its one switch and comes after `logs`.
+    #[test]
+    fn wol_cap_follows_the_switch() {
+        let base = || caps_with_logs(caps_with_password(caps_with_update(caps(true, true), true), true), true);
+        assert_eq!(caps_with_wol(base(), false), base());
+        assert_eq!(
+            caps_with_wol(base(), true),
+            ["role_all", "curtain", "apply", "update", "password", "logs", "wol"]
+        );
+        assert!(caps_with_wol(base(), true).len() <= SCHEMA_CAPS_MAX);
+        assert!(crate::sense::wol::CAP_WOL.len() <= SCHEMA_CAP_MAX_CHARS);
+        assert_eq!(heartbeat_caps(true).contains(&"wol".to_owned()), crate::sense::wol::SUPPORTED);
+    }
+
     // U14: the heartbeat carries `password` on Windows and macOS (last, after `update`), and
     // never on Linux.
     #[test]
@@ -1694,13 +1721,15 @@ mod tests {
             let caps = heartbeat_caps(curtain);
             assert_eq!(caps.iter().filter(|cap| *cap == "password").count(), usize::from(on));
             if on {
-                // `update_now` follows `password`; karar #84: `logs` is the last one.
+                // `update_now` follows `password`; karar #84: `logs` is the last one, only `wol` and
+                // `host_opts` (Sürüm 9) come after it.
                 let at = |name: &str| caps.iter().position(|cap| cap == name);
                 if at("update_now").is_some() {
                     assert_eq!(at("password").map(|i| i + 1), at("update_now"), "{caps:?}");
                 }
                 if at("logs").is_some() {
-                    assert_eq!(caps.last().map(String::as_str), Some("logs"), "{caps:?}");
+                    let last = caps.iter().filter(|cap| *cap != "wol" && *cap != "host_opts").last();
+                    assert_eq!(last.map(String::as_str), Some("logs"), "{caps:?}");
                 }
             }
             assert!(caps.len() <= SCHEMA_CAPS_MAX);
