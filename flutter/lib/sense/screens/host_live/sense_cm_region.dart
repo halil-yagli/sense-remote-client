@@ -11,7 +11,7 @@
 // plain frame (no Windows 11 border or rounded corners around the transparent
 // window), the size read-back for the record, and the Flutter view refresh.
 
-import 'dart:ffi';
+import 'dart:ffi' hide Size;
 import 'dart:isolate';
 import 'dart:ui' show Rect, Size;
 
