@@ -11,15 +11,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../host_live/sense_cm_style.dart';
+import '../../tokens/sense_tokens.dart';
+import '../../tokens/theme.dart';
 import '../host_live/sense_cm_widgets.dart';
 import '../controller/sense_home_strings.dart';
 import '../install/sense_install_strings.dart';
 import '../install/sense_mac_permissions.dart';
 
 export '../install/sense_mac_permissions.dart';
-
-typedef _T = SenseCmTokens;
 
 bool _hosts(SenseHomeRole role) =>
     role == SenseHomeRole.host || role == SenseHomeRole.both;
@@ -197,11 +196,11 @@ class SenseMacPermissionNotice extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(senseMacMissingText(missing),
                 key: const Key('sense-mac-perm-title'),
-                style: _T.text(size: 12, weight: FontWeight.w600)),
+                style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold)),
           ),
         Text(senseMacMissingNote(missing),
             key: const Key('sense-mac-perm-note'),
-            style: _T.text(size: 11, color: _T.soft)),
+            style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textSecondary)),
         const SizedBox(height: 4),
         SenseCmTextButton(
             key: const Key('sense-mac-perm-open'),
@@ -233,9 +232,9 @@ class SenseMacPermissionCardView extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       padding: const EdgeInsets.fromLTRB(12, 12, 8, 6),
       decoration: BoxDecoration(
-        color: _T.field,
-        borderRadius: BorderRadius.circular(_T.radiusCard),
-        border: Border.all(color: _T.border),
+        color: SenseColors.surface,
+        borderRadius: BorderRadius.circular(SenseRadii.popup),
+        border: Border.all(color: SenseColors.line),
       ),
       child: SenseMacPermissionNotice(missing: missing, onOpen: onOpen),
     );

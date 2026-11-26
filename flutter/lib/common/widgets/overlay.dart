@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/sense/tokens/sense_tokens.dart'; // Sense Remote (T2)
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:debounce_throttle/debounce_throttle.dart';
 import 'package:flutter/material.dart';
@@ -86,7 +87,7 @@ class DraggableChatWindow extends StatelessWidget {
                 translate("Chat"),
                 style: const TextStyle(
                     color: Colors.white,
-                    fontFamily: 'WorkSans',
+                    fontFamily: SenseFont.family,
                     fontWeight: FontWeight.bold,
                     fontSize: 20),
               )),

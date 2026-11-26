@@ -1,3 +1,4 @@
+import '../../sense/tokens/sense_tokens.dart'; // Sense Remote (T2)
 import 'dart:async';
 
 import 'package:auto_size_text_field/auto_size_text_field.dart';
@@ -231,7 +232,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
                           _idController.id = text;
                         },
                         style: const TextStyle(
-                          fontFamily: 'WorkSans',
+                          fontFamily: SenseFont.family,
                           fontWeight: FontWeight.bold,
                           fontSize: 30,
                           color: MyTheme.idColor,

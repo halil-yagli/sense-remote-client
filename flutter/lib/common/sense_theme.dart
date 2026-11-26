@@ -35,53 +35,33 @@ bool senseRoleInstalled() {
   }
 }
 
-typedef _C = SenseThemeColors;
-
-// Sense Remote (A1b, YH T1): bridge only, aliases of the one token set.
-class SenseThemeColors {
-  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
-  static const black = SenseColors.bg;
-  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
-  static const white = SenseColors.text;
-  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
-  static const surface = SenseColors.surface;
-  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
-  static const raised = SenseColors.raised;
-  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
-  static const line = SenseColors.line;
-  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
-  static const hover = SenseColors.hover;
-  @Deprecated('Sense Remote A1b: use SenseColors / tokens/sense_tokens.dart')
-  static const selection = SenseColors.glowEnd;
-}
-
 /// Pure: the Sense dark theme on top of RustDesk's dark theme (keeps its
 /// extensions and component sizes, swaps colors and the font).
 ThemeData senseDarkTheme(ThemeData base) {
   return base.copyWith(
-    scaffoldBackgroundColor: _C.black,
-    canvasColor: _C.black,
-    cardColor: _C.surface,
-    dialogBackgroundColor: _C.surface,
-    hoverColor: _C.hover,
-    dividerColor: _C.line,
+    scaffoldBackgroundColor: SenseColors.bg,
+    canvasColor: SenseColors.bg,
+    cardColor: SenseColors.surface,
+    dialogBackgroundColor: SenseColors.surface,
+    hoverColor: SenseColors.hover,
+    dividerColor: SenseColors.line,
     colorScheme: base.colorScheme.copyWith(
-      primary: _C.white,
-      onPrimary: _C.black,
-      secondary: _C.white,
-      onSecondary: _C.black,
+      primary: SenseColors.text,
+      onPrimary: SenseColors.bg,
+      secondary: SenseColors.text,
+      onSecondary: SenseColors.bg,
       // Many stock pages paint `colorScheme.background` (deprecated, still read).
       // ignore: deprecated_member_use
-      background: _C.black,
+      background: SenseColors.bg,
     ),
     textTheme: base.textTheme.apply(fontFamily: kSenseFont),
     primaryTextTheme: base.primaryTextTheme.apply(fontFamily: kSenseFont),
     textSelectionTheme: const TextSelectionThemeData(
-        cursorColor: _C.white, selectionColor: _C.selection),
+        cursorColor: SenseColors.text, selectionColor: SenseColors.glowEnd),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: _C.white,
-        foregroundColor: _C.black,
+        backgroundColor: SenseColors.text,
+        foregroundColor: SenseColors.bg,
         disabledForegroundColor: Colors.white38,
         disabledBackgroundColor: Colors.white10,
         textStyle: const TextStyle(
@@ -91,14 +71,14 @@ ThemeData senseDarkTheme(ThemeData base) {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        backgroundColor: _C.black,
-        foregroundColor: _C.white,
-        side: const BorderSide(color: _C.line),
+        backgroundColor: SenseColors.bg,
+        foregroundColor: SenseColors.text,
+        side: const BorderSide(color: SenseColors.line),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     ),
     menuBarTheme: const MenuBarThemeData(
-        style: MenuStyle(backgroundColor: MaterialStatePropertyAll(_C.black))),
+        style: MenuStyle(backgroundColor: MaterialStatePropertyAll(SenseColors.bg))),
   );
 }
 
