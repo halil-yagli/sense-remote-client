@@ -988,3 +988,29 @@ fn other_platforms_reject_in_the_daemon_entry() {
     };
     assert_eq!(out, vec![rejected.clone(), rejected]);
 }
+
+// Sürüm 9 denetim düzeltmesi (K27): an optional Host setting the panel stopped managing is not
+// protected any more, so the user's change passes the daemon; managed ones stay root's.
+#[test]
+fn root_frees_extended_settings_the_envelope_no_longer_carries() {
+    let map = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    };
+    let root = map(&[
+        ("sense-managed-ext", "v1:disable-udp"),
+        ("disable-udp", "Y"),
+        ("relay-fallback-delay", "9"),
+    ]);
+    let mut incoming = map(&[("disable-udp", "N"), ("relay-fallback-delay", "3")]);
+    keep_root_options(&mut incoming, &root);
+    assert_eq!(incoming["disable-udp"], "Y");
+    assert_eq!(incoming["relay-fallback-delay"], "3");
+    // The marker itself is root's.
+    assert_eq!(incoming["sense-managed-ext"], "v1:disable-udp");
+    // No marker: as before, all extended keys protected.
+    assert!(is_protected_with("relay-fallback-delay", None));
+    assert!(!is_protected_with("relay-fallback-delay", Some("v1:")));
+}

@@ -371,7 +371,14 @@ pub const PROTECTED_ACCESS_OPTIONS: [&str; 3] = ["verification-method", "approve
 /// Options the daemon keeps its own value for: everything an envelope sets, plus the access
 /// settings.
 pub fn is_protected_option(key: &str) -> bool {
-    PROTECTED_ACCESS_OPTIONS.contains(&key) || super::envelope::is_panel_option(key)
+    is_protected_with(key, None)
+}
+
+/// Sense Remote (K27): like `is_protected_option`, but an optional Host setting the last applied
+/// envelope did not carry (`marker` = root's `envelope::OPTION_MANAGED_EXT`) is free: the user's
+/// change passes, matching the unlocked setting in the app.
+pub fn is_protected_with(key: &str, marker: Option<&str>) -> bool {
+    PROTECTED_ACCESS_OPTIONS.contains(&key) || super::envelope::is_panel_managed(key, marker)
 }
 
 /// Sense Remote (G4-3): the daemon protects its config when a Sense role that takes incoming
@@ -388,9 +395,10 @@ pub fn sync_protected(state: Result<Option<Option<SenseRole>>, String>) -> bool 
 /// Sense Remote (G4-3): protected options of `incoming` (from a user process) are replaced by
 /// root's own: its value, or no value when root has none. Other options pass.
 pub fn keep_root_options(incoming: &mut HashMap<String, String>, root: &HashMap<String, String>) {
-    incoming.retain(|key, _| !is_protected_option(key));
+    let marker = root.get(super::envelope::OPTION_MANAGED_EXT).map(String::as_str);
+    incoming.retain(|key, _| !is_protected_with(key, marker));
     for (key, value) in root {
-        if is_protected_option(key) {
+        if is_protected_with(key, marker) {
             incoming.insert(key.clone(), value.clone());
         }
     }

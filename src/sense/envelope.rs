@@ -537,13 +537,58 @@ impl ExtendedRule {
 /// The options the app writes for `SENSE_AUDIO_INPUT` besides itself: the RustDesk key.
 pub const OPTION_AUDIO_INPUT: &str = "audio-input";
 
+/// Sense Remote (Sürüm 9 denetim düzeltmesi, K27): which `EXTENDED_OPTIONS` the last applied
+/// envelope carried. The extended settings are optional, so when the panel stops managing one the
+/// computer keeps its last value (like an envelope without them always did) but the app must no
+/// longer lock it. Stored as a normal option, written with the envelope's other options
+/// (`sense_set_envelope_options`); `v1:` + the keys, comma separated. The prefix keeps the value
+/// non-empty (an empty option is removed by `Config::set_options`).
+pub const OPTION_MANAGED_EXT: &str = "sense-managed-ext";
+const MANAGED_EXT_PREFIX: &str = "v1:";
+
+/// The marker value for the envelope's `config_options`: every extended key it carries.
+pub fn managed_ext_marker(config_options: &BTreeMap<String, String>) -> String {
+    let keys: Vec<&str> = EXTENDED_OPTIONS
+        .iter()
+        .map(|(key, _)| *key)
+        .filter(|key| config_options.contains_key(*key))
+        .collect();
+    format!("{MANAGED_EXT_PREFIX}{}", keys.join(","))
+}
+
+/// The extended (optional) setting an option name belongs to: the key itself, or `audio-input`
+/// for `sense-audio-input`. `None` for everything else.
+fn extended_of(option: &str) -> Option<&'static str> {
+    if option == OPTION_AUDIO_INPUT {
+        return Some(SENSE_AUDIO_INPUT);
+    }
+    EXTENDED_OPTIONS
+        .iter()
+        .map(|(key, _)| *key)
+        .find(|key| *key == option)
+}
+
 /// True when only the panel writes this key: `ALLOWED_OPTIONS`, `EXTENDED_OPTIONS` and the RustDesk
 /// option `SENSE_AUDIO_INPUT` becomes. The app never offers to change these, and on macOS the
-/// daemon keeps its own value for them.
+/// daemon keeps its own value for them. Static: an extended key counts even when the last envelope
+/// did not carry it; `is_panel_managed` is the dynamic answer.
 pub fn is_panel_option(key: &str) -> bool {
     key == OPTION_AUDIO_INPUT
+        || key == OPTION_MANAGED_EXT
         || ALLOWED_OPTIONS.iter().any(|(allowed, _)| *allowed == key)
         || EXTENDED_OPTIONS.iter().any(|(allowed, _)| *allowed == key)
+}
+
+/// Sense Remote (K27): like `is_panel_option`, but an extended setting the last applied envelope
+/// did not carry is free (`marker` = the stored `OPTION_MANAGED_EXT`). No marker (no envelope
+/// applied by this build yet) or one that is not understood keeps every extended key locked.
+pub fn is_panel_managed(key: &str, marker: Option<&str>) -> bool {
+    match extended_of(key) {
+        Some(ext) => marker
+            .and_then(|m| m.strip_prefix(MANAGED_EXT_PREFIX))
+            .map_or(true, |keys| keys.split(',').any(|k| k == ext)),
+        None => is_panel_option(key),
+    }
 }
 
 /// True when every key is on the allow list (base or extended) and every value fits its rule.
