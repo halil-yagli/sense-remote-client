@@ -31,6 +31,9 @@ abstract final class SenseSettingsStrings {
   static const String confirmClosingTabs = 'Birden çok sekmeyi kapatmadan önce sor';
   static const String keepAwake = 'Bağlantı sürerken bu bilgisayarı uyanık tut';
   static const String syncClipboard = 'Sekmeler arasında panoyu eşitle';
+  static const String askNote = 'Oturum bitince not sor';
+  static const String askNoteHint =
+      'Bağlantı bitince “ne yaptın?” diye sorulur; not panelin denetim kaydına yazılır.';
   static const String shortcuts = 'Uzak oturumda klavye kısayolları';
   static const String shortcutsHint = 'Ctrl+Alt+Shift+B çubuğu gizler / gösterir, Ctrl+Alt+Shift+Q bağlantıyı bitirir (Mac: Cmd+Option+Shift). Tüm liste oturumda Klavye › Kısayollar.';
   static const String passThrough = 'Kısayolları karşı tarafa ilet';

@@ -168,6 +168,7 @@ void main() {
       'enable-confirm-closing-tabs',
       'keep-awake-during-outgoing-sessions',
       'allow-sync-clipboard-between-sessions',
+      'allow-ask-for-note', // R7: off by default
     ];
     for (final key in keys) {
       testWidgets(key, (tester) async {

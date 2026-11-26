@@ -37,6 +37,7 @@ import 'sense/router.dart'; // Sense Remote (A2c)
 import 'sense/screens/controller/sense_home_strings.dart' // Sense Remote (A2c)
     show SenseHomeRole, senseHomeRoleFrom;
 import 'sense/screens/controller/sense_update_model.dart'; // Sense Remote (A2c)
+import 'sense/screens/controller/shell/controller_window.dart'; // Sense Remote (Y2)
 import 'sense/strings/common.dart'; // Sense Remote (A2c)
 import 'sense/diag_log.dart'; // Sense Remote (karar #86)
 
@@ -196,6 +197,10 @@ void runMainApp(bool startService, {bool envReady = false}) async {
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     // Restore the location of the main window before window hide or show.
     await restoreWindowPosition(WindowType.Main);
+    // Sense Remote (Y2, T3, T9): the Controller window opens at 1180x720 (fitted to the screen).
+    if (isDesktop && senseControllerWindowApplies(_senseWindowRole())) {
+      await senseSizeControllerWindow();
+    }
     // Check the startup argument, if we successfully handle the argument, we keep the main window hidden.
     final handledByUniLinks = await initUniLinks();
     debugPrint("handled by uni links: $handledByUniLinks");
@@ -213,6 +218,13 @@ void runMainApp(bool startService, {bool envReady = false}) async {
     setResizable(!bind.isIncomingOnly());
   });
 }
+
+/// Sense Remote (Y2): role of this computer for the window size (same reading as
+/// the home screen's `senseHomeRole`).
+SenseHomeRole _senseWindowRole() => senseHomeRoleFrom(
+    incomingOnly: bind.isIncomingOnly(),
+    outgoingOnly: bind.isOutgoingOnly(),
+    settingsDisabled: bind.isDisableSettings());
 
 /// Sense Remote (A2c, T8): the version just installed, when the app opens
 /// right after an update; null otherwise (or when the status is unreadable).
