@@ -23,8 +23,11 @@ fn build_mac() {
             b.flag("-DNO_InputMonitoringAuthStatus=1");
         }
     }
-    b.flag("-std=c++17").file(file).compile("macos");
+    // Sense Remote (MAC-SONRA-15): the maintenance curtain of ghost mode.
+    let sense_curtain = "src/sense/curtain_mac.mm";
+    b.flag("-std=c++17").file(file).file(sense_curtain).compile("macos");
     println!("cargo:rerun-if-changed={}", file);
+    println!("cargo:rerun-if-changed={}", sense_curtain);
 }
 
 #[cfg(all(windows, feature = "inline"))]

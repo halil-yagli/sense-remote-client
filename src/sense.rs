@@ -800,6 +800,8 @@ pub mod mac_state;
 pub mod server;
 // Sense Remote: maintenance curtain of ghost mode; privacy mode turns it on (wave 3 I10).
 pub mod curtain;
+// Sense Remote (MAC-SONRA-15): the curtain on macOS (pure parts are tested everywhere).
+pub mod curtain_mac;
 // Sense Remote (S8): one Controller at a time.
 pub mod single_conn;
 // Sense Remote (S10): connection quality the app shows (last frame age, loss estimate).

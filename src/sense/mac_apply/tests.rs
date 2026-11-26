@@ -270,8 +270,8 @@ fn valid_envelope_is_applied_and_its_seq_stored() {
     assert_eq!((store.role, store.seq), (Some(SenseRole::Both), 5));
     assert_eq!(store.options["enable-terminal"], "Y");
     assert_eq!(store.options["enable-keyboard"], "Y");
-    // macOS has no curtain: the privacy mode permission is not written.
-    assert!(!store.options.contains_key("enable-privacy-mode"));
+    // Sürüm 9 (MAC-SONRA-15): macOS has the curtain, the ghost mode permission is written.
+    assert!(store.options.contains_key("enable-privacy-mode"));
 
     // Same role as installed: nothing to report, the role is not rewritten.
     let raw = s.sign(&strategy(6, json!({ "sense_role": "host_controller" })));

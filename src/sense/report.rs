@@ -59,7 +59,7 @@ pub const EXT_VERSION: u32 = 1;
 /// `role_all`: this build takes all three roles from the panel.
 pub const CAPS: [&str; 1] = ["role_all"];
 /// Sense Remote (wave 3, I10): added to `caps` only where the maintenance curtain can be shown
-/// (`curtain::is_supported`: Windows 10 2004+; not on macOS or older Windows).
+/// (`curtain::is_supported`: Windows 10 2004+ and macOS; not on older Windows).
 pub const CAP_CURTAIN: &str = "curtain";
 /// Sense Remote (Mac M4, plan §3.4): added to `caps` only where this build applies a signed
 /// envelope (`envelope_apply::APPLIES`). The panel looks at it on macOS: a Mac without it gets
@@ -1726,9 +1726,12 @@ mod tests {
         assert!(base(false).get("maintenance_curtain").is_none());
         assert_eq!(base(false)["caps"], serde_json::json!(["role_all"]));
         assert_eq!(base(true)["maintenance_curtain"], serde_json::json!(false));
-        // Outside Windows there is no curtain, so no `curtain` capability (MAC-SONRA-15).
-        #[cfg(not(windows))]
+        // Outside Windows and macOS there is no curtain, so no `curtain` capability; macOS has
+        // it since Sürüm 9 (MAC-SONRA-15).
+        #[cfg(not(any(windows, target_os = "macos")))]
         assert!(!crate::sense::curtain::is_supported());
+        #[cfg(target_os = "macos")]
+        assert!(crate::sense::curtain::is_supported());
     }
 
     /// Mac M4: what `displays_mac` reads, mapped to the contract.
