@@ -88,6 +88,9 @@ abstract class SenseSessionBackend extends ChangeNotifier {
   SenseResolution? get originalResolution;
   SenseResolution? get fitLocalResolution;
   void setResolution(SenseResolution r);
+
+  /// Size the custom resolution fields start with (the current one).
+  SenseResolution? get customResolutionStart => currentResolution;
   bool get useAllMyDisplays;
   void setUseAllMyDisplays(bool v);
   int get virtualDisplayCount;
@@ -126,6 +129,15 @@ abstract class SenseSessionBackend extends ChangeNotifier {
   String? get activeCodec;
   bool get muted;
   void setMuted(bool v);
+
+  /// How large the remote image is drawn now, in percent (O1 "%N ölçekte"), or null.
+  int? get viewScalePercent;
+
+  /// Drawing settings of this computer (local options, used by the next connection).
+  bool get textureRender;
+  void setTextureRender(bool v);
+  bool get d3dRender;
+  void setD3dRender(bool v);
 
   // ---- O5 Klavye ve fare ----
   /// Keyboard modes this session supports (map, translate, legacy).
@@ -179,7 +191,21 @@ abstract class SenseSessionBackend extends ChangeNotifier {
   void setLockAfterEnd(bool v);
   void addNote();
   void openTerminal();
+
+  /// Windows: the terminal runs as administrator (RustDesk `setEnvTerminalAdmin`).
+  void openTerminalAdmin();
   void openTunnel();
+
+  /// A separate camera connection to the same computer (RustDesk "View camera").
+  void openCamera();
+
+  /// "Bu bilgisayara hep aktarmayla bağlan" (peer option `force-always-relay`, next connection).
+  bool get forceRelay;
+
+  /// The panel turned relay on for every computer (`force-always-relay` in the main
+  /// options): the switch shows on and cannot be changed here.
+  bool get forceRelayEverywhere;
+  void setForceRelay(bool v);
 
   /// The connection fingerprint, or empty.
   String get fingerprint;

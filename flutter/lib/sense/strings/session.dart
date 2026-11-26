@@ -41,6 +41,7 @@ abstract final class SenseSessionStrings {
 
   // Remote image scale (O1).
   static String scaleNote(int w, int h, int pct) => '$w×$h · %$pct ölçekte';
+  static String scaleNoteShort(int pct) => '%$pct ölçekte';
 
   // ---- Island (O2) ----
   static const String islandHide = 'Gizle';
@@ -95,6 +96,12 @@ abstract final class SenseSessionStrings {
   static const String virtualAdd = 'Sanal ekran ekle';
   static const String virtualRemoveAll = 'Tüm sanal ekranları çıkar';
   static String virtualCount(int n) => '$n sanal ekran';
+  static const String customResolution = 'Özel çözünürlük';
+  static const String customResolutionHint = 'sanal ekran';
+  static const String customResolutionWidth = 'Genişlik';
+  static const String customResolutionHeight = 'Yükseklik';
+  static const String customResolutionApply = 'Uygula';
+  static String customResolutionRange(int min, int max) => 'Genişlik ve yükseklik $min–$max arası olmalı';
 
   // ---- Görüntü (O4) ----
   static const String size = 'Boyut';
@@ -123,6 +130,16 @@ abstract final class SenseSessionStrings {
   static const String codecAuto = 'Otomatik';
   static const String audio = 'Ses';
   static const String mute = 'Uzak bilgisayarın sesini kapat';
+  static const String remoteImage = 'Uzak ekran';
+  static String scalePct(int pct) => '%$pct';
+  static const String renderSection = 'Gelişmiş';
+  static const String textureRender = 'Doku ile çiz';
+  static const String d3dRender = 'D3D ile çiz';
+  static const String nextConnection = 'yeni bağlantıda';
+  static const String d3dHint = 'Windows · yeni bağlantıda';
+  static const String renderTexture = 'doku';
+  static const String renderD3d = 'D3D';
+  static const String renderDefault = 'varsayılan';
 
   // ---- Klavye ve fare (O5) ----
   static const String keyboardMode = 'Klavye';
@@ -185,10 +202,26 @@ abstract final class SenseSessionStrings {
   static const String note = 'Oturuma not ekle';
   static const String advanced = 'Gelişmiş';
   static const String advancedSummary = 'terminal, tünel…';
+  static const String advancedSummaryCamera = 'terminal, tünel, kamera…';
   static const String terminal = 'Terminal aç';
+  static const String terminalAdmin = 'Terminal aç (yönetici)';
+  static const String terminalAdminHint = 'Windows';
+  static const String camera = 'Kamerayı görüntüle';
+  static const String cameraHint = 'ayrı pencere';
+  static const String forceRelay = 'Bu bilgisayara hep aktarmayla bağlan';
+  static const String forceRelayHint = 'sonraki bağlantıda';
+  static const String forceRelayEverywhere = 'panelden açık';
   static const String tunnel = 'TCP tüneli';
   static const String fingerprint = 'Parmak izini kopyala';
   static const String fingerprintCopied = 'Parmak izi kopyalandı';
   static const String fingerprintNone = 'Parmak izi yok';
   static const String typed = 'Panodaki metin yazıldı';
+
+  // ---- Kamera penceresi (O6 "Kamerayı görüntüle") ----
+  static const String cameraWindow = 'Kamera';
+  static String cameraN(int n) => 'Kamera $n';
+  static const String cameraConnecting = 'Kamera bağlanıyor…';
+  static const String cameraNone = 'Kamera bulunamadı';
+  static String cameraCount(int n) => '$n kamera';
+  static const String cameraEndTooltip = 'Kamera bağlantısını bitir';
 }

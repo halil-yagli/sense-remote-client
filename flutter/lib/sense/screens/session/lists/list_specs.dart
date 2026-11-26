@@ -89,6 +89,20 @@ SenseListSpec senseScreensList(SenseSessionBackend b) {
         }
       },
     ));
+    // R5: width × height, only on a virtual display resolution (RustDesk rule).
+    if (SenseRules.customResolution(f)) {
+      final start = b.customResolutionStart;
+      res.add(SenseSizeInputEntry(
+        id: 'screens.customResolution',
+        label: _S.customResolution,
+        hint: _S.customResolutionHint,
+        rustdesk: 'Custom resolution (resolution_custom_tip)',
+        width: start?.width,
+        height: start?.height,
+        noRights: !b.grants.allows(SenseGrant.control),
+        onApply: (w, h) => b.setResolution(SenseResolution(w, h)),
+      ));
+    }
   }
 
   final virtualEntries = <SenseListEntry>[
@@ -202,7 +216,17 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
     ),
   ];
 
+  final pct = b.viewScalePercent;
+  final remote = b.currentResolution;
   final scale = <SenseListEntry>[
+    // O1 "%N ölçekte": how large the remote image is drawn now.
+    if (pct != null)
+      SenseInfoEntry(
+        id: 'display.scaleNote',
+        label: _S.remoteImage,
+        rustdesk: 'Scale (canvas, read only)',
+        detail: remote == null ? _S.scaleNoteShort(pct) : _S.scaleNote(remote.width, remote.height, pct),
+      ),
     SenseSliderEntry(
       id: 'display.customScale',
       label: _S.customScale,
@@ -306,8 +330,35 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
   final viewSummary = switch (view) {
     SenseRd.viewOriginal => _S.originalSize,
     SenseRd.viewCustom => '${_S.customScale} %${b.customScalePercent}',
-    _ => _S.fitWindow,
+    _ => pct == null ? _S.fitWindow : '${_S.fitWindow} · ${_S.scalePct(pct)}',
   };
+
+  // R4: drawing settings of this computer (RustDesk settings page), for a black or
+  // flickering image on some graphics cards; they apply to the next connection.
+  final render = <SenseListEntry>[
+    if (SenseRules.textureRender(f))
+      SenseToggleEntry(
+        id: 'display.textureRender',
+        label: _S.textureRender,
+        hint: _S.nextConnection,
+        rustdesk: 'Use texture rendering',
+        value: b.textureRender,
+        onChanged: b.setTextureRender,
+      ),
+    if (SenseRules.d3dRender(f))
+      SenseToggleEntry(
+        id: 'display.d3dRender',
+        label: _S.d3dRender,
+        hint: _S.d3dHint,
+        rustdesk: 'Use D3D rendering',
+        value: b.d3dRender,
+        onChanged: b.setD3dRender,
+      ),
+  ];
+  final renderOn = [
+    if (SenseRules.textureRender(f) && b.textureRender) _S.renderTexture,
+    if (SenseRules.d3dRender(f) && b.d3dRender) _S.renderD3d,
+  ];
 
   return SenseListSpec(
     title: _S.display,
@@ -338,6 +389,12 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
               onChanged: b.setMuted,
             ),
         ],
+      ),
+      SenseListSection(
+        id: 'render',
+        title: _S.renderSection,
+        summary: renderOn.isEmpty ? _S.renderDefault : renderOn.join(' · '),
+        entries: render,
       ),
     ]),
   );
@@ -671,6 +728,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
   ];
 
   final terminal = g.allows(SenseGrant.terminalTunnel);
+  final camera = SenseRules.viewCamera(f);
   final advanced = <SenseListEntry>[
     if (SenseRules.advanced(f)) ...[
       SenseActionEntry(
@@ -681,6 +739,16 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         noRights: !terminal,
         onTap: b.openTerminal,
       ),
+      if (SenseRules.terminalAdmin(f))
+        SenseActionEntry(
+          id: 'actions.terminalAdmin',
+          label: _S.terminalAdmin,
+          hint: _S.terminalAdminHint,
+          rustdesk: 'Terminal (Run as administrator)',
+          tag: _S.technical,
+          noRights: !terminal,
+          onTap: b.openTerminalAdmin,
+        ),
       SenseActionEntry(
         id: 'actions.tunnel',
         label: _S.tunnel,
@@ -690,6 +758,25 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         onTap: b.openTunnel,
       ),
     ],
+    // O6: the computer's camera permission (panel) decides; the computer refuses the
+    // camera connection itself when it is off.
+    if (camera)
+      SenseActionEntry(
+        id: 'actions.camera',
+        label: _S.camera,
+        hint: _S.cameraHint,
+        rustdesk: 'View camera',
+        onTap: b.openCamera,
+      ),
+    if (SenseRules.forceRelay(f))
+      SenseToggleEntry(
+        id: 'actions.forceRelay',
+        label: _S.forceRelay,
+        hint: b.forceRelayEverywhere ? _S.forceRelayEverywhere : _S.forceRelayHint,
+        rustdesk: 'Always connect via relay',
+        value: b.forceRelayEverywhere || b.forceRelay,
+        onChanged: b.forceRelayEverywhere ? null : b.setForceRelay,
+      ),
     SenseActionEntry(
       id: 'actions.fingerprint',
       label: _S.fingerprint,
@@ -712,7 +799,12 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         entries: clipboard,
       ),
       SenseListSection(id: 'session', title: _S.session, entries: session),
-      SenseListSection(id: 'advanced', title: _S.advanced, summary: _S.advancedSummary, entries: advanced),
+      SenseListSection(
+        id: 'advanced',
+        title: _S.advanced,
+        summary: camera ? _S.advancedSummaryCamera : _S.advancedSummary,
+        entries: advanced,
+      ),
     ]),
   );
 }

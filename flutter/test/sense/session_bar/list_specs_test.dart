@@ -65,6 +65,13 @@ const kCorrespondence = <String, String>{
   'Terminal (connectWithToken)': 'actions.terminal',
   'TCP (connectWithToken)': 'actions.tunnel',
   'Parmak izi (onCopyFingerprint)': 'actions.fingerprint',
+  // Sürüm 9 (Paket L): RustDesk items that had no list entry yet.
+  'Kamerayı görüntüle (connectWithToken isViewCamera)': 'actions.camera',
+  'Terminal, yönetici (setEnvTerminalAdmin)': 'actions.terminalAdmin',
+  'Hep aktarmayla bağlan (force-always-relay)': 'actions.forceRelay',
+  'Doku ile çizim (use-texture-render)': 'display.textureRender',
+  'D3D ile çizim (allow-d3d-render)': 'display.d3dRender',
+  'Özel çözünürlük (resolution_custom_tip)': 'screens.customResolution',
 };
 
 void main() {
@@ -73,7 +80,10 @@ void main() {
     // Follow remote cursor/window need a peer from 1.2.4 with more than one display;
     // zoom cursor needs a fitted view: check those on a second, adaptive backend.
     final fitted = FakeBackend();
-    final all = {...entriesOf(b), ...entriesOf(fitted)};
+    // The custom resolution needs a virtual display resolution.
+    final virtual = FakeBackend(
+        facts: const SensePeerFacts(displaysCount: 3, resolutionsCount: 3, virtualResolution: true));
+    final all = {...entriesOf(b), ...entriesOf(fitted), ...entriesOf(virtual)};
     final missing = [
       for (final e in kCorrespondence.entries)
         if (!all.containsKey(e.value)) '${e.key} → ${e.value}',
@@ -224,6 +234,7 @@ void main() {
         'actions.blockInput',
         'actions.record',
         'actions.terminal',
+        'actions.terminalAdmin',
         'actions.tunnel',
         'actions.remoteFiles',
         'actions.fileCopyPaste',

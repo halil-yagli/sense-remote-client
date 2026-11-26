@@ -1,5 +1,5 @@
 // Sense Remote: fixes from the golden ↔ prototype review (flow C): drawn carets instead of
-// glyphs (G1), no camera item (G4), no handle over an open list (G5), disabled sliders (O4),
+// glyphs (G1), camera item only when supported (G4, Y1), no handle over an open list (G5), disabled sliders (O4),
 // trackpad range and the follow-cursor rows (O5), Turkish percent (G9).
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -40,13 +40,18 @@ void main() {
     await drain(tester);
   });
 
-  test('G4: no camera item, summary without "kamera" (#67)', () {
-    final b = FakeBackend();
-    final spec = senseBuildList(SenseBarMenu.actions, b);
+  // G4 was "no camera item" (#67 read as covering it). #67 only moved the video call;
+  // Sürüm 9 (#102, Y1) brings back the one-way "Kamerayı görüntüle" of O6 / prototype c05.
+  // Still no camera button in the chat call (#67) and none where the peer cannot show one.
+  test('G4 / Y1: camera item only where the peer can show its cameras', () {
+    final none = FakeBackend(facts: const SensePeerFacts(displaysCount: 3));
+    final spec = senseBuildList(SenseBarMenu.actions, none);
     expect(spec.allEntries.map((e) => e.id), isNot(contains('actions.camera')));
     expect(spec.allEntries.map((e) => e.label).join(' '), isNot(contains('Kamera')));
-    final adv = spec.sections.firstWhere((s) => s.id == 'advanced');
-    expect(adv.summary, isNot(contains('kamera')));
+    expect(spec.sections.firstWhere((s) => s.id == 'advanced').summary, isNot(contains('kamera')));
+    final cam = senseBuildList(SenseBarMenu.actions, FakeBackend());
+    expect(cam.allEntries.map((e) => e.id), contains('actions.camera'));
+    expect(cam.sections.firstWhere((s) => s.id == 'advanced').summary, 'terminal, tünel, kamera…');
   });
 
   testWidgets('O4: quality and frame rate sliders are off until "Özel kalite" is on', (tester) async {

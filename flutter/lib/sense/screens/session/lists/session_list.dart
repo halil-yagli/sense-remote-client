@@ -5,6 +5,7 @@
 // reaches down to the bottom of the window. A choice keeps the list open and shows a
 // short notification (the caller's [onNotify]).
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../components/accordion.dart';
 import '../../../components/button.dart';
@@ -232,6 +233,7 @@ class SenseListEntryView extends StatelessWidget {
       SenseSliderEntry s => _slider(context, s),
       SenseInfoEntry i => _info(i),
       SenseTilesEntry t => _tiles(t),
+      SenseSizeInputEntry z => _SizeInputRow(entry: z, notify: notify),
     };
     return KeyedSubtree(key: ValueKey('sense-entry-${e.id}'), child: row);
   }
@@ -605,5 +607,133 @@ class _SliderRowState extends State<_SliderRow> {
     // Switched off by its parent option (Özel kalite kapalı): faded, like locked rows.
     if (!enabled) return Opacity(opacity: SenseUi.disabledOpacity, child: row);
     return row;
+  }
+}
+
+/// Custom resolution row (R5): label, width × height fields, "Uygula". Digits only; the
+/// size is applied when both fields are inside the limits, otherwise the limits are said
+/// in place (no dialog, T7).
+class _SizeInputRow extends StatefulWidget {
+  const _SizeInputRow({required this.entry, required this.notify});
+  final SenseSizeInputEntry entry;
+  final ValueChanged<String> notify;
+
+  @override
+  State<_SizeInputRow> createState() => _SizeInputRowState();
+}
+
+class _SizeInputRowState extends State<_SizeInputRow> {
+  late final TextEditingController _w = TextEditingController(text: widget.entry.width?.toString() ?? '');
+  late final TextEditingController _h = TextEditingController(text: widget.entry.height?.toString() ?? '');
+  bool _wrong = false;
+
+  @override
+  void dispose() {
+    _w.dispose();
+    _h.dispose();
+    super.dispose();
+  }
+
+  void _apply() {
+    final e = widget.entry;
+    final apply = e.onApply;
+    if (apply == null) return;
+    if (!senseCustomSizeValid(_w.text, _h.text, min: e.min, max: e.max)) {
+      setState(() => _wrong = true);
+      return;
+    }
+    final w = int.parse(_w.text.trim()), h = int.parse(_h.text.trim());
+    setState(() => _wrong = false);
+    apply(w, h);
+    widget.notify('${e.label} · $w×$h');
+  }
+
+  OutlineInputBorder _border(Color c) =>
+      OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c));
+
+  Widget _field(TextEditingController c, String label, bool enabled) => SizedBox(
+        width: 58,
+        child: Material(
+          type: MaterialType.transparency,
+          child: TextField(
+            key: ValueKey('sense-size-${widget.entry.id}-$label'),
+            controller: c,
+            enabled: enabled,
+            maxLines: 1,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
+            style: SenseTextStyles.of(size: SenseFontSize.bodySmall),
+            cursorColor: SenseColors.text,
+            onChanged: (_) {
+              if (_wrong) setState(() => _wrong = false);
+            },
+            onSubmitted: (_) => _apply(),
+            decoration: InputDecoration(
+              isDense: true,
+              filled: true,
+              fillColor: SenseColors.surface,
+              hintText: label,
+              hintStyle: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim),
+              contentPadding: const EdgeInsets.symmetric(vertical: 5, horizontal: 6),
+              enabledBorder: _border(_wrong ? SenseColors.warn : SenseColors.lineStrong),
+              focusedBorder: _border(_wrong ? SenseColors.warn : SenseColors.text),
+              disabledBorder: _border(SenseColors.line),
+              border: _border(SenseColors.lineStrong),
+            ),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final e = widget.entry;
+    final enabled = e.onApply != null && !e.noRights;
+    final row = Padding(
+      padding: const EdgeInsets.fromLTRB(12 + 24, 4, 12, 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        Text.rich(
+          TextSpan(children: [
+            TextSpan(text: e.label, style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted)),
+            if (e.hint != null)
+              TextSpan(
+                  text: ' · ${e.hint}',
+                  style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textDim)),
+          ]),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 6),
+        Row(children: [
+          _field(_w, SenseSessionStrings.customResolutionWidth, enabled),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Text('×', style: SenseTextStyles.of(size: SenseFontSize.bodySmall, color: SenseColors.textMuted)),
+          ),
+          _field(_h, SenseSessionStrings.customResolutionHeight, enabled),
+          const Spacer(),
+          SenseButton(
+            key: ValueKey('sense-size-apply-${e.id}'),
+            label: SenseSessionStrings.customResolutionApply,
+            size: SenseButtonSize.small,
+            onPressed: enabled ? _apply : null,
+          ),
+        ]),
+        if (_wrong)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(SenseSessionStrings.customResolutionRange(e.min, e.max),
+                key: ValueKey('sense-size-wrong-${e.id}'),
+                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.warn)),
+          ),
+      ]),
+    );
+    if (e.noRights) {
+      return Tooltip(
+        message: SenseSessionStrings.noRights,
+        child: Opacity(opacity: SenseUi.disabledOpacity, child: IgnorePointer(child: row)),
+      );
+    }
+    return enabled ? row : Opacity(opacity: SenseUi.disabledOpacity, child: row);
   }
 }

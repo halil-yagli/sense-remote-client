@@ -22,6 +22,8 @@ import 'package:get/get.dart';
 import 'package:bot_toast/bot_toast.dart';
 
 import '../../models/platform_model.dart';
+import '../../sense/screens/camera/sense_camera_frame.dart';
+import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
 
 class _MenuTheme {
   static const Color blueColor = MyTheme.button;
@@ -137,8 +139,13 @@ class _ViewCameraTabPageState extends State<ViewCameraTabPage> {
         controller: tabController,
         onWindowCloseButton: handleWindowCloseButton,
         tail: const AddButton(),
-        selectedBorderColor: MyTheme.accent,
-        pageViewBuilder: (pageView) => pageView,
+        // Sense Remote: white accent instead of RustDesk's blue (T3-7).
+        selectedBorderColor: kSenseRemoteWindow ? Colors.white : MyTheme.accent,
+        // Sense Remote: the Sense camera bar above the camera image (YH O6); the RustDesk
+        // floating toolbar is not drawn in Sense windows.
+        pageViewBuilder: (pageView) => kSenseRemoteWindow
+            ? SenseCameraTabFrame(controller: tabController, child: pageView)
+            : pageView,
         labelGetter: DesktopTab.tablabelGetter,
         tabBuilder: (key, icon, label, themeConf) => Obx(() {
           final connectionType = ConnectionTypeState.find(key);

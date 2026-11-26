@@ -154,6 +154,43 @@ class SenseInfoEntry extends SenseListEntry {
   final String? detail;
 }
 
+/// Two number fields and "Uygula" (custom resolution of a virtual display, R5). The size
+/// is applied only when [senseCustomSizeValid] accepts it; nothing is written while typing.
+class SenseSizeInputEntry extends SenseListEntry {
+  const SenseSizeInputEntry({
+    required super.id,
+    required super.label,
+    required super.rustdesk,
+    required this.width,
+    required this.height,
+    required this.onApply,
+    this.min = kSenseCustomSizeMin,
+    this.max = kSenseCustomSizeMax,
+    super.hint,
+    super.noRights,
+  });
+
+  /// The fields start with these (the current size), or empty.
+  final int? width;
+  final int? height;
+  final int min;
+  final int max;
+
+  /// Null = not available right now (faded).
+  final void Function(int width, int height)? onApply;
+}
+
+/// Limits of the custom resolution fields (RustDesk allows four digits; a virtual display
+/// below 320 px or above 8K is not useful).
+const int kSenseCustomSizeMin = 320;
+const int kSenseCustomSizeMax = 7680;
+
+/// The text of both fields is a size inside the limits.
+bool senseCustomSizeValid(String w, String h, {int min = kSenseCustomSizeMin, int max = kSenseCustomSizeMax}) {
+  final x = int.tryParse(w.trim()), y = int.tryParse(h.trim());
+  return x != null && y != null && x >= min && x <= max && y >= min && y <= max;
+}
+
 class SenseTile {
   const SenseTile(this.value, this.title, this.sub);
   final int value;
