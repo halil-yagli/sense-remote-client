@@ -260,6 +260,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
         toggle(SenseOptionKeys.confirmClosingTabs, SenseSettingsStrings.confirmClosingTabs),
         toggle(SenseOptionKeys.keepAwakeOutgoing, SenseSettingsStrings.keepAwake),
         toggle(SenseOptionKeys.syncClipboard, SenseSettingsStrings.syncClipboard),
+        toggle(SenseOptionKeys.askNote, SenseSettingsStrings.askNote, hint: SenseSettingsStrings.askNoteHint),
       ]);
       shortcutsLocked ? lockedCount++ : mine++;
       connections.add(SenseToggleRow(

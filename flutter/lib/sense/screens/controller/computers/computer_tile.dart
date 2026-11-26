@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import '../../../sense.dart';
 import '../../../strings/controller.dart';
 import '../data/peers.dart';
+import 'tile_more.dart';
 
 // Prototype `.pc2`: corner 12; `.th` 84 high; screens 30×19, gap 4, line 1.5,
 // corner 2; os / tag at 9 px from the side, 7 / 8 px from the edge; LED 9 px in;
@@ -57,6 +58,9 @@ class SenseComputerTile extends StatelessWidget {
     this.dropMark = false,
     this.ghost = false,
     this.ledOpen = false,
+    this.moreKinds = const [],
+    this.onConnectKind,
+    this.moreOpen = false,
   });
 
   final SenseComputer computer;
@@ -81,6 +85,14 @@ class SenseComputerTile extends StatelessWidget {
 
   /// Goldens: the LED box shown without a pointer.
   final bool ledOpen;
+
+  /// "⋯" menu (R6): the ways to open this computer besides its screen, already
+  /// filtered by the person's grants. Empty = no menu.
+  final List<SenseConnectKind> moreKinds;
+  final ValueChanged<SenseConnectKind>? onConnectKind;
+
+  /// Goldens: the "⋯" menu shown without a pointer.
+  final bool moreOpen;
 
   SenseLevel get _ledLevel => computer.online ? (health?.level ?? SenseLevel.unknown) : SenseLevel.unknown;
 
@@ -215,11 +227,19 @@ class SenseComputerTile extends StatelessWidget {
             ),
             const SizedBox(width: _kBodyGap),
             _action(),
+            if (_showMore) ...[
+              const SizedBox(width: _kBodyGap - 2),
+              SenseTileMore(computerId: c.id, kinds: moreKinds, onPick: onConnectKind!, initiallyOpen: moreOpen),
+            ],
           ]),
         ],
       ),
     );
   }
+
+  /// The "⋯" menu is for a computer that can be opened now (not busy, not
+  /// already connecting, connect right granted).
+  bool get _showMore => moreKinds.isNotEmpty && onConnectKind != null && canConnect && !computer.busy && !connecting;
 
   Widget _action() {
     final c = computer;

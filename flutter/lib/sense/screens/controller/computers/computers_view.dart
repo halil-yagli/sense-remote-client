@@ -13,6 +13,7 @@ import '../../../strings/controller.dart';
 import '../data/peers.dart';
 import 'computer_tile.dart';
 import 'project_group.dart';
+import 'tile_more.dart';
 import 'widgets.dart';
 
 // Prototype `.amain` gap 10; `.ahead` gap 10, padding 4/0/8; search min 240;
@@ -32,6 +33,9 @@ class SenseComputersView extends StatefulWidget {
     this.health,
     this.connectingId,
     this.canConnect = true,
+    this.canFileTransfer = false,
+    this.canTerminalTunnel = false,
+    this.onConnectKind,
     this.grantsMissing = false,
     this.onRetry,
     this.onTileOrder,
@@ -58,6 +62,12 @@ class SenseComputersView extends StatefulWidget {
 
   /// False when the person may not connect (grants): Bağlan is locked.
   final bool canConnect;
+
+  /// R6: the grants that show "Dosya aktarımı" and "Terminal" / "TCP tünel" in
+  /// the tile's "⋯" menu; [onConnectKind] opens the computer that way.
+  final bool canFileTransfer;
+  final bool canTerminalTunnel;
+  final void Function(String id, SenseConnectKind kind)? onConnectKind;
 
   /// The grants envelope could not be read ("Yetkiler panelden alınamadı").
   final bool grantsMissing;
@@ -302,6 +312,10 @@ class _SenseComputersViewState extends State<SenseComputersView> {
         connecting: widget.connectingId == c.id,
         canConnect: widget.canConnect,
         onConnect: () => widget.onConnect(c.id),
+        moreKinds: widget.onConnectKind == null
+            ? const []
+            : senseMoreKinds(fileTransfer: widget.canFileTransfer, terminalTunnel: widget.canTerminalTunnel),
+        onConnectKind: widget.onConnectKind == null ? null : (k) => widget.onConnectKind!(c.id, k),
         onLedHover: widget.health == null ? null : () => widget.health!.want([c.id], first: true),
         dropMark: dropMark,
         ghost: ghost,

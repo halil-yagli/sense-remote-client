@@ -15,6 +15,7 @@ import '../../../strings/controller.dart';
 import '../data/grants.dart';
 import '../data/peers.dart';
 import 'computers_view.dart';
+import 'tile_more.dart';
 
 class SenseComputersPage extends StatefulWidget {
   const SenseComputersPage({
@@ -120,23 +121,31 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
     unawaited(gFFI.groupModel.pull(force: true, quiet: true));
   }
 
-  void _connect(List<SenseProject> projects, String id) {
+  void _connect(List<SenseProject> projects, String id, [SenseConnectKind kind = SenseConnectKind.screen]) {
     final found = senseUnique(projects).where((c) => c.id == id).toList();
     final c = found.isEmpty ? null : found.first;
     // A busy computer cannot be connected to (kabul C2): one person at a time.
     if (c != null && c.busy) return;
     if (!widget.grants.grants.can(SensePerm.connect) && widget.grants.loaded) return;
+    // R6: the other ways need their own grant, also checked here (not only hidden).
+    if (!senseKindAllowed(kind, widget.grants.grants)) return;
     // P3 (B7): the "Bağlanıyor" state ends when the window call returns (or fails, with a
     // note); the timer is only a safety net. A second click meanwhile is ignored.
     if (_connecting == id) return;
     _connectTimer?.cancel();
     setState(() => _connecting = id);
     _connectTimer = Timer(kSenseConnectSafety, _endConnecting);
-    unawaited(_open(id));
+    unawaited(_open(id, kind));
   }
 
-  Future<void> _open(String id) async {
-    final ok = await senseOpenConnection(() => connect(context, id));
+  Future<void> _open(String id, SenseConnectKind kind) async {
+    final ok = await senseOpenConnection(() => connect(
+          context,
+          id,
+          isFileTransfer: kind == SenseConnectKind.fileTransfer,
+          isTerminal: kind == SenseConnectKind.terminal,
+          isTcpTunneling: kind == SenseConnectKind.tcpTunnel,
+        ));
     if (!mounted) return;
     _connectTimer?.cancel();
     _endConnecting();
@@ -182,6 +191,9 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
             canConnect: !g.loaded || g.grants.can(SensePerm.connect),
             grantsMissing: g.loaded && !g.grants.ok,
             onConnect: (id) => _connect(projects, id),
+            canFileTransfer: g.loaded && senseKindAllowed(SenseConnectKind.fileTransfer, g.grants),
+            canTerminalTunnel: g.loaded && senseKindAllowed(SenseConnectKind.terminal, g.grants),
+            onConnectKind: (id, kind) => _connect(projects, id, kind),
             onRetry: () => group.pull(force: true),
             onTileOrder: _saveTileOrder,
             onGroupOrder: _saveGroupOrder,
@@ -204,3 +216,11 @@ Future<bool> senseOpenConnection(Future<void> Function() open) async {
     return false;
   }
 }
+
+/// R6: whether the grants allow opening a computer in [kind] (the screen needs
+/// only the connect right, checked by the caller).
+bool senseKindAllowed(SenseConnectKind kind, SenseGrants g) => switch (kind) {
+      SenseConnectKind.screen => true,
+      SenseConnectKind.fileTransfer => g.can(SensePerm.fileTransfer),
+      SenseConnectKind.terminal || SenseConnectKind.tcpTunnel => g.can(SensePerm.terminalTunnel),
+    };

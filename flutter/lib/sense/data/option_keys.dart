@@ -70,6 +70,11 @@ abstract final class SenseOptionKeys {
   static const syncClipboard = SenseOptionKey('allow-sync-clipboard-between-sessions',
       group: SenseOptionGroup.connections, store: SenseOptionStore.local);
 
+  /// R7: ask "what did you do" when a session ends (stock `allow-ask-for-note`; the
+  /// note goes to the panel's connection audit). Off by default.
+  static const askNote = SenseOptionKey('allow-ask-for-note',
+      group: SenseOptionGroup.connections, store: SenseOptionStore.local);
+
   /// Keyboard shortcuts and pass-through (`ShortcutModel.setEnabled / setPassThrough`).
   static const keyboardShortcuts = SenseOptionKey('keyboard-shortcuts',
       group: SenseOptionGroup.connections, store: SenseOptionStore.local);
@@ -137,7 +142,7 @@ abstract final class SenseOptionKeys {
       group: SenseOptionGroup.update, store: SenseOptionStore.local, lock: SenseOptionLock.overwrite);
 
   static const List<SenseOptionKey> all = [
-    openInTabs, confirmClosingTabs, keepAwakeOutgoing, syncClipboard, keyboardShortcuts,
+    openInTabs, confirmClosingTabs, keepAwakeOutgoing, syncClipboard, askNote, keyboardShortcuts,
     viewStyle, imageQuality, viewOnly, privacyMode,
     incomingFilesDir, autoRecordOutgoing, videoSaveDirectory,
     permanentPassword, connType, autoDisconnect, autoDisconnectTimeout,

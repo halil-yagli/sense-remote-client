@@ -78,6 +78,12 @@ abstract final class SenseControllerStrings {
   static const String noRight = 'Yetkin yok';
   static const String noRightTip = 'Bağlanma yetkin panelde kapalı';
 
+  // "⋯" menu of a tile (R6).
+  static const String moreConnect = 'Ekranı açmadan bağlan';
+  static const String openFileTransfer = 'Dosya aktarımı';
+  static const String openTerminal = 'Terminal';
+  static const String openTcpTunnel = 'TCP tünel';
+
   // LED detail (250 px box).
   static const String healthOk = 'Sağlıklı';
   static const String healthWarn = 'Uyarı var';

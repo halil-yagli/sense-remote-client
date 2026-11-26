@@ -168,6 +168,7 @@ void main() {
       'enable-confirm-closing-tabs',
       'keep-awake-during-outgoing-sessions',
       'allow-sync-clipboard-between-sessions',
+      'allow-ask-for-note', // R7: off by default
     ];
     for (final key in keys) {
       testWidgets(key, (tester) async {
@@ -370,7 +371,7 @@ void main() {
     testWidgets('overview counts the rows (Controller)', (tester) async {
       final b = _FakeBackend();
       await _pump(tester, b);
-      expect(find.text(SenseSettingsStrings.overviewTitle('Controller', 14, 10)), findsOneWidget);
+      expect(find.text(SenseSettingsStrings.overviewTitle('Controller', 15, 10)), findsOneWidget);
       expect(find.text(SenseSettingsStrings.live), findsOneWidget);
     });
 
