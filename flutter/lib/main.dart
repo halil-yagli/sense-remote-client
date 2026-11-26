@@ -456,6 +456,7 @@ void _runApp(
       navigatorObservers: [
         // FirebaseAnalyticsObserver(analytics: analytics),
         BotToastNavigatorObserver(),
+        SenseDiagNavigatorObserver(), // Sense Remote (karar #103)
       ],
       builder: (context, child) {
         child = _keepScaleBuilder(context, child);
@@ -595,6 +596,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           navigatorObservers: [
             // FirebaseAnalyticsObserver(analytics: analytics),
             BotToastNavigatorObserver(),
+            SenseDiagNavigatorObserver(), // Sense Remote (karar #103)
           ],
           builder: isAndroid
               ? (context, child) => AccessibilityListener(

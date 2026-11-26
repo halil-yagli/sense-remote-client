@@ -18,6 +18,7 @@ import '../../../components/blink.dart';
 import '../../../components/button.dart';
 import '../../../components/caret.dart';
 import '../../../components/sense_mark.dart';
+import '../../../diag_log.dart';
 import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart';
 import '../../../tokens/theme.dart';
@@ -125,6 +126,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
       _showNote(SenseSessionStrings.ghostDisplay1);
       return;
     }
+    senseUiGhost(!b.ghostOn, reason: 'user');
     b.toggleGhost();
   }
 
@@ -149,6 +151,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
             onTap: ready
                 ? () {
                     if (!menus.isOpen(m)) widget.popups.closeAll();
+                    senseUiList(m.name, open: !menus.isOpen(m));
                     menus.toggle(m);
                   }
                 : null,

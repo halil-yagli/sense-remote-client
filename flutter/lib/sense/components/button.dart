@@ -4,6 +4,7 @@
 // Space and a visible keyboard focus ring behave the same everywhere.
 import 'package:flutter/material.dart';
 
+import '../diag_log.dart';
 import '../tokens/sense_tokens.dart';
 import '../tokens/theme.dart';
 
@@ -256,7 +257,13 @@ class SenseButton extends StatelessWidget {
     return Opacity(
       opacity: enabled ? 1 : SenseUi.disabledOpacity,
       child: SenseInteractive(
-        onTap: onPressed,
+        // Sense Remote (karar #103): every library button leaves its label in the record.
+        onTap: enabled
+            ? () {
+                senseUiButton(label);
+                onPressed!();
+              }
+            : null,
         focusNode: focusNode,
         autofocus: autofocus,
         tooltip: tooltip,
