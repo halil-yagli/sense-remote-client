@@ -106,7 +106,7 @@ pub fn parse_answer(body: &str) -> Option<HeartbeatAnswer> {
             // Sense Remote (D3c, H1): read by `identity_set::on_heartbeat_answer`, not here.
             super::report::KEY_LOCATIONS => {}
             // Sense Remote (Sürüm 9, R1): read by `wol::on_answer`, not here.
-            super::wol::KEY_ANSWER => {}
+            super::wol::KEY_ANSWER | super::wol::KEY_ANSWER_MORE => {}
             // Karar #93: read by `identity_set::apply_pushed` (only for a panel announcing
             // `name_push`), not here.
             super::identity_set::KEY_IDENTITY => {}
@@ -518,7 +518,7 @@ mod tests {
     /// Sürüm 9 (R1): `sense_wol` is read by `wol::on_answer`, so it is not logged as ignored here.
     #[test]
     fn wake_order_is_not_ignored() {
-        let body = r#"{"sense_wol":{"k":"0000000000000000","p":"e30","s":"x"}}"#;
+        let body = r#"{"sense_wol":{"k":"0000000000000000","p":"e30","s":"x"},"sense_wol_more":[{"k":"0000000000000000","p":"e30","s":"x"}]}"#;
         let answer = parse_answer(body).unwrap();
         assert!(answer.ignored.is_empty());
     }

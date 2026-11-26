@@ -15,6 +15,13 @@ import '../sense_home_strings.dart' show SenseHomeRole;
 bool senseControllerWindowApplies(SenseHomeRole role) =>
     role == SenseHomeRole.controller || role == SenseHomeRole.both;
 
+/// The 1180 × 720 size and centring are for the first opening only (Sürüm 9 denetim düzeltmesi):
+/// once a position is saved, `restoreWindowPosition` has put the window back where the user left
+/// it and it must stay there. True when nothing was restored: the restore is switched off
+/// (`DISABLE_RUSTDESK_RESTORE_WINDOW_POSITION`) or no readable frame was saved yet.
+bool senseControllerWindowFirstRun({required bool restoreEnabled, required bool hasSavedFrame}) =>
+    !restoreEnabled || !hasSavedFrame;
+
 /// 1180 × 720 trimmed to the visible area ([visibleWidth] × [visibleHeight], in
 /// logical pixels; 0 or less = unknown, ignored). A tiny sliver of screen never
 /// makes the window smaller than 1024 × 600.

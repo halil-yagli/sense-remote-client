@@ -52,8 +52,14 @@ pub const MAX_MACS: usize = 8;
 pub const CAP_WOL: &str = "wol";
 /// Where wake orders are carried out (the platforms whose `--server` sends the heartbeat).
 pub const SUPPORTED: bool = cfg!(any(windows, target_os = "macos"));
-/// Key of the heartbeat answer that carries the order.
+/// Key of the heartbeat answer that carries the order (the newest one).
 pub const KEY_ANSWER: &str = "sense_wol";
+/// Sürüm 9 denetim düzeltmesi (K25): the OTHER orders waiting for this computer (an array of
+/// envelopes), when the panel woke more than one target through it. An older build reads only
+/// `sense_wol` and ignores this key, so it still carries out the newest one.
+pub const KEY_ANSWER_MORE: &str = "sense_wol_more";
+/// Most orders read from one answer (the panel gives at most this many, newest first).
+pub const MAX_ORDERS: usize = 8;
 /// Magic packet ports: 9 (discard, the usual one) and 7 (echo, some network cards listen there).
 pub const PORTS: [u16; 2] = [9, 7];
 
@@ -376,60 +382,102 @@ fn now_s() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
-/// Called by the heartbeat loop (`hbbs_http/sync.rs`) with the panel's answer. Does nothing when
-/// the answer carries no `sense_wol`; otherwise verifies it and, once per order, sends the packets
-/// on a separate thread so the heartbeat never waits.
-pub fn on_answer(answer: &str) {
-    if !SUPPORTED {
-        return;
+/// The envelopes an answer carries: the newest (`sense_wol`) and the others (`sense_wol_more`).
+/// Anything of the wrong shape is skipped; at most `MAX_ORDERS`.
+pub fn answer_envelopes(answer: &Value) -> Vec<&Value> {
+    let mut list: Vec<&Value> = Vec::new();
+    if let Some(newest) = answer.get(KEY_ANSWER) {
+        list.push(newest);
     }
-    let Some(envelope) = serde_json::from_str::<Value>(answer)
-        .ok()
-        .and_then(|mut v| v.get_mut(KEY_ANSWER).map(Value::take))
-    else {
-        return;
-    };
-    let iss = super::envelope::expected_issuer();
-    let did = Config::get_id();
-    let duuid = crate::encode64(hbb_common::get_uuid());
-    let order = {
-        let mut seen = seen().lock().unwrap_or_else(|e| e.into_inner());
-        let checked = verify(
-            &envelope,
-            envelope_keys::trusted_keys(),
-            &Expect {
-                iss: &iss,
-                did: &did,
-                duuid: &duuid,
-                now_s: now_s(),
-                seen: &seen,
-            },
-        );
+    if let Some(more) = answer.get(KEY_ANSWER_MORE).and_then(Value::as_array) {
+        list.extend(more.iter());
+    }
+    list.truncate(MAX_ORDERS);
+    list
+}
+
+/// Verifies every envelope against `expect` (its `seen` is ignored; `seen` here is used), once per
+/// `wid`: each accepted order's `wid` goes into `seen` (the most recent `SEEN_KEEP` stay).
+/// `refused` gets the reason of each envelope that was not accepted and is not just a repeat.
+pub fn accept_orders(
+    envelopes: &[&Value],
+    keys: &[TrustedKey],
+    expect: &Expect,
+    seen: &mut Vec<String>,
+    refused: &mut Vec<Reason>,
+) -> Vec<Order> {
+    let mut orders = Vec::new();
+    for envelope in envelopes {
+        let checked = verify(envelope, keys, &Expect { seen: seen.as_slice(), ..*expect });
         match checked {
             Ok(order) => {
                 seen.push(order.wid.clone());
                 if seen.len() > SEEN_KEEP {
                     seen.remove(0);
                 }
-                order
+                orders.push(order);
             }
-            Err(Reason::Replayed) => return,
-            Err(reason) => {
-                log::warn!("Sense Remote: wake-on-LAN order refused: {}", reason.as_str());
-                return;
-            }
+            Err(Reason::Replayed) => {}
+            Err(reason) => refused.push(reason),
         }
+    }
+    orders
+}
+
+/// Called by the heartbeat loop (`hbbs_http/sync.rs`) with the panel's answer. Does nothing when
+/// the answer carries no `sense_wol`; otherwise verifies every order in it (`sense_wol` and
+/// `sense_wol_more`) and, once per order, sends the packets on a separate thread so the heartbeat
+/// never waits.
+pub fn on_answer(answer: &str) {
+    if !SUPPORTED {
+        return;
+    }
+    let Ok(answer) = serde_json::from_str::<Value>(answer) else {
+        return;
     };
+    let envelopes = answer_envelopes(&answer);
+    if envelopes.is_empty() {
+        return;
+    }
+    let iss = super::envelope::expected_issuer();
+    let did = Config::get_id();
+    let duuid = crate::encode64(hbb_common::get_uuid());
+    let mut refused = Vec::new();
+    let orders = {
+        let mut seen = seen().lock().unwrap_or_else(|e| e.into_inner());
+        let no_seen: Vec<String> = Vec::new();
+        accept_orders(
+            &envelopes,
+            envelope_keys::trusted_keys(),
+            &Expect {
+                iss: &iss,
+                did: &did,
+                duuid: &duuid,
+                now_s: now_s(),
+                seen: &no_seen,
+            },
+            &mut seen,
+            &mut refused,
+        )
+    };
+    for reason in refused {
+        log::warn!("Sense Remote: wake-on-LAN order refused: {}", reason.as_str());
+    }
+    if orders.is_empty() {
+        return;
+    }
     std::thread::spawn(move || {
-        let sent = send(&order);
-        if sent > 0 {
-            log::info!(
-                "Sense Remote: wake-on-LAN order {} carried out: {sent} packets for {} computer address(es)",
-                order.wid,
-                order.macs.len()
-            );
-        } else {
-            log::warn!("Sense Remote: wake-on-LAN order {}: no packet could be sent", order.wid);
+        for order in orders {
+            let sent = send(&order);
+            if sent > 0 {
+                log::info!(
+                    "Sense Remote: wake-on-LAN order {} carried out: {sent} packets for {} computer address(es)",
+                    order.wid,
+                    order.macs.len()
+                );
+            } else {
+                log::warn!("Sense Remote: wake-on-LAN order {}: no packet could be sent", order.wid);
+            }
         }
     });
 }
@@ -583,5 +631,71 @@ mod tests {
     fn capability_fits_the_panel_schema() {
         assert!(!CAP_WOL.is_empty() && CAP_WOL.len() <= 32);
         assert_eq!(PORTS, [9, 7]);
+    }
+
+    // Sürüm 9 denetim düzeltmesi (K25): two targets woken through one relay both go out, once each.
+    // The orders are signed here with a key that exists only in this test.
+    fn signed_order(
+        secret: &sodiumoxide::crypto::sign::SecretKey,
+        key: &TrustedKey,
+        wid: &str,
+        mac: &str,
+    ) -> Value {
+        let payload = serde_json::json!({
+            "v": 1, "typ": "wol", "iss": "panel.test", "did": "123456789", "duuid": "dXV1aWQ",
+            "wid": wid, "macs": [mac], "iat": 1_800_000_000i64, "exp": 1_800_000_100i64,
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let mut signed = SIGNING_PREFIX.to_vec();
+        signed.extend_from_slice(&bytes);
+        let signature = sodiumoxide::crypto::sign::sign_detached(&signed, secret);
+        serde_json::json!({
+            "k": key.k,
+            "p": URL_SAFE_NO_PAD.encode(bytes),
+            "s": URL_SAFE_NO_PAD.encode(signature.to_bytes()),
+        })
+    }
+
+    #[test]
+    fn every_pending_order_of_an_answer_is_carried_out_once() {
+        assert!(sodium_ready());
+        let (public, secret) = sodiumoxide::crypto::sign::gen_keypair();
+        let key = TrustedKey { k: key_id(&public.0), public_key: public.0 };
+        let first = signed_order(&secret, &key, "wol_CCCCCCCCCCCCCCCCCCCCCC", "0A:1B:2C:3D:4E:5F");
+        let second = signed_order(&secret, &key, "wol_DDDDDDDDDDDDDDDDDDDDDD", "0A:1B:2C:3D:4E:60");
+        let answer = serde_json::json!({ "sense_wol": second, "sense_wol_more": [first, second] });
+        let envelopes = answer_envelopes(&answer);
+        assert_eq!(envelopes.len(), 3);
+        let no_seen: Vec<String> = Vec::new();
+        let expect = Expect {
+            iss: "panel.test",
+            did: "123456789",
+            duuid: "dXV1aWQ",
+            now_s: 1_800_000_005,
+            seen: &no_seen,
+        };
+        let mut seen = Vec::new();
+        let mut refused = Vec::new();
+        let orders = accept_orders(&envelopes, &[key.clone()], &expect, &mut seen, &mut refused);
+        assert!(refused.is_empty());
+        let wids: Vec<&str> = orders.iter().map(|o| o.wid.as_str()).collect();
+        assert_eq!(wids, ["wol_DDDDDDDDDDDDDDDDDDDDDD", "wol_CCCCCCCCCCCCCCCCCCCCCC"]);
+        assert_eq!(orders[0].macs, vec![[0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x60]]);
+        assert_eq!(orders[1].macs, vec![[0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x5f]]);
+        // The next heartbeat answer repeats them: nothing goes out again.
+        let again = accept_orders(&envelopes, &[key.clone()], &expect, &mut seen, &mut refused);
+        assert!(again.is_empty() && refused.is_empty());
+        // An older panel's answer (only `sense_wol`) still works; a wrong shape is skipped.
+        let old = serde_json::json!({ "sense_wol": first });
+        assert_eq!(answer_envelopes(&old).len(), 1);
+        assert!(answer_envelopes(&serde_json::json!({ "sense_wol_more": "x" })).is_empty());
+        // A bad order does not stop the good one next to it.
+        let bad = serde_json::json!({ "k": key.k, "p": "e30", "s": "x" });
+        let mixed = serde_json::json!({ "sense_wol": bad, "sense_wol_more": [first] });
+        let mut fresh = Vec::new();
+        let mut refused = Vec::new();
+        let orders =
+            accept_orders(&answer_envelopes(&mixed), &[key], &expect, &mut fresh, &mut refused);
+        assert_eq!((orders.len(), refused.len()), (1, 1));
     }
 }

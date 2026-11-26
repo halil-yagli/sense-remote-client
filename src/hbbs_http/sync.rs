@@ -717,6 +717,11 @@ fn sense_check(
 // user process following it.
 #[cfg(not(any(target_os = "ios")))]
 pub(crate) fn sense_set_envelope_options(options: HashMap<String, String>) -> Result<(), String> {
+    // Sense Remote (Sürüm 9, K27): remember which optional Host settings this envelope carries, so
+    // one the panel stopped managing is unlocked in the app (it keeps its last value).
+    let marker = crate::sense::envelope::managed_ext_marker(&options.clone().into_iter().collect());
+    let mut options = options;
+    options.insert(crate::sense::envelope::OPTION_MANAGED_EXT.to_owned(), marker);
     // Sense Remote (Sürüm 9, paket A, R8): the panel's audio choice becomes RustDesk options.
     let options: HashMap<String, String> = crate::sense::envelope_apply::host_options(
         &options.into_iter().collect(),

@@ -28,6 +28,15 @@ void main() {
     expect(s.height, closeTo(693.33, 0.01));
   });
 
+  // Sürüm 9 denetim düzeltmesi: a saved position and size are not overwritten at each opening.
+  test('size and centring only when no frame was restored (first opening)', () {
+    expect(senseControllerWindowFirstRun(restoreEnabled: true, hasSavedFrame: false), isTrue);
+    expect(senseControllerWindowFirstRun(restoreEnabled: true, hasSavedFrame: true), isFalse);
+    // Restore switched off: nothing was restored, so the default size still applies.
+    expect(senseControllerWindowFirstRun(restoreEnabled: false, hasSavedFrame: true), isTrue);
+    expect(senseControllerWindowFirstRun(restoreEnabled: false, hasSavedFrame: false), isTrue);
+  });
+
   test('never below 1024 x 600', () {
     expect(senseControllerWindowSize(visibleWidth: 900, visibleHeight: 500), const Size(1024, 600));
   });
