@@ -527,7 +527,7 @@ impl Server {
         #[cfg(target_os = "macos")]
         self.update_enable_retina();
         // Sense Remote (S7-a): a closed connection watches nothing.
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         self.sense_update_watched();
     }
 
@@ -576,8 +576,8 @@ impl Server {
             }
             #[cfg(target_os = "macos")]
             self.update_enable_retina();
-            // Sense Remote (S7-a): the watched screens changed.
-            #[cfg(windows)]
+            // Sense Remote (S7-a): the watched screens changed (macOS too, MAC-SONRA-15).
+            #[cfg(any(windows, target_os = "macos"))]
             if Self::is_video_service_name(name) {
                 self.sense_update_watched();
             }
@@ -586,7 +586,7 @@ impl Server {
 
     // Sense Remote (S7-a, H5): the screens any connection watches turn green on the maintenance
     // curtain. Screen indexes are those of the display list the Controller got.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     fn sense_update_watched(&self) {
         let prefix = VideoSource::Monitor.service_name_prefix();
         let displays = display_service::get_sync_displays();

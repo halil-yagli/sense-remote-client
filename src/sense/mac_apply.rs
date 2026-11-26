@@ -37,7 +37,6 @@ use super::{
     envelope_keys::TrustedKey,
     SenseRole,
 };
-use base::config::keys;
 use hbb_common::log;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
@@ -56,10 +55,10 @@ pub const REASON_BUSY: &str = "busy";
 /// How long the user process waits for the daemon's answer.
 pub const DAEMON_TIMEOUT_MS: u64 = 5000;
 
-/// Envelope settings macOS can not honour: there is no maintenance curtain on macOS (privacy
-/// mode is off in `privacy_mode.rs`, the `curtain` capability is not reported), so the key is
-/// accepted as part of the full set (G2-7) but never written.
-pub const MAC_UNSUPPORTED_OPTIONS: [&str; 1] = [keys::OPTION_ENABLE_PRIVACY_MODE];
+/// Envelope settings macOS can not honour: accepted as part of the full set (G2-7) but never
+/// written. Empty since Sürüm 9 (MAC-SONRA-15): macOS has the maintenance curtain, so the ghost
+/// mode permission (`enable-privacy-mode`) is written as on Windows.
+pub const MAC_UNSUPPORTED_OPTIONS: [&str; 0] = [];
 
 /// Payload of `ipc::Data::SenseEnvelope`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -49,9 +49,13 @@ pub const PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY: &str = "privacy_mode_impl_virtu
 // screens off) are not offered.
 #[cfg(windows)]
 const SENSE_CURTAIN_ONLY: bool = true;
-// Sense Remote (MAC-SONRA-15): macOS has no curtain yet, so it offers no privacy mode.
+// Sense Remote (MAC-SONRA-15, Sürüm 9): macOS offers the same ghost mode (Sense curtain +
+// local input blocked, `sense::curtain_mac`) under RustDesk's macOS key; RustDesk's own macOS
+// mode (gamma black screen) is not offered.
 #[cfg(target_os = "macos")]
-const SENSE_MACOS_CURTAIN: bool = false;
+fn sense_macos_curtain() -> bool {
+    crate::sense::curtain::is_supported()
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "t", content = "c")]
@@ -129,9 +133,9 @@ lazy_static::lazy_static! {
         {
             #[cfg(target_os = "macos")]
             {
-                // Sense Remote (MAC-SONRA-15): no maintenance curtain on macOS yet; RustDesk's
-                // macOS privacy mode is a black screen, which needs a team decision.
-                if SENSE_MACOS_CURTAIN {
+                // Sense Remote (MAC-SONRA-15): the Sense curtain (a black screen would need a
+                // team decision).
+                if sense_macos_curtain() {
                     macos::PRIVACY_MODE_IMPL.to_owned()
                 } else {
                     "".to_owned()
@@ -165,9 +169,12 @@ lazy_static::lazy_static! {
         let mut map: HashMap<&'static str, PrivacyModeCreator> = HashMap::new();
         #[cfg(target_os = "macos")]
         {
-            map.insert(macos::PRIVACY_MODE_IMPL, |impl_key: &str| {
-                Box::new(macos::PrivacyModeImpl::new(impl_key))
-            });
+            // Sense Remote (MAC-SONRA-15): the key creates the Sense curtain mode.
+            if sense_macos_curtain() {
+                map.insert(macos::PRIVACY_MODE_IMPL, |impl_key: &str| {
+                    Box::new(crate::sense::curtain_mac::PrivacyModeImpl::new(impl_key))
+                });
+            }
         }
         #[cfg(windows)]
         let mut map: HashMap<&'static str, PrivacyModeCreator> = HashMap::new();
@@ -410,8 +417,8 @@ pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
         // No translation is intended for privacy_mode_impl_macos_tip as it is a 
         // placeholder for macOS specific privacy mode implementation which currently
         // doesn't provide multiple modes like Windows does.
-        // Sense Remote (MAC-SONRA-15): nothing offered, so the ghost button stays off.
-        if SENSE_MACOS_CURTAIN {
+        // Sense Remote (MAC-SONRA-15): the Sense curtain is the one mode offered.
+        if sense_macos_curtain() {
             vec![(macos::PRIVACY_MODE_IMPL, "privacy_mode_impl_macos_tip")]
         } else {
             Vec::new()

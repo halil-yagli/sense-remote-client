@@ -13,7 +13,8 @@
 //! Layout and colours follow the prototype (`uygulama.html` → "Hayalet mod — sahada") and
 //! BRAND_CORE: black, a soft navy→purple glow, the Sense mark, "**Bakım** yapılıyor".
 //!
-//! MAC-SONRA-15: macOS has no curtain yet (privacy mode is not offered there).
+//! MAC-SONRA-15 (Sürüm 9): macOS shows the same curtain (`curtain_mac.rs` + `curtain_mac.mm`),
+//! with the layout, glow, texts and colours of this file.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -37,8 +38,14 @@ pub fn is_supported() -> bool {
     })
 }
 
-/// Sense Remote: no curtain outside Windows yet (MAC-SONRA-15).
-#[cfg(not(windows))]
+/// Sense Remote (MAC-SONRA-15): macOS draws the curtain with AppKit (`curtain_mac`).
+#[cfg(target_os = "macos")]
+pub fn is_supported() -> bool {
+    true
+}
+
+/// Sense Remote: no curtain on other systems.
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn is_supported() -> bool {
     false
 }
@@ -50,9 +57,9 @@ pub const SUBTITLE: &str = "Kısa süre içinde yeniden hizmetinizde.";
 
 /// Prototype `--muted` (#8e8e98) and the mark box border (#2a2a33).
 #[cfg_attr(not(windows), allow(dead_code))]
-const MUTED: (u8, u8, u8) = (0x8e, 0x8e, 0x98);
+pub(crate) const MUTED: (u8, u8, u8) = (0x8e, 0x8e, 0x98);
 #[cfg_attr(not(windows), allow(dead_code))]
-const BORDER: (u8, u8, u8) = (0x2a, 0x2a, 0x33);
+pub(crate) const BORDER: (u8, u8, u8) = (0x2a, 0x2a, 0x33);
 
 /// Positions on one screen, in pixels of that screen.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -269,10 +276,13 @@ pub fn set_watched(displays: Vec<WatchedDisplay>) {
     }
     #[cfg(windows)]
     win::watched_changed();
+    // Sense Remote (MAC-SONRA-15): same on macOS.
+    #[cfg(target_os = "macos")]
+    super::curtain_mac::watched_changed();
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
-fn watched() -> Vec<WatchedDisplay> {
+pub(crate) fn watched() -> Vec<WatchedDisplay> {
     WATCHED.lock().unwrap().clone()
 }
 
@@ -354,13 +364,27 @@ pub(crate) fn tinted_pixel(on_black: (u8, u8, u8), on_white: (u8, u8, u8), tint:
 #[cfg(windows)]
 pub use win::{hide, show};
 
-#[cfg(not(windows))]
-#[allow(dead_code)]
+/// Sense Remote (MAC-SONRA-15): the macOS curtain; `SHOWN` as on Windows.
+#[cfg(target_os = "macos")]
 pub fn show() -> hbb_common::ResultType<()> {
-    hbb_common::bail!("Sense Remote: the maintenance curtain is Windows only (MAC-SONRA-15)")
+    super::curtain_mac::show()?;
+    SHOWN.store(true, Ordering::SeqCst);
+    Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn hide() {
+    super::curtain_mac::hide();
+    SHOWN.store(false, Ordering::SeqCst);
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+#[allow(dead_code)]
+pub fn show() -> hbb_common::ResultType<()> {
+    hbb_common::bail!("Sense Remote: no maintenance curtain on this system")
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 #[allow(dead_code)]
 pub fn hide() {}
 
