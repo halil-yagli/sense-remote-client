@@ -649,6 +649,16 @@ fn run(vs: VideoService) -> ResultType<()> {
         log::info!("disable dxgi with option, fall back to gdi");
         c.set_gdi();
     }
+    // Sense Remote (#103): how this display is captured.
+    #[cfg(windows)]
+    let capture_method = if c.is_gdi() { "gdi" } else { "dxgi" };
+    #[cfg(target_os = "macos")]
+    let capture_method = "cg";
+    #[cfg(target_os = "android")]
+    let capture_method = "android";
+    #[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "android")))]
+    let capture_method = "scrap";
+    crate::sense::diag::kinds::video_capture(capture_method, display_idx, c.width, c.height);
     let mut video_qos = VIDEO_QOS.lock().unwrap();
     let mut spf = video_qos.spf();
     let mut quality = video_qos.ratio();
@@ -671,6 +681,7 @@ fn run(vs: VideoService) -> ResultType<()> {
         Ok(result) => result,
         Err(err) => {
             log::error!("Failed to create encoder: {err:?}, fallback to VP9");
+            crate::sense::diag::kinds::encoder_built("bilinmiyor", false, Some(&format!("{err:?}"))); // Sense Remote (#103)
             Encoder::set_fallback(&EncoderCfg::VPX(VpxEncoderConfig {
                 width: c.width as _,
                 height: c.height as _,
@@ -690,6 +701,7 @@ fn run(vs: VideoService) -> ResultType<()> {
             )?
         }
     };
+    crate::sense::diag::kinds::encoder_built(&format!("{codec_format:?}"), encoder.codec.is_hardware(), None); // Sense Remote (#103)
     #[cfg(feature = "vram")]
     c.set_output_texture(encoder.input_texture());
     #[cfg(target_os = "android")]
@@ -767,6 +779,7 @@ fn run(vs: VideoService) -> ResultType<()> {
                 let _ = try_broadcast_display_changed(&sp, display_idx, &c, true);
             }
             log::info!("switch to refresh");
+            crate::sense::diag::kinds::keyframe_req("istemci_istedi", display_idx); // Sense Remote (#103)
             bail!("SWITCH");
         }
         if codec_format != Encoder::negotiated_codec() {

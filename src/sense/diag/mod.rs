@@ -126,7 +126,29 @@ pub fn event(c: &str, k: &str, fields: Value) {
     #[cfg(not(test))]
     writer::push(line);
     #[cfg(test)]
-    drop(line);
+    {
+        drop(line);
+        sink::record(c, k);
+    }
+}
+
+/// Tests only: the events this thread has written (category, event), to prove a call site fires.
+#[cfg(test)]
+pub mod sink {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static EVENTS: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn record(c: &str, k: &str) {
+        EVENTS.with(|e| e.borrow_mut().push((c.to_owned(), k.to_owned())));
+    }
+
+    /// Takes (and clears) what this thread recorded.
+    pub fn take() -> Vec<(String, String)> {
+        EVENTS.with(|e| std::mem::take(&mut *e.borrow_mut()))
+    }
 }
 
 /// [`event`] with the fields as JSON text (Dart bridge). Text that is not JSON goes in as

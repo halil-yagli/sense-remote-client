@@ -1148,13 +1148,14 @@ impl RendezvousMediator {
             || (config::is_disable_tcp_listen() && ph.udp_port <= 0);
         // Sense Remote (#100): name the reason in the log; with our open-source hbbs only the TCP
         // punch is forwarded, so this decides between a direct path and the relay.
-        if let Some(reason) = crate::sense::link_quality::relay_reason(
+        let relay_why = crate::sense::link_quality::relay_reason(
             ph.nat_type.enum_value() == Ok(NatType::SYMMETRIC),
             Config::get_nat_type() == NatType::SYMMETRIC as i32,
             local_proxy,
             ph.force_relay,
             config::is_disable_tcp_listen() && ph.udp_port <= 0,
-        ) {
+        );
+        if let Some(reason) = relay_why {
             log::info!("Sense Remote path: relay, {}", reason);
         } else {
             log::info!(
@@ -1181,6 +1182,20 @@ impl RendezvousMediator {
         }
         let relay_server = self.get_relay_server(ph.relay_server);
         remember_reported_relay(&relay_server, Instant::now());
+        // Sense Remote (#103): the Host's path, the relay server and why the relay was chosen.
+        crate::sense::diag::kinds::conn_path_reason(
+            if relay_v4 { "relay" } else { "direct" },
+            if ph.udp_port > 0 {
+                "udp"
+            } else if !ph.webrtc_sdp_offer.is_empty() {
+                "webrtc"
+            } else {
+                "tcp"
+            },
+            Some(crate::sense::diag::kinds::nat_name(Config::get_nat_type())),
+            relay_v4.then_some(relay_server.as_str()),
+            relay_v4.then(|| relay_why.unwrap_or("other")),
+        );
         // for ensure, websocket go relay directly
         // A symmetric NAT relays the legacy transports but deliberately not WebRTC: the answer
         // built above rides along on the relay request, and ICE probes the candidate pairs rather
@@ -1262,6 +1277,7 @@ impl RendezvousMediator {
                 "declined a TCP punch: {} TCP punches already in flight",
                 TCP_PUNCHES.max
             );
+            crate::sense::diag::kinds::conn_punch(0, "tcp", "wan", "reddedildi", 0); // Sense Remote (#103)
             return Ok(());
         };
         punch_tcp_until_connected(server, peer_addr, local_addr, meta, slot).await;
@@ -1292,6 +1308,7 @@ impl RendezvousMediator {
                 "declined a UDP punch: {} UDP punches already in flight",
                 UDP_PUNCHES.max
             );
+            crate::sense::diag::kinds::conn_punch(0, "udp", "wan", "reddedildi", 0); // Sense Remote (#103)
             return Ok(());
         };
         let socket_cloned = socket.clone();

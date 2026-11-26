@@ -998,6 +998,8 @@ impl Client {
                 my_addr,
                 peer
             );
+            // Sense Remote (#103): one punch attempt sent.
+            crate::sense::diag::kinds::conn_punch(i as u32, &punch_type.to_lowercase(), "wan", "gonderildi", 0);
             socket.send(&msg_out).await?;
             // below timeout should not bigger than hbbs's connection timeout.
             let attempt_deadline = Instant::now() + Duration::from_millis((i * 3000) as u64);
@@ -1061,6 +1063,14 @@ impl Client {
                                 }
                             }
                             log::info!("{} Hole Punched {} = {}", punch_type, peer, peer_addr);
+                            // Sense Remote (#103): the punch worked (`lan` when the peer is local).
+                            crate::sense::diag::kinds::conn_punch(
+                                i as u32,
+                                &punch_type.to_lowercase(),
+                                if is_local { "lan" } else { "wan" },
+                                "basarili",
+                                start.elapsed().as_millis() as u64,
+                            );
                             break 'punch_attempts;
                         }
                     }
@@ -1077,6 +1087,14 @@ impl Client {
                             "Sense Remote path: relay chosen by peer, own nat={:?}, force_relay={}",
                             nat_type,
                             interface.is_force_relay()
+                        );
+                        // Sense Remote (#103): the peer answered with a relay.
+                        crate::sense::diag::kinds::conn_punch(
+                            i as u32,
+                            &punch_type.to_lowercase(),
+                            "wan",
+                            "relay_istendi",
+                            start.elapsed().as_millis() as u64,
                         );
                         start = Instant::now();
                         let mut connect_futures = Vec::new();
@@ -1318,6 +1336,14 @@ impl Client {
                     }
                 }
             }
+            // Sense Remote (#103): no answer within this attempt's time.
+            crate::sense::diag::kinds::conn_punch(
+                i as u32,
+                &punch_type.to_lowercase(),
+                "wan",
+                "zaman_asimi",
+                (i * 3000) as u64,
+            );
         }
         let mut webrtc_bridge_stop = None;
         let mut webrtc_for_connect = None;
@@ -2709,8 +2735,10 @@ impl VideoHandler {
             } else {
                 ImageFormat::ARGB
             };
+        let decoder = Decoder::new(format, luid);
+        crate::sense::diag::kinds::decoder_built(decoder.valid(), &format!("{format:?}")); // Sense Remote (#103)
         VideoHandler {
-            decoder: Decoder::new(format, luid),
+            decoder,
             rgb: ImageRgb::new(rgba_format, crate::get_dst_align_rgba()),
             texture: Default::default(),
             recorder: Default::default(),
@@ -2747,6 +2775,7 @@ impl VideoHandler {
         if crate::sense::link_quality::key_request_due(since) {
             self.sense_last_key_request = Some(std::time::Instant::now());
             self.sense_key_request = true;
+            crate::sense::diag::kinds::keyframe_req("bekliyor_anahtar_kare", self._display); // Sense Remote (#103)
         }
     }
 
@@ -2760,6 +2789,7 @@ impl VideoHandler {
     pub fn refresh_requested(&mut self) {
         self.sense_key_request = false;
         self.sense_last_key_request = Some(std::time::Instant::now());
+        crate::sense::diag::kinds::keyframe_req("cozucu_hatasi", self._display); // Sense Remote (#103)
     }
 
     /// Handle a new video frame.
@@ -2839,7 +2869,16 @@ impl VideoHandler {
                     // of them (the decoder loop requests a refresh on an error). A decoder that
                     // also fails on key frames still reaches MAX_DECODE_FAIL_COUNTER, one key
                     // frame per failure. An empty result keeps the stock handling.
-                    if res.is_err() {
+                    if let Err(e) = &res {
+                        // Sense Remote (#103): once per series of errors, not per frame.
+                        if !self.sense_wait_key {
+                            crate::sense::diag::kinds::video_decoder(
+                                "hata",
+                                &format!("{format:?}"),
+                                matches!(format, CodecFormat::H264 | CodecFormat::H265),
+                                Some(&e.to_string()),
+                            );
+                        }
                         self.sense_wait_key = true;
                         self.sense_skipped = 0;
                     }
@@ -2872,6 +2911,7 @@ impl VideoHandler {
         let luid = Self::get_adapter_luid();
         let format = format.unwrap_or(self.decoder.format());
         self.decoder = Decoder::new(format, luid);
+        crate::sense::diag::kinds::decoder_built(self.decoder.valid(), &format!("{format:?}")); // Sense Remote (#103)
         self.fail_counter = 0;
         self.first_frame = true;
         // Sense Remote (#100): the new decoder starts at a key frame.
