@@ -148,14 +148,15 @@ mod tests {
 
     #[test]
     fn the_newest_lines_are_kept_within_the_budget() {
-        let lines: Vec<(i64, String)> = (0..100).map(|t| (t, ev(t, "rtt"))).collect();
+        // Two-digit times: every line has the same length.
+        let lines: Vec<(i64, String)> = (10..100).map(|t| (t, ev(t, "rtt"))).collect();
         let one = lines[0].1.len() + 1;
         let text = join_fit(&lines, one * 10 + 3);
         assert_eq!(text.lines().count(), 10);
         assert!(text.len() <= one * 10 + 3);
-        assert!(text.ends_with(&format!("{}\n", lines[99].1)));
+        assert!(text.ends_with(&format!("{}\n", lines[89].1)));
         assert_eq!(join_fit(&lines, 5), "");
-        assert_eq!(join_fit(&lines, usize::MAX).lines().count(), 100);
+        assert_eq!(join_fit(&lines, usize::MAX).lines().count(), 90);
     }
 
     #[test]
