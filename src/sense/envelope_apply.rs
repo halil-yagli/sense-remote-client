@@ -105,6 +105,9 @@ pub fn parse_answer(body: &str) -> Option<HeartbeatAnswer> {
             },
             // Sense Remote (D3c, H1): read by `identity_set::on_heartbeat_answer`, not here.
             super::report::KEY_LOCATIONS => {}
+            // Karar #93: read by `identity_set::apply_pushed` (only for a panel announcing
+            // `name_push`), not here.
+            super::identity_set::KEY_IDENTITY => {}
             _ => answer.ignored.push(key),
         }
     }
@@ -462,6 +465,14 @@ mod tests {
         assert_eq!(answer.envelopes.len(), 1);
         assert_eq!(answer.server_time, Some(1_800_000_123));
         assert_eq!(answer.ignored, vec!["disconnect", "modified_at", "strategy"]);
+    }
+
+    /// Karar #93: `sense_identity` is read by `identity_set`, so it is not logged as ignored here.
+    #[test]
+    fn panel_identity_push_is_not_ignored() {
+        let body = r#"{"sense_identity":{"rev":5,"name":"K","location_id":null}}"#;
+        let answer = parse_answer(body).unwrap();
+        assert!(answer.ignored.is_empty());
     }
 
     /// Sense Remote (S6): `sense_panel_caps` is read; a wrong shape is ignored and logged.
