@@ -35,6 +35,17 @@
 //!    names an offer of this connection and the job id is that offer id; any other path stays
 //!    off. The one-way rule and the file permission still apply.
 //!
+//! Resume of a Host file (Y3): with the offer the Host gives the Controller a random resume key
+//! and keeps (path, key) in memory for [`RESUME_TTL_MS`] ([`conn_offer`]). A dropped link keeps
+//! the half-written `.download`; at the next login of the same session the Controller asks for
+//! `sense:offer-resume/<id>/<key>/<name>` and [`host_file_action`] opens that read for the key
+//! alone (no peer, no other path; anything else is refused). RustDesk's `.digest` check decides
+//! what part is already right. A folder, an old Host without key, an expired wait or a closed
+//! session ends it and removes the half-written files.
+//!
+//! Closing audit (Y5): [`ConnCounts::audit`] adds `recording_s` and `reason` (the panel's
+//! `AuditConnSense`, no other fields).
+//!
 //! Call (D3d2): the Host card starts a call (`ipc::Data::StartVoiceCall` to its connection, a
 //! `VoiceCallRequest` to the Controller); the Controller answers with its own call buttons.
 //! Microphone off, microphone level and the sound output work in the process that captures /
@@ -273,7 +284,16 @@ pub fn host_file_action(enabled: bool, fa: &FileAction, offers: &[(i32, String)]
             match offered {
                 Some((_, path)) if enabled => HostAction::Offer(path.clone()),
                 Some(_) => HostAction::Refuse(s.id),
-                None => HostAction::Ignore,
+                None => match parse_resume(&s.path).filter(|(id, _, _)| *id == s.id) {
+                    // Y3: a Controller continues a read the dropped link cut. Only the key the
+                    // Host gave with that offer opens it; anything else is refused, so the
+                    // Controller's job ends instead of waiting.
+                    Some((id, key, _)) => match resumable_find(id, key, now_ms()) {
+                        Some(path) if enabled => HostAction::Offer(path),
+                        _ => HostAction::Refuse(s.id),
+                    },
+                    None => HostAction::Ignore,
+                },
             }
         }
         // Resume offsets and cancels of those jobs; they only reach this connection's own jobs.
@@ -292,6 +312,28 @@ pub fn host_file_action(enabled: bool, fa: &FileAction, offers: &[(i32, String)]
 pub struct ConnCounts {
     pub chat_messages: u32,
     pub files: u32,
+    /// Total seconds the Controller recorded this connection (`None`: never recorded). Only
+    /// the length is kept, never the recording (S7-b, S12).
+    pub recording_s: Option<u64>,
+    /// Why the connection closed, as the panel's `ConnCloseReason` (O14); `None` when unknown.
+    pub reason: Option<&'static str>,
+}
+
+/// Longest `recording_s` the panel takes (31 days).
+const RECORDING_MAX_S: u64 = 31 * 86_400;
+
+/// The panel's closing reason (`host_ended`, `idle`, `peer_gone`, `controller`) of the text
+/// `Connection::on_close` was given; `None` for any other text (the panel then shows none).
+pub fn close_reason_code(text: &str) -> Option<&'static str> {
+    match text {
+        "Peer close" | "Closed manually by the peer" => Some("controller"),
+        "connection manager" | "connection manager window closed" | "stop service" => {
+            Some("host_ended")
+        }
+        "auto disconnect" => Some("idle"),
+        "Timeout" | "Reset by the peer" => Some("peer_gone"),
+        _ => None,
+    }
 }
 
 impl ConnCounts {
@@ -303,12 +345,32 @@ impl ConnCounts {
         self.files = self.files.saturating_add(1);
     }
 
-    /// Value of `sense` in the closing `audit/conn` record.
+    /// A recording of `secs` seconds ended (Y5, S12: "Kayıt alındı · süre").
+    pub fn add_recording(&mut self, secs: u64) {
+        self.recording_s = Some(self.recording_s.unwrap_or(0).saturating_add(secs));
+    }
+
+    /// The connection closes with `text` (the first reason wins; unknown texts leave it unset).
+    pub fn set_close_reason(&mut self, text: &str) {
+        if self.reason.is_none() {
+            self.reason = close_reason_code(text);
+        }
+    }
+
+    /// Value of `sense` in the closing `audit/conn` record. Numbers and a reason code only; the
+    /// panel's `AuditConnSense` is strict, so no other field may ever be added here.
     pub fn audit(&self) -> Value {
-        json!({
+        let mut v = json!({
             "chat_messages": self.chat_messages.min(AUDIT_MAX),
             "files": self.files.min(AUDIT_MAX),
-        })
+        });
+        if let Some(secs) = self.recording_s {
+            v["recording_s"] = json!(secs.min(RECORDING_MAX_S));
+        }
+        if let Some(reason) = self.reason {
+            v["reason"] = json!(reason);
+        }
+        v
     }
 }
 
@@ -350,6 +412,13 @@ struct Job {
     state: State,
     /// Why it ended with an error ("" while none): shown to the person, never sent anywhere.
     error: &'static str,
+    /// Incoming only: the Host's resume key of this offer ("" from a Host that sends none).
+    key: String,
+    /// Incoming only: when the link cut it (ms since the epoch); the partial file is kept until
+    /// [`RESUME_TTL_MS`] after that.
+    cut_at: u64,
+    /// Incoming only: it was restarted after a cut; if the Host refuses, the partial goes.
+    resumed: bool,
 }
 
 #[derive(Debug)]
@@ -438,6 +507,9 @@ pub fn ffi_send_files(sid: u64, peer: &str, paths: &[String], send: impl Fn(Data
                 file_num: 0,
                 state: State::Run,
                 error: "",
+                key: String::new(),
+                cut_at: 0,
+                resumed: false,
             },
         );
         send(Data::SendFiles((
@@ -454,8 +526,23 @@ pub fn ffi_send_files(sid: u64, peer: &str, paths: &[String], send: impl Fn(Data
     json!(ids).to_string()
 }
 
+/// Cut downloads of the Host that waited longer than [`RESUME_TTL_MS`] (at `now`, ms) end:
+/// their half-written file is removed.
+fn sweep_expired(now: u64) {
+    let mut all = SESSIONS.lock().unwrap();
+    for j in all.iter_mut().flat_map(|s| s.jobs.iter_mut()) {
+        if j.incoming && j.state == State::Resume && now.saturating_sub(j.cut_at) > RESUME_TTL_MS
+        {
+            j.state = State::Err;
+            j.error = ERR_LINK_LOST;
+            discard_partial(Path::new(&j.local));
+        }
+    }
+}
+
 /// `session_sense_file_jobs`: `[{id, name, kind, dir, done, total, state, path}]`.
 pub fn ffi_file_jobs(sid: u64) -> String {
+    sweep_expired(now_ms());
     let jobs = with_session(sid, |s| {
         s.jobs
             .iter()
@@ -525,7 +612,17 @@ pub fn forget_closed(alive: impl Fn(u64, &str) -> bool) {
         .map(|(sid, _)| sid)
         .collect();
     if !gone.is_empty() {
-        SESSIONS.lock().unwrap().retain(|s| !gone.contains(&s.sid));
+        let mut all = SESSIONS.lock().unwrap();
+        // A closed session never resumes: what its cut downloads left on disk goes (Y3).
+        for j in all
+            .iter()
+            .filter(|s| gone.contains(&s.sid))
+            .flat_map(|s| s.jobs.iter())
+            .filter(|j| j.incoming && j.state == State::Resume)
+        {
+            discard_partial(Path::new(&j.local));
+        }
+        all.retain(|s| !gone.contains(&s.sid));
     }
 }
 
@@ -549,14 +646,19 @@ pub fn on_status(sid: u64, id: i32, err: Option<&str>) {
             log::warn!("sense chat file {} failed: {e}", j.id);
             j.state = State::Err;
             j.error = ERR_FAILED;
+            // The Host would not (or could not) continue it: no half-written file stays.
+            if j.incoming && j.resumed {
+                discard_partial(Path::new(&j.local));
+            }
         }
     });
 }
 
 /// `error` of a transfer the other side or the disk ended.
 pub const ERR_FAILED: &str = "failed";
-/// `error` of a file from the Host cut by a dropped link: it does not continue (the Host forgets
-/// its offers with the connection); the half-written file is removed, the Host offers it again.
+/// `error` of a file from the Host that a dropped link cut and that could not continue (an old
+/// Host without resume key, a folder, or [`RESUME_TTL_MS`] passed): the half-written file is
+/// removed, the Host offers it again.
 pub const ERR_LINK_LOST: &str = "link_lost_not_resumed";
 
 /// Removes what a cut download from the Host left at `local`: the half-written `.download`
@@ -582,16 +684,27 @@ pub fn discard_partial(local: &Path) {
     }
 }
 
+/// How long a cut download of a Host file keeps its half-written file waiting for the same
+/// session to log in again (Host and Controller use the same limit), Y3.
+pub const RESUME_TTL_MS: u64 = 15 * 60 * 1000;
+
 /// `io_loop`: the link dropped. Running jobs wait to resume; `live` gives the file each live
-/// read job was at. A file the Host offered does not continue ([`ERR_LINK_LOST`]): its
-/// half-written file is removed so nothing incomplete stays in the incoming folder.
+/// read job was at. A single file the Host offered keeps its half-written `.download` and
+/// continues at the next login of the session (Y3); a folder, or a file of a Host that sent no
+/// resume key, ends with [`ERR_LINK_LOST`] and its half-written files are removed.
 pub fn on_link_lost(sid: u64, live: &[(i32, i32)]) {
+    let now = now_ms();
     with_session(sid, |s| {
         for j in s.jobs.iter_mut().filter(|j| j.state == State::Run) {
             if j.incoming {
-                j.state = State::Err;
-                j.error = ERR_LINK_LOST;
-                discard_partial(Path::new(&j.local));
+                if j.key.is_empty() || Path::new(&j.local).is_dir() {
+                    j.state = State::Err;
+                    j.error = ERR_LINK_LOST;
+                    discard_partial(Path::new(&j.local));
+                } else {
+                    j.state = State::Resume;
+                    j.cut_at = now;
+                }
                 continue;
             }
             if let Some((_, n)) = live.iter().find(|(id, _)| *id == j.id) {
@@ -605,10 +718,27 @@ pub fn on_link_lost(sid: u64, live: &[(i32, i32)]) {
 /// `io_loop`: the session logged in again. Returns what restarts the jobs cut by the drop
 /// (RustDesk's own `AddJob` + `ResumeJob`; the Host continues the `.download` file).
 pub fn on_connected(sid: u64) -> Vec<Data> {
+    sweep_expired(now_ms());
     with_session(sid, |s| {
         let mut out = Vec::new();
         for j in s.jobs.iter_mut().filter(|j| j.state == State::Resume) {
             j.state = State::Run;
+            if j.incoming {
+                // From the Host: the same offer again, by its resume key; RustDesk's resume
+                // (`.download` + `.digest`) checks the part already written.
+                j.resumed = true;
+                out.push(Data::AddJob((
+                    j.id,
+                    JobType::Generic,
+                    resume_source(j.id, &j.key, &j.name),
+                    j.local.clone(),
+                    0,
+                    false,
+                    true,
+                )));
+                out.push(Data::ResumeJob((j.id, true)));
+                continue;
+            }
             out.push(Data::AddJob((
                 j.id,
                 JobType::Generic,
@@ -632,6 +762,9 @@ pub fn on_connected(sid: u64) -> Vec<Data> {
 /// Source mark of an offered file: `sense:offer/<offer id>/<name>`. The real path stays on
 /// the Host.
 pub const OFFER_MARK: &str = "sense:offer";
+
+/// Source mark of a continued download: `sense:offer-resume/<offer id>/<key>/<name>` (Y3).
+pub const RESUME_MARK: &str = "sense:offer-resume";
 
 /// `Misc.plugin_request` id of an offer (Host → Controller). RustDesk builds without the plugin
 /// framework ignore it.
@@ -673,6 +806,79 @@ pub fn parse_offer(path: &str) -> Option<(i32, &str)> {
     }
     let id: i32 = id.parse().ok()?;
     (is_offer_id(id) && safe_name(name)).then_some((id, name))
+}
+
+/// Source the Controller asks for when it continues a cut download: the offer id and the
+/// resume key the Host gave with the offer (Y3).
+pub fn resume_source(id: i32, key: &str, name: &str) -> String {
+    format!("{RESUME_MARK}/{id}/{key}/{name}")
+}
+
+/// (offer id, key, name) of a resume mark; `None` for any other path.
+pub fn parse_resume(path: &str) -> Option<(i32, &str, &str)> {
+    let rest = path.strip_prefix(RESUME_MARK)?.strip_prefix('/')?;
+    let (id, rest) = rest.split_once('/')?;
+    let (key, name) = rest.split_once('/')?;
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let id: i32 = id.parse().ok()?;
+    (is_offer_id(id) && valid_key(key) && safe_name(name)).then_some((id, key, name))
+}
+
+/// A resume key: 32 lower-case hex digits (16 random bytes).
+fn valid_key(k: &str) -> bool {
+    k.len() == 32 && k.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn new_key() -> Option<String> {
+    use hbb_common::sodiumoxide::{self, randombytes::randombytes_into};
+    if sodiumoxide::init().is_err() {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    randombytes_into(&mut bytes);
+    Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// One offer the Host kept after the connection that made it ended (server process, memory
+/// only): the Controller that was given `key` may read it again until [`RESUME_TTL_MS`].
+struct Resumable {
+    id: i32,
+    key: String,
+    path: String,
+    at: u64,
+}
+
+static RESUMABLE: Mutex<Vec<Resumable>> = Mutex::new(Vec::new());
+/// At most this many offers wait for a resume (the oldest go first).
+const RESUMABLE_MAX: usize = 256;
+
+fn resumable_put(id: i32, key: &str, path: &str, now: u64) {
+    let mut all = RESUMABLE.lock().unwrap();
+    all.retain(|r| r.id != id && now.saturating_sub(r.at) <= RESUME_TTL_MS);
+    if all.len() >= RESUMABLE_MAX {
+        all.remove(0);
+    }
+    all.push(Resumable {
+        id,
+        key: key.to_owned(),
+        path: path.to_owned(),
+        at: now,
+    });
+}
+
+/// Real path of offer `id` when `key` is its resume key and it has not expired.
+fn resumable_find(id: i32, key: &str, now: u64) -> Option<String> {
+    let mut all = RESUMABLE.lock().unwrap();
+    all.retain(|r| now.saturating_sub(r.at) <= RESUME_TTL_MS);
+    all.iter()
+        .find(|r| r.id == id && r.key == key)
+        .map(|r| r.path.clone())
+}
+
+fn resumable_drop(ids: &[i32]) {
+    RESUMABLE.lock().unwrap().retain(|r| !ids.contains(&r.id));
 }
 
 /// One file of the Host card's list (CM process). Memory only (S12).
@@ -896,8 +1102,14 @@ pub fn conn_offer(raw: &str) -> Option<(i32, String, Vec<u8>)> {
         log::warn!("sense chat file offer refused: not a valid offer");
         return None;
     }
-    let content = json!({ "id": id, "name": name, "total": total }).to_string();
-    Some((id, path.to_owned(), content.into_bytes()))
+    let mut content = json!({ "id": id, "name": name, "total": total });
+    // Y3: the key lets the same Controller continue this read after a dropped link; the Host
+    // path still never leaves the Host.
+    if let Some(key) = new_key() {
+        resumable_put(id, &key, path, now_ms());
+        content["key"] = json!(key);
+    }
+    Some((id, path.to_owned(), content.to_string().into_bytes()))
 }
 
 /// Connection: the Controller started reading offer `id` (white list entry in use).
@@ -924,6 +1136,8 @@ pub fn prune_offers(
     }
     reading.retain(|id| !ended.contains(id));
     offers.retain(|(id, _)| !ended.contains(id));
+    // An offer whose read ended (done, failed, cancelled) cannot be resumed either.
+    resumable_drop(&ended);
 }
 
 /// The message that tells the Controller about an offer.
@@ -956,6 +1170,12 @@ fn on_offer_into(sid: u64, peer: &str, content: &[u8], dir: &Path) -> Option<Dat
         log::warn!("sense chat file: invalid offer ignored");
         return None;
     }
+    // A Host that sends no (valid) key cannot be resumed: a cut then ends the download.
+    let key = v["key"]
+        .as_str()
+        .filter(|k| valid_key(k))
+        .unwrap_or_default()
+        .to_owned();
     let (known, busy) = with_session(sid, |s| {
         (
             s.jobs.iter().any(|j| j.id == id),
@@ -970,8 +1190,8 @@ fn on_offer_into(sid: u64, peer: &str, content: &[u8], dir: &Path) -> Option<Dat
     if known {
         return None;
     }
-    // A half-written ".download" of an earlier transfer counts as taken: an offer is not
-    // resumed (the Host forgets its offers with the connection).
+    // A half-written ".download" of an earlier transfer counts as taken (a new offer never
+    // continues it; only the cut job itself does, by its resume key).
     let taken = |n: &str| {
         let p = dir.join(n);
         p.exists() || dir.join(format!("{n}.download")).exists() || busy.contains(&p)
@@ -991,6 +1211,9 @@ fn on_offer_into(sid: u64, peer: &str, content: &[u8], dir: &Path) -> Option<Dat
             file_num: 0,
             state: State::Run,
             error: "",
+            key,
+            cut_at: 0,
+            resumed: false,
         },
     );
     log::info!("sense chat file from the Host to the incoming folder");
@@ -1510,8 +1733,64 @@ mod tests {
         let big = ConnCounts {
             chat_messages: u32::MAX,
             files: 200_000,
+            ..Default::default()
         };
         assert_eq!(big.audit(), json!({ "chat_messages": 100_000, "files": 100_000 }));
+    }
+
+    #[test]
+    fn audit_carries_recording_length_and_close_reason() {
+        let mut c = ConnCounts::default();
+        c.add_message();
+        // Never recorded, reason unknown: the record is what it was (old panels and new agree).
+        assert_eq!(c.audit(), json!({ "chat_messages": 1, "files": 0 }));
+        // Two recordings add up; a recording shorter than a second still counts as taken.
+        c.add_recording(90);
+        c.add_recording(0);
+        c.add_recording(30);
+        c.set_close_reason("Peer close");
+        // The first reason wins; unknown texts change nothing.
+        c.set_close_reason("auto disconnect");
+        let v = c.audit();
+        assert_eq!(
+            v,
+            json!({ "chat_messages": 1, "files": 0, "recording_s": 120, "reason": "controller" })
+        );
+        // Only the fields the panel's strict `AuditConnSense` knows.
+        let keys: Vec<&str> = v.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        assert!(keys
+            .iter()
+            .all(|k| ["chat_messages", "files", "recording_s", "reason"].contains(k)));
+        let mut z = ConnCounts::default();
+        z.add_recording(0);
+        assert_eq!(z.audit()["recording_s"], 0);
+        z.add_recording(u64::MAX);
+        assert_eq!(z.audit()["recording_s"], 31 * 86_400);
+    }
+
+    #[test]
+    fn close_reason_codes_are_the_panels() {
+        for (text, code) in [
+            ("Peer close", Some("controller")),
+            ("connection manager", Some("host_ended")),
+            ("connection manager window closed", Some("host_ended")),
+            ("stop service", Some("host_ended")),
+            ("auto disconnect", Some("idle")),
+            ("Timeout", Some("peer_gone")),
+            ("Reset by the peer", Some("peer_gone")),
+            ("web console", None),
+            ("End", None),
+            ("", None),
+        ] {
+            assert_eq!(close_reason_code(text), code, "{text}");
+        }
+        // A reason never set stays out of the record; the first known one is kept.
+        let mut c = ConnCounts::default();
+        c.set_close_reason("End");
+        assert!(c.audit().get("reason").is_none());
+        c.set_close_reason("Timeout");
+        c.set_close_reason("Peer close");
+        assert_eq!(c.audit()["reason"], "peer_gone");
     }
 
     // ---- Controller: job list ----
@@ -1749,7 +2028,13 @@ mod tests {
         assert_eq!(oid, id);
         assert_eq!(path, file.to_string_lossy());
         let told: Value = serde_json::from_slice(&content).unwrap();
-        assert_eq!(told, json!({ "id": id, "name": "plan.pdf", "total": 2048 }));
+        // Y3: a resume key rides with the offer (never the path).
+        let key = told["key"].as_str().unwrap().to_owned();
+        assert!(valid_key(&key));
+        assert_eq!(
+            told,
+            json!({ "id": id, "name": "plan.pdf", "total": 2048, "key": key })
+        );
         let msg = offer_message(content.clone());
         assert_eq!(msg.misc().plugin_request().id, OFFER_REQUEST);
 
@@ -1778,13 +2063,50 @@ mod tests {
         on_progress(sid, id, 1024);
         assert_eq!(parse(&ffi_file_jobs(sid))[0]["done"], 1024);
         assert_eq!(parse(&ffi_file_jobs(sid))[0]["error"], "");
-        // A drop ends it (the Host forgot the offer); it is not resumed, and the half-written
-        // file does not stay in the incoming folder.
+        // Y3: a drop keeps the half-written file; the job waits and continues at the next login
+        // of the same session, by the key of the offer.
         let part = in_dir.join("plan (1).pdf.download");
         std::fs::write(&part, b"half").unwrap();
         on_link_lost(sid, &[]);
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["state"], "resume");
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["error"], "");
+        assert!(part.exists());
+        assert!(on_connected(0xFFFF).is_empty());
+        let again = on_connected(sid);
+        assert_eq!(again.len(), 2);
+        let src = resume_source(id, &key, "plan.pdf");
+        match (&again[0], &again[1]) {
+            (
+                Data::AddJob((a, JobType::Generic, from, to, 0, false, true)),
+                Data::ResumeJob((b, true)),
+            ) => {
+                assert_eq!((*a, *b), (id, id));
+                assert_eq!(from, &src);
+                assert_eq!(PathBuf::from(to), in_dir.join("plan (1).pdf"));
+            }
+            _ => panic!("unexpected Data"),
+        }
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["state"], "run");
+        assert!(on_connected(sid).is_empty(), "resumed once only");
+
+        // Host, new connection (empty white list): the key opens the read of that offer only.
+        assert_eq!(
+            host_file_action(true, &send(id, &src), &[]),
+            HostAction::Offer(file.to_string_lossy().into_owned())
+        );
+        assert_eq!(host_file_action(false, &send(id, &src), &[]), HostAction::Refuse(id));
+        let wrong = resume_source(id, &"0".repeat(32), "plan.pdf");
+        assert_eq!(host_file_action(true, &send(id, &wrong), &[]), HostAction::Refuse(id));
+        assert_eq!(host_file_action(true, &send(id + 1, &src), &[]), HostAction::Ignore);
+        // Once its read ends the offer is gone for good.
+        let mut offers = Vec::new();
+        let mut reading = vec![id];
+        prune_offers(&mut offers, &mut reading, |_| false);
+        assert_eq!(host_file_action(true, &send(id, &src), &[]), HostAction::Refuse(id));
+
+        // The Host refuses a continue (it restarted): the job ends and no half file stays.
+        on_status(sid, id, Some("Permission denied"));
         assert_eq!(parse(&ffi_file_jobs(sid))[0]["state"], "err");
-        assert_eq!(parse(&ffi_file_jobs(sid))[0]["error"], ERR_LINK_LOST);
         assert!(!part.exists());
         assert_eq!(std::fs::read(in_dir.join("plan.pdf")).unwrap(), b"old");
         assert!(on_connected(sid).is_empty());
@@ -1820,6 +2142,126 @@ mod tests {
         discard_partial(&dir.join("yok.txt"));
         assert!(dir.join("b.bin").exists());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn offer_content(id: i32, name: &str, key: Option<&str>) -> Vec<u8> {
+        let mut v = json!({ "id": id, "name": name, "total": 100 });
+        if let Some(k) = key {
+            v["key"] = json!(k);
+        }
+        v.to_string().into_bytes()
+    }
+
+    #[test]
+    fn cut_download_without_key_or_of_a_folder_is_removed() {
+        let dir = temp_dir("nokey");
+        let sid = 0xB101;
+        // An old Host sends no key: the cut ends it, as before.
+        let old = OFFER_FIRST + 900;
+        assert!(on_offer_into(sid, "p", &offer_content(old, "a.bin", None), &dir).is_some());
+        std::fs::write(dir.join("a.bin.download"), b"x").unwrap();
+        // A folder offer cannot continue (the file it was at is unknown).
+        let folder = OFFER_FIRST + 901;
+        let key = "ab".repeat(16);
+        assert!(on_offer_into(sid, "p", &offer_content(folder, "Proje", Some(&key)), &dir).is_some());
+        std::fs::create_dir_all(dir.join("Proje").join("alt")).unwrap();
+        std::fs::write(dir.join("Proje").join("alt").join("x.download"), b"x").unwrap();
+        // A key that is not 32 hex digits counts as none.
+        let bad = OFFER_FIRST + 902;
+        assert!(on_offer_into(sid, "p", &offer_content(bad, "b.bin", Some("XYZ")), &dir).is_some());
+        std::fs::write(dir.join("b.bin.download"), b"x").unwrap();
+
+        on_link_lost(sid, &[]);
+        for row in parse(&ffi_file_jobs(sid)).as_array().unwrap() {
+            assert_eq!(row["state"], "err");
+            assert_eq!(row["error"], ERR_LINK_LOST);
+        }
+        assert!(!dir.join("a.bin.download").exists());
+        assert!(!dir.join("Proje").exists());
+        assert!(!dir.join("b.bin.download").exists());
+        assert!(on_connected(sid).is_empty());
+        forget_closed(|s, _| s != sid);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cut_download_is_cleaned_after_the_wait_or_when_the_session_closes() {
+        let dir = temp_dir("ttl");
+        let key = "cd".repeat(16);
+        // Waited too long: the next list read ends it and removes the half file.
+        let sid = 0xB102;
+        let id = OFFER_FIRST + 910;
+        assert!(on_offer_into(sid, "p", &offer_content(id, "c.bin", Some(&key)), &dir).is_some());
+        std::fs::write(dir.join("c.bin.download"), b"x").unwrap();
+        on_link_lost(sid, &[]);
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["state"], "resume");
+        assert!(dir.join("c.bin.download").exists());
+        with_job(sid, id, |j| j.cut_at = 0);
+        let rows = parse(&ffi_file_jobs(sid));
+        assert_eq!(rows[0]["state"], "err");
+        assert_eq!(rows[0]["error"], ERR_LINK_LOST);
+        assert!(!dir.join("c.bin.download").exists());
+        assert!(on_connected(sid).is_empty());
+        forget_closed(|s, _| s != sid);
+
+        // The session closes while it waits: nothing stays on disk.
+        let sid2 = 0xB103;
+        let id2 = OFFER_FIRST + 911;
+        assert!(on_offer_into(sid2, "p", &offer_content(id2, "d.bin", Some(&key)), &dir).is_some());
+        std::fs::write(dir.join("d.bin.download"), b"x").unwrap();
+        std::fs::write(dir.join("d.bin.digest"), b"{}").unwrap();
+        on_link_lost(sid2, &[]);
+        assert!(dir.join("d.bin.download").exists());
+        forget_closed(|s, _| s != sid2);
+        assert!(!dir.join("d.bin.download").exists());
+        assert!(!dir.join("d.bin.digest").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resume_marks_and_keys() {
+        let key = "0123456789abcdef".repeat(2);
+        let id = OFFER_FIRST + 920;
+        let src = resume_source(id, &key, "film.mp4");
+        assert_eq!(src, format!("sense:offer-resume/{id}/{key}/film.mp4"));
+        assert_eq!(parse_resume(&src), Some((id, key.as_str(), "film.mp4")));
+        // A resume mark is never an offer mark, nor the other way round.
+        assert_eq!(parse_offer(&src), None);
+        assert_eq!(parse_resume(&offer_source(id, "film.mp4")), None);
+        for bad in [
+            format!("sense:offer-resume/{}/{key}/a.txt", OFFER_FIRST - 1),
+            format!("sense:offer-resume/{id}/{}/a.txt", "AB".repeat(16)),
+            format!("sense:offer-resume/{id}/{}/a.txt", "ab".repeat(15)),
+            format!("sense:offer-resume/{id}/{key}/../x"),
+            format!("sense:offer-resume/{id}/{key}/a/b"),
+            format!("sense:offer-resume/{id}/{key}/"),
+            format!("sense:offer-resume/{id}//a.txt"),
+            format!("sense:offer-resume/+{id}/{key}/a.txt"),
+        ] {
+            assert_eq!(parse_resume(&bad), None, "{bad}");
+        }
+        // A key made on the Host is valid and different each time.
+        let (a, b) = (new_key().unwrap(), new_key().unwrap());
+        assert!(valid_key(&a) && valid_key(&b));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn host_keeps_a_resumable_offer_only_for_a_while() {
+        let id = OFFER_FIRST + 930;
+        let key = "ef".repeat(16);
+        let now = now_ms();
+        resumable_put(id, &key, "/h/film.mp4", now);
+        assert_eq!(resumable_find(id, &key, now), Some("/h/film.mp4".to_owned()));
+        assert_eq!(resumable_find(id, &"00".repeat(16), now), None, "wrong key");
+        assert_eq!(resumable_find(id + 1, &key, now), None, "other offer");
+        // Expired entries are gone, whoever asks.
+        resumable_put(id, &key, "/h/film.mp4", now.saturating_sub(RESUME_TTL_MS + 1));
+        assert_eq!(resumable_find(id, &key, now), None);
+        // An ended read drops it.
+        resumable_put(id, &key, "/h/film.mp4", now);
+        resumable_drop(&[id]);
+        assert_eq!(resumable_find(id, &key, now), None);
     }
 
     #[test]
