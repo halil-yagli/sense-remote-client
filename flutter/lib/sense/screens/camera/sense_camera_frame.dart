@@ -89,7 +89,7 @@ class _SenseCameraTabFrameState extends State<SenseCameraTabFrame> {
     final pi = ffi.ffiModel.pi;
     final alias = _try(() => bind.mainGetPeerOptionSync(id: ffi.id, key: 'alias'), '');
     final name = alias.isNotEmpty ? alias : (pi.hostname.isNotEmpty ? pi.hostname : ffi.id);
-    final ct = _try<ConnectionTypeState?>(() => ConnectionTypeState.find(ffi.id), null);
+    final ct = _try<ConnectionType?>(() => ConnectionTypeState.find(ffi.id), null);
     final bool? relay = ct == null || !ct.isValid() ? null : ct.direct.value != ConnectionType.strDirect;
     return SenseCameraBarState(
       name: name,
