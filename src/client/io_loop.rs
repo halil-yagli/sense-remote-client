@@ -114,6 +114,9 @@ pub struct Remote<T: InvokeUiSession> {
     sense_link: crate::sense::link_quality::LinkMeter,
     // Sense Remote (H4, O11): time stamp of a call the Host started, until it is answered here.
     sense_call_in: Option<i64>,
+    // Sense Remote (#103): five seconds of statistics for the event record (fps, rate, round
+    // trip, frames dropped by the full decode queue).
+    sense_stats: crate::sense::diag::kinds::StatsWindow,
 }
 
 #[derive(Default)]
@@ -173,6 +176,7 @@ impl<T: InvokeUiSession> Remote<T> {
             trusted_device: Default::default(),
             sense_link: Default::default(),
             sense_call_in: None,
+            sense_stats: Default::default(),
         }
     }
 
@@ -321,6 +325,8 @@ impl<T: InvokeUiSession> Remote<T> {
                                 match res {
                                     Err(err) => {
                                         self.handler.on_establish_connection_error(err.to_string());
+                                        // Sense Remote (#103): why the connection dropped, in the event record.
+                                        crate::sense::diag::kinds::conn_drop("akis_hatasi", Some(&err.to_string()));
                                         break;
                                     }
                                     Ok(ref bytes) => {
@@ -338,9 +344,11 @@ impl<T: InvokeUiSession> Remote<T> {
                             } else {
                                 if self.handler.is_restarting_remote_device() {
                                     log::info!("Restart remote device");
+                                    crate::sense::diag::kinds::conn_drop("karsi_yeniden_basliyor", None); // Sense Remote (#103)
                                     self.handler.msgbox("restarting", "Restarting remote device", "Connection in progress. Please wait.", "");
                                 } else {
                                     log::info!("Reset by the peer");
+                                    crate::sense::diag::kinds::conn_drop("karsi_kapatti", None); // Sense Remote (#103)
                                     self.handler.msgbox("error", "Connection Error", "Reset by the peer", "");
                                 }
                                 break;
@@ -359,6 +367,7 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                         _ = self.timer.tick() => {
                             if last_recv_time.elapsed() >= SEC30 {
+                                crate::sense::diag::kinds::conn_drop("zaman_asimi_30sn", None); // Sense Remote (#103)
                                 self.handler.msgbox("error", "Connection Error", "Timeout", "");
                                 break;
                             }
@@ -401,6 +410,7 @@ impl<T: InvokeUiSession> Remote<T> {
                                     .map_or(false, |silent| silent >= KCP_PEER_SILENCE_LIMIT);
                             if peer_gone {
                                 log::info!("Peer stopped answering, reconnecting");
+                                crate::sense::diag::kinds::conn_reconnect("karsi_yanit_vermiyor"); // Sense Remote (#103)
                                 #[cfg(feature = "flutter")]
                                 self.handler.msgbox("restarting-show", "Connecting...", "Connection in progress. Please wait.", "");
                                 // Sciter knows no `restarting-show` and would show a dialog that
@@ -417,6 +427,7 @@ impl<T: InvokeUiSession> Remote<T> {
                             fps_instant = Instant::now();
                             let mut speed = self.data_count.swap(0, Ordering::Relaxed);
                             speed = speed * 1000 / elapsed as usize;
+                            let sense_bytes_per_s = speed;
                             let speed = format!("{:.2}kB/s", speed as f32 / 1024 as f32);
 
                             let fps = self.video_threads.iter().map(|(k, v)| {
@@ -457,6 +468,24 @@ impl<T: InvokeUiSession> Remote<T> {
                                     if direct { "direct" } else { "relay" }
                                 );
                             }
+                            // Sense Remote (#103): the same values as events: `conn/path` once,
+                            // `video/stats` and `conn/rtt` every five seconds (desktop sessions).
+                            if self.handler.is_default() {
+                                crate::sense::diag::kinds::controller_tick(
+                                    &mut self.sense_stats,
+                                    &crate::sense::diag::kinds::Tick {
+                                        fps: fps.values().sum::<i32>(),
+                                        bytes_per_s: sense_bytes_per_s,
+                                        codec: codec_format.as_ref().map(|c| format!("{c:?}")),
+                                        chroma: chroma.clone(),
+                                        last_frame_ms: link.last_frame_ms,
+                                        loss: link.loss_est,
+                                        direct,
+                                        stream: stream_type.to_string(),
+                                        quality: self.handler.lc.read().unwrap().image_quality.clone(),
+                                    },
+                                );
+                            }
                             self.handler.update_quality_status(QualityStatus {
                                 speed: Some(speed),
                                 fps,
@@ -488,6 +517,8 @@ impl<T: InvokeUiSession> Remote<T> {
                 }
             }
             Err(err) => {
+                // Sense Remote (#103): the connection could not be made, and why.
+                crate::sense::diag::kinds::conn_fail(&err.to_string());
                 self.handler.on_establish_connection_error(err.to_string());
             }
         }
@@ -1837,6 +1868,8 @@ impl<T: InvokeUiSession> Remote<T> {
                         let video_queue = thread.video_queue.read().unwrap();
                         if video_queue.force_push(vf).is_some() {
                             drop(video_queue);
+                            // Sense Remote (#103): a dropped frame, counted in `video/stats`.
+                            self.sense_stats.on_drop();
                             self.handler.refresh_video(display as _);
                         } else {
                             thread.video_sender.send(MediaData::VideoQueue).ok();
@@ -1870,6 +1903,8 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                     Some(login_response::Union::PeerInfo(pi)) => {
                         self.sense_logged_in = true;
+                        // Sense Remote (#103): the Host's platform, version and display sizes.
+                        crate::sense::diag::kinds::peer_info(&pi);
                         let peer_version = pi.version.clone();
                         let peer_platform = pi.platform.clone();
                         self.set_peer_info(&pi);
@@ -2620,6 +2655,8 @@ impl<T: InvokeUiSession> Remote<T> {
                     // Sense Remote (S10): probe timing for the loss estimate.
                     if !t.from_client {
                         self.sense_link.on_probe(t.last_delay);
+                        // Sense Remote (#103): the round trip the Host measured, for `conn/rtt`.
+                        self.sense_stats.on_rtt(t.last_delay);
                     }
                     self.handler.handle_test_delay(t, peer).await;
                 }

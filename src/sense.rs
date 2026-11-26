@@ -832,6 +832,8 @@ pub mod tray_menu;
 pub mod log_upload;
 // Sense Remote (Sürüm 9, R1): signed Wake-on-LAN orders from the panel for this LAN.
 pub mod wol;
+// Sense Remote (#103): structured event record, panic hook, crash records (log_upload sends them).
+pub mod diag;
 
 #[cfg(test)]
 mod tests {

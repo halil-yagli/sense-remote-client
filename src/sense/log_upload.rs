@@ -34,6 +34,14 @@
 //! error-triggered sends per hour per computer (kept in the local config, so a restart loop
 //! cannot get past it).
 //!
+//! Sense Remote (#103, contract `Calisma/plan/2026-11-26_kayit-sozlesmesi.md`): every request
+//! also carries the structured events of its time window (`sense-events.jsonl`, merged from the
+//! event files of every process, see `super::diag`), first, within 1 MB. A connection open longer
+//! than five minutes sends a chunk every five minutes (`periodic`, same `session_id`, only what
+//! came since the last chunk the panel took); at the next start the `--server` sends what a
+//! crash or a connection left open did not (`crash`). A panel that refuses these two reasons
+//! (older panel) gets session records as before.
+//!
 //! Logs can still hold customer computer details (names, addresses): the panel stores them
 //! encrypted, shows them to the system administrator only (hidden developer page) and deletes
 //! them after 30 days. Nothing here logs a log line, a key or a path of another user.
@@ -87,6 +95,27 @@ const RECENT_S: u64 = 3 * 86_400;
 const OPTION_SENT: &str = "sense-log-sent";
 const OPTION_SESSIONS: &str = "sense-log-sessions";
 const OPTION_TS: &str = "sense-log-ts";
+/// Sense Remote (#103, contract §2): chunks of a long connection and crash records, their own
+/// hourly limits; when the last crash flag handled was written (Unix ms).
+const OPTION_PERIODIC: &str = "sense-log-periodic";
+const OPTION_CRASH: &str = "sense-log-crash";
+const OPTION_CRASH_SEEN: &str = "sense-log-crash-seen";
+/// A chunk of an open connection every five minutes.
+pub const PERIODIC_S: i64 = 300;
+/// Chunks per computer and hour (12 per connection; a Host and a Controller session at once).
+pub const PERIODIC_PER_HOUR: usize = 24;
+pub const CRASH_PER_HOUR: usize = 3;
+/// A connection record open longer than this is closed without a send (its end never came,
+/// e.g. the window process died); its marker goes too.
+const MAX_SESSION_S: i64 = 24 * 3600;
+/// Events of a crash record: this long before the panic.
+const CRASH_BEFORE_MS: i64 = 15 * 60 * 1000;
+/// Events of a panel request or an error-triggered send: the last hour.
+const EVENTS_LOOKBACK_MS: i64 = 3600 * 1000;
+/// A chunk stops this long before now (lines still in a writer's queue go into the next one).
+const CHUNK_LAG_MS: i64 = 2000;
+/// The merged events of a request take at most this much of its 2 MB.
+const EVENTS_BUDGET: usize = MAX_FILE_BYTES;
 /// User profiles read next to the service profile (Windows).
 #[cfg(windows)]
 const MAX_PROFILES: usize = 8;
@@ -103,6 +132,10 @@ static LAST_MANUAL: AtomicI64 = AtomicI64::new(0);
 static UPDATE_FAILED: AtomicBool = AtomicBool::new(false);
 /// Serializes the read-modify-write of the local-config options.
 static OPTIONS: Mutex<()> = Mutex::new(());
+/// Sense Remote (#103): the panel refused a `periodic` / `crash` record (an older panel without
+/// these reasons): neither is tried again in this run, and chunks no longer move a session's
+/// start, so its end record still carries everything.
+static NEW_REASONS_REFUSED: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------------------------
 // Reasons and IPC
@@ -117,6 +150,10 @@ pub enum Reason {
     ConnNoVideo,
     ConnFailed,
     UpdateFailed,
+    /// Sense Remote (#103): a five-minute chunk of a long connection (same `session_id`).
+    Periodic,
+    /// Sense Remote (#103): the previous run ended badly (panic, or a connection left open).
+    Crash,
 }
 
 impl Reason {
@@ -127,6 +164,8 @@ impl Reason {
             Reason::ConnNoVideo => "conn_no_video",
             Reason::ConnFailed => "conn_failed",
             Reason::UpdateFailed => "update_failed",
+            Reason::Periodic => "periodic",
+            Reason::Crash => "crash",
         }
     }
 
@@ -686,14 +725,14 @@ pub type Offsets = HashMap<PathBuf, u64>;
 
 /// A real directory, not a link (a link in a folder a user can write would send this process
 /// somewhere else).
-fn is_plain_dir(path: &Path) -> bool {
+pub(crate) fn is_plain_dir(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|m| m.is_dir() && !is_link(&m))
         .unwrap_or(false)
 }
 
 /// True for a link, junction or any other reparse point.
-fn is_link(meta: &fs::Metadata) -> bool {
+pub(crate) fn is_link(meta: &fs::Metadata) -> bool {
     if meta.file_type().is_symlink() {
         return true;
     }
@@ -870,26 +909,54 @@ pub fn snapshot_offsets(now: SystemTime) -> Offsets {
     offsets
 }
 
+/// Sense Remote (#103): the event directory of every profile this process reads.
+fn event_dirs() -> Vec<PathBuf> {
+    log_roots()
+        .into_iter()
+        .map(|(_, root)| root.join(super::diag::writer::DIR))
+        .collect()
+}
+
+/// Byte budget of each of `count` raw log files when `used` bytes of the request are taken
+/// (the merged events): 1 MB, less when the rest of the 2 MB would not hold them.
+pub fn raw_budget(count: usize, used: usize) -> usize {
+    MAX_FILE_BYTES.min(MAX_TOTAL_BYTES.saturating_sub(used) / count.max(1))
+}
+
 /// The files of this request: cleaned, within the budgets, at most [`MAX_FILES`]. With `since`
-/// only what was written after a session started.
-pub fn collect_files(now: SystemTime, since: Option<&Offsets>) -> Vec<LogFile> {
+/// only what was written after a session started. Sense Remote (#103): with `events`
+/// (`[from, to)` Unix ms) the event lines of that window come first, merged into
+/// `sense-events.jsonl` (already cleaned line by line); the raw logs share the rest.
+pub fn collect_files(now: SystemTime, since: Option<&Offsets>, events: Option<(i64, i64)>) -> Vec<LogFile> {
+    let mut files: Vec<LogFile> = Vec::new();
+    if let Some((from, to)) = events {
+        if let Some(text) = super::diag::read::collect(&event_dirs(), from, to, EVENTS_BUDGET) {
+            files.push(LogFile {
+                name: super::diag::read::UPLOAD_NAME.to_owned(),
+                text,
+            });
+        }
+    }
+    let used: usize = files.iter().map(|f| f.text.len()).sum();
     let mut raw: Vec<(String, String)> = Vec::new();
     for (name, dir) in log_dirs() {
-        if raw.len() >= MAX_FILES {
+        if files.len() + raw.len() >= MAX_FILES {
             break;
         }
         if let Some(text) = read_recent(&dir, MAX_FILE_BYTES, now, since) {
             raw.push((name, text));
         }
     }
-    let budget = per_file_budget(raw.len());
-    raw.into_iter()
-        .map(|(name, text)| LogFile {
-            name,
-            text: fit_bytes(&sanitize(&text), budget),
-        })
-        .filter(|file| is_file_name(&file.name) && !file.text.trim().is_empty())
-        .collect()
+    let budget = raw_budget(raw.len(), used);
+    files.extend(
+        raw.into_iter()
+            .map(|(name, text)| LogFile {
+                name,
+                text: fit_bytes(&sanitize(&text), budget),
+            })
+            .filter(|file| is_file_name(&file.name) && !file.text.trim().is_empty()),
+    );
+    files
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -899,15 +966,26 @@ pub fn collect_files(now: SystemTime, since: Option<&Offsets>) -> Vec<LogFile> {
 /// One connection being recorded: the other computer, when it started, which role this
 /// computer had and where the log files were then.
 struct Session {
+    /// The id sent to the panel (`session_id`): the same for every chunk of this connection.
+    sid: String,
     peer: Option<String>,
     started_s: i64,
     role: Option<String>,
+    /// Log file positions when the connection started, later after the last chunk.
     offsets: Offsets,
+    /// Sense Remote (#103): event lines before this (Unix ms) already went in a chunk.
+    cut_ms: i64,
+    /// When the last chunk was tried (Unix s); the start at first.
+    last_chunk_s: i64,
+    chunk_in_flight: bool,
 }
 
 static SESSIONS: Mutex<Option<HashMap<String, Session>>> = Mutex::new(None);
 /// Most sessions open at once (a leftover entry is dropped, oldest first).
 const MAX_SESSIONS: usize = 32;
+/// Events this long before a connection's start belong to its record (the start itself is
+/// written by another process a moment earlier).
+const SESSION_LEAD_MS: i64 = 5000;
 
 /// The connection key of a Host connection (its connection id) and of a Controller session
 /// (the id the UI process made): separate name spaces.
@@ -917,6 +995,13 @@ fn host_key(conn_id: i32) -> String {
 
 fn controller_key(sid: &str) -> String {
     format!("c{sid}")
+}
+
+/// Sense Remote (#103): the session id of a Host connection. Connection ids start again with
+/// every run of the service; the panel groups the chunks of a connection by this id, so it
+/// carries the start too.
+pub fn host_sid(conn_id: i32, started_s: i64) -> String {
+    format!("h{started_s}-{conn_id}")
 }
 
 /// This computer's role as the contract names it.
@@ -935,33 +1020,87 @@ pub fn platform_name() -> &'static str {
     }
 }
 
-fn session_started(key: String, peer: Option<String>) {
+/// Log positions as the open-session marker keeps them, and back (only ever used as keys).
+pub fn offsets_to_strings(offsets: &Offsets) -> HashMap<String, u64> {
+    offsets
+        .iter()
+        .map(|(path, len)| (path.to_string_lossy().into_owned(), *len))
+        .collect()
+}
+
+pub fn offsets_from_strings(offsets: HashMap<String, u64>) -> Offsets {
+    offsets
+        .into_iter()
+        .map(|(path, len)| (PathBuf::from(path), len))
+        .collect()
+}
+
+fn open_marker(session: &Session) -> super::diag::crash::OpenSession {
+    super::diag::crash::OpenSession {
+        sid: session.sid.clone(),
+        peer: session.peer.clone(),
+        started_s: session.started_s,
+        role: session.role.clone(),
+        cut_ms: session.cut_ms,
+        offsets: offsets_to_strings(&session.offsets),
+    }
+}
+
+fn session_meta(session: &Session, peer: Option<String>, ended: i64) -> Meta {
+    Meta {
+        peer: peer.or_else(|| session.peer.clone()),
+        session_id: Some(session.sid.clone()),
+        started: Some(session.started_s),
+        ended: Some(ended.max(session.started_s)),
+        app_version: Some(super::update::current_version()),
+        platform: Some(platform_name().to_owned()),
+        role: session.role.clone(),
+    }
+}
+
+fn session_started(key: String, sid: String, peer: Option<String>) {
     if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) {
         return;
     }
     let now = SystemTime::now();
+    let started_s = now_s();
     let session = Session {
+        sid,
         peer,
-        started_s: now_s(),
+        started_s,
         role: own_role(),
         offsets: snapshot_offsets(now),
+        cut_ms: super::diag::now_ms() - SESSION_LEAD_MS,
+        last_chunk_s: started_s,
+        chunk_in_flight: false,
     };
-    let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
-    let map = guard.get_or_insert_with(HashMap::new);
-    if map.len() >= MAX_SESSIONS {
-        if let Some(oldest) = map
-            .iter()
-            .min_by_key(|(_, s)| s.started_s)
-            .map(|(key, _)| key.clone())
-        {
-            map.remove(&oldest);
+    let dir = super::diag::writer::events_dir();
+    super::diag::crash::write_open(&dir, &open_marker(&session));
+    {
+        let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        let map = guard.get_or_insert_with(HashMap::new);
+        if map.len() >= MAX_SESSIONS {
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, s)| s.started_s)
+                .map(|(key, _)| key.clone())
+            {
+                if let Some(old) = map.remove(&oldest) {
+                    super::diag::crash::remove_open(&dir, &old.sid);
+                }
+            }
         }
+        map.insert(key, session);
     }
-    map.insert(key, session);
+    // The computer as it is now goes into this record (displays may have changed).
+    let _ = std::thread::Builder::new()
+        .name("sense-diag-info".to_owned())
+        .spawn(super::diag::sys::emit_info);
 }
 
-/// The connection is over: its record (the logs written since it started) goes to the panel.
-/// A session whose start was not noted (the panel did not take logs then) sends nothing.
+/// The connection is over: its record (the logs and events since it started, or since its last
+/// chunk) goes to the panel. A session whose start was not noted (the panel did not take logs
+/// then) sends nothing.
 fn session_ended(key: &str, reason: Reason, peer: Option<String>) {
     let session = SESSIONS
         .lock()
@@ -971,31 +1110,262 @@ fn session_ended(key: &str, reason: Reason, peer: Option<String>) {
     let Some(session) = session else {
         return;
     };
+    super::diag::crash::remove_open(&super::diag::writer::events_dir(), &session.sid);
     if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) {
         return;
     }
-    let ended = now_s();
-    let meta = Meta {
-        peer: peer.or(session.peer),
-        session_id: Some(key.to_owned()),
-        started: Some(session.started_s),
-        ended: Some(ended.max(session.started_s)),
-        app_version: Some(super::update::current_version()),
-        platform: Some(platform_name().to_owned()),
-        role: session.role,
-    };
+    let meta = session_meta(&session, peer, now_s());
+    let from = session.cut_ms;
     let offsets = session.offsets;
     let spawned = std::thread::Builder::new()
         .name("sense-log-upload".to_owned())
         .spawn(move || {
             if take_slot(OPTION_SESSIONS, SESSION_PER_HOUR, now_s()) {
-                send_blocking(reason, meta, Some(&offsets));
+                // The last lines of the other processes (the window's own end event) reach
+                // their files first.
+                std::thread::sleep(Duration::from_secs(2));
+                send_blocking(reason, meta, Some(&offsets), Some((from, super::diag::now_ms())));
             } else {
                 log::info!("Sense Remote: session log skipped, {SESSION_PER_HOUR} an hour is the limit");
             }
         });
     if let Err(err) = spawned {
         log::warn!("Sense Remote: session log not started: {err}");
+    }
+}
+
+/// Sessions due for a chunk at `now` (pure): open longer than [`PERIODIC_S`] since the last
+/// try, none in flight. `(key, last_chunk_s, in_flight)`.
+pub fn chunks_due(sessions: &[(String, i64, bool)], now: i64) -> Vec<String> {
+    let mut due: Vec<&(String, i64, bool)> = sessions
+        .iter()
+        .filter(|(_, last, in_flight)| !*in_flight && now - *last >= PERIODIC_S)
+        .collect();
+    due.sort_by_key(|(_, last, _)| *last);
+    due.into_iter().map(|(key, _, _)| key.clone()).collect()
+}
+
+/// Sense Remote (#103, contract §2 `periodic`): every five minutes an open connection sends what
+/// came since its last chunk, with the same session id. A chunk moves the session's start only
+/// once the panel took it; a refused chunk is sent again with the next one or with the end.
+fn periodic_tick() {
+    let now = now_s();
+    let dir = super::diag::writer::events_dir();
+    // Records whose end never came (the window process died) are closed quietly.
+    {
+        let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(map) = guard.as_mut() {
+            map.retain(|_, s| {
+                let keep = now - s.started_s < MAX_SESSION_S;
+                if !keep {
+                    super::diag::crash::remove_open(&dir, &s.sid);
+                }
+                keep
+            });
+        }
+    }
+    if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) || NEW_REASONS_REFUSED.load(Ordering::Relaxed) {
+        return;
+    }
+    let state: Vec<(String, i64, bool)> = SESSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|map| {
+            map.iter()
+                .map(|(key, s)| (key.clone(), s.last_chunk_s, s.chunk_in_flight))
+                .collect()
+        })
+        .unwrap_or_default();
+    for key in chunks_due(&state, now) {
+        if !take_slot(OPTION_PERIODIC, PERIODIC_PER_HOUR, now) {
+            log::info!("Sense Remote: log chunk skipped, {PERIODIC_PER_HOUR} an hour is the limit");
+            return;
+        }
+        let to = super::diag::now_ms() - CHUNK_LAG_MS;
+        let job = {
+            let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+            let job = guard.as_mut().and_then(|map| map.get_mut(&key)).map(|s| {
+                s.last_chunk_s = now;
+                s.chunk_in_flight = true;
+                (session_meta(s, None, now), s.offsets.clone(), s.cut_ms)
+            });
+            job
+        };
+        let Some((meta, offsets, from)) = job else {
+            continue;
+        };
+        let next_offsets = snapshot_offsets(SystemTime::now());
+        let chunk_key = key.clone();
+        let spawned = std::thread::Builder::new()
+            .name("sense-log-chunk".to_owned())
+            .spawn(move || {
+                let outcome = send_blocking(Reason::Periodic, meta, Some(&offsets), Some((from, to)));
+                let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(s) = guard.as_mut().and_then(|map| map.get_mut(&chunk_key)) {
+                    s.chunk_in_flight = false;
+                    if outcome == Outcome::Sent {
+                        s.cut_ms = to;
+                        s.offsets = next_offsets;
+                        super::diag::crash::write_open(&super::diag::writer::events_dir(), &open_marker(s));
+                    }
+                }
+            });
+        if let Err(err) = spawned {
+            log::warn!("Sense Remote: log chunk not started: {err}");
+            if let Some(s) = SESSIONS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_mut()
+                .and_then(|map| map.get_mut(&key))
+            {
+                s.chunk_in_flight = false;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Crash records (`--server`, contract §2 `crash`)
+// ---------------------------------------------------------------------------------------------
+
+/// At the first heartbeat answer that takes logs: connections the previous run left open go with
+/// their own session id, then the newest unhandled panic flag.
+fn crash_check_once() {
+    static DONE: AtomicBool = AtomicBool::new(false);
+    if !SUPPORTED || DONE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("sense-log-crash".to_owned())
+        .spawn(|| {
+            let dir = super::diag::writer::events_dir();
+            for open in super::diag::crash::take_open(&dir) {
+                if NEW_REASONS_REFUSED.load(Ordering::Relaxed)
+                    || !take_slot(OPTION_CRASH, CRASH_PER_HOUR, now_s())
+                {
+                    break;
+                }
+                let meta = Meta {
+                    peer: open.peer,
+                    session_id: Some(open.sid),
+                    started: Some(open.started_s),
+                    ended: Some(now_s().max(open.started_s)),
+                    app_version: Some(super::update::current_version()),
+                    platform: Some(platform_name().to_owned()),
+                    role: open.role,
+                };
+                let offsets = offsets_from_strings(open.offsets);
+                log::info!("Sense Remote: the previous run left a connection record open");
+                send_blocking(Reason::Crash, meta, Some(&offsets), Some((open.cut_ms, super::diag::now_ms())));
+            }
+            scan_panics();
+        });
+    if let Err(err) = spawned {
+        log::warn!("Sense Remote: crash check not started: {err}");
+    }
+}
+
+/// A panic flag of any process newer than the last one handled: the events before it go to the
+/// panel. When the panicked process had a connection record open here, that record ends with it.
+fn scan_panics() {
+    if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) || NEW_REASONS_REFUSED.load(Ordering::Relaxed) {
+        return;
+    }
+    let now_ms = super::diag::now_ms();
+    let oldest = now_ms - (RECENT_S as i64) * 1000;
+    let flags: Vec<super::diag::crash::PanicFlag> = event_dirs()
+        .iter()
+        .flat_map(|dir| super::diag::crash::read_flags(dir))
+        .filter(|f| f.t >= oldest && f.t <= now_ms + 60_000)
+        .collect();
+    let flag = {
+        let _lock = OPTIONS.lock().unwrap_or_else(|e| e.into_inner());
+        let seen = config::LocalConfig::get_option(OPTION_CRASH_SEEN)
+            .trim()
+            .parse::<i64>()
+            .unwrap_or(0);
+        let Some(flag) = super::diag::crash::newest_unseen(&flags, seen) else {
+            return;
+        };
+        // Handled before sending: a send that crashes again is not repeated in a loop.
+        config::LocalConfig::set_option(OPTION_CRASH_SEEN.to_owned(), flag.t.to_string());
+        flag
+    };
+    if !take_slot(OPTION_CRASH, CRASH_PER_HOUR, now_s()) {
+        log::info!("Sense Remote: crash record skipped, {CRASH_PER_HOUR} an hour is the limit");
+        return;
+    }
+    // The record of the connection the panicked process had open, if this process holds it.
+    let open = flag.s.as_deref().and_then(|sid| {
+        let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        let map = guard.as_mut()?;
+        let key = map.iter().find(|(_, s)| s.sid == sid).map(|(key, _)| key.clone())?;
+        map.remove(&key)
+    });
+    let (meta, offsets, from) = match open {
+        Some(session) => {
+            super::diag::crash::remove_open(&super::diag::writer::events_dir(), &session.sid);
+            let meta = session_meta(&session, None, flag.t / 1000);
+            (meta, Some(session.offsets), session.cut_ms)
+        }
+        None => {
+            let meta = Meta {
+                session_id: flag.s.clone(),
+                started: Some((flag.t - CRASH_BEFORE_MS) / 1000),
+                ended: Some(flag.t / 1000),
+                app_version: Some(super::update::current_version()),
+                platform: Some(platform_name().to_owned()),
+                role: own_role(),
+                ..Meta::default()
+            };
+            (meta, None, flag.t - CRASH_BEFORE_MS)
+        }
+    };
+    log::info!("Sense Remote: a process panicked ({}), its record goes to the panel", flag.p);
+    let to = flag.t + 5000;
+    let spawned = std::thread::Builder::new()
+        .name("sense-log-crash".to_owned())
+        .spawn(move || {
+            send_blocking(Reason::Crash, meta, offsets.as_ref(), Some((from, to)));
+        });
+    if let Err(err) = spawned {
+        log::warn!("Sense Remote: crash record not started: {err}");
+    }
+}
+
+/// The `--server`'s background work for the record: `sys/info` at start (hardware after two
+/// minutes), `sys/load` every minute, chunks of long connections, panic flags.
+fn start_ticker() {
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("sense-diag-tick".to_owned())
+        .spawn(|| {
+            super::diag::sys::emit_info();
+            let mut load = super::diag::sys::Load::default();
+            let mut ticks: u64 = 0;
+            loop {
+                std::thread::sleep(Duration::from_secs(30));
+                ticks = ticks.wrapping_add(1);
+                if ticks == 4 {
+                    super::diag::sys::read_hardware_once();
+                }
+                if ticks % 2 == 0 {
+                    if let Some(fields) = load.sample() {
+                        super::diag::event("sys", "load", fields);
+                    }
+                }
+                periodic_tick();
+                if ticks % 2 == 1 {
+                    scan_panics();
+                }
+            }
+        });
+    if let Err(err) = spawned {
+        log::warn!("Sense Remote: record ticker not started: {err}");
     }
 }
 
@@ -1045,9 +1415,19 @@ impl Drop for Flight {
     }
 }
 
+/// How a send ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Sent,
+    Refused(u16),
+    Failed,
+    Nothing,
+}
+
 /// Read, clean, sign and send. Blocking; runs on its own thread. Sessions of two connections
-/// that end together wait for each other (one send at a time).
-fn send_blocking(reason: Reason, meta: Meta, since: Option<&Offsets>) {
+/// that end together wait for each other (one send at a time). `events`: the window of event
+/// lines that goes with it (`[from, to)` Unix ms).
+fn send_blocking(reason: Reason, meta: Meta, since: Option<&Offsets>, events: Option<(i64, i64)>) -> Outcome {
     let mut flight = Flight::begin();
     for _ in 0..30 {
         if flight.is_some() {
@@ -1057,12 +1437,12 @@ fn send_blocking(reason: Reason, meta: Meta, since: Option<&Offsets>) {
         flight = Flight::begin();
     }
     let Some(_flight) = flight else {
-        return;
+        return Outcome::Failed;
     };
-    let files = collect_files(SystemTime::now(), since);
+    let files = collect_files(SystemTime::now(), since, events);
     if files.is_empty() {
         log::info!("Sense Remote: no log to send ({})", reason.as_str());
-        return;
+        return Outcome::Nothing;
     }
     let id = config::Config::get_id();
     let uuid = crate::encode64(hbb_common::get_uuid());
@@ -1070,26 +1450,39 @@ fn send_blocking(reason: Reason, meta: Meta, since: Option<&Offsets>) {
     let ts = next_ts();
     let Some(body) = signed_body(&id, &uuid, ts, reason.as_str(), &meta, &files, &secret_key) else {
         log::warn!("Sense Remote: logs not sent, no device key");
-        return;
+        return Outcome::Failed;
     };
     let url = format!("{}{PATH}", super::api_server());
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(err) => {
             log::warn!("Sense Remote: logs not sent, no runtime: {err}");
-            return;
+            return Outcome::Failed;
         }
     };
     let answer = runtime.block_on(crate::common::post_request_with_status(url, body.to_string(), ""));
     // Only the outcome: never a log line, a key or a path.
     match answer {
-        Ok((200, _)) => log::info!(
-            "Sense Remote: {} log file(s) sent to the panel ({})",
-            files.len(),
-            reason.as_str()
-        ),
-        Ok((status, _)) => log::warn!("Sense Remote: logs not taken by the panel (status {status})"),
-        Err(_) => log::warn!("Sense Remote: logs not sent, the panel is not reachable"),
+        Ok((200, _)) => {
+            log::info!(
+                "Sense Remote: {} log file(s) sent to the panel ({})",
+                files.len(),
+                reason.as_str()
+            );
+            Outcome::Sent
+        }
+        Ok((status, _)) => {
+            log::warn!("Sense Remote: logs not taken by the panel (status {status}, {})", reason.as_str());
+            if status == 400 && matches!(reason, Reason::Periodic | Reason::Crash) {
+                NEW_REASONS_REFUSED.store(true, Ordering::Relaxed);
+                log::info!("Sense Remote: the panel takes no chunks or crash records; not tried again");
+            }
+            Outcome::Refused(status)
+        }
+        Err(_) => {
+            log::warn!("Sense Remote: logs not sent, the panel is not reachable");
+            Outcome::Failed
+        }
     }
 }
 
@@ -1108,11 +1501,13 @@ pub fn trigger_auto(reason: Reason, peer: Option<String>) {
         role: own_role(),
         ..Meta::default()
     };
+    let now_ms = super::diag::now_ms();
+    let events = Some((now_ms - EVENTS_LOOKBACK_MS, now_ms + 1000));
     let spawned = std::thread::Builder::new()
         .name("sense-log-upload".to_owned())
         .spawn(move || {
             if take_slot(OPTION_SENT, AUTO_PER_HOUR, now_s()) {
-                send_blocking(reason, meta, None);
+                send_blocking(reason, meta, None, events);
             } else {
                 log::info!("Sense Remote: log send skipped, {AUTO_PER_HOUR} an hour is the limit");
             }
@@ -1141,9 +1536,13 @@ fn trigger_manual() {
         role: own_role(),
         ..Meta::default()
     };
+    let now_ms = super::diag::now_ms();
+    let events = Some((now_ms - EVENTS_LOOKBACK_MS, now_ms + 1000));
     let spawned = std::thread::Builder::new()
         .name("sense-log-upload".to_owned())
-        .spawn(move || send_blocking(Reason::Manual, meta, None));
+        .spawn(move || {
+            send_blocking(Reason::Manual, meta, None, events);
+        });
     if let Err(err) = spawned {
         log::warn!("Sense Remote: log send not started: {err}");
     }
@@ -1159,10 +1558,19 @@ pub fn panel_takes_logs(caps: Option<&[String]>) -> bool {
 }
 
 /// Every parsed heartbeat answer (`hbbs_http/sync.rs`): the panel's capabilities and its request.
+/// Sense Remote (#103): the `--server`'s event record and its ticker start with the first one;
+/// the first that takes logs also checks how the previous run ended.
 pub fn on_answer(panel_caps: Option<&[String]>, log_request: bool) {
     let on = panel_takes_logs(panel_caps);
     if PANEL_LOGS.swap(on, Ordering::Relaxed) != on {
         log::info!("Sense Remote: panel logs_v1 {}", if on { "on" } else { "off" });
+    }
+    if crate::is_server() {
+        super::diag::init();
+        start_ticker();
+        if on {
+            crash_check_once();
+        }
     }
     if on && log_request {
         trigger_manual();
@@ -1171,7 +1579,15 @@ pub fn on_answer(panel_caps: Option<&[String]>, log_request: bool) {
 
 /// A Host desktop connection was authorized (`src/server/connection.rs`): its record starts.
 pub fn host_started(conn_id: i32, peer_id: &str) {
-    session_started(host_key(conn_id), clean_peer(peer_id));
+    let peer = clean_peer(peer_id);
+    let sid = host_sid(conn_id, now_s());
+    super::diag::set_session(Some(&sid));
+    super::diag::event(
+        "conn",
+        "start",
+        json!({ "taraf": "host", "baglanti": conn_id, "karsi": peer }),
+    );
+    session_started(host_key(conn_id), sid, peer);
 }
 
 /// A Host connection closed: `remote` = an authorized desktop connection (not file transfer,
@@ -1182,6 +1598,16 @@ pub fn host_closed(conn_id: i32, remote: bool, video_sent: bool, peer_id: &str) 
         return;
     }
     let reason = if video_sent { Reason::Session } else { Reason::ConnNoVideo };
+    super::diag::event(
+        "conn",
+        "end",
+        json!({ "taraf": "host", "baglanti": conn_id, "neden": reason.as_str(), "goruntu_gitti": video_sent }),
+    );
+    if let Some(current) = super::diag::session() {
+        if current.starts_with('h') && current.ends_with(&format!("-{conn_id}")) {
+            super::diag::end_session(&current);
+        }
+    }
     session_ended(&host_key(conn_id), reason, clean_peer(peer_id));
 }
 
@@ -1206,6 +1632,9 @@ pub fn controller_started(peer_id: &str) -> Option<String> {
     let peer = clean_peer(peer_id)?;
     static COUNTER: AtomicI64 = AtomicI64::new(0);
     let sid = format!("{}-{}", now_s(), COUNTER.fetch_add(1, Ordering::Relaxed));
+    // Sense Remote (#103): this process's events belong to the session from now on.
+    super::diag::set_session(Some(&controller_key(&sid)));
+    super::diag::event("conn", "start", json!({ "taraf": "controller", "karsi": peer }));
     let message = SenseLogIpc::ControllerStart {
         sid: sid.clone(),
         peer,
@@ -1220,6 +1649,8 @@ pub fn controller_ended(sid: &str, reason: Reason, peer_id: &str) {
     if !SUPPORTED || !matches!(reason, Reason::Session | Reason::ConnNoVideo | Reason::ConnFailed) {
         return;
     }
+    super::diag::event("conn", "end", json!({ "taraf": "controller", "neden": reason.as_str() }));
+    super::diag::end_session(&controller_key(sid));
     let Some(peer) = clean_peer(peer_id) else {
         return;
     };
@@ -1266,7 +1697,8 @@ pub fn on_main_ipc(message: SenseLogIpc) {
             let (Some(sid), Some(peer)) = (clean_peer(&sid), clean_peer(&peer)) else {
                 return;
             };
-            session_started(controller_key(&sid), Some(peer));
+            let key = controller_key(&sid);
+            session_started(key.clone(), key, Some(peer));
         }
         SenseLogIpc::ControllerEnd { sid, peer, reason } => {
             let (Some(sid), Some(peer), Some(reason)) =
@@ -1857,5 +2289,81 @@ connected peer 123456789
             assert!(!is_safe_dir_under(&root, &link));
             assert!(!is_plain_dir(&link));
         }
+    }
+
+    // --- Sense Remote (#103): chunks, crash records, events in the request ---
+
+    #[test]
+    fn new_reasons_follow_the_contract_and_the_ui_cannot_name_them() {
+        assert_eq!(Reason::Periodic.as_str(), "periodic");
+        assert_eq!(Reason::Crash.as_str(), "crash");
+        assert_eq!(Reason::from_ipc("periodic"), None);
+        assert_eq!(Reason::from_ipc("crash"), None);
+    }
+
+    #[test]
+    fn events_take_their_share_and_raw_logs_the_rest() {
+        assert_eq!(raw_budget(4, 0), per_file_budget(4));
+        assert_eq!(raw_budget(1, 0), MAX_FILE_BYTES);
+        assert_eq!(raw_budget(7, MAX_FILE_BYTES), (MAX_TOTAL_BYTES - MAX_FILE_BYTES) / 7);
+        assert_eq!(raw_budget(3, MAX_TOTAL_BYTES + 5), 0);
+        for count in 1..=MAX_FILES - 1 {
+            assert!(raw_budget(count, EVENTS_BUDGET) * count + EVENTS_BUDGET <= MAX_TOTAL_BYTES);
+        }
+        assert!(is_file_name(crate::sense::diag::read::UPLOAD_NAME));
+    }
+
+    #[test]
+    fn chunks_are_due_every_five_minutes_one_at_a_time() {
+        let sessions = vec![
+            ("h1".to_owned(), 1000, false),
+            ("c2".to_owned(), 1000 + PERIODIC_S, false),
+            ("c3".to_owned(), 900, true),
+            ("h4".to_owned(), 700, false),
+        ];
+        assert_eq!(chunks_due(&sessions, 1000 + PERIODIC_S - 1), vec!["h4".to_owned()]);
+        assert_eq!(chunks_due(&sessions, 1000 + PERIODIC_S), vec!["h4".to_owned(), "h1".to_owned()]);
+        assert!(chunks_due(&[], 10).is_empty());
+        // Twelve chunks an hour per connection.
+        assert_eq!(3600 / PERIODIC_S, 12);
+        assert!(PERIODIC_PER_HOUR >= 12);
+    }
+
+    #[test]
+    fn host_session_ids_differ_across_runs_and_fit_the_contract() {
+        let a = host_sid(1, 1_764_150_000);
+        let b = host_sid(1, 1_764_160_000);
+        assert_ne!(a, b);
+        for sid in [a, b, host_sid(-3, 0), controller_key("1764150000-12")] {
+            assert!(crate::sense::diag::line::is_session(&sid), "{sid}");
+        }
+    }
+
+    #[test]
+    fn open_session_offsets_round_trip() {
+        let mut offsets = Offsets::new();
+        offsets.insert(PathBuf::from("log").join("server").join("a.log"), 42);
+        offsets.insert(PathBuf::from("b.log"), 7);
+        assert_eq!(offsets_from_strings(offsets_to_strings(&offsets)), offsets);
+    }
+
+    #[test]
+    fn a_request_with_events_is_signed_over_them() {
+        let events = format!(
+            "{}\n",
+            crate::sense::diag::line::build_line(5, "conn", "rtt", "client", Some("c1-0"), &json!({"ms": 180})).unwrap()
+        );
+        let files = vec![LogFile {
+            name: crate::sense::diag::read::UPLOAD_NAME.to_owned(),
+            text: events,
+        }];
+        let meta = Meta {
+            session_id: Some("c1-0".to_owned()),
+            ..Meta::default()
+        };
+        let a = signed_bytes("1", "u", 9, Reason::Periodic.as_str(), &meta, &files);
+        let text = String::from_utf8(a).unwrap();
+        assert!(text.contains("\"reason\":\"periodic\""), "{text}");
+        assert!(text.contains("\"name\":\"sense-events.jsonl\""), "{text}");
     }
 }
