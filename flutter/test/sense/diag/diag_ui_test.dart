@@ -93,4 +93,51 @@ void main() {
       expect(lines, contains('info [ui] route op=pop name=settings to=/'));
     });
   });
+
+  group('structured events (main_sense_diag_event)', () {
+    final events = <String>[];
+    setUp(() {
+      events.clear();
+      senseDiagEventTestSink = (c, k, fields) => events.add('$c/$k $fields');
+    });
+    tearDown(() => senseDiagEventTestSink = null);
+
+    test('interface events go as ui events with their fields', () {
+      senseUiButton('Bağlantıyı bitir', where: 'host.card');
+      senseUiPopup('durum', open: true);
+      expect(events, [
+        'ui/button {name: Bağlantıyı bitir, where: host.card}',
+        'ui/popup {name: durum, open: true}',
+      ]);
+    });
+
+    test('a setting is ad / eski / yeni; a secret setting writes neither value', () {
+      senseUiSetting('view_style', 'original', 'adaptive', where: 'session');
+      senseUiSetting('permanent-password', 'a', 'b');
+      expect(events[0], 'ui/setting {ad: view_style, yer: session, eski: original, yeni: adaptive}');
+      expect(events[1], 'ui/setting {ad: permanent-password, eski: ***, yeni: ***}');
+    });
+
+    test('fields are JSON safe and masked; bad kinds are dropped', () {
+      final f = senseDiagEventFields({
+        'n': 3,
+        'b': false,
+        'x': null,
+        'token': 'abc',
+        'note': 'from ali@example.com',
+        'o': const Size(2, 3),
+      });
+      expect(f['n'], 3);
+      expect(f['b'], false);
+      expect(f['x'], isNull);
+      expect(f['token'], '***');
+      expect(f['note'], 'from ***');
+      expect(f['o'], isA<String>());
+      expect(senseDiagEventKind('display'), 'display');
+      expect(senseDiagEventKind('a b'), isNull);
+      expect(senseDiagEventKind(''), isNull);
+      senseUiEvent('bad kind!', {'a': 1});
+      expect(events, isEmpty);
+    });
+  });
 }
