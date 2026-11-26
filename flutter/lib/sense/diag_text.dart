@@ -30,12 +30,20 @@ const int kSenseUiMaxValue = 120;
 const String kSenseUiMasked = '***';
 
 final RegExp _secretKey = RegExp(
-    r'pass|pwd|token|secret|e-?mail|otp|api_?key|private|credential|cookie|session_?key',
+    r'pass|pwd|token|secret|e-?mail|otp|api_?key|private|credential|cookie|session_?(key|token|cookie|secret|auth)',
     caseSensitive: false);
+
+/// Names that are secrets only as a whole word (`pin`, `auth_code`, `twoFa`, `salt`): a plain
+/// substring would also hide `typing`, `mapping`, `author`. A session *id* is not a secret.
+const Set<String> _secretWords = {'pin', '2fa', 'otp', 'salt', 'auth', 'secret', 'cookie'};
+final RegExp _wordBreak = RegExp(r'[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])');
 final RegExp _email = RegExp(r'[^\s@"=]+@[^\s@"=]+\.[^\s@"=]+');
 
-/// Pure: a field whose name says it holds a password, token, key or e-mail.
-bool senseUiSecretKey(String key) => _secretKey.hasMatch(key);
+/// Pure: a field whose name says it holds a password, PIN, 2FA code, token, key, salt, cookie
+/// or e-mail.
+bool senseUiSecretKey(String key) =>
+    _secretKey.hasMatch(key) ||
+    key.split(_wordBreak).any((w) => _secretWords.contains(w.toLowerCase()));
 
 /// Pure: one field value as one short, single-line text (e-mail addresses masked).
 String senseUiValue(Object? value) {

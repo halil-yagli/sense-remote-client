@@ -37,6 +37,24 @@ void main() {
       expect(line, contains('keyboard=on'), reason: '"key" alone is not a secret');
     });
 
+    test('PIN, 2FA, salt, auth and cookie / session token names are masked, ids are not', () {
+      for (final key in [
+        'pin', 'user_pin', 'devicePin', '2fa', 'totp_2fa', 'otp', 'salt', 'pwSalt',
+        'auth', 'auth_code', 'basicAuth', 'secret', 'cookie', 'sessionCookie', 'session_token',
+        'sessionToken', 'sessionKey', 'session-secret',
+      ]) {
+        expect(senseUiSecretKey(key), isTrue, reason: key);
+        expect(senseUiLine('x', {key: 'v4lue'}), '[ui] x $key=***', reason: key);
+      }
+      for (final key in [
+        'sessionId', 'session_id', 'session', 'typing', 'mapping', 'author', 'pinned', 'spinner',
+        'authority', 'saltwater', 'keyboard', 'name', 'where',
+      ]) {
+        expect(senseUiSecretKey(key), isFalse, reason: key);
+      }
+      expect(senseUiLine('x', {'sessionId': 'abc'}), '[ui] x sessionId=abc');
+    });
+
     test('a setting change is old -> new, a secret setting writes neither', () {
       expect(senseUiSettingLine('view_style', 'original', 'adaptive', where: 'session'),
           '[ui] setting key=view_style where=session from=original to=adaptive');
