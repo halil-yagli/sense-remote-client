@@ -14,6 +14,16 @@ pub fn conn_path(yol: &str, akis: &str, nat: Option<&str>, relay: Option<&str>) 
     super::event("conn", "path", json!({ "yol": yol, "akis": akis, "nat": nat, "relay": relay }));
 }
 
+/// `conn/path` with the reason the relay was (not) chosen (`neden`, the text of
+/// `link_quality::relay_reason`); `relay` is the relay server when the path is a relay.
+pub fn conn_path_reason(yol: &str, akis: &str, nat: Option<&str>, relay: Option<&str>, neden: Option<&str>) {
+    super::event(
+        "conn",
+        "path",
+        json!({ "yol": yol, "akis": akis, "nat": nat, "relay": relay, "neden": neden }),
+    );
+}
+
 /// `conn/punch`: one hole-punching attempt. `yontem` = `udp` | `tcp` | `ipv6`, `hedef` = `lan` |
 /// `wan`, `sonuc` = `basarili` | `basarisiz` | `zaman_asimi` …
 pub fn conn_punch(deneme: u32, yontem: &str, hedef: &str, sonuc: &str, ms: u64) {
@@ -60,6 +70,22 @@ pub fn video_encoder(olay: &str, kodek: &str, donanim: bool, hata: Option<&str>)
         "encoder",
         json!({ "olay": olay, "kodek": kodek, "donanim": donanim, "hata": hata }),
     );
+}
+
+/// `video/encoder` for the outcome of building one: `kuruldu`, or `hata` with the error.
+pub fn encoder_built(kodek: &str, donanim: bool, error: Option<&str>) {
+    video_encoder(if error.is_some() { "hata" } else { "kuruldu" }, kodek, donanim, error);
+}
+
+/// `video/decoder` for a freshly built decoder: `kuruldu`, or `hata` when it came out unusable.
+/// Hardware decoding only exists for H264/H265.
+pub fn decoder_built(valid: bool, kodek: &str) {
+    let donanim = matches!(kodek, "H264" | "H265");
+    if valid {
+        video_decoder("kuruldu", kodek, donanim, None);
+    } else {
+        video_decoder("hata", kodek, donanim, Some("olusturulamadi"));
+    }
 }
 
 /// `video/decoder`: `olay` = `kuruldu` | `hata` …
@@ -320,5 +346,47 @@ mod tests {
             let line = crate::sense::diag::line::build_line(1, c, k, "client", Some("c1-0"), &fields).unwrap();
             assert!(crate::sense::diag::line::clean_event_line(&line).is_some(), "{line}");
         }
+    }
+
+    fn taken() -> Vec<(String, String)> {
+        crate::sense::diag::sink::take()
+    }
+
+    #[test]
+    fn named_wrappers_write_their_events() {
+        taken();
+        conn_punch(1, "udp", "wan", "basarili", 40);
+        conn_path_reason("relay", "tcp", Some("symmetric"), Some("relay.example:21117"), Some("own NAT symmetric"));
+        keyframe_req("istemci_istedi", 0);
+        video_capture("dxgi", 0, 1920, 1080);
+        update_state("idle", "available");
+        update_wait("incoming_connection");
+        let got: Vec<(String, String)> = taken();
+        let want = [
+            ("conn", "punch"),
+            ("conn", "path"),
+            ("video", "keyframe_req"),
+            ("video", "capture"),
+            ("update", "state"),
+            ("update", "wait"),
+        ];
+        assert_eq!(got.len(), want.len());
+        for ((c, k), (wc, wk)) in got.iter().zip(want) {
+            assert_eq!((c.as_str(), k.as_str()), (wc, wk));
+        }
+    }
+
+    #[test]
+    fn encoder_and_decoder_outcomes_pick_the_event_name() {
+        taken();
+        encoder_built("H264", true, None);
+        encoder_built("VP9", false, Some("no device"));
+        decoder_built(true, "H265");
+        decoder_built(false, "VP8");
+        let got = taken();
+        assert_eq!(got.len(), 4);
+        assert!(got.iter().all(|(c, _)| c == "video"));
+        assert_eq!(got[0].1, "encoder");
+        assert_eq!(got[2].1, "decoder");
     }
 }

@@ -106,6 +106,7 @@ pub fn observe(before: UpdateState, s: &State, now_s: i64, idle_s: u64) {
             before.as_str(),
             s.phase.as_str()
         );
+        super::super::diag::kinds::update_state(before.as_str(), s.phase.as_str()); // Sense Remote (#103)
     }
     // The session lookup is only made while waiting for idle.
     let kind = if s.phase == UpdateState::WaitingIdle {
@@ -129,6 +130,7 @@ pub fn observe(before: UpdateState, s: &State, now_s: i64, idle_s: u64) {
         controlling.map_or(0, |c| c.0),
         controlling.map_or(-1, |c| c.1),
     );
+    super::super::diag::kinds::update_wait(neden); // Sense Remote (#103)
 }
 
 #[cfg(test)]
@@ -180,5 +182,18 @@ mod tests {
         assert!(due(Some(("incoming_connection", 100)), "outgoing_session", 105));
         // Clock set back: write again rather than stay silent.
         assert!(due(Some(("incoming_connection", 100)), "incoming_connection", 50));
+    }
+
+    #[test]
+    fn observe_writes_state_and_wait_events() {
+        crate::sense::diag::sink::take();
+        let s = State {
+            phase: UpdateState::WaitingIdle,
+            ..State::default()
+        };
+        observe(UpdateState::Available, &s, 100, 0);
+        let got = crate::sense::diag::sink::take();
+        assert!(got.contains(&("update".to_owned(), "state".to_owned())), "{got:?}");
+        assert!(got.contains(&("update".to_owned(), "wait".to_owned())), "{got:?}");
     }
 }
