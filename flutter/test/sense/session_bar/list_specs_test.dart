@@ -112,7 +112,7 @@ void main() {
         final b = FakeBackend(facts: SensePeerFacts(displaysCount: 3, privacyOn: ghost))..individualWindows = on;
         final entry = senseScreensList(b).allEntries.whereType<SenseToggleEntry>().singleWhere((e) => e.id == 'screens.individual');
         expect(entry.value, on);
-        entry.onChanged(!on);
+        entry.onChanged!(!on);
         expect(b.individualWindows, !on);
       });
     }
