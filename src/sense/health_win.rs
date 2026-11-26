@@ -503,6 +503,8 @@ pub fn extend(health: &mut super::report::SenseHealth, base_mhz: Option<u32>) {
                 read_bps: *read,
                 write_bps: *write,
                 temp_c: temps.get(id).copied(),
+                // Sense Remote (Sürüm 9): written_gb is filled below (NVMe SMART).
+                ..Default::default()
             })
             .collect();
         for (id, temp) in &temps {
