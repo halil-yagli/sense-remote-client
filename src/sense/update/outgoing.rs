@@ -7,6 +7,11 @@
 //! see the user's temp dir), named per uid. The reader trusts it only when it is a plain file
 //! owned by that uid and the process is alive, so a stale file left by a crash never blocks
 //! updates for ever. A forged file can only delay an update, never cause one.
+//!
+//! S9 P5 (#96): a living process is not enough (the pid can be reused, or the app hangs with
+//! its session gone). The app rewrites the file every `controlling::REFRESH_S` while a session
+//! is open, so its modification time says "still open"; a file older than `controlling::TTL_S`
+//! is ignored like a dead process's.
 
 use std::path::PathBuf;
 
@@ -37,6 +42,11 @@ pub fn is_active(content: &str, pid_alive: impl Fn(u32) -> bool) -> bool {
         Some((pid, count)) => count > 0 && pid_alive(pid),
         None => false,
     }
+}
+
+/// Pure: is a marker last written `age_s` seconds ago still fresh?
+pub fn fresh_enough(age_s: u64) -> bool {
+    age_s < super::controlling::TTL_S as u64
 }
 
 /// The user's app: publish the current number of Controller sessions (`0` removes the marker).
@@ -80,6 +90,17 @@ pub fn uid_has_outgoing(uid: u32) -> bool {
     if !meta.is_file() || meta.uid() != uid || meta.len() > 64 {
         return false;
     }
+    let age_s = meta
+        .modified()
+        .ok()
+        .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+        .map_or(0, |d| d.as_secs());
+    if !fresh_enough(age_s) {
+        hbb_common::log::info!(
+            "[sense-update] wait neden=outgoing_session_marker_stale uid={uid} age_s={age_s}; ignored"
+        );
+        return false;
+    }
     std::fs::read_to_string(&path).is_ok_and(|content| is_active(&content, pid_alive))
 }
 
@@ -99,6 +120,14 @@ mod tests {
             assert_eq!(parse(bad), None, "{bad:?}");
             assert!(!is_active(bad, |_| true), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn old_marker_is_not_fresh() {
+        assert!(fresh_enough(0));
+        assert!(fresh_enough(super::super::controlling::TTL_S as u64 - 1));
+        assert!(!fresh_enough(super::super::controlling::TTL_S as u64));
+        assert!(!fresh_enough(86_400));
     }
 
     #[test]

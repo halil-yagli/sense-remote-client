@@ -2321,10 +2321,21 @@ pub mod sessions {
     #[inline]
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn update_session_count_to_server() {
+        if push_session_count() > 0 {
+            // Sense Remote (S9 P5, #96): repeat the count while a session is open; the
+            // receiver ignores one that is not refreshed (this process may die without a 0).
+            crate::sense::update::controlling::keep_fresh(push_session_count);
+        }
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn push_session_count() -> usize {
+        let count = SESSIONS.read().unwrap().len();
         // Sense Remote (B1): the root updater also reads this when no `--server` listens.
         #[cfg(target_os = "macos")]
-        crate::sense::update::outgoing::publish(SESSIONS.read().unwrap().len());
-        crate::ipc::update_controlling_session_count(SESSIONS.read().unwrap().len()).ok();
+        crate::sense::update::outgoing::publish(count);
+        crate::ipc::update_controlling_session_count(count).ok();
+        count
     }
 
     #[inline]
