@@ -2509,6 +2509,8 @@ impl Connection {
                 .sense_recording_since
                 .take()
                 .map_or(0, |t| t.elapsed().as_secs());
+            // Sense Remote (Y5, S12): the closing record carries the recorded seconds.
+            self.sense_chat.add_recording(secs);
             json!({ "sense_recording": "stop", "duration_s": secs })
         };
         self.send_to_cm(ipc::Data::SenseRecording(on));
@@ -5632,6 +5634,8 @@ impl Connection {
             return;
         }
         self.closed = true;
+        // Sense Remote (Y5, O14): why it closed goes into the closing audit record.
+        self.sense_chat.set_close_reason(reason);
         // If voice A,B -> C, and A,B has voice call
         // B disconnects, C will reset the voice call input.
         //
