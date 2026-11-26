@@ -4,6 +4,9 @@
 //  - "Tümü" only when the peer can show all displays together and has more than one (#5),
 //  - "Her ekranı ayrı pencerede aç" without the `show_monitors_toolbar` condition,
 //  - no "Taraf değiştir" (decision 2), no Android buttons, no Wayland or OS password items.
+// Sürüm 9 (Paket L): "Kamerayı görüntüle" (O6), "Terminal aç (yönetici)" (Windows), "Bu
+// bilgisayara hep aktarmayla bağlan", çizim ayarları (doku / D3D) and the custom resolution
+// of a virtual display, with the same conditions as the RustDesk menus they come from.
 import 'package:flutter/foundation.dart';
 
 enum SensePeerOs { windows, mac, linux, android, other }
@@ -73,6 +76,8 @@ class SensePeerFacts {
     this.relativeMouseSupported = true,
     this.fileClipboard = true,
     this.audioPerm = true,
+    this.viewCameraSupported = false,
+    this.localWindows = false,
   });
 
   final SensePeerOs os;
@@ -115,6 +120,13 @@ class SensePeerFacts {
   final bool fileClipboard;
   final bool audioPerm;
 
+  /// The peer can show its cameras (`platform_additions.support_view_camera`; RustDesk
+  /// sends it from Windows and Linux only, so a Mac peer has no camera item).
+  final bool viewCameraSupported;
+
+  /// This (the Controller) computer runs Windows (D3D rendering is Windows only).
+  final bool localWindows;
+
   bool perm(String name) => !deniedPerms.contains(name);
   bool get onAllDisplays => currentDisplay == SenseRd.allDisplays;
   bool get desktopPeer => os == SensePeerOs.windows || os == SensePeerOs.mac || os == SensePeerOs.linux;
@@ -145,6 +157,10 @@ abstract final class SenseRules {
   static bool individualWindows(SensePeerFacts f) => f.supportMultiDisplay && f.displaysCount > 1;
   static bool resolution(SensePeerFacts f) =>
       f.keyboard && (f.virtualResolution || f.resolutionsCount > 1) && !f.onAllDisplays;
+
+  /// "Özel çözünürlük" (width × height): RustDesk offers it only on a virtual display
+  /// resolution (`isVirtualDisplayResolution`), inside the resolution menu.
+  static bool customResolution(SensePeerFacts f) => resolution(f) && f.virtualResolution;
   static bool useAllMyDisplays(SensePeerFacts f) => f.supportMultiDisplay && f.localMultiScreens;
 
   /// Windows + installed + a virtual display driver.
@@ -163,6 +179,11 @@ abstract final class SenseRules {
   static bool trueColor(SensePeerFacts f) =>
       senseVersionCmp(f.version, '1.2.4') >= 0 && (f.codecFormat == 'AV1' || f.codecFormat == 'VP9');
   static bool mute(SensePeerFacts f) => f.defaultConn && f.audioPerm;
+
+  /// Drawing settings of this computer (RustDesk settings "Use texture rendering", "Use D3D
+  /// rendering"): local options, used by the next connection.
+  static bool textureRender(SensePeerFacts f) => f.defaultConn;
+  static bool d3dRender(SensePeerFacts f) => f.defaultConn && f.localWindows;
 
   // ---- O5 Klavye ve fare ----
   static bool viewOnlyEnabled(SensePeerFacts f) => senseVersionCmp(f.version, '1.2.0') >= 0 && f.keyboard;
@@ -213,4 +234,15 @@ abstract final class SenseRules {
   static bool lockAfterEnd(SensePeerFacts f) => f.defaultConn && f.keyboard && f.os != SensePeerOs.android;
   static bool note(SensePeerFacts f) => f.defaultConn && !f.accountDisabled;
   static bool advanced(SensePeerFacts f) => f.defaultConn;
+
+  /// RustDesk peer menu "Terminal (Run as administrator)": Windows peers only.
+  static bool terminalAdmin(SensePeerFacts f) => advanced(f) && f.os == SensePeerOs.windows;
+
+  /// RustDesk "View camera" (toolbar, desktop): a separate camera connection. Hidden when
+  /// the peer cannot show cameras (Mac) or the computer turned the camera permission off.
+  static bool viewCamera(SensePeerFacts f) =>
+      advanced(f) && f.desktopPeer && f.viewCameraSupported && f.perm('camera');
+
+  /// RustDesk peer menu "Always connect via relay" (peer option `force-always-relay`).
+  static bool forceRelay(SensePeerFacts f) => f.defaultConn;
 }

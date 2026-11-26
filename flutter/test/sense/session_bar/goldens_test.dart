@@ -55,4 +55,17 @@ void main() {
   testWidgets('c05 Eylemler, recording, Gelişmiş open',
       (t) => shot(t, 'list_actions_c05', FakeBackend()..recordingOn = true, open: SenseBarMenu.actions, taps: ['Gelişmiş']),
       skip: goldenSkip('list_actions_c05'), tags: const ['golden']);
+  // Sürüm 9 (Paket L): drawing settings (R4), custom resolution of a virtual display (R5).
+  testWidgets('Görüntü, Gelişmiş (çizim) open',
+      (t) => shot(t, 'list_display_render', FakeBackend(), open: SenseBarMenu.display, taps: ['Gelişmiş']),
+      skip: goldenSkip('list_display_render'), tags: const ['golden']);
+  testWidgets('Ekranlar, Uzak çözünürlük open on a virtual display',
+      (t) => shot(
+          t,
+          'list_screens_custom_res',
+          FakeBackend(
+              facts: const SensePeerFacts(displaysCount: 3, resolutionsCount: 3, virtualResolution: true, rustDeskIdd: true)),
+          open: SenseBarMenu.screens,
+          taps: ['Uzak çözünürlük']),
+      skip: goldenSkip('list_screens_custom_res'), tags: const ['golden']);
 }

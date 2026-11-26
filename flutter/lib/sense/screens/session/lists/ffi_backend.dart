@@ -6,6 +6,9 @@
 //    custom quality is set in the list (no custom quality dialog);
 //  - ghost mode never opens a window (S9-b): a short note next to the button instead;
 //  - Bitir closes without the note window (decision 4).
+// Sürüm 9 (Paket L): View camera, Terminal as administrator, Always connect via relay, the
+// drawing settings (texture / D3D) and the custom resolution call the same RustDesk
+// functions as the peer card, the settings page and the resolution menu.
 import 'package:flutter_hbb/sense/screens/session/sense_swap_key_default.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -36,6 +39,10 @@ import '../layers/layer_controller.dart' show SenseLayerController;
 import '../sense_remote_window.dart' show SenseAutoGhost, senseGhostToggle;
 import 'backend.dart';
 import 'rules.dart';
+
+/// Platform addition a peer sends when it can show its cameras (RustDesk server,
+/// Windows and Linux only).
+const String kSensePlatformAdditionsSupportViewCamera = 'support_view_camera';
 
 /// The six read-only shortcut rows of O5 and their RustDesk actions.
 const List<(String, String)> kSenseShortcutRows = [
@@ -108,6 +115,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   bool _publicRelay = false;
   bool _localMultiScreens = false;
   bool _canAdjust = false;
+  bool _forceRelay = false;
 
   late final ScreenAdjustor _adjustor =
       ScreenAdjustor(id: ffi.id, ffi: ffi, cbExitFullscreen: () => stateGlobal.setFullscreen(false));
@@ -124,6 +132,8 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
     _m.addListener(_notify);
     ffi.qualityMonitorModel.addListener(_notify);
     ffi.recordingModel.addListener(_notify);
+    // O1 "%N ölçekte" follows the canvas.
+    ffi.canvasModel.addListener(_notify);
     _signals.addListener(_notify);
     void watch(RxInterface<Object?> rx) => _workers.add(ever(rx, (_) => _notify()));
     watch(_pi.isSet);
@@ -156,6 +166,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
     _m.removeListener(_notify);
     ffi.qualityMonitorModel.removeListener(_notify);
     ffi.recordingModel.removeListener(_notify);
+    ffi.canvasModel.removeListener(_notify);
     _signals.removeListener(_notify);
     for (final w in _workers) {
       w.dispose();
@@ -250,6 +261,8 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
         relativeMouseSupported: ffi.inputModel.isRelativeMouseModeSupported,
         fileClipboard: _fileClipboard,
         audioPerm: _m.permissions['audio'] != false,
+        viewCameraSupported: _pi.platformAdditions[kSensePlatformAdditionsSupportViewCamera] == true,
+        localWindows: isWindows,
       );
 
   @override
@@ -300,6 +313,8 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       _publicRelay = await bind.mainIsUsingPublicServer() && !direct;
       _localMultiScreens = (await getScreenRectList()).length > 1;
       _canAdjust = await _adjustor.isWindowCanBeAdjusted();
+      _forceRelay =
+          option2bool(kOptionForceAlwaysRelay, await bind.sessionGetOption(sessionId: _sid, arg: kOptionForceAlwaysRelay) ?? '');
       KBLayoutType.value = bind.getLocalKbLayoutType();
     } catch (e) {
       debugPrint('Sense session refresh: $e');
@@ -645,6 +660,33 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void setMuted(bool v) => _set('disable-audio', v);
 
+  @override
+  int? get viewScalePercent {
+    if (!ready) return null;
+    final s = _try(() => ffi.canvasModel.scale, 0.0);
+    if (!s.isFinite || s <= 0) return null;
+    return (s * 100).round();
+  }
+
+  /// Same getter / setter as the RustDesk settings page ("Use texture rendering").
+  @override
+  bool get textureRender => _try(() => bind.mainGetUseTextureRender(), false);
+
+  @override
+  void setTextureRender(bool v) async {
+    await bind.mainSetLocalOption(key: kOptionTextureRender, value: v ? 'Y' : 'N');
+    _notify();
+  }
+
+  @override
+  bool get d3dRender => _try(() => mainGetLocalBoolOptionSync(kOptionD3DRender), false);
+
+  @override
+  void setD3dRender(bool v) async {
+    await mainSetLocalBoolOption(kOptionD3DRender, v);
+    _notify();
+  }
+
   // ---- O5 ----
   @override
   List<String> get keyboardModes {
@@ -898,12 +940,12 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void setClipboardDisabled(bool v) => _set('disable-clipboard', v);
 
-  void _connectWithToken({bool files = false, bool terminal = false, bool tunnel = false}) {
+  void _connectWithToken({bool files = false, bool terminal = false, bool tunnel = false, bool camera = false}) {
     final token = bind.sessionGetConnToken(sessionId: _sid);
     connect(contextOf(), ffi.id,
         loginMethod: bind.sessionGetCommonSync(sessionId: _sid, key: 'login_method', param: '') ?? '',
         isFileTransfer: files,
-        isViewCamera: false,
+        isViewCamera: camera,
         isTerminal: terminal,
         isTcpTunneling: tunnel,
         connToken: token);
@@ -927,8 +969,36 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void openTerminal() => _connectWithToken(terminal: true);
 
+  /// Like the RustDesk peer card: the flag is read (and cleared) when the terminal
+  /// session is added.
+  @override
+  void openTerminalAdmin() {
+    setEnvTerminalAdmin();
+    _connectWithToken(terminal: true);
+  }
+
   @override
   void openTunnel() => _connectWithToken(tunnel: true);
+
+  @override
+  void openCamera() => _connectWithToken(camera: true);
+
+  @override
+  bool get forceRelay => _forceRelay;
+
+  @override
+  bool get forceRelayEverywhere =>
+      _try(() => option2bool(kOptionForceAlwaysRelay, bind.mainGetOptionSync(key: kOptionForceAlwaysRelay)), false);
+
+  /// Written to this computer's saved options through the session, so it is kept when the
+  /// session saves its config; RustDesk reads it when the next connection starts.
+  @override
+  void setForceRelay(bool v) async {
+    _forceRelay = v;
+    _notify();
+    await bind.sessionPeerOption(
+        sessionId: _sid, name: kOptionForceAlwaysRelay, value: bool2option(kOptionForceAlwaysRelay, v));
+  }
 
   @override
   String get fingerprint => _try(() => FingerprintState.find(ffi.id).value, '');

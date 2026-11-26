@@ -21,6 +21,8 @@ class FakeBackend extends SenseSessionBackend {
               resolutionsCount: 3,
               codecFormat: 'VP9',
               elevationOffered: true,
+              viewCameraSupported: true,
+              localWindows: true,
             );
 
   final List<String> calls = [];
@@ -189,6 +191,16 @@ class FakeBackend extends SenseSessionBackend {
   bool muted = false;
   @override
   void setMuted(bool v) => set(() => muted = v);
+  @override
+  int? viewScalePercent = 38;
+  @override
+  bool textureRender = false;
+  @override
+  void setTextureRender(bool v) => set(() => textureRender = v);
+  @override
+  bool d3dRender = false;
+  @override
+  void setD3dRender(bool v) => set(() => d3dRender = v);
 
   // O5
   @override
@@ -300,7 +312,17 @@ class FakeBackend extends SenseSessionBackend {
   @override
   void openTerminal() => _call('terminal');
   @override
+  void openTerminalAdmin() => _call('terminalAdmin');
+  @override
   void openTunnel() => _call('tunnel');
+  @override
+  void openCamera() => _call('camera');
+  @override
+  bool forceRelay = false;
+  @override
+  bool forceRelayEverywhere = false;
+  @override
+  void setForceRelay(bool v) => set(() => forceRelay = v);
   @override
   String fingerprint = 'ab12 cd34';
   @override
