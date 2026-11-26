@@ -92,14 +92,18 @@ class SenseCameraBar extends StatelessWidget {
         ? ConstrainedBox(
             key: const ValueKey('sense-camera-choice'),
             constraints: const BoxConstraints(maxWidth: 420),
-            child: SenseSegment<int>(
-              expand: false,
-              semanticLabel: _S.cameraWindow,
-              options: [
-                for (var i = 0; i < s.cameras; i++) SenseSegmentOption(value: i, label: _S.cameraN(i + 1)),
-              ],
-              value: s.current,
-              onChanged: onPick,
+            // The segment fills any height it is given; IntrinsicHeight keeps it at the
+            // height of a normal button instead of the whole bar.
+            child: IntrinsicHeight(
+              child: SenseSegment<int>(
+                expand: false,
+                semanticLabel: _S.cameraWindow,
+                options: [
+                  for (var i = 0; i < s.cameras; i++) SenseSegmentOption(value: i, label: _S.cameraN(i + 1)),
+                ],
+                value: s.current,
+                onChanged: onPick,
+              ),
             ),
           )
         : const SizedBox.shrink();

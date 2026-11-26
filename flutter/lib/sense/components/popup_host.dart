@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../diag_log.dart';
 import '../tokens/sense_tokens.dart';
 import 'popup_shell.dart';
 
@@ -40,6 +41,11 @@ class SensePopupController extends ChangeNotifier {
   void open(String id, WidgetBuilder builder,
       {SensePopupPlacement placement = SensePopupPlacement.topRight}) {
     final same = _id == id;
+    // Sense Remote (karar #103): the one place popups open and close.
+    if (!same) {
+      if (_id != null) senseUiPopup(_id!, open: false);
+      senseUiPopup(id, open: true);
+    }
     _id = id;
     _builder = builder;
     _placement = placement;
@@ -60,6 +66,7 @@ class SensePopupController extends ChangeNotifier {
   /// Closes the open popup; with [id], only when that one is open.
   void close([String? id]) {
     if (_id == null || (id != null && id != _id)) return;
+    senseUiPopup(_id!, open: false);
     _id = null;
     _builder = null;
     notifyListeners();

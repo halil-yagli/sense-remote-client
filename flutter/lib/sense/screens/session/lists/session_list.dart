@@ -13,10 +13,14 @@ import '../../../components/inline_confirm.dart';
 import '../../../components/scrollbar.dart';
 import '../../../components/segment.dart';
 import '../../../components/toggle.dart';
+import '../../../diag_log.dart';
 import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart';
 import '../../../tokens/theme.dart';
 import 'list_model.dart';
+
+/// `where` of the interface records written from the lists (karar #103).
+const String _where = 'session.list';
 
 /// List width (YH O7: 360 px).
 const double kSenseListWidth = 360;
@@ -302,6 +306,7 @@ class SenseListEntryView extends StatelessWidget {
     final onTap = e.onTap;
     if (onTap == null) return line(null);
     void run() {
+      senseUiButton(e.id, where: _where);
       onTap();
       notify(e.toast ?? e.label);
     }
@@ -332,6 +337,7 @@ class SenseListEntryView extends StatelessWidget {
           onChanged: change == null || e.noRights
               ? null
               : (v) {
+                  senseUiSetting(e.id, e.value, v, where: _where);
                   change(v);
                   notify('${e.label} · ${v ? SenseSessionStrings.on : SenseSessionStrings.off}');
                 },
@@ -361,6 +367,7 @@ class SenseListEntryView extends StatelessWidget {
             onChanged: change == null || e.noRights
                 ? null
                 : (v) {
+                    senseUiSetting(e.id, e.value, v, where: _where);
                     change(v);
                     final label = e.options.firstWhere((o) => o.value == v).label;
                     notify('${e.label} · $label');
@@ -383,6 +390,7 @@ class SenseListEntryView extends StatelessWidget {
             onTap: change == null || e.noRights || !o.enabled
                 ? null
                 : () {
+                    senseUiSetting(e.id, e.value, o.value, where: _where);
                     change(o.value);
                     notify('${e.label} · ${o.label}');
                   },
@@ -583,6 +591,8 @@ class _SliderRowState extends State<_SliderRow> {
               onChanged: enabled ? (x) => setState(() => _drag = x) : null,
               onChangeEnd: enabled
                   ? (x) {
+                      // On release only, never on every step of the drag.
+                      senseUiSetting(e.id, e.value, x, where: _where);
                       change!(x);
                       widget.notify('${e.label} · ${e.format(x)}');
                     }
@@ -644,6 +654,7 @@ class _SizeInputRowState extends State<_SizeInputRow> {
     }
     final w = int.parse(_w.text.trim()), h = int.parse(_h.text.trim());
     setState(() => _wrong = false);
+    senseUiSetting(e.id, '-', '$w×$h', where: _where);
     apply(w, h);
     widget.notify('${e.label} · $w×$h');
   }

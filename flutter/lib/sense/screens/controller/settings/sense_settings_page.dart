@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../../../../consts.dart' show kRemoteViewStyleAdaptive, kRemoteViewStyleOriginal,
     kRemoteImageQualityBest, kRemoteImageQualityBalanced, kRemoteImageQualityLow;
 import '../../../data/option_keys.dart';
+import '../../../diag_log.dart';
 import '../../../sense.dart';
 import '../../../strings/settings.dart';
 import '../../../router.dart' show senseRoleChangeReopen;
@@ -24,6 +25,9 @@ import 'widgets.dart';
 const EdgeInsets kSensePagePadding = EdgeInsets.fromLTRB(22, 18, 22, 24);
 
 /// Category ids (also test keys `sense-acc-<id>`).
+/// `where` of the interface records of this page (karar #103).
+const String _where = 'controller.settings';
+
 abstract final class SenseSettingsCategory {
   static const role = 'role';
   static const connections = 'connections';
@@ -136,12 +140,14 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
 
   Future<void> _setBool(SenseOptionKey k, bool v) async {
     if (_locked(k.key)) return;
+    senseUiSetting(k.key, _bool(k), v, where: _where);
     await _b.writeBool(k.key, k.store, v);
     _mark(k.key);
   }
 
   Future<void> _setChoice(SenseOptionKey k, String v) async {
     if (_locked(k.key)) return;
+    senseUiSetting(k.key, _raw(k), v, where: _where);
     await _b.write(k.key, k.store, v);
     _mark(k.key);
   }
@@ -150,6 +156,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
     if (_locked(SenseOptionKeys.incomingFilesDir.key)) return;
     final picked = await _b.pickDirectory(_incoming);
     if (picked == null || picked.isEmpty) return;
+    senseUiSetting(SenseOptionKeys.incomingFilesDir.key, '-', 'changed', where: _where); // the path is not written
     await _b.incoming.set(picked);
     await _loadIncoming();
     _mark(SenseOptionKeys.incomingFilesDir.key);
@@ -161,18 +168,21 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
     final picked = await _b.pickDirectory(_b.recordDir());
     if (picked == null || picked.isEmpty) return;
     // The stock page keeps this one in the local options (only this user).
+    senseUiSetting(k.key, '-', 'changed', where: _where); // the path is not written
     await _b.write(k.key, SenseOptionStore.local, picked);
     _mark(k.key);
   }
 
   Future<void> _setShortcuts(bool v) async {
     if (_locked(SenseOptionKeys.keyboardShortcuts.key)) return;
+    senseUiSetting('shortcuts', _b.shortcutsEnabled(), v, where: _where);
     await _b.setShortcutsEnabled(v);
     _mark('shortcuts');
   }
 
   Future<void> _setPassThrough(bool v) async {
     if (_locked(SenseOptionKeys.keyboardShortcuts.key)) return;
+    senseUiSetting('pass-through', _b.shortcutsPassThrough(), v, where: _where);
     await _b.setShortcutsPassThrough(v);
     _mark('pass-through');
   }

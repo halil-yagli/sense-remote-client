@@ -10,6 +10,7 @@ import 'package:get/get.dart';
 
 import '../../../../common.dart' show connect, gFFI;
 import '../../../../models/platform_model.dart' show bind;
+import '../../../diag_log.dart';
 import '../../../sense.dart';
 import '../../../strings/controller.dart';
 import '../data/grants.dart';
@@ -132,6 +133,7 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
     // P3 (B7): the "Bağlanıyor" state ends when the window call returns (or fails, with a
     // note); the timer is only a safety net. A second click meanwhile is ignored.
     if (_connecting == id) return;
+    senseUiButton('connect.${kind.name}', where: 'controller.computers'); // the kind only, no id
     _connectTimer?.cancel();
     setState(() => _connecting = id);
     _connectTimer = Timer(kSenseConnectSafety, _endConnecting);

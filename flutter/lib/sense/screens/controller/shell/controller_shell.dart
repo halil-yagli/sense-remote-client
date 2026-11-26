@@ -9,6 +9,7 @@ import 'package:get/get.dart';
 
 import '../../../../common.dart' show connect, gFFI, isMacOS;
 import '../../../components/sense_version_chip.dart' show senseAppVersion;
+import '../../../diag_log.dart';
 import '../../../sense.dart';
 import '../../../strings/controller.dart';
 import '../../host/sense_home_mac.dart' show SenseMacPermissionCard;
@@ -77,7 +78,13 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
   }
 
   // Signed out the sign-in page stays (About is in the menu after sign-in).
-  void _showAbout() => setState(() => _nav = SenseControllerNav.about);
+  void _showAbout() => _goto(SenseControllerNav.about);
+
+  // Sense Remote (karar #103): every screen change of the Controller leaves a record.
+  void _goto(SenseControllerNav n) {
+    if (n != _nav) senseUiScreen('controller.${n.name}', from: 'controller.${_nav.name}');
+    setState(() => _nav = n);
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -109,7 +116,7 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
           // T8: the opening screen with "yeni rolle açılıyor" (A2c router).
           // Sense Remote (D3b): splash, then the app reopens with the new role.
           onRoleRestart: senseRoleChangeReopen,
-          onOpenSettingsPassword: () => setState(() => _nav = SenseControllerNav.settings),
+          onOpenSettingsPassword: () => _goto(SenseControllerNav.settings),
         ));
       case SenseControllerNav.settings:
         return const SenseSettingsPage();
@@ -129,7 +136,7 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
           builder: (context, strip) => SenseControllerShellView(
             role: widget.role,
             nav: _nav,
-            onNav: (n) => setState(() => _nav = n),
+            onNav: _goto,
             signedIn: signedIn,
             name: senseAccountName(user.displayName.value, email),
             email: email,

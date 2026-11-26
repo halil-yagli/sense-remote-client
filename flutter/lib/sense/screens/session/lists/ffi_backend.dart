@@ -24,6 +24,7 @@ import '../../../../common/widgets/keyboard_shortcuts/display.dart';
 import '../../../../common/widgets/toolbar.dart'
     show TToggleMenu, allowDisplaySwitchInPrivacyMode, toolbarPrivacyMode;
 import '../../../../consts.dart';
+import '../../../diag_log.dart';
 import '../../../../desktop/widgets/kb_layout_type_chooser.dart' show KBLayoutType;
 import '../../../../desktop/widgets/remote_toolbar.dart' show ScreenAdjustor, ToolbarState;
 import '../../../../models/model.dart';
@@ -372,13 +373,15 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   void _autoGhostOnImage() {
     if (_disposed || _m.waitForFirstImage.value) return;
     try {
-      _autoGhost.run(
+      if (_autoGhost.run(
         ready: ready,
         on: ghostOn,
         available: ghostAvailable,
         needsDisplay1: ghostNeedsDisplay1,
         toggle: senseGhostToggle(_ghostMenus, ghostOn),
-      );
+      )) {
+        senseUiGhost(true, reason: 'session-start');
+      }
     } catch (e) {
       debugPrint('Sense ghost auto start: $e'); // never breaks the connection
     }
@@ -448,6 +451,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void openDisplay(int i) {
     if (_pi.currentDisplay == i) return;
+    senseUiDisplay(from: _pi.currentDisplay == kAllDisplayValue ? 'all' : _pi.currentDisplay, to: i == kAllDisplayValue ? 'all' : i);
     if (individualWindows && i != kAllDisplayValue) {
       openMonitorInNewTabOrWindow(i, ffi.id, _pi);
     } else {
