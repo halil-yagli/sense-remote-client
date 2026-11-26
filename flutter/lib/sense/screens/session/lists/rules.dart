@@ -138,8 +138,11 @@ abstract final class SenseRules {
 
   /// #5: one display → no "Tümü".
   static bool allTile(SensePeerFacts f) => f.supportMultiDisplay && f.displaysCount > 1;
-  static bool individualWindows(SensePeerFacts f) =>
-      f.supportMultiDisplay && f.displaysCount > 1 && !f.privacyOn;
+
+  /// #97: also visible while ghost mode is on (it starts on in every session, #95); a hidden
+  /// switch would lock a computer that once had it on into separate windows. Default is off
+  /// (RustDesk option `displays_as_individual_windows`, empty = off; only "Y" opens windows).
+  static bool individualWindows(SensePeerFacts f) => f.supportMultiDisplay && f.displaysCount > 1;
   static bool resolution(SensePeerFacts f) =>
       f.keyboard && (f.virtualResolution || f.resolutionsCount > 1) && !f.onAllDisplays;
   static bool useAllMyDisplays(SensePeerFacts f) => f.supportMultiDisplay && f.localMultiScreens;

@@ -105,6 +105,23 @@ void main() {
     expect(spec.allEntries.map((e) => e.id), isNot(contains('screens.individual')));
   });
 
+  // #97 / K20: the separate-windows switch is shown in every ghost x switch combination.
+  for (final ghost in [false, true]) {
+    for (final on in [false, true]) {
+      test('separate windows switch visible: ghost=$ghost, switch=$on', () {
+        final b = FakeBackend(facts: SensePeerFacts(displaysCount: 3, privacyOn: ghost))..individualWindows = on;
+        final entry = senseScreensList(b).allEntries.whereType<SenseToggleEntry>().singleWhere((e) => e.id == 'screens.individual');
+        expect(entry.value, on);
+        entry.onChanged(!on);
+        expect(b.individualWindows, !on);
+      });
+    }
+  }
+
+  test('separate windows switch is off by default', () {
+    expect(FakeBackend().individualWindows, isFalse);
+  });
+
   test('several displays: "Tümü birlikte" is the last tile', () {
     final spec = senseScreensList(FakeBackend());
     final tiles = spec.frequent.whereType<SenseTilesEntry>().single.tiles;
