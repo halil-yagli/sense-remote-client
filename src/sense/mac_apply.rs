@@ -371,10 +371,7 @@ pub const PROTECTED_ACCESS_OPTIONS: [&str; 3] = ["verification-method", "approve
 /// Options the daemon keeps its own value for: everything an envelope sets, plus the access
 /// settings.
 pub fn is_protected_option(key: &str) -> bool {
-    PROTECTED_ACCESS_OPTIONS.contains(&key)
-        || super::envelope::ALLOWED_OPTIONS
-            .iter()
-            .any(|(allowed, _)| *allowed == key)
+    PROTECTED_ACCESS_OPTIONS.contains(&key) || super::envelope::is_panel_option(key)
 }
 
 /// Sense Remote (G4-3): the daemon protects its config when a Sense role that takes incoming

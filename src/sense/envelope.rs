@@ -488,12 +488,73 @@ impl OptionRule {
     }
 }
 
-/// True when every key is on the allow list and every value fits its rule.
+/// Sense Remote (Sürüm 9, paket A): the panel-managed Host settings. They are OPTIONAL in an
+/// envelope (`is_full_set` still asks for `ALLOWED_OPTIONS` only): an envelope without them keeps
+/// the computer's behaviour as it is, and the panel adds them only for a computer that reports
+/// `report::CAP_HOST_OPTS` (a build without this list refuses an unknown key with `not_allowed`).
+/// `SENSE_AUDIO_INPUT` is a Sense-side name: `envelope_apply::host_options` turns it into the
+/// RustDesk options before anything is written.
+pub const SENSE_AUDIO_INPUT: &str = "sense-audio-input";
+pub const EXTENDED_OPTIONS: [(&str, ExtendedRule); 4] = [
+    (SENSE_AUDIO_INPUT, ExtendedRule::AudioInput),
+    (keys::OPTION_KEEP_AWAKE_DURING_INCOMING_SESSIONS, ExtendedRule::YesNo),
+    (keys::OPTION_RELAY_FALLBACK_DELAY, ExtendedRule::Seconds),
+    (keys::OPTION_DISABLE_UDP, ExtendedRule::YesNo),
+];
+
+pub const MIN_RELAY_DELAY_S: u16 = 1;
+pub const MAX_RELAY_DELAY_S: u16 = 30;
+
+/// Rule for one `EXTENDED_OPTIONS` key (the same spelling as the panel's `EXTENDED_OPTIONS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtendedRule {
+    /// `Y` or `N`.
+    YesNo,
+    /// `""` (default: system sound), `system` (the system's default input device) or `off`.
+    AudioInput,
+    /// `""` or a decimal without leading zero (1-2 ASCII digits), `MIN_RELAY_DELAY_S..=MAX_RELAY_DELAY_S`.
+    Seconds,
+}
+
+impl ExtendedRule {
+    pub fn accepts(self, value: &str) -> bool {
+        match self {
+            ExtendedRule::YesNo => value == "Y" || value == "N",
+            ExtendedRule::AudioInput => matches!(value, "" | "system" | "off"),
+            ExtendedRule::Seconds => {
+                value.is_empty()
+                    || (value.len() <= 2
+                        && !value.starts_with('0')
+                        && value.bytes().all(|b| b.is_ascii_digit())
+                        && value.parse::<u16>().is_ok_and(|s| {
+                            (MIN_RELAY_DELAY_S..=MAX_RELAY_DELAY_S).contains(&s)
+                        }))
+            }
+        }
+    }
+}
+
+/// The options the app writes for `SENSE_AUDIO_INPUT` besides itself: the RustDesk key.
+pub const OPTION_AUDIO_INPUT: &str = "audio-input";
+
+/// True when only the panel writes this key: `ALLOWED_OPTIONS`, `EXTENDED_OPTIONS` and the RustDesk
+/// option `SENSE_AUDIO_INPUT` becomes. The app never offers to change these, and on macOS the
+/// daemon keeps its own value for them.
+pub fn is_panel_option(key: &str) -> bool {
+    key == OPTION_AUDIO_INPUT
+        || ALLOWED_OPTIONS.iter().any(|(allowed, _)| *allowed == key)
+        || EXTENDED_OPTIONS.iter().any(|(allowed, _)| *allowed == key)
+}
+
+/// True when every key is on the allow list (base or extended) and every value fits its rule.
 pub fn check_allowed(config_options: &BTreeMap<String, String>) -> bool {
     config_options.iter().all(|(key, value)| {
         ALLOWED_OPTIONS
             .iter()
             .any(|(allowed, rule)| allowed == key && rule.accepts(value))
+            || EXTENDED_OPTIONS
+                .iter()
+                .any(|(allowed, rule)| allowed == key && rule.accepts(value))
     })
 }
 

@@ -709,13 +709,30 @@ fn sense_check(
 // user process following it.
 #[cfg(not(any(target_os = "ios")))]
 pub(crate) fn sense_set_envelope_options(options: HashMap<String, String>) -> Result<(), String> {
+    // Sense Remote (Sürüm 9, paket A, R8): the panel's audio choice becomes RustDesk options.
+    let options: HashMap<String, String> = crate::sense::envelope_apply::host_options(
+        &options.into_iter().collect(),
+        crate::common::get_default_sound_input,
+    )
+    .into_iter()
+    .collect();
     let options = merge_config_options(options);
     // The allow list has no authentication key, so this never changes 2FA / trusted
     // devices; refuse rather than take upstream's async authentication path.
     if crate::trusted_devices::config::changes_authentication(&options) {
         return Err("envelope would change authentication settings".to_owned());
     }
+    // Sense Remote (Sürüm 9, paket A, R8, R10): `ipc` restarts these services when the settings
+    // window changes the same options; an envelope writes `Config` directly, so it does the same.
+    let audio_before = Config::get_option(crate::sense::envelope::OPTION_AUDIO_INPUT);
+    let udp_before = Config::get_option(keys::OPTION_DISABLE_UDP);
     Config::set_options(options);
+    if audio_before != Config::get_option(crate::sense::envelope::OPTION_AUDIO_INPUT) {
+        crate::audio_service::restart();
+    }
+    if udp_before != Config::get_option(keys::OPTION_DISABLE_UDP) {
+        crate::rendezvous_mediator::RendezvousMediator::restart();
+    }
     Ok(())
 }
 

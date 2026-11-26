@@ -71,6 +71,37 @@ fn vector_allow_list_matches() {
     }
 }
 
+// Sürüm 9, paket A: the optional Host settings the panel adds for a computer that reports
+// `host_opts`. Same rules on both sides; the vector's `extended_options` is the panel's list.
+#[test]
+fn vector_extended_options_match() {
+    let v = vector();
+    let rules = v["extended_options"].as_object().unwrap();
+    let theirs: BTreeSet<&str> = rules.keys().map(String::as_str).collect();
+    let ours: BTreeSet<&str> = EXTENDED_OPTIONS.iter().map(|(k, _)| *k).collect();
+    assert_eq!(theirs, ours);
+    for (key, rule) in EXTENDED_OPTIONS {
+        let theirs = &rules[key];
+        match rule {
+            ExtendedRule::YesNo => {
+                assert_eq!(theirs["kind"], "enum", "{key}");
+                assert_eq!(theirs["values"], serde_json::json!(["Y", "N"]), "{key}");
+            }
+            ExtendedRule::AudioInput => {
+                assert_eq!(theirs["kind"], "enum", "{key}");
+                assert_eq!(theirs["values"], serde_json::json!(["", "system", "off"]), "{key}");
+            }
+            ExtendedRule::Seconds => {
+                assert_eq!(theirs["kind"], "int_or_empty", "{key}");
+                assert_eq!(theirs["min"].as_u64(), Some(MIN_RELAY_DELAY_S as u64), "{key}");
+                assert_eq!(theirs["max"].as_u64(), Some(MAX_RELAY_DELAY_S as u64), "{key}");
+            }
+        }
+    }
+    // The extended keys never overlap the base set (the full-set rule counts on it).
+    assert!(ours.is_disjoint(&ALLOWED_OPTIONS.iter().map(|(k, _)| *k).collect()));
+}
+
 #[test]
 fn vector_cases_match_result_client() {
     let v = vector();

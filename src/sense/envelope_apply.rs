@@ -129,11 +129,49 @@ fn panel_caps(value: &Value) -> Option<Vec<String>> {
 /// other permissions as they happen to be on this computer (e.g. an old `access-mode=full`
 /// overriding them all), so it is refused here, before anything is applied. `verify` alone still
 /// accepts it, to stay identical to the panel's `verifyEnvelope` and the shared test vector.
+///
+/// Sense Remote (Sürüm 9, paket A): `EXTENDED_OPTIONS` may come on top of the full set; they are
+/// optional, an envelope without them is as complete as before. Any other extra key (`check_allowed`
+/// already refuses it in `verify`) breaks the count here too.
 pub fn is_full_set(config_options: &BTreeMap<String, String>) -> bool {
-    config_options.len() == envelope::ALLOWED_OPTIONS.len()
+    let extended = envelope::EXTENDED_OPTIONS
+        .iter()
+        .filter(|(key, _)| config_options.contains_key(*key))
+        .count();
+    config_options.len() == envelope::ALLOWED_OPTIONS.len() + extended
         && envelope::ALLOWED_OPTIONS
             .iter()
             .all(|(key, _)| config_options.contains_key(*key))
+}
+
+/// Sense Remote (Sürüm 9, paket A, R8): the settings an envelope writes. `config_options` as they
+/// are, except the Sense-side `sense-audio-input`, which is replaced by what it means for RustDesk:
+/// - `""` (default): `audio-input` = `""` (the system sound);
+/// - `system`: `audio-input` = the name of the system's default input device (`default_input`);
+///   none found (a media server without a microphone) = `""`, never a failed apply;
+/// - `off`: `audio-input` = `""` and `enable-audio` = `N`, whatever the permission says: no sound
+///   leaves this computer. Choosing another input later brings `enable-audio` back from the
+///   permission, which every envelope carries.
+///
+/// Without `sense-audio-input` the settings are returned unchanged. `Config::set_options` removes
+/// an empty value, which is RustDesk's own default.
+pub fn host_options(
+    config_options: &BTreeMap<String, String>,
+    default_input: impl FnOnce() -> Option<String>,
+) -> BTreeMap<String, String> {
+    let mut options = config_options.clone();
+    let Some(choice) = options.remove(envelope::SENSE_AUDIO_INPUT) else {
+        return options;
+    };
+    let device = match choice.as_str() {
+        "system" => default_input().filter(|name| !name.is_empty()).unwrap_or_default(),
+        _ => String::new(),
+    };
+    options.insert(envelope::OPTION_AUDIO_INPUT.to_owned(), device);
+    if choice == "off" {
+        options.insert(base::config::keys::OPTION_ENABLE_AUDIO.to_owned(), "N".to_owned());
+    }
+    options
 }
 
 /// Verification, the full-set rule and the platform gate. `Ok` = apply it now.
@@ -813,6 +851,90 @@ mod tests {
         for reason in Reason::ALL {
             assert_eq!(Reason::parse(reason.as_str()), Some(reason));
         }
+    }
+
+    // Sürüm 9, paket A: the extended Host settings are optional on top of the full set.
+    #[test]
+    fn extended_options_are_optional_and_checked() {
+        let s = signer();
+        let keys = vec![s.trusted.clone()];
+        let with = |extra: Value| {
+            let mut body = strategy(5, json!({}));
+            let options = body["body"]["config_options"].as_object_mut().unwrap();
+            for (key, value) in extra.as_object().unwrap() {
+                options.insert(key.clone(), value.clone());
+            }
+            s.sign(&body)
+        };
+        // Without them: as before.
+        assert!(check(&s.sign(&strategy(5, json!({}))), &keys, &expect(4), true).is_ok());
+        // All four.
+        let all = json!({
+            "sense-audio-input": "system",
+            "keep-awake-during-incoming-sessions": "Y",
+            "relay-fallback-delay": "5",
+            "disable-udp": "N",
+        });
+        let verified = check(&with(all), &keys, &expect(4), true).unwrap();
+        assert_eq!(verified.body.config_options.len(), ALLOWED_OPTIONS.len() + 4);
+        // Some of them; empty values where the rule allows.
+        let some = json!({ "sense-audio-input": "", "relay-fallback-delay": "" });
+        assert!(check(&with(some), &keys, &expect(4), true).is_ok());
+        // One bad value, an unknown key or a RustDesk key that is not on the list: whole envelope.
+        for bad in [
+            json!({ "sense-audio-input": "mic" }),
+            json!({ "keep-awake-during-incoming-sessions": "" }),
+            json!({ "relay-fallback-delay": "0" }),
+            json!({ "relay-fallback-delay": "31" }),
+            json!({ "relay-fallback-delay": "05" }),
+            json!({ "disable-udp": "y" }),
+            json!({ "audio-input": "Speakers" }),
+            json!({ "enable-udp-punch": "N" }),
+        ] {
+            assert_eq!(
+                envelope::verify(&with(bad.clone()), &keys, &expect(4)).unwrap_err().reason,
+                Reason::NotAllowed,
+                "{bad}"
+            );
+        }
+        // The count still catches a missing base key next to an extended one.
+        let mut map: BTreeMap<String, String> = serde_json::from_value(full_set()).unwrap();
+        map.insert("disable-udp".to_owned(), "Y".to_owned());
+        assert!(is_full_set(&map));
+        map.remove("enable-tunnel");
+        assert!(!is_full_set(&map));
+    }
+
+    #[test]
+    fn audio_input_choice_becomes_rustdesk_options() {
+        let opts = |value: &str| -> BTreeMap<String, String> {
+            BTreeMap::from([
+                ("enable-audio".to_owned(), "Y".to_owned()),
+                ("sense-audio-input".to_owned(), value.to_owned()),
+                ("disable-udp".to_owned(), "Y".to_owned()),
+            ])
+        };
+        let mic = || Some("Mikrofon (USB)".to_owned());
+        // Nothing to translate: unchanged (and the closure is never asked).
+        let plain = BTreeMap::from([("enable-audio".to_owned(), "Y".to_owned())]);
+        assert_eq!(host_options(&plain, || panic!("not asked")), plain);
+        for (choice, device, audio) in [
+            ("", "", "Y"),
+            ("system", "Mikrofon (USB)", "Y"),
+            ("off", "", "N"),
+        ] {
+            let out = host_options(&opts(choice), mic);
+            assert!(!out.contains_key("sense-audio-input"), "{choice}");
+            assert_eq!(out["audio-input"], device, "{choice}");
+            assert_eq!(out["enable-audio"], audio, "{choice}");
+            assert_eq!(out["disable-udp"], "Y", "{choice}");
+        }
+        // No microphone found: the default, not a failure.
+        assert_eq!(host_options(&opts("system"), || None)["audio-input"], "");
+        assert_eq!(
+            host_options(&opts("system"), || Some(String::new()))["audio-input"],
+            ""
+        );
     }
 
     #[test]
