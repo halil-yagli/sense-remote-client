@@ -19,6 +19,8 @@ import '../../../common.dart';
 import '../../../models/chat_model.dart';
 import '../../../models/platform_model.dart';
 import '../../../models/server_model.dart';
+import '../../diag_log.dart';
+import '../../strings/host_live.dart';
 import '../../components/popup_shell.dart' show SensePopupFrom;
 import '../shared/chat/chat_controller.dart';
 import 'data/call.dart';
@@ -173,6 +175,12 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
 
   void _guarded(Client c, VoidCallback action) => checkClickTime(c.id, action);
 
+  /// Karar #103: the button's name into the record, then the action.
+  VoidCallback _logged(String name, VoidCallback action) => () {
+        senseUiButton(name, where: 'host.card');
+        action();
+      };
+
   Future<void> _closeEnded(Client c) async {
     await bind.cmRemoveDisconnectedConnection(connId: c.id);
     if (await bind.cmGetClientsLength() == 0) {
@@ -190,6 +198,7 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
     return Obx(() {
       final open = SenseCm.open.value;
       final edge = SenseCm.edge.value;
+      final endedAt = SenseCm.endedAt.value; // #101: rebuild when it starts / stops
       if (clients.isEmpty) {
         return const ColoredBox(color: Colors.transparent);
       }
@@ -239,19 +248,31 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
             // Ataç and drop: main_sense_host_offer_files (D3d2).
             pickFiles: SenseHostChatFiles.available ? senseHostPickFiles : null,
             from: SenseCm.anchor.bottom ? SensePopupFrom.bottom : SensePopupFrom.top,
+            endedClosingIn: selected.disconnected && endedAt != null
+                ? SenseCm.endedSecondsLeft(DateTime.now())
+                : null,
             actions: SenseHostCardActions(
-              onMinimize: SenseCm.closePanel,
+              onMinimize: _logged(SenseHostLiveStrings.minimize, SenseCm.closePanel),
               onDragStart: windowManager.startDragging,
-              onEnd: () => _guarded(
-                  selected, () => bind.cmCloseConnection(connId: selected.id)),
-              onAccept: () => _guarded(
-                  selected, () => serverModel.sendLoginResponse(selected, true)),
-              onReject: () => _guarded(
-                  selected, () => serverModel.sendLoginResponse(selected, false)),
-              onCloseEnded: () => _guarded(selected, () => _closeEnded(selected)),
-              onAnswerCall: (accept) => _guarded(
-                  selected,
-                  () => SenseHostChatCall(connId: selected.id).answer(accept)),
+              onEnd: _logged(
+                  SenseHostLiveStrings.endConnection,
+                  () => _guarded(
+                      selected, () => bind.cmCloseConnection(connId: selected.id))),
+              onAccept: _logged(
+                  SenseHostLiveStrings.accept,
+                  () => _guarded(selected,
+                      () => serverModel.sendLoginResponse(selected, true))),
+              onReject: _logged(
+                  SenseHostLiveStrings.reject,
+                  () => _guarded(selected,
+                      () => serverModel.sendLoginResponse(selected, false))),
+              onCloseEnded: _logged(SenseHostLiveStrings.close,
+                  () => _guarded(selected, () => _closeEnded(selected))),
+              onAnswerCall: (accept) {
+                senseUiButton(accept ? 'call.accept' : 'call.reject', where: 'host.card');
+                _guarded(selected,
+                    () => SenseHostChatCall(connId: selected.id).answer(accept));
+              },
             ),
           );
           // A peer that controls this computer must not use the card unless

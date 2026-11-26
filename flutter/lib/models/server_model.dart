@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 import '../common.dart';
 import '../common/formatter/id_formatter.dart';
 import '../desktop/pages/server_page.dart' as desktop;
+import '../sense/screens/host_live/sense_cm_ended.dart'; // Sense Remote (#101)
 import '../sense/screens/host_live/sense_cm_window.dart'; // Sense Remote
 import '../desktop/widgets/tabbar_widget.dart';
 import '../mobile/pages/server_page.dart';
@@ -726,6 +727,13 @@ class ServerModel with ChangeNotifier {
       }
       if (desktopType == DesktopType.cm && _clients.isEmpty) {
         hideCmWindow();
+      }
+      // Sense Remote (#101): in icon mode there is no tab to close an ended
+      // connection, so the card says "Bağlantı sona erdi" and closes itself.
+      if (desktopType == DesktopType.cm &&
+          SenseCm.enabled &&
+          senseCmAllEnded(_clients.map((c) => c.disconnected))) {
+        SenseCm.onAllEnded();
       }
       if (isAndroid) androidUpdatekeepScreenOn();
       notifyListeners();

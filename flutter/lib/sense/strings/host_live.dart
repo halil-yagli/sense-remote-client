@@ -44,8 +44,9 @@ abstract final class SenseHostLiveStrings {
 
   // Incoming voice call: SenseChatLabels.host.incomingCall (shared box, #73).
 
-  // Ended connection.
-  static const String ended = 'Bağlantı bitti';
+  // Ended connection (#101; O14 wording): the card closes by itself.
+  static const String ended = 'Bağlantı sona erdi';
+  static String endedClosing(int seconds) => '$seconds sn sonra kapanıyor';
   static const String close = 'Kapat';
 
   // Icon (H3).

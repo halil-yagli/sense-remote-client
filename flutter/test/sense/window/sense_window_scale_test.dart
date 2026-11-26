@@ -17,6 +17,40 @@ import '../install/sense_install_upgrade_test.dart' show FakeUpgrade;
 import '../install/sense_install_wizard_test.dart' show FakeBackend, frames;
 
 void main() {
+  group('senseViewMatches (#99)', () {
+    const want = Rect.fromLTWH(1200, 300, 660, 1020);
+    test('frameless window, view as large as the window: match', () {
+      expect(
+          senseViewMatches(
+              want: want, window: want, client: want.size, flutter: want.size),
+          isTrue);
+    });
+    test('the hidden title bar border (16 x 8 px) is caught', () {
+      expect(
+          senseViewMatches(
+              want: want,
+              window: want,
+              client: const Size(644, 1012),
+              flutter: const Size(644, 1012)),
+          isFalse);
+    });
+    test('a Flutter view left at another size is caught', () {
+      expect(
+          senseViewMatches(
+              want: want, window: want, client: want.size, flutter: const Size(990, 1530)),
+          isFalse);
+    });
+    test('a window the system scaled again is caught', () {
+      expect(
+          senseViewMatches(
+              want: want,
+              window: const Rect.fromLTWH(1200, 300, 990, 1530),
+              client: const Size(990, 1530),
+              flutter: const Size(990, 1530)),
+          isFalse);
+    });
+  });
+
   group('senseBoundsMatch', () {
     const want = Rect.fromLTWH(100, 50, 660, 1020);
     test('same frame and a pixel off match', () {

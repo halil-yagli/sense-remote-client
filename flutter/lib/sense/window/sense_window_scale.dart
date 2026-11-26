@@ -23,3 +23,14 @@ Size senseScaledSize(Size logical, double scale) =>
 /// Visible area of a monitor (physical pixels) in logical pixels; null for an unknown scale.
 Size? senseLogicalVisible(Rect visibleFrame, double scale) =>
     scale > 0 ? Size(visibleFrame.width / scale, visibleFrame.height / scale) : null;
+
+/// Sense Remote (#99): the window is where it was asked to be, and the Flutter view draws at
+/// the size of the window's client area (frameless: the whole window). Physical pixels.
+bool senseViewMatches(
+    {required Rect want, required Rect window, required Size client, required Size flutter}) {
+  return senseBoundsMatch(want, window) &&
+      (client.width - window.width).abs() <= 2 &&
+      (client.height - window.height).abs() <= 2 &&
+      (flutter.width - client.width).abs() <= 2 &&
+      (flutter.height - client.height).abs() <= 2;
+}
