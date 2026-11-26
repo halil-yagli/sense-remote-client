@@ -82,3 +82,31 @@ String senseUiRect(double left, double top, double width, double height) =>
 
 /// Pure: a size as `wxh`.
 String senseUiSize(double width, double height) => '${width.round()}x${height.round()}';
+
+// ---- structured events (karar #103, `main_sense_diag_event`) ----
+
+/// Pure: interface event fields as JSON-safe values for the structured event record: numbers,
+/// booleans and null as they are, anything else as its short text ([senseUiValue] rules without
+/// the quotes); secret looking fields masked. Rust cleans and masks them again.
+Map<String, Object?> senseDiagEventFields(Map<String, Object?> fields) {
+  final out = <String, Object?>{};
+  fields.forEach((key, value) {
+    if (senseUiSecretKey(key)) {
+      out[key] = kSenseUiMasked;
+    } else if (value == null || value is num || value is bool) {
+      out[key] = value;
+    } else {
+      var text = value.toString().replaceAll(RegExp(r'[\r\n\t]+'), ' ').trim();
+      text = text.replaceAll(_email, kSenseUiMasked);
+      if (text.length > kSenseUiMaxValue) text = '${text.substring(0, kSenseUiMaxValue)}…';
+      out[key] = text;
+    }
+  });
+  return out;
+}
+
+/// Pure: an interface event kind as the record takes it (`A-Za-z0-9_.-`, 1–48), or null.
+String? senseDiagEventKind(String kind) {
+  final k = kind.trim();
+  return RegExp(r'^[A-Za-z0-9_.\-]{1,48}$').hasMatch(k) ? k : null;
+}

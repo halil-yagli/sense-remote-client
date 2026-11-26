@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show jsonEncode;
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/foundation.dart';
@@ -14,8 +15,9 @@ import 'package:flutter_hbb/sense/diag_text.dart';
 // Karar #103 (Sürüm 9): interface events as well — screen, list and popup openings, button
 // names, setting changes (old → new), ghost mode, display switches and the Host window's size
 // and scale. One `[ui] …` line each (see diag_text.dart); names only, never content.
-// The lines go through the same bridge call; when the Rust side gets its own event call
-// (`sense_diag_event`), only [_senseDiagSend] changes.
+// The lines go through the same bridge call (raw log, unchanged); interface events and errors
+// also go to the structured event record (`main_sense_diag_event`, [_senseDiagEvent]), which the
+// panel filters by category and kind.
 
 /// Tests catch the lines here instead of the bridge.
 @visibleForTesting
@@ -35,6 +37,30 @@ void _senseDiagSend(String level, String line) {
   }
 }
 
+/// Tests catch the structured events here instead of the bridge: (category, kind, fields).
+@visibleForTesting
+void Function(String category, String kind, Map<String, Object?> fields)? senseDiagEventTestSink;
+
+/// One structured event (`main_sense_diag_event`). Never throws; in tests only the sinks see it.
+void _senseDiagEvent(String category, String kind, Map<String, Object?> fields) {
+  final k = senseDiagEventKind(kind);
+  if (k == null) return;
+  final clean = senseDiagEventFields(fields);
+  final sink = senseDiagEventTestSink;
+  if (sink != null) {
+    sink(category, k, clean);
+    return;
+  }
+  if (senseDiagTestSink != null) return; // a test that watches the lines only
+  try {
+    unawaited(bind
+        .mainSenseDiagEvent(category: category, kind: k, fieldsJson: jsonEncode(clean))
+        .catchError((_) {}));
+  } catch (_) {
+    // The bridge is not ready or gone: never throw from a logger.
+  }
+}
+
 bool _installed = false;
 
 /// Hooks `FlutterError.onError`, `PlatformDispatcher.onError` and `debugPrint`. Call it first
@@ -46,6 +72,8 @@ void senseInstallDiagLog() {
   FlutterError.onError = (FlutterErrorDetails details) {
     _senseDiagSend('error',
         senseDiagError('FlutterError', details.exceptionAsString(), details.stack));
+    _senseDiagEvent('error', 'flutter',
+        {'tur': 'FlutterError', 'hata': details.exceptionAsString()});
     if (previousFlutterError != null) {
       previousFlutterError(details);
     } else {
@@ -54,6 +82,7 @@ void senseInstallDiagLog() {
   };
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
     _senseDiagSend('error', senseDiagError('PlatformDispatcher', error, stack));
+    _senseDiagEvent('error', 'flutter', {'tur': 'PlatformDispatcher', 'hata': '$error'});
     return false; // not handled here: the default behaviour goes on
   };
   final previousDebugPrint = debugPrint;
@@ -66,6 +95,7 @@ void senseInstallDiagLog() {
 /// `runZonedGuarded`'s error handler.
 void senseDiagZoneError(Object error, StackTrace stack) {
   _senseDiagSend('error', senseDiagError('Zone', error, stack));
+  _senseDiagEvent('error', 'zone', {'hata': '$error'});
 }
 
 /// Zone specification that also records `print` calls.
@@ -81,6 +111,7 @@ ZoneSpecification senseDiagZoneSpec() => ZoneSpecification(
 /// Any interface event: `[ui] <kind> key=value …`. Field values are names and numbers only.
 void senseUiEvent(String kind, [Map<String, Object?> fields = const {}]) {
   _senseDiagSend('info', senseUiLine(kind, fields));
+  _senseDiagEvent('ui', kind, fields);
 }
 
 /// A screen (page, tab, view) opened, e.g. `senseUiScreen('controller.computers')`.
@@ -100,8 +131,16 @@ void senseUiButton(String name, {String? where}) =>
     senseUiEvent('button', {'name': name, if (where != null) 'where': where});
 
 /// A setting changed from [from] to [to]; secret settings are written as `***`.
-void senseUiSetting(String key, Object? from, Object? to, {String? where}) =>
-    _senseDiagSend('info', senseUiSettingLine(key, from, to, where: where));
+void senseUiSetting(String key, Object? from, Object? to, {String? where}) {
+  _senseDiagSend('info', senseUiSettingLine(key, from, to, where: where));
+  final secret = senseUiSecretKey(key);
+  _senseDiagEvent('ui', 'setting', {
+    'ad': key,
+    if (where != null) 'yer': where,
+    'eski': secret ? kSenseUiMasked : from,
+    'yeni': secret ? kSenseUiMasked : to,
+  });
+}
 
 /// Ghost mode (hayalet mod) on or off, and why (user, policy, session start).
 void senseUiGhost(bool on, {String? reason}) =>

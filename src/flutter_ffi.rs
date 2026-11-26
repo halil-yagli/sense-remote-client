@@ -2625,6 +2625,12 @@ pub fn main_sense_dart_log(level: String, line: String) {
     crate::sense::log_upload::dart_line(&level, &line);
 }
 
+// Sense Remote (#103): a structured event from Dart (`ui`, `window`, `error` …) into this
+// process's event record; `fields_json` is a JSON object, cleaned and masked on the Rust side.
+pub fn main_sense_diag_event(category: String, kind: String, fields_json: String) {
+    crate::sense::diag::event_json(&category, &kind, &fields_json);
+}
+
 // S3 / H1 (D3c): name and location changed on the Host.
 pub fn main_sense_identity() -> String {
     crate::sense::identity_set::ffi_identity()
