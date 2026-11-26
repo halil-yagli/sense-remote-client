@@ -9,7 +9,9 @@ import '../../../sense.dart';
 import 'data/session_hub.dart';
 import 'layer_controller.dart';
 import 'layer_strings.dart';
+import 'layer_spec.dart';
 import 'layer_views.dart';
+import 'link_machine.dart';
 
 class SenseSessionLayers extends StatefulWidget {
   const SenseSessionLayers({
@@ -18,7 +20,11 @@ class SenseSessionLayers extends StatefulWidget {
     required this.controller,
     this.stripTop = SenseSizes.sessionToolbarHeight,
     this.listenToInput = true,
+    this.shrinkTo,
   });
+
+  /// Where the weak card shrinks to: the logo area of the bar (window coordinates).
+  final Offset? shrinkTo;
 
   /// Connection tab key (peer id).
   final String id;
@@ -34,7 +40,15 @@ class SenseSessionLayers extends StatefulWidget {
   State<SenseSessionLayers> createState() => _SenseSessionLayersState();
 }
 
-class _SenseSessionLayersState extends State<SenseSessionLayers> {
+class _SenseSessionLayersState extends State<SenseSessionLayers>
+    with SingleTickerProviderStateMixin {
+  // 0 = card open, 1 = shrunk into the bar (karar #94, ~250 ms, ease).
+  late final AnimationController _shrink =
+      AnimationController(vsync: this, duration: SenseLinkTiming.shrink);
+  late final Animation<double> _shrinkCurve =
+      CurvedAnimation(parent: _shrink, curve: SenseCurves.ease);
+  bool _wasMinimized = false;
+
   final SenseToastController _toast = SenseToastController();
   int _recoveredSeen = 0;
 
@@ -44,6 +58,9 @@ class _SenseSessionLayersState extends State<SenseSessionLayers> {
   void initState() {
     super.initState();
     _recoveredSeen = _c.recoveredSerial;
+    _wasMinimized = _c.minimized;
+    _shrink.value = _wasMinimized ? 1 : 0;
+    _shrink.addListener(_repaint);
     _c.addListener(_changed);
     SenseLayerController.attach(widget.id, _c);
     SenseSessionHub.register(widget.id, _c.onMessage);
@@ -62,6 +79,7 @@ class _SenseSessionLayersState extends State<SenseSessionLayers> {
       GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
       HardwareKeyboard.instance.removeHandler(_onKey);
     }
+    _shrink.dispose();
     _toast.dispose();
     super.dispose();
   }
@@ -80,7 +98,26 @@ class _SenseSessionLayersState extends State<SenseSessionLayers> {
     return false;
   }
 
+  void _repaint() {
+    if (mounted) setState(() {});
+  }
+
+  void _syncShrink() {
+    final now = _c.minimized;
+    if (now == _wasMinimized) return;
+    _wasMinimized = now;
+    final off = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (off) {
+      _shrink.value = now ? 1 : 0;
+    } else if (now) {
+      _shrink.forward();
+    } else {
+      _shrink.reverse();
+    }
+  }
+
   void _changed() {
+    _syncShrink();
     if (_c.recoveredSerial != _recoveredSeen) {
       _recoveredSeen = _c.recoveredSerial;
       _toast.show(SenseLayerStrings.recovered);
@@ -103,8 +140,16 @@ class _SenseSessionLayersState extends State<SenseSessionLayers> {
             onReconnect: _c.reconnectEnded,
             appear: t,
           );
-    } else if (link.layerUp) {
-      layer = (t) => SenseLinkLayer(view: link, onEnd: _c.endByUser, appear: t);
+    } else if (link.layerUp && (_shrink.value < 1 || !_c.minimized)) {
+      final lost = link.phase == SenseLinkPhase.lost;
+      layer = (t) => SenseLinkLayer(
+            view: link,
+            onEnd: _c.endByUser,
+            onMinimize: lost ? null : _c.minimize,
+            appear: t,
+            shrink: lost ? 0 : _shrinkCurve.value,
+            shrinkTo: widget.shrinkTo ?? Offset(40, widget.stripTop / 2),
+          );
     }
     return SenseToastHost(
       controller: _toast,

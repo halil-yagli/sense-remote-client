@@ -21,6 +21,8 @@ class SenseLayerVeil extends StatelessWidget {
     required this.brightness,
     required this.child,
     this.appear = 1,
+    this.shrink = 0,
+    this.shrinkTo = Offset.zero,
   });
 
   final double blur;
@@ -31,15 +33,35 @@ class SenseLayerVeil extends StatelessWidget {
   /// (an Opacity above a BackdropFilter would hide the blur).
   final double appear;
 
+  /// 0..1 while the card shrinks into the bar's logo area (karar #94): the veil fades
+  /// out and the card moves to [shrinkTo] (window coordinates) while it gets small.
+  final double shrink;
+  final Offset shrinkTo;
+
   @override
   Widget build(BuildContext context) {
-    final sigma = blur * appear;
+    final shown = appear * (1 - shrink);
+    final sigma = blur * shown;
     return ClipRect(
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
         child: ColoredBox(
-          color: SenseColors.bg.withOpacity((1 - brightness) * appear),
-          child: Center(child: Opacity(opacity: appear, child: child)),
+          color: SenseColors.bg.withOpacity((1 - brightness) * shown),
+          child: LayoutBuilder(builder: (context, box) {
+            final centre = Offset(box.maxWidth / 2, box.maxHeight / 2);
+            final move = (shrinkTo - centre) * shrink;
+            final scale = 1 - (1 - SenseLayerLook.shrinkScale) * shrink;
+            return Center(
+              child: Opacity(
+                opacity: shown,
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.translationValues(move.dx, move.dy, 0)..scale(scale, scale, 1),
+                  child: child,
+                ),
+              ),
+            );
+          }),
         ),
       ),
     );
@@ -48,13 +70,16 @@ class SenseLayerVeil extends StatelessWidget {
 
 /// The card of the layers (`.nc`).
 class SenseLayerCard extends StatelessWidget {
-  const SenseLayerCard({super.key, required this.children});
+  const SenseLayerCard({super.key, required this.children, this.onClose});
 
   final List<Widget> children;
 
+  /// "x" in the top right corner (weak card only, karar #94); null = none.
+  final VoidCallback? onClose;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final card = Container(
       constraints: const BoxConstraints(minWidth: SenseLayerLook.cardMinWidth),
       padding: const EdgeInsets.fromLTRB(SenseLayerLook.cardPadSide, SenseLayerLook.cardPadTop,
           SenseLayerLook.cardPadSide, SenseLayerLook.cardPadBottom),
@@ -77,6 +102,32 @@ class SenseLayerCard extends StatelessWidget {
           children: _spaced(children),
         ),
       ),
+    );
+    if (onClose == null) return card;
+    // The "x" sits inside the card's corner (outside the card it would not take clicks).
+    return Stack(
+      children: [
+        card,
+        Positioned(
+          top: SenseLayerLook.closeInset,
+          right: SenseLayerLook.closeInset,
+          child: SenseInteractive(
+            key: const Key('sense-layer-minimize'),
+            onTap: onClose,
+            semanticLabel: SenseLayerStrings.minimize,
+            tooltip: SenseLayerStrings.minimize,
+            builder: (context, s) => SizedBox(
+              width: SenseLayerLook.closeSize,
+              height: SenseLayerLook.closeSize,
+              child: Center(
+                child: SenseGlyph(SenseGlyphKind.cross,
+                    size: SenseFontSize.body,
+                    color: s.hovered ? SenseColors.text : SenseColors.textMuted),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -160,11 +211,24 @@ Widget _statusLine(String text, {bool spinner = true, Color color = SenseColors.
 
 /// O13 — "Bağlantı zayıf" / "Bağlantı kesildi".
 class SenseLinkLayer extends StatelessWidget {
-  const SenseLinkLayer({super.key, required this.view, required this.onEnd, this.appear = 1});
+  const SenseLinkLayer({
+    super.key,
+    required this.view,
+    required this.onEnd,
+    this.onMinimize,
+    this.appear = 1,
+    this.shrink = 0,
+    this.shrinkTo = Offset.zero,
+  });
 
   final SenseLinkView view;
   final VoidCallback onEnd;
+
+  /// "x": only while the link is not lost (karar #94).
+  final VoidCallback? onMinimize;
   final double appear;
+  final double shrink;
+  final Offset shrinkTo;
 
   @override
   Widget build(BuildContext context) {
@@ -222,7 +286,9 @@ class SenseLinkLayer extends StatelessWidget {
       blur: lost ? SenseLayerLook.lostBlur : SenseLayerLook.weakBlur,
       brightness: lost ? SenseLayerLook.lostBrightness : SenseLayerLook.weakBrightness,
       appear: appear,
-      child: SenseLayerCard(children: [
+      shrink: shrink,
+      shrinkTo: shrinkTo,
+      child: SenseLayerCard(onClose: lost ? null : onMinimize, children: [
         _logo(breathe: true),
         _title(lost ? SenseLayerStrings.lostTitle : SenseLayerStrings.weakTitle,
             lost ? SenseColors.dangerText : SenseColors.warn),

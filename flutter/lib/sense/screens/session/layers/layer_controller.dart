@@ -103,10 +103,35 @@ class SenseLayerController extends ChangeNotifier {
   SenseReconnectState _reconnect = SenseReconnectState.idle;
   int _recoveredSerial = 0;
 
+  // Karar #94: "×" on the weak card shrinks it into the bar's logo area.
+  bool _dismissed = false;
+  Duration? _dismissedAt;
+  SenseLinkPhase _prevPhase = SenseLinkPhase.normal;
+
   /// Bad values without a layer: the top bar says "Dalgalı".
   final ValueNotifier<bool> wavy = ValueNotifier(false);
 
   SenseLinkView get link => _link.view;
+
+  /// The weak card was closed with "×" and sits in the bar's logo area. Never true
+  /// for the lost card (it stays).
+  bool get minimized => _dismissed && _link.view.phase == SenseLinkPhase.weak && !_link.view.dropped;
+
+  /// "×" on the weak card (not offered once the link is lost).
+  void minimize() {
+    if (_ended != null || _link.view.phase != SenseLinkPhase.weak || _link.view.dropped) return;
+    _dismissed = true;
+    _dismissedAt = _clock();
+    _notify();
+  }
+
+  /// Click on the bar's logo / status area: the card opens again.
+  void restoreCard() {
+    if (!_dismissed) return;
+    _dismissed = false;
+    _notify();
+  }
+
   SenseIdleView get idle => _idle.view;
   SenseSessionSummary? get ended => _ended;
   SenseReconnectState get reconnectState => _reconnect;
@@ -161,7 +186,9 @@ class SenseLayerController extends ChangeNotifier {
         watchingSince: _watchingSince,
       ),
     );
-    wavy.value = view.wavy;
+    _trackDismissal(now, view.phase);
+    // The bar keeps the warning colour while the card is up or minimized.
+    wavy.value = view.wavy || view.phase != SenseLinkPhase.normal;
     if (_link.lastEvent == SenseLinkEvent.recovered) _recoveredSerial++;
     if (_link.lastEvent == SenseLinkEvent.dropped) {
       _end(SenseEndReason.peerGone);
@@ -172,6 +199,21 @@ class SenseLayerController extends ChangeNotifier {
       return;
     }
     _notify();
+  }
+
+  /// Card state across phase changes: a card closed with "×" stays closed while the
+  /// same trouble lasts; after it cleared and came back it opens again, at most
+  /// every [SenseLinkTiming.reopenEvery]. The lost card ignores all this.
+  void _trackDismissal(Duration now, SenseLinkPhase phase) {
+    final was = _prevPhase;
+    _prevPhase = phase;
+    if (phase == was) return;
+    if (phase == SenseLinkPhase.normal || phase == SenseLinkPhase.lost) {
+      _dismissed = false;
+    } else if (phase == SenseLinkPhase.weak) {
+      final at = _dismissedAt;
+      _dismissed = at != null && now - at < SenseLinkTiming.reopenEvery;
+    }
   }
 
   /// Mouse or keyboard input in this window.
@@ -213,10 +255,13 @@ class SenseLayerController extends ChangeNotifier {
       // The card is up: RustDesk's own retry / error dialogs stay away.
       return kind != null || type == 'restarting-show' || title == 'Connection Error';
     }
-    // RustDesk's own reconnect after its 30 s timeout: the layer has been showing
-    // "Bağlantı kesildi" — the session is over for Sense.
-    if (type == 'restarting-show' && _link.view.phase == SenseLinkPhase.lost) {
-      _end(SenseEndReason.peerGone);
+    // Karar #94: the transport is gone: the "kesildi" card shows; the session closes
+    // only when no frame and no delay measurement came for 30 s.
+    // With data still coming (a restart on a working link) RustDesk keeps its way.
+    if (type == 'restarting-show' &&
+        (_link.view.phase == SenseLinkPhase.lost || _link.view.stall >= SenseLinkTiming.tick)) {
+      _link.transportLost(_clock());
+      tick();
       return true;
     }
     if (kind == null || kind == SenseMessageKind.busy) return false;
@@ -247,6 +292,8 @@ class SenseLayerController extends ChangeNotifier {
     _endedAt = null;
     _reconnect = SenseReconnectState.idle;
     _link.reset();
+    _dismissed = false;
+    _prevPhase = SenseLinkPhase.normal;
     _startedAt = now;
     _idle.activity(now);
     wavy.value = false;

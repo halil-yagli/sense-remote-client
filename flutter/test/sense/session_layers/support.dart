@@ -20,6 +20,26 @@ class FakeHost implements SenseLayerHost {
         probeAt: clock.wall,
       );
 
+  /// Frames under 5 per second on a link that answers (the weak card's condition).
+  void weakFps() => raw = SenseLinkRaw(
+        delay: '20',
+        fps: '3',
+        lossEst: 0.1,
+        lastFrameMs: 10,
+        lastFrameAt: clock.wall,
+        probeAt: clock.wall,
+      );
+
+  /// High delay but frames and probes keep coming.
+  void highDelay() => raw = SenseLinkRaw(
+        delay: '900',
+        fps: '20',
+        lossEst: 0.1,
+        lastFrameMs: 10,
+        lastFrameAt: clock.wall,
+        probeAt: clock.wall,
+      );
+
   /// A link that answers but slowly.
   void slow() => raw = SenseLinkRaw(
         delay: '272',

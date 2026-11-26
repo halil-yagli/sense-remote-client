@@ -11,6 +11,9 @@ abstract final class SenseLayerStrings {
       'Son görüntü $seconds sn önce geldi. Uzak bilgisayar çalışıyor olabilir.';
   static const String latency = 'gecikme';
 
+  /// "x" on the weak card; the card shrinks into the logo area (karar #94).
+  static const String minimize = 'Kapat (durum alanına küçülür)';
+
   /// Loss is estimated, not measured (TK7, #69).
   static const String lossEstimated = 'tahmini kayıp';
   static const String frames = 'görüntü';

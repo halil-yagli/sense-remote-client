@@ -4,10 +4,12 @@
 // sends no event at all. Every tick it gets the latest [SenseLinkSample] and the
 // current time (a monotonic clock; tests pass a fake one).
 //
-//   normal ── bad 5 s without a break ──▶ weak
-//   normal / weak ── no picture 3 s ──▶ lost
+// Karar #94 (the layer must never get in the way of a working link):
+//   normal ── fps < 5 for 15 s without a break ──▶ weak   (delay / loss alone: no card)
+//   any ── transport lost (RustDesk "restarting") ──▶ lost
 //   weak / lost ── good 3 s without a break ──▶ normal  (+ "Bağlantı düzeldi")
-//   any ── stalled 30 s ──▶ dropped (the session closes; O14 "Uzak bilgisayar…")
+//   any ── no frame and no delay measurement 30 s ──▶ dropped (O14 "Uzak bilgisayar…")
+// While frames or probes keep coming the machine never drops.
 //
 // A short shake shows no layer; the top bar says "Dalgalı" ([SenseLinkView.wavy]).
 import '../../../tokens/sense_tokens.dart';
@@ -60,6 +62,13 @@ class SenseLinkSample {
   /// The frame rate alone does not count: a still screen has no frames (D1); its
   /// tile is still coloured by the limit.
   bool get valuesBad => _atLeastWarn(latencyLevel) || _atLeastWarn(lossLevel);
+
+  /// Frame rate under the weak card's limit. 0 fps is a still screen (D1: no frame is
+  /// sent while probes keep coming) and does not count.
+  bool get fpsWeak {
+    final f = fps;
+    return f != null && f > 0 && f < SenseLinkTiming.weakFpsBelow;
+  }
 
   static bool _atLeastWarn(SenseLevel l) => l == SenseLevel.warn || l == SenseLevel.hot;
 }
@@ -121,6 +130,7 @@ class SenseLinkMachine {
   Duration? _badSince;
   Duration? _goodSince;
   bool _dropped = false;
+  Duration? _transportLostAt;
   SenseLinkView _view = SenseLinkView.initial;
   SenseLinkEvent _event = SenseLinkEvent.none;
 
@@ -129,8 +139,13 @@ class SenseLinkMachine {
   /// What happened on the last tick.
   SenseLinkEvent get lastEvent => _event;
 
+  /// RustDesk reports the transport gone (`restarting-show`): "Bağlantı kesildi" now;
+  /// the session closes when no data comes for [SenseLinkTiming.drop].
+  void transportLost(Duration now) => _transportLostAt ??= now;
+
   /// Starts over (after a reconnect).
   void reset() {
+    _transportLostAt = null;
     _phase = SenseLinkPhase.normal;
     _badSince = null;
     _goodSince = null;
@@ -143,12 +158,23 @@ class SenseLinkMachine {
     _event = SenseLinkEvent.none;
     if (_dropped) return _view;
 
-    final stall = s.stall;
-    final lostNow = stall >= SenseLinkTiming.showLost;
-    // Late probes or a missing picture for a second are already "bad".
-    final bad = s.valuesBad || stall >= SenseLinkTiming.tick;
+    var stall = s.stall;
+    final lostAt = _transportLostAt;
+    if (lostAt != null) {
+      if (stall < SenseLinkTiming.tick && now > lostAt) {
+        // Data flows again: the transport is back.
+        _transportLostAt = null;
+      } else if (now - lostAt > stall) {
+        stall = now - lostAt;
+      }
+    }
+    final lostNow = _transportLostAt != null;
+    // Short shake for the bar word: bad values or a missing picture for a second.
+    final shake = s.valuesBad || stall >= SenseLinkTiming.tick;
+    // The weak card only cares about the frame rate.
+    final weakBad = s.fpsWeak;
 
-    if (bad) {
+    if (weakBad || lostNow) {
       _goodSince = null;
       _badSince ??= now;
     } else {
@@ -168,21 +194,21 @@ class SenseLinkMachine {
       case SenseLinkPhase.normal:
         if (lostNow) {
           _phase = SenseLinkPhase.lost;
-        } else if (bad && now - _badSince! >= SenseLinkTiming.showWeak) {
+        } else if (weakBad && now - _badSince! >= SenseLinkTiming.showWeak) {
           _phase = SenseLinkPhase.weak;
         }
       case SenseLinkPhase.weak:
       case SenseLinkPhase.lost:
         if (lostNow) {
           _phase = SenseLinkPhase.lost;
-        } else if (!bad && now - _goodSince! >= SenseLinkTiming.hideOk) {
+        } else if (!weakBad && now - _goodSince! >= SenseLinkTiming.hideOk) {
           _phase = SenseLinkPhase.normal;
           _event = SenseLinkEvent.recovered;
         }
     }
 
     int? recoveringIn;
-    if (_phase != SenseLinkPhase.normal && !bad && _goodSince != null) {
+    if (_phase != SenseLinkPhase.normal && !weakBad && !lostNow && _goodSince != null) {
       final left = SenseLinkTiming.hideOk - (now - _goodSince!);
       final secs = (left.inMilliseconds / 1000).ceil();
       recoveringIn = secs < 1 ? 1 : secs;
@@ -191,7 +217,7 @@ class SenseLinkMachine {
     _view = SenseLinkView(
       phase: _phase,
       sample: s,
-      wavy: _phase == SenseLinkPhase.normal && bad,
+      wavy: _phase == SenseLinkPhase.normal && shake,
       recoveringIn: recoveringIn,
       stall: stall,
     );
