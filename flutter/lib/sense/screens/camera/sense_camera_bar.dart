@@ -106,12 +106,14 @@ class SenseCameraBar extends StatelessWidget {
     final right = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: const BoxDecoration(border: Border(left: BorderSide(color: SenseColors.line))),
-      child: SenseButton(
-        key: const ValueKey('sense-camera-end'),
-        label: _S.end,
-        tooltip: _S.cameraEndTooltip,
-        kind: SenseButtonKind.danger,
-        onPressed: onEnd,
+      child: Center(
+        child: SenseButton(
+          key: const ValueKey('sense-camera-end'),
+          label: _S.end,
+          tooltip: _S.cameraEndTooltip,
+          kind: SenseButtonKind.danger,
+          onPressed: onEnd,
+        ),
       ),
     );
     return GestureDetector(
@@ -126,7 +128,8 @@ class SenseCameraBar extends StatelessWidget {
           border: Border(bottom: BorderSide(color: SenseColors.line)),
         ),
         child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Flexible(child: left),
+          // Left block at most 360 px, the camera choice centred, Bitir at the right edge.
+          ConstrainedBox(constraints: const BoxConstraints(maxWidth: 360), child: left),
           Expanded(child: Center(child: choice)),
           right,
         ]),
