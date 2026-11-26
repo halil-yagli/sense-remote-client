@@ -15,7 +15,6 @@ use hbb_common::{bail, config, log, ResultType};
 use std::{
     path::Path,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
         Mutex,
     },
@@ -79,8 +78,6 @@ lazy_static::lazy_static! {
     static ref TX_MSG : Mutex<Sender<UpdateMsg>> = Mutex::new(start_auto_update_check());
 }
 
-static CONTROLLING_SESSION_COUNT: AtomicUsize = AtomicUsize::new(0);
-
 /// Initial wait after startup before the first update check (30 seconds).
 pub const INITIAL_CHECK_DELAY: Duration = Duration::from_secs(30);
 
@@ -94,7 +91,9 @@ pub const MIN_INTERVAL: Duration = Duration::from_secs(60 * 10);
 pub const RETRY_INTERVAL: Duration = Duration::from_secs(60 * 30);
 
 pub fn update_controlling_session_count(count: usize) {
-    CONTROLLING_SESSION_COUNT.store(count, Ordering::SeqCst);
+    // Sense Remote (S9 P5, #96): kept with its arrival time; a report that is not refreshed
+    // expires, so a UI process that died without sending 0 no longer blocks updates for ever.
+    crate::sense::update::controlling::report(count);
 }
 
 #[allow(dead_code)]
@@ -129,7 +128,7 @@ pub fn has_no_active_conns() -> bool {
 
 #[cfg(any(not(target_os = "windows"), feature = "flutter"))]
 fn has_no_controlling_conns() -> bool {
-    CONTROLLING_SESSION_COUNT.load(Ordering::SeqCst) == 0
+    !crate::sense::update::controlling::active()
 }
 
 #[cfg(not(any(not(target_os = "windows"), feature = "flutter")))]

@@ -195,8 +195,11 @@ impl Daemon {
 
     fn advance(&mut self, event: Event, ctx: &Ctx) {
         let state = std::mem::take(&mut self.state);
+        let before = state.phase;
         let (state, actions) = engine::next(state, event, ctx);
         self.state = state;
+        // Sense Remote (S9 P5): phase changes and the reason an update waits, to the log.
+        crate::sense::update::wait_log::observe(before, &self.state, ctx.now_s, ctx.idle_s);
         for action in actions {
             if let Some(job) = self.job_for(action) {
                 let _ = self.jobs.send(job);

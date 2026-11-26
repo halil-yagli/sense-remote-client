@@ -82,6 +82,9 @@ pub mod apply_win;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod daemon_mac;
 pub mod cancel_log;
+// Sense Remote (S9 P5, #96): own Controller session count that expires when not refreshed.
+#[allow(dead_code)]
+pub mod controlling;
 pub mod download;
 pub mod engine;
 pub mod guard;
@@ -99,6 +102,8 @@ pub mod order;
 pub mod outgoing;
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub mod runner;
+// Sense Remote (S9 P5, #96): why an accepted update waits, to the log.
+pub mod wait_log;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod sign_mac;
 pub mod store;
