@@ -51,6 +51,7 @@ abstract final class SenseStatusStrings {
   static const String freeSlots = 'Boş yuva';
   static const String diskHealth = 'Sağlık';
   static const String totalWritten = 'Toplam yazılan';
+  static const String writtenSinceBoot = 'Açılıştan beri yazılan';
   static const String readWrite = 'Anlık okuma / yazma';
   static const String firmware = 'Yazılım sürümü';
   static const String healthOk = 'İyi';

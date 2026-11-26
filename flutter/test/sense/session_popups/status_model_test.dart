@@ -3,6 +3,7 @@
 // never guessed. Colours follow T6 and a category takes its worst value.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/screens/session/data/peer_status.dart';
+import 'package:flutter_hbb/sense/screens/session/data/health.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/status/status_format.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/status/status_model.dart';
 import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
@@ -126,7 +127,7 @@ void main() {
       expect(line(rows, 'Boş yuva').value, '2 / 4');
     });
 
-    test('Depolama: disk cards, unread temperature and total written stay "okunamadı"', () {
+    test('Depolama: disk cards, unread temperature and total written (not in fixture) stay "okunamadı"', () {
       final cards = cat(v, 'storage').rows.whereType<SenseStatusCard>().toList();
       expect(cards.map((c) => c.title), ['Samsung SSD 980 PRO 1TB', 'WDC WD20EZBX 2TB']);
       expect(cards.map((c) => c.tags), [['NVMe'], ['SATA HDD']]);
@@ -137,6 +138,24 @@ void main() {
       expect(line(cards[1].rows, 'Sıcaklık').value, isNull);
       expect(line(cards[0].rows, 'Toplam yazılan').value, isNull);
       expect(cards[1].level, SenseLevel.hot);
+    });
+
+    test('Depolama: Toplam yazılan / Açılıştan beri yazılan / okunamadı', () {
+      final win = SenseHealthPhysicalDisk.fromJson({'id': '0', 'written_gb': 18450.3});
+      expect(senseWrittenLine(win).label, 'Toplam yazılan');
+      expect(senseWrittenLine(win).value, '18,5 TB');
+      final small = SenseHealthPhysicalDisk.fromJson({'id': '0', 'written_gb': 640.2});
+      expect(senseWrittenLine(small).value, '640 GB');
+      // macOS: only the since-boot counter; its own label, never "Toplam yazılan".
+      final mac = SenseHealthPhysicalDisk.fromJson({'id': 'disk0', 'written_boot_gb': 12.5});
+      expect(senseWrittenLine(mac).label, 'Açılıştan beri yazılan');
+      expect(senseWrittenLine(mac).value, '13 GB');
+      // The lifetime value wins when both exist.
+      final both = SenseHealthPhysicalDisk.fromJson({'id': '0', 'written_gb': 100, 'written_boot_gb': 5});
+      expect(senseWrittenLine(both).label, 'Toplam yazılan');
+      // Unread / out of range: "okunamadı".
+      expect(senseWrittenLine(null).value, isNull);
+      expect(senseWrittenLine(SenseHealthPhysicalDisk.fromJson({'id': '1', 'written_gb': -4})).value, isNull);
     });
 
     test('Ağ: wired first, STATİK / DHCP tags, unplugged adapter short', () {

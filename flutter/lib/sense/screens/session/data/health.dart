@@ -437,11 +437,16 @@ class SenseHealthGpu {
 }
 
 class SenseHealthPhysicalDisk {
-  const SenseHealthPhysicalDisk({required this.id, this.readBps, this.writeBps, this.tempC});
+  const SenseHealthPhysicalDisk(
+      {required this.id, this.readBps, this.writeBps, this.tempC, this.writtenGb, this.writtenBootGb});
   final String id;
   final int? readBps;
   final int? writeBps;
   final double? tempC;
+  /// Sürüm 9 (O8): lifetime data written, GB (SMART). Windows NVMe only.
+  final double? writtenGb;
+  /// Sürüm 9 (O8): written since boot, GB (macOS). Never shown as the lifetime total.
+  final double? writtenBootGb;
 
   static SenseHealthPhysicalDisk? fromJson(Object? json) {
     final m = _map(json);
@@ -452,6 +457,8 @@ class SenseHealthPhysicalDisk {
       readBps: _bps(m['read_bps']),
       writeBps: _bps(m['write_bps']),
       tempC: _temp(m['temp_c']),
+      writtenGb: _range(_num(m['written_gb']), 0, 10000000),
+      writtenBootGb: _range(_num(m['written_boot_gb']), 0, 10000000),
     );
   }
 }
