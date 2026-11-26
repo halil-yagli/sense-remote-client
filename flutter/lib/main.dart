@@ -197,9 +197,19 @@ void runMainApp(bool startService, {bool envReady = false}) async {
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     // Restore the location of the main window before window hide or show.
     await restoreWindowPosition(WindowType.Main);
-    // Sense Remote (Y2, T3, T9): the Controller window opens at 1180x720 (fitted to the screen).
+    // Sense Remote (Y2, T3, T9): the Controller window opens at 1180x720 (fitted to the screen),
+    // on the first opening only: a saved position and size win (it was just restored above).
     if (isDesktop && senseControllerWindowApplies(_senseWindowRole())) {
-      await senseSizeControllerWindow();
+      final restoreEnabled = bind
+          .mainGetEnv(key: "DISABLE_RUSTDESK_RESTORE_WINDOW_POSITION")
+          .isEmpty;
+      final hasSavedFrame = LastWindowPosition.loadFromString(bind
+              .getLocalFlutterOption(k: windowFramePrefix + WindowType.Main.name)) !=
+          null;
+      if (senseControllerWindowFirstRun(
+          restoreEnabled: restoreEnabled, hasSavedFrame: hasSavedFrame)) {
+        await senseSizeControllerWindow();
+      }
     }
     // Check the startup argument, if we successfully handle the argument, we keep the main window hidden.
     final handledByUniLinks = await initUniLinks();
