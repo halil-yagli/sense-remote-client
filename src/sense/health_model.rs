@@ -359,8 +359,8 @@ pub fn pct(value: f64) -> Option<f64> {
 /// Written data in GB (decimal, one decimal place). Above 10 million GB (10 PB) is a broken
 /// counter, not a disk.
 pub fn written_gb(bytes: u128) -> Option<f64> {
-    let gb = bytes as f64 / 1e9;
-    (gb.is_finite() && gb <= 1e7).then(|| round_to(gb, 1))
+    let gb = bytes as f64 / 1.0e9;
+    (gb.is_finite() && gb <= 1.0e7).then(|| round_to(gb, 1))
 }
 
 /// NVMe SMART / Health log page (id 2, 512 bytes): "Data Units Written" is the 128-bit

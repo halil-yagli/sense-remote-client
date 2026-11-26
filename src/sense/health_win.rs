@@ -330,10 +330,15 @@ fn disk_temps() -> HashMap<String, f64> {
 // ---------------------------------------------------------------------------------------------
 
 /// Lifetime data written by NVMe disk number `disk` (GB), from the drive's SMART / Health log
-/// page 2 via `IOCTL_STORAGE_QUERY_PROPERTY` on `\.\PhysicalDriveN`. The handle is opened with
+/// page 2 via `IOCTL_STORAGE_QUERY_PROPERTY` on the PhysicalDriveN device. The handle is opened with
 /// no access rights (a query needs none); the service runs as SYSTEM anyway. SATA, USB bridges
 /// and RAID volumes refuse the request, so they stay "not read" (nothing is estimated).
 fn nvme_written_gb(disk: u32) -> Option<f64> {
+    /// Device path of the physical disk (raw string: the prefix is two backslashes, a dot, one).
+    fn device_path(disk: u32) -> String {
+        format!("{}{disk}", r"\\.\PhysicalDrive")
+    }
+
     use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
     use windows::Win32::{Foundation::HANDLE, System::IO::DeviceIoControl};
 
@@ -350,7 +355,7 @@ fn nvme_written_gb(disk: u32) -> Option<f64> {
     let file = std::fs::OpenOptions::new()
         .access_mode(0)
         .share_mode(3)
-        .open(format!("\\.\PhysicalDrive{disk}"))
+        .open(device_path(disk))
         .ok()?;
     let handle = HANDLE(file.as_raw_handle());
     // Namespace 0 first (Microsoft's sample), then "all namespaces" (what some tools send).
