@@ -1209,7 +1209,7 @@ fn periodic_tick() {
                         s.offsets = next_offsets;
                         super::diag::crash::write_open(&super::diag::writer::events_dir(), &open_marker(s));
                     }
-                }
+                };
             });
         if let Err(err) = spawned {
             log::warn!("Sense Remote: log chunk not started: {err}");
