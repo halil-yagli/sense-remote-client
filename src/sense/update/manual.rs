@@ -31,12 +31,32 @@ pub use super::apply_win::{
     UPGRADE_OK as EXIT_OK,
 };
 
-/// Pure (Windows): the setup screen must not run as the installed program's file name:
-/// `update_me` ends every other `SenseRemote.exe` process (U3), so the screen would close
-/// while it waits for the elevated step. The setup file is `SenseRemote-Kurulum-<n>.exe`.
+/// Pure (Windows): the setup screen must not be the installed program itself (Sürüm 10, #106).
+/// The check is on the full path, not on the file name: the setup file unpacks itself and runs
+/// as `%LOCALAPPDATA%\senseremote\SenseRemote.exe`, the same name as the installed program, so
+/// a name check refused every manual move. Only the installed exe (under Program Files) is
+/// refused. The setup copy may be ended by `update_me` (it ends every other `SenseRemote.exe`,
+/// U3) while it waits; `update_me` then starts the installed main window again in that session.
+/// Both paths should already be resolved (`std::fs::canonicalize`: long names, no short 8.3
+/// names); this compares them without case and without the `\\?\` prefix.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
-pub fn runs_as_installed_exe(file_name: &str) -> bool {
-    file_name.eq_ignore_ascii_case(super::apply_win::INSTALLED_EXE)
+pub fn runs_as_installed_exe(exe: &str, installed_exe: &str) -> bool {
+    let exe = normalize_win_path(exe);
+    !exe.is_empty() && exe == normalize_win_path(installed_exe)
+}
+
+/// `\\?\C:\Program Files\X\` and `c:/program files/x` are the same path.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn normalize_win_path(path: &str) -> String {
+    let path = path.trim().replace('/', r"\");
+    let path = if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        path
+    };
+    path.trim_end_matches('\\').to_lowercase()
 }
 
 /// Text of the macOS administrator password prompt.
@@ -170,9 +190,8 @@ mod win {
                 return FAILED.to_owned();
             }
         };
-        let name = exe.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        if runs_as_installed_exe(name) {
-            log::error!("Sense Remote: manual move refused, setup runs as the installed exe name");
+        if runs_as_installed_exe(&resolved(&exe), &resolved(Path::new(&installed_exe()))) {
+            log::error!("Sense Remote: manual move refused, setup runs as the installed exe");
             return FAILED.to_owned();
         }
         match run_elevated(&exe, ARG_UPGRADE_LOCAL) {
@@ -187,6 +206,20 @@ mod win {
                 FAILED.to_owned()
             }
         }
+    }
+
+    /// The installed program (`get_install_info`, under Program Files).
+    fn installed_exe() -> String {
+        crate::platform::get_install_info().3
+    }
+
+    /// Full long path (short 8.3 names and links resolved); the path as given if it can not be
+    /// resolved.
+    fn resolved(path: &Path) -> String {
+        std::fs::canonicalize(path)
+            .unwrap_or_else(|_| path.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
     }
 
     enum RunError {
@@ -328,10 +361,42 @@ mod tests {
 
     #[test]
     fn setup_never_runs_as_the_installed_exe() {
-        assert!(runs_as_installed_exe("SenseRemote.exe"));
-        assert!(runs_as_installed_exe("senseremote.EXE"));
-        assert!(!runs_as_installed_exe("SenseRemote-Kurulum-3.exe"));
-        assert!(!runs_as_installed_exe(""));
+        let installed = r"C:\Program Files\SenseRemote\SenseRemote.exe";
+        // The installed program itself is refused, whatever the case or the prefix.
+        assert!(runs_as_installed_exe(installed, installed));
+        assert!(runs_as_installed_exe(r"c:\program files\senseremote\SENSEREMOTE.EXE", installed));
+        assert!(runs_as_installed_exe(r"\\?\C:\Program Files\SenseRemote\SenseRemote.exe", installed));
+        assert!(runs_as_installed_exe("C:/Program Files/SenseRemote/SenseRemote.exe", installed));
+        // #106: the setup file unpacks itself under the same name elsewhere; that copy may run.
+        assert!(!runs_as_installed_exe(
+            r"C:\Users\ekip\AppData\Local\senseremote\SenseRemote.exe",
+            installed
+        ));
+        assert!(!runs_as_installed_exe(
+            r"\\?\C:\Users\ekip\AppData\Local\senseremote\SenseRemote.exe",
+            installed
+        ));
+        assert!(!runs_as_installed_exe(r"C:\Users\ekip\Downloads\SenseRemote-Kurulum-10.exe", installed));
+        // A short (8.3) name is only equal after `canonicalize`; unresolved it is not the same text.
+        assert!(!runs_as_installed_exe(r"C:\PROGRA~1\SENSER~1\SENSER~1.EXE", installed));
+        assert!(!runs_as_installed_exe("", installed));
+        assert!(!runs_as_installed_exe("", ""));
+        assert!(runs_as_installed_exe(r"\\?\UNC\srv\x\a.exe", r"\\srv\x\A.exe"));
+    }
+
+    // #106: the Windows caller resolves short names with `canonicalize` before comparing.
+    #[cfg(windows)]
+    #[test]
+    fn resolved_paths_compare_equal() {
+        let dir = std::env::temp_dir();
+        let file = dir.join(format!("sense-manual-{}.exe", std::process::id()));
+        std::fs::write(&file, b"x").unwrap();
+        let a = std::fs::canonicalize(&file).unwrap();
+        let upper = file.to_string_lossy().to_uppercase();
+        let b = std::fs::canonicalize(&upper).unwrap();
+        assert!(runs_as_installed_exe(&a.to_string_lossy(), &b.to_string_lossy()));
+        assert!(runs_as_installed_exe(&a.to_string_lossy(), &file.to_string_lossy()));
+        let _ = std::fs::remove_file(&file);
     }
 
     fn env() -> ScriptEnv {
