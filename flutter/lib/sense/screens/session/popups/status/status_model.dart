@@ -752,9 +752,9 @@ String? _role(String? r) => switch (r) {
       _ => null,
     };
 
-SenseStatusCategory _software(SensePeerStatus st, SenseHealthDetail? h, SenseInventory? inv, SenseStatusPlatform os) {
+SenseStatusCategory _software(SensePeerStatus st, SenseHealthDetail? h, SenseInventory? inv, SenseStatusPlatform platform) {
   // A Mac's drivers are part of macOS: the group is left out (Sürüm 11).
-  final showDrivers = os != _P.mac || inv?.drivers != null;
+  final showDrivers = platform != _P.mac || inv?.drivers != null;
   final os = inv?.os;
   final osName = _join([os?.name, os?.version], ' ');
   final drivers = inv?.drivers;
