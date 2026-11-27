@@ -5,10 +5,11 @@
 //!   `\GPU Adapter Memory(*)\Dedicated Usage` (Windows 10 1709+), joined by LUID. NVIDIA cards
 //!   add temperature, fan and power from the driver's `nvidia-smi`; other vendors publish no
 //!   documented temperature, so it is not sent.
-//! - Disks: read / write bytes per second from `\PhysicalDisk(*)`; temperature from the Storage
-//!   reliability counters (PowerShell, at most every `DISK_TEMP_INTERVAL`, in the background).
-//!   Lifetime data written (NVMe SMART log, `nvme_written_gb`) only with the panel capability
-//!   `disk_written`.
+//! - Disks: read / write bytes per second from `\PhysicalDisk(*)`; NVMe temperature from the
+//!   drive's SMART / Health log page (Sürüm 11, W2), other disks' from the Storage reliability
+//!   counters (PowerShell, at most every `DISK_TEMP_INTERVAL`, in the background, only when a
+//!   disk has no NVMe temperature). Lifetime data written (same NVMe log page,
+//!   `nvme_health_log`) only with the panel capability `disk_written`.
 //! - CPU current clock: `\Processor Information(_Total)\% Processor Performance` x base clock
 //!   (inventory).
 //! - Wi-Fi: `netsh wlan show interfaces` (SSID needs location access on Windows 11 24H2; without
@@ -28,7 +29,8 @@ use std::{
     time::{Duration, Instant},
 };
 use winapi::um::pdh::{
-    PdhAddEnglishCounterW, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW,
+    PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW,
+    PdhOpenQueryW,
     PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_FMT_NOCAP100, PDH_HCOUNTER, PDH_HQUERY,
 };
 
@@ -143,8 +145,45 @@ struct Pdh {
 // SAFETY: the handles are only used under `PDH`'s lock; PDH handles are not tied to a thread.
 unsafe impl Send for Pdh {}
 
-/// Opened on first use; `None` inside when PDH cannot be opened (then nothing is retried).
-static PDH: Mutex<Option<Option<Pdh>>> = Mutex::new(None);
+impl Pdh {
+    /// Every counter could be added.
+    fn complete(&self) -> bool {
+        [
+            self.gpu_engine,
+            self.gpu_memory,
+            self.disk_read,
+            self.disk_write,
+            self.cpu_performance,
+        ]
+        .iter()
+        .all(|c| !c.is_null())
+    }
+}
+
+impl Drop for Pdh {
+    fn drop(&mut self) {
+        // SAFETY: the query was opened by `open_pdh` and is closed once (its counters with it).
+        unsafe {
+            PdhCloseQuery(self.query);
+        }
+    }
+}
+
+/// Sense Remote (Sürüm 11, W3): the query and when it was last opened. A query that could not be
+/// opened, or opened without a counter (graphics driver not ready at start, driver update), is
+/// opened again after `PDH_RETRY`; a failed collection opens it again at once, then after
+/// `PDH_RETRY` if it keeps failing. Before, a failure stayed until the service restarted.
+struct PdhState {
+    pdh: Option<Pdh>,
+    opened_at: Option<Instant>,
+    collect_failures: u32,
+}
+
+static PDH: Mutex<PdhState> = Mutex::new(PdhState {
+    pdh: None,
+    opened_at: None,
+    collect_failures: 0,
+});
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
@@ -240,13 +279,47 @@ struct PdhSample {
 }
 
 fn sample_pdh() -> Option<PdhSample> {
-    let mut guard = PDH.lock().unwrap_or_else(|e| e.into_inner());
-    let pdh = guard.get_or_insert_with(open_pdh).as_ref()?;
+    let mut state = PDH.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    let complete = state.pdh.as_ref().is_some_and(Pdh::complete);
+    if pdh_reopen_due(state.opened_at, complete, now) {
+        let again = state.opened_at.is_some();
+        state.pdh = None; // closes the old query
+        state.pdh = open_pdh();
+        state.opened_at = Some(Instant::now());
+        match state.pdh.as_ref() {
+            Some(pdh) if pdh.complete() => {
+                if again {
+                    log::info!("Sense Remote: PDH counters opened again");
+                }
+            }
+            Some(_) => log::warn!(
+                "Sense Remote: PDH counter missing, tried again in {}s",
+                PDH_RETRY.as_secs()
+            ),
+            None => log::warn!(
+                "Sense Remote: PDH query not opened, tried again in {}s",
+                PDH_RETRY.as_secs()
+            ),
+        }
+    }
+    let query = state.pdh.as_ref()?.query;
+    // SAFETY: query handle from `open_pdh`, used under the lock.
+    if unsafe { PdhCollectQueryData(query) } != 0 {
+        state.collect_failures += 1;
+        log::warn!(
+            "Sense Remote: PDH collection failed ({}), the query is opened again",
+            state.collect_failures
+        );
+        state.pdh = None;
+        // First failure: open again at the next health; repeated: after `PDH_RETRY`.
+        state.opened_at = (state.collect_failures > 1).then_some(now);
+        return None;
+    }
+    state.collect_failures = 0;
+    let pdh = state.pdh.as_ref()?;
     // SAFETY: handles from `open_pdh`, used under the lock.
     unsafe {
-        if PdhCollectQueryData(pdh.query) != 0 {
-            return None;
-        }
         let engines = counter_array(pdh.gpu_engine);
         let gpu_util = gpu_util_by_luid(engines.iter().map(|(n, v)| (n.as_str(), *v)));
         let mut gpu_memory: HashMap<u64, u64> = HashMap::new();
@@ -298,9 +371,13 @@ static DISK_TEMPS: Mutex<DiskTemps> = Mutex::new(DiskTemps {
     values: Vec::new(),
 });
 
-fn disk_temps() -> HashMap<String, f64> {
+/// Temperatures from the Storage reliability counters. Sense Remote (Sürüm 11, W2 / W17): the
+/// PowerShell script only runs when a disk has no temperature from its NVMe log page (SATA,
+/// USB); on a computer with only NVMe disks no PowerShell is started for it at all.
+fn disk_temps(needed: bool) -> HashMap<String, f64> {
     let mut state = DISK_TEMPS.lock().unwrap_or_else(|e| e.into_inner());
-    let due = !state.running
+    let due = needed
+        && !state.running
         && state
             .started
             .map_or(true, |t| t.elapsed() >= DISK_TEMP_INTERVAL);
@@ -329,11 +406,12 @@ fn disk_temps() -> HashMap<String, f64> {
 // Total written (Sense Remote Sürüm 9, O8): NVMe SMART / Health log page
 // ---------------------------------------------------------------------------------------------
 
-/// Lifetime data written by NVMe disk number `disk` (GB), from the drive's SMART / Health log
-/// page 2 via `IOCTL_STORAGE_QUERY_PROPERTY` on the PhysicalDriveN device. The handle is opened with
-/// no access rights (a query needs none); the service runs as SYSTEM anyway. SATA, USB bridges
-/// and RAID volumes refuse the request, so they stay "not read" (nothing is estimated).
-fn nvme_written_gb(disk: u32) -> Option<f64> {
+/// SMART / Health log page 2 of NVMe disk number `disk` via `IOCTL_STORAGE_QUERY_PROPERTY` on
+/// the PhysicalDriveN device: lifetime data written (Sürüm 9) and, Sürüm 11 (W2), the composite
+/// temperature, so NVMe disks need no PowerShell for it. The handle is opened with no access
+/// rights (a query needs none); the service runs as SYSTEM anyway. SATA, USB bridges and RAID
+/// volumes refuse the request, so they stay "not read" (nothing is estimated).
+fn nvme_health_log(disk: u32) -> Option<Vec<u8>> {
     /// Device path of the physical disk (raw string: the prefix is two backslashes, a dot, one).
     fn device_path(disk: u32) -> String {
         format!("{}{disk}", r"\\.\PhysicalDrive")
@@ -399,15 +477,27 @@ fn nvme_written_gb(disk: u32) -> Option<f64> {
         };
         let start = 8usize.saturating_add(offset);
         let end = start.saturating_add(len.min(LOG_LEN)).min(returned as usize);
-        if let Some(gb) = output
+        // A page with neither a written total nor a temperature is an empty answer.
+        if let Some(page) = output
             .get(start..end)
-            .and_then(nvme_written_bytes)
-            .and_then(written_gb)
+            .filter(|page| nvme_written_bytes(page).is_some() || nvme_temp_c(page).is_some())
         {
-            return Some(gb);
+            return Some(page.to_vec());
         }
     }
     None
+}
+
+/// What one NVMe log page gives: temperature (always) and the lifetime total written (only with
+/// the panel capability `disk_written`, `with_written`).
+fn nvme_values(disk: &str, with_written: bool) -> (Option<f64>, Option<f64>) {
+    let Some(page) = disk.parse::<u32>().ok().and_then(nvme_health_log) else {
+        return (None, None);
+    };
+    let written = with_written
+        .then(|| nvme_written_bytes(&page).and_then(written_gb))
+        .flatten();
+    (nvme_temp_c(&page), written)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -441,14 +531,30 @@ fn nvidia_smi() -> Vec<GpuLive> {
     .unwrap_or_default()
 }
 
+/// Sense Remote (Sürüm 11, #119): `netsh` runs at most every `WIFI_INTERVAL` (it ran at every
+/// health, every 8 s with a session); a time-out keeps the last reading for `LIVE_KEEP`, an
+/// answer without Wi-Fi (disconnected, no adapter) clears it.
 fn wifi() -> Option<WifiLive> {
-    let out = health_cmd::run(
-        &system32("netsh.exe"),
-        &["wlan", "show", "interfaces"],
-        TOOL_TIMEOUT,
-    )?;
-    health_parse::netsh_wifi(&out)
+    let mut state = WIFI.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    if state.0.is_some_and(|at| now.saturating_duration_since(at) < WIFI_INTERVAL) {
+        return state.1.get(now, LIVE_KEEP);
+    }
+    state.0 = Some(now);
+    match health_cmd::run(&system32("netsh.exe"), &["wlan", "show", "interfaces"], TOOL_TIMEOUT) {
+        Some(out) => match health_parse::netsh_wifi(&out) {
+            Some(wifi) => state.1.update(now, Some(wifi), LIVE_KEEP),
+            None => {
+                state.1.clear();
+                None
+            }
+        },
+        None => state.1.get(now, LIVE_KEEP),
+    }
 }
+
+const WIFI_INTERVAL: Duration = Duration::from_secs(60);
+static WIFI: Mutex<(Option<Instant>, Kept<WifiLive>)> = Mutex::new((None, Kept::new()));
 
 // ---------------------------------------------------------------------------------------------
 // Live values
@@ -499,20 +605,31 @@ pub fn extend(health: &mut super::report::SenseHealth, base_mhz: Option<u32>) {
     gpus.retain(|g| *g != GpuLive { name: g.name.clone(), ..Default::default() });
     health.gpus = non_empty(gpus);
 
-    let temps = disk_temps();
+    let mut cpu_mhz = None;
     if let Some(sample) = &sample {
+        // Sense Remote (Sürüm 9, O8): lifetime data written, only with the panel capability
+        // `disk_written`; disks that do not answer (SATA, USB, RAID) send no value. Sürüm 11
+        // (W2): the NVMe temperature comes from the same log page.
+        let with_written = super::report_sig::panel_has(CAP_DISK_WRITTEN);
         let mut disks: Vec<DiskLive> = sample
             .disks
             .iter()
-            .map(|(id, (read, write))| DiskLive {
-                id: id.clone(),
-                read_bps: *read,
-                write_bps: *write,
-                temp_c: temps.get(id).copied(),
-                // Sense Remote (Sürüm 9): written_gb is filled below (NVMe SMART).
-                ..Default::default()
+            .map(|(id, (read, write))| {
+                let (temp_c, written_gb) = nvme_values(id, with_written);
+                DiskLive {
+                    id: id.clone(),
+                    read_bps: *read,
+                    write_bps: *write,
+                    temp_c,
+                    written_gb,
+                    ..Default::default()
+                }
             })
             .collect();
+        let temps = disk_temps(disks.is_empty() || disks.iter().any(|d| d.temp_c.is_none()));
+        for disk in &mut disks {
+            disk.temp_c = disk.temp_c.or_else(|| temps.get(&disk.id).copied());
+        }
         for (id, temp) in &temps {
             if !disks.iter().any(|d| &d.id == id) {
                 disks.push(DiskLive {
@@ -524,18 +641,18 @@ pub fn extend(health: &mut super::report::SenseHealth, base_mhz: Option<u32>) {
         }
         disks.sort_by(|a, b| a.id.cmp(&b.id));
         disks.truncate(MAX_ITEMS);
-        // Sense Remote (Sürüm 9, O8): lifetime data written, only with the panel capability
-        // `disk_written`; disks that do not answer (SATA, USB, RAID) send no value.
-        if super::report_sig::panel_has(CAP_DISK_WRITTEN) {
-            for disk in &mut disks {
-                disk.written_gb = disk.id.parse::<u32>().ok().and_then(nvme_written_gb);
-            }
-        }
         health.physical_disks = non_empty(disks);
-        health.cpu_mhz = match (sample.cpu_performance_pct, base_mhz) {
+        cpu_mhz = match (sample.cpu_performance_pct, base_mhz) {
             (Some(perf), Some(base)) => mhz(perf * base as f64 / 100.0),
             _ => None,
         };
     }
+    // Sense Remote (Sürüm 11, #119): one missed sample keeps the last clock for `LIVE_KEEP`.
+    health.cpu_mhz = CPU_MHZ
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .update(Instant::now(), cpu_mhz, LIVE_KEEP);
     health.wifi = wifi();
 }
+
+static CPU_MHZ: Mutex<Kept<u32>> = Mutex::new(Kept::new());

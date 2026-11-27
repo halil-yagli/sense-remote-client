@@ -17,6 +17,16 @@ use std::{
 
 const MAX_OUTPUT: u64 = 4 * 1024 * 1024;
 const POLL: Duration = Duration::from_millis(50);
+/// Error output kept for the log (the rest is read and dropped).
+const MAX_ERROR_OUTPUT: u64 = 4096;
+/// Characters of error output written to the log.
+pub const ERROR_EXCERPT_CHARS: usize = 300;
+
+/// First `ERROR_EXCERPT_CHARS` characters of a tool's error text on one line; empty -> None.
+pub fn error_excerpt(raw: &str) -> Option<String> {
+    let one_line = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!one_line.is_empty()).then(|| one_line.chars().take(ERROR_EXCERPT_CHARS).collect())
+}
 
 pub fn run(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
     let mut command = Command::new(program);
@@ -24,7 +34,9 @@ pub fn run(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        // Sense Remote (Sürüm 11, #119): the error output is kept (start of it in the log), so a
+        // failing query is no longer invisible.
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -46,6 +58,16 @@ pub fn run(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
         let _ = (&mut stdout).take(MAX_OUTPUT).read_to_end(&mut bytes);
         let _ = tx.send(bytes);
     });
+    let (err_tx, err_rx) = mpsc::channel();
+    if let Some(mut stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = (&mut stderr).take(MAX_ERROR_OUTPUT).read_to_end(&mut bytes);
+            // The rest is read and dropped so the child never blocks on a full pipe.
+            let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+            let _ = err_tx.send(bytes);
+        });
+    }
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
@@ -66,12 +88,37 @@ pub fn run(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
     };
     let status = status?;
     let bytes = rx.recv_timeout(Duration::from_secs(2)).ok()?;
+    let errors = err_rx
+        .recv_timeout(Duration::from_millis(200))
+        .ok()
+        .and_then(|e| error_excerpt(&String::from_utf8_lossy(&e)));
     if !status.success() {
-        log::debug!("Sense Remote: {program} exited with {status}");
+        match errors {
+            Some(errors) => log::info!("Sense Remote: {program} exited with {status}: {errors}"),
+            None => log::debug!("Sense Remote: {program} exited with {status}"),
+        }
         return None;
+    }
+    if let Some(errors) = errors {
+        log::debug!("Sense Remote: {program} error output: {errors}");
     }
     let text = String::from_utf8_lossy(&bytes);
     Some(text.trim_start_matches('\u{feff}').to_owned())
+}
+
+#[cfg(test)]
+mod excerpt_tests {
+    use super::*;
+
+    #[test]
+    fn error_text_is_one_short_line() {
+        assert_eq!(error_excerpt("  \r\n "), None);
+        assert_eq!(
+            error_excerpt("Cannot convert value \"NVMe\" to type\r\n  \"System.Int32\".").as_deref(),
+            Some("Cannot convert value \"NVMe\" to type \"System.Int32\".")
+        );
+        assert_eq!(error_excerpt(&"x".repeat(1000)).unwrap().chars().count(), ERROR_EXCERPT_CHARS);
+    }
 }
 
 #[cfg(all(test, unix))]

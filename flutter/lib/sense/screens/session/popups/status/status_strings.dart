@@ -15,6 +15,12 @@ abstract final class SenseStatusStrings {
   static const String retry = 'Yeniden dene';
   static const String unreadable = 'okunamadı';
 
+  /// Sürüm 11 (#124): the hardware / firmware has no such value (not a failed reading).
+  static const String notReported = 'bu bilgisayar bildirmiyor';
+  static const String sharedMemory = 'Paylaşılan bellek';
+  static const String unifiedMemory = 'Birleşik bellek';
+  static String physicalDisk(String id) => 'Fiziksel disk $id';
+
   // Overall box (T7).
   static const String allOk = 'Her şey normal';
   static const String warn = 'Uyarı var';
@@ -147,6 +153,9 @@ abstract final class SenseDisplayStrings {
   static const String position = 'Konum';
   static const String hdrOn = 'Açık';
   static const String hdrOff = 'Kapalı';
+  /// Sürüm 11: macOS tells whether the screen can show HDR, not whether it is on.
+  static const String hdrCapable = 'Destekliyor';
+  static const String hdrNotCapable = 'Desteklemiyor';
   static String nativeSize(String size) => '$size (yerel)';
   static String nativeOther(String size, String native) => '$size (yerel $native)';
   static String othersHz(String hz) => '(diğerleri $hz)';

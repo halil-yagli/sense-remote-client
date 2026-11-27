@@ -2,6 +2,7 @@
 // session numbers from RustDesk; different refresh / 4:2:2 in orange with a
 // note; latency 150 / 300 ms (#135); frame rate by T6.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_hbb/sense/screens/session/data/sense_peer_status.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/display/display_data.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/display/display_model.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/status/status_model.dart';
@@ -139,5 +140,29 @@ void main() {
     expect(senseParseSpeedMbit('781.25kB/s'), closeTo(6.4, 0.01));
     expect(senseParseSpeedMbit(''), isNull);
     expect(senseParseSpeedMbit(null), isNull);
+  });
+
+  // Sürüm 11 (#124): macOS gives no external monitor's connection type and no colour format;
+  // its HDR value is "can show HDR".
+  test('Mac: built-in panel, HDR support, not-reported connection', () {
+    final mac = [
+      SensePeerDisplay.fromJson({'index': 0, 'name': 'Built-in Retina Display', 'x': 0, 'y': 0, 'width': 1512,
+        'height': 982, 'scale': 2.0, 'primary': true, 'refresh_hz': 120, 'connection': 'internal',
+        'bit_depth': 10, 'hdr': true, 'native_width': 3024, 'native_height': 1964})!,
+      SensePeerDisplay.fromJson({'index': 1, 'name': 'DELL P2422H', 'x': 1512, 'y': 0, 'width': 1920,
+        'height': 1080, 'scale': 1.0, 'refresh_hz': 60})!,
+    ];
+    final v = senseBuildDisplayView(panel: mac, video: kVideo, platform: SenseStatusPlatform.mac);
+    final builtIn = v.categories[0].rows;
+    expect(line(builtIn, 'Bağlantı').value, isNotNull);
+    expect(line(builtIn, 'Renk').value, '10 bit');
+    expect(line(builtIn, 'HDR').value, 'Destekliyor');
+    final external = v.categories[1].rows;
+    expect(line(external, 'Bağlantı').shownValue, 'bu bilgisayar bildirmiyor');
+    expect(line(external, 'Renk').shownValue, 'bu bilgisayar bildirmiyor');
+    // The same gap on Windows is a failed reading.
+    final win = senseBuildDisplayView(panel: mac, video: kVideo, platform: SenseStatusPlatform.windows);
+    expect(line(win.categories[1].rows, 'Bağlantı').shownValue, 'okunamadı');
+    expect(line(win.categories[0].rows, 'HDR').value, 'Açık');
   });
 }

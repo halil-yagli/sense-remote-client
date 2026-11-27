@@ -117,7 +117,11 @@ double? _commonHz(List<SensePeerDisplay> ds) {
 SenseDisplayView senseBuildDisplayView({
   required List<SensePeerDisplay> panel,
   required SenseSessionVideo video,
+  SenseStatusPlatform platform = SenseStatusPlatform.unknown,
 }) {
+  // Sürüm 11 (#124): macOS gives no external monitor's connection type and no colour format;
+  // its HDR value says whether the screen can show HDR (not whether it is on).
+  final mac = platform == SenseStatusPlatform.mac;
   // Every display either side knows, by index.
   final indexes = <int>{for (final d in panel) d.index, for (final d in video.displays) d.index}.toList()..sort();
   SensePeerDisplay? p(int i) => panel.where((d) => d.index == i).firstOrNull;
@@ -156,7 +160,7 @@ SenseDisplayView senseBuildDisplayView({
       ]),
       rows: [
         SenseStatusLine(_D.monitor, pd?.name),
-        SenseStatusLine(_D.connection, _connectionLong(pd?.connection)),
+        SenseStatusLine(_D.connection, _connectionLong(pd?.connection), notReported: mac && pd != null),
         SenseStatusLine(_D.resolution, res),
         SenseStatusLine(_D.scale, pd?.scale == null ? null : '%${(pd!.scale! * 100).round()}'),
         SenseStatusLine(
@@ -164,8 +168,15 @@ SenseDisplayView senseBuildDisplayView({
           hz == null ? null : (hzOff ? '${senseHz(hz)} ${_D.othersHz(senseHz(common!))}' : senseHz(hz)),
           valueLevel: hzOff ? SenseLevel.warn : null,
         ),
-        SenseStatusLine(_D.color, colour, valueLevel: subsampled ? SenseLevel.warn : null),
-        SenseStatusLine(_D.hdr, pd?.hdr == null ? null : (pd!.hdr! ? _D.hdrOn : _D.hdrOff)),
+        SenseStatusLine(_D.color, colour, valueLevel: subsampled ? SenseLevel.warn : null, notReported: mac && pd != null),
+        SenseStatusLine(
+            _D.hdr,
+            pd?.hdr == null
+                ? null
+                : mac
+                    ? (pd!.hdr! ? _D.hdrCapable : _D.hdrNotCapable)
+                    : (pd!.hdr! ? _D.hdrOn : _D.hdrOff),
+            notReported: mac && pd != null),
         SenseStatusLine(_D.position, x == null || y == null ? null : '$x, $y'),
         if (subsampled) SenseStatusNote('${_colorFormat(fmt)}: ${_D.ycbcrNote}'),
       ],

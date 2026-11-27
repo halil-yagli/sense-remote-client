@@ -183,8 +183,8 @@ void main() {
       final comp = cat(v, 'components').rows;
       expect(line(comp, 'BIOS').value, '2611 · 24.10.2025');
       expect(line(comp, 'USB aygıtları').value, 'Logitech K400, Elo Touch 2201L, Stream Deck MK.2');
-      // macOS-only field on a Windows computer: not guessed.
-      expect(line(comp, 'Elektrik kesilince').value, isNull);
+      // macOS-only field on a Windows computer: no row at all (Sürüm 11, #124).
+      expect(flat(comp).whereType<SenseStatusLine>().where((l) => l.label == 'Elektrik kesilince'), isEmpty);
       final soft = cat(v, 'software').rows;
       expect(line(soft, 'Açık kalma').value, '3 gün 4 sa');
       expect(line(soft, 'Son güncelleme').value, '12.11.2026');
@@ -265,6 +265,156 @@ void main() {
           expect(l.value, isNull, reason: '$id / ${l.label}');
         }
       }
+    });
+  });
+
+  // Sürüm 11 (#119, #124): "okunamadı" only where a value should have come. A value the
+  // computer's system has no notion of is not drawn; one its hardware never gives says so.
+  group('platform: hidden, not reported, unreadable (#124)', () {
+    Iterable<String> labels(List<SenseStatusRow> rows) => flat(rows).whereType<SenseStatusLine>().map((l) => l.label);
+
+    // A Mac Host as Sürüm 11 sends it (shapes from the Rust parsers' samples).
+    Map<String, Object?> macJson() {
+      final j = fullJson();
+      j['platform'] = 'macos-arm64';
+      j['network'] = [
+        {'name': 'Wi-Fi', 'kind': 'wifi', 'ipv4': ['192.168.1.20/24'], 'up': true},
+      ];
+      j['health'] = {
+        'at': 1795000000, 'cpu_pct': 9, 'cpu_temp_c': 48, 'mem_used_mb': 9000, 'mem_total_mb': 16384,
+        'mem_available_mb': 6200, 'swap_used_mb': 1024, 'swap_total_mb': 2048, 'uptime_s': 3600,
+        'disks': [{'mount': '/', 'used_pct': 40, 'total_gb': 460}],
+        'gpus': [{'name': 'Apple M2', 'util_pct': 12, 'vram_used_mb': 261, 'vram_total_mb': 16384}],
+        'physical_disks': [{'id': 'disk0', 'read_bps': 1000, 'write_bps': 2000, 'written_boot_gb': 12.5}],
+        'wifi': {'name': 'en1', 'band': '5 GHz', 'signal_pct': 84},
+      };
+      j['inventory'] = {
+        'at': 1795000000,
+        'cpu': {'model': 'Apple M2', 'cores': 8, 'threads': 8},
+        'gpus': [{'name': 'Apple M2', 'integrated': true}],
+        'memory': {'total_mb': 16384, 'modules': [{'size_mb': 16384, 'kind': 'LPDDR5', 'manufacturer': 'Hynix'}]},
+        'physical_disks': [{'id': 'disk0', 'model': 'APPLE SSD AP0512Z', 'bus': 'nvme', 'media': 'ssd',
+          'size_gb': 465.9, 'firmware': '387.100.', 'health': 'ok'}],
+        'network': [
+          {'name': 'Wi-Fi', 'device': 'en1', 'kind': 'wifi', 'connected': true, 'speed_mbps': 866, 'dhcp': true},
+        ],
+        'board': {'manufacturer': 'Apple', 'product': 'Mac mini (Mac14,3)'},
+        'bios': {'vendor': 'Apple', 'version': '10151.121.1'},
+        'serial': 'ORNEK00MAC',
+        'audio': ['Mac mini Speakers'],
+        'usb': ['Magic Keyboard'],
+        'power_restore': true,
+        'os': {'name': 'macOS', 'version': '14.5', 'build': '23F79', 'last_update': '2024-05-20'},
+      };
+      return j;
+    }
+
+    test('platform from the panel, else from the inventory', () {
+      expect(senseStatusPlatform(parseFull(macJson())), SenseStatusPlatform.mac);
+      expect(senseStatusPlatform(parseFull(fullJson())), SenseStatusPlatform.windows);
+      final noPlatform = macJson()..remove('platform');
+      expect(senseStatusPlatform(parseFull(noPlatform)), SenseStatusPlatform.mac, reason: 'board maker Apple');
+      expect(senseStatusPlatform(parseFull(v1Json())), SenseStatusPlatform.unknown);
+      final winPanel = v1Json()..['platform'] = 'windows-x64';
+      expect(senseStatusPlatform(parseFull(winPanel)), SenseStatusPlatform.windows);
+    });
+
+    test('Mac: rows macOS has no notion of are not drawn', () {
+      final v = senseBuildStatusView(parseFull(macJson()));
+      expect(labels(cat(v, 'cpu').rows), isNot(contains('Temel / anlık hız')));
+      final gpu = cat(v, 'gpu').rows.whereType<SenseStatusCard>().single;
+      expect(labels(gpu.rows), isNot(anyOf(contains('Sürücü sürümü'), contains('Sıcaklık'), contains('Fan'))));
+      expect(meter(gpu.rows, 'Paylaşılan bellek').text, isNotNull);
+      final mem = cat(v, 'memory').rows;
+      expect(labels(mem), isNot(contains('Boş yuva')));
+      expect(line(mem, 'Birleşik bellek').value, '16 GB LPDDR5 · Hynix');
+      expect(line(mem, 'Kullanılabilir').value, isNotNull);
+      final disk = cat(v, 'storage').rows.whereType<SenseStatusCard>().first;
+      expect(disk.title, 'APPLE SSD AP0512Z');
+      expect(labels(disk.rows), isNot(contains('Sıcaklık')));
+      expect(line(disk.rows, 'Açılıştan beri yazılan').value, '13 GB');
+      final net = cat(v, 'network').rows.whereType<SenseStatusCard>().single;
+      expect(labels(net.rows), isNot(anyOf(contains('Kart'), contains('Sürücü sürümü'))));
+      expect(line(net.rows, 'Ağ adı').value, '5 GHz · sinyal %84');
+      expect(line(net.rows, 'Hız').value, '866 Mbit/s');
+      final comp = cat(v, 'components').rows;
+      expect(labels(comp), isNot(contains('Güç planı')));
+      expect(line(comp, 'Elektrik kesilince').value, isNotNull);
+      final soft = cat(v, 'software').rows;
+      expect(labels(soft), isNot(contains('Yonga seti')));
+      expect(line(soft, 'Son güncelleme').value, '20.05.2024');
+      // Nothing left that macOS cannot give: every remaining line has a value.
+      for (final id in ['cpu', 'gpu', 'memory', 'storage', 'components']) {
+        for (final l in flat(cat(v, id).rows).whereType<SenseStatusLine>()) {
+          expect(l.value, isNotNull, reason: '$id / ${l.label}');
+        }
+      }
+    });
+
+    test('Windows: the same missing values stay "okunamadı"', () {
+      final j = fullJson();
+      final inv = j['inventory']! as Map<String, Object?>;
+      (inv['cpu']! as Map<String, Object?>).remove('base_mhz');
+      (j['health']! as Map<String, Object?>).remove('cpu_mhz');
+      final v = senseBuildStatusView(parseFull(j));
+      final speed = line(cat(v, 'cpu').rows, 'Temel / anlık hız');
+      expect(speed.value, isNull);
+      expect(speed.shownValue, 'okunamadı');
+      expect(labels(cat(v, 'memory').rows), contains('Boş yuva'));
+      expect(labels(cat(v, 'components').rows), contains('Güç planı'));
+    });
+
+    test('a value the hardware never gives: "bu bilgisayar bildirmiyor"', () {
+      final j = fullJson();
+      (j['health']! as Map<String, Object?>)['gpus'] = [
+        {'name': 'AMD Radeon RX 7800 XT', 'util_pct': 30, 'vram_used_mb': 4000, 'vram_total_mb': 16368},
+        {'name': 'NVIDIA GeForce RTX 4060 Laptop GPU', 'util_pct': 5, 'temp_c': 52},
+      ];
+      final inv = j['inventory']! as Map<String, Object?>;
+      inv['gpus'] = [
+        {'name': 'AMD Radeon RX 7800 XT', 'integrated': false},
+        {'name': 'NVIDIA GeForce RTX 4060 Laptop GPU', 'integrated': false},
+      ];
+      inv.remove('serial');
+      final v = senseBuildStatusView(parseFull(j));
+      final cards = cat(v, 'gpu').rows.whereType<SenseStatusCard>().toList();
+      final amd = line(cards[0].rows, 'Sıcaklık');
+      expect(amd.value, isNull);
+      expect(amd.shownValue, 'bu bilgisayar bildirmiyor');
+      expect(amd.copyText, 'Sıcaklık: bu bilgisayar bildirmiyor');
+      expect(line(cards[1].rows, 'Sıcaklık').value, '52 °C');
+      expect(line(cards[1].rows, 'Fan').shownValue, 'bu bilgisayar bildirmiyor');
+      // Firmware read, no serial in it.
+      expect(line(cat(v, 'components').rows, 'Seri no').shownValue, 'bu bilgisayar bildirmiyor');
+      // Without an inventory nothing is claimed: "okunamadı".
+      final old = senseBuildStatusView(parseFull(v1Json()));
+      expect(line(cat(old, 'components').rows, 'Seri no').shownValue, 'okunamadı');
+    });
+
+    test('Windows Host without an inventory disk list: temperature and written still shown (#119)', () {
+      final j = fullJson();
+      (j['inventory']! as Map<String, Object?>).remove('physical_disks');
+      final h = j['health']! as Map<String, Object?>;
+      h['disks'] = [{'mount': 'C:', 'used_pct': 62, 'total_gb': 931}];
+      h['physical_disks'] = [{'id': '0', 'read_bps': 24000000, 'write_bps': 3000000, 'temp_c': 41, 'written_gb': 18450.3}];
+      final v = senseBuildStatusView(parseFull(j));
+      final card = cat(v, 'storage').rows.whereType<SenseStatusCard>().single;
+      expect(card.title, 'Fiziksel disk 0');
+      expect(meter(card.rows, 'C:').text, isNotNull);
+      expect(line(card.rows, 'Sıcaklık').value, '41 °C');
+      expect(line(card.rows, 'Toplam yazılan').value, '18,5 TB');
+      expect(line(card.rows, 'Anlık okuma / yazma').value, '24 / 3 MB/s');
+      // The overview takes the single disk's temperature for its volume.
+      expect(v.meters.firstWhere((m) => m.label.startsWith('Disk')).text, contains('41 °C'));
+    });
+
+    test('two live disks without an inventory list: one card each, volumes apart', () {
+      final j = fullJson();
+      (j['inventory']! as Map<String, Object?>).remove('physical_disks');
+      final v = senseBuildStatusView(parseFull(j));
+      final titles = cat(v, 'storage').rows.whereType<SenseStatusCard>().map((c) => c.title).toList();
+      expect(titles, containsAllInOrder(['Fiziksel disk 0', 'Fiziksel disk 1']));
+      expect(titles.where((t) => t.startsWith('Disk ')), isNotEmpty);
     });
   });
 

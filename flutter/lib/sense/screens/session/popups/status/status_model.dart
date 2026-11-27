@@ -25,10 +25,18 @@ sealed class SenseStatusRow {
 
 /// "Label ··· value" (`.r`). Null value = "okunamadı".
 class SenseStatusLine extends SenseStatusRow {
-  const SenseStatusLine(this.label, this.value, {this.valueLevel, this.tag, this.tagStrong = false});
+  const SenseStatusLine(this.label, this.value,
+      {this.valueLevel, this.tag, this.tagStrong = false, this.notReported = false});
 
   final String label;
   final String? value;
+
+  /// Sürüm 11 (#124): a missing value the computer never gives (sensor / firmware has none):
+  /// "bu bilgisayar bildirmiyor" instead of "okunamadı". Only used with a null [value].
+  final bool notReported;
+
+  /// What the row shows: the value, or why there is none.
+  String get shownValue => value ?? (notReported ? _S.notReported : _S.unreadable);
 
   /// Coloured value (warn / hot); ok and null stay white.
   final SenseLevel? valueLevel;
@@ -41,7 +49,7 @@ class SenseStatusLine extends SenseStatusRow {
   SenseLevel? get level => valueLevel;
 
   @override
-  String get copyText => '$label: ${value ?? _S.unreadable}${tag == null ? '' : ' ($tag)'}';
+  String get copyText => '$label: $shownValue${tag == null ? '' : ' ($tag)'}';
 }
 
 /// Meter row (`.mt`): label, 6 px bar, value. [pct] null = bar empty and the
@@ -191,20 +199,43 @@ String? _join(Iterable<String?> parts, [String sep = ' · ']) {
   return p.isEmpty ? null : p.join(sep);
 }
 
+/// Sürüm 11 (#124): the computer's operating system decides which rows exist at all. A value
+/// macOS has no notion of (base clock, memory slots, graphics driver version, power plan …) is
+/// not drawn on a Mac; Windows has no "start after power loss" reading.
+enum SenseStatusPlatform { windows, mac, unknown }
+
+/// From the panel's `platform` ("windows-x64", "macos-arm64") when it sends it, else from the
+/// inventory (operating system name, board maker); unknown when neither says.
+SenseStatusPlatform senseStatusPlatform(SensePeerStatusFull full) {
+  final p = full.platform?.toLowerCase();
+  if (p != null) {
+    if (p.startsWith('mac')) return SenseStatusPlatform.mac;
+    if (p.startsWith('win')) return SenseStatusPlatform.windows;
+  }
+  final inv = full.inventory;
+  final os = inv?.os?.name?.toLowerCase() ?? '';
+  if (os.startsWith('macos') || inv?.boardManufacturer == 'Apple') return SenseStatusPlatform.mac;
+  if (os.contains('windows')) return SenseStatusPlatform.windows;
+  return SenseStatusPlatform.unknown;
+}
+
+typedef _P = SenseStatusPlatform;
+
 /// Builds the popup content. [now] is only for nothing time-related here.
 SenseStatusView senseBuildStatusView(SensePeerStatusFull full) {
   final st = full.status;
   final h = full.health;
   final inv = full.inventory;
+  final os = senseStatusPlatform(full);
 
-  final cpu = _cpu(h, inv);
-  final gpu = _gpu(h, inv);
-  final mem = _memory(h, inv);
-  final disk = _storage(h, inv);
-  final net = _network(st, h, inv);
+  final cpu = _cpu(h, inv, os);
+  final gpu = _gpu(h, inv, os);
+  final mem = _memory(h, inv, os);
+  final disk = _storage(h, inv, os);
+  final net = _network(st, h, inv, os);
   final disp = _displays(st);
-  final comp = _components(inv);
-  final soft = _software(st, h, inv);
+  final comp = _components(inv, os);
+  final soft = _software(st, h, inv, os);
 
   return SenseStatusView(
     meters: _overview(h, inv),
@@ -238,13 +269,18 @@ SenseStatusMeter _pctTemp(String label, double? pct, double? temp, SenseLevel Fu
 }
 
 double? _diskTempFor(String mount, SenseHealthDetail? h, SenseInventory? inv) {
-  for (final d in inv?.physicalDisks ?? const <SenseInvDisk>[]) {
+  final invDisks = inv?.physicalDisks ?? const <SenseInvDisk>[];
+  for (final d in invDisks) {
     if (d.mounts.contains(mount)) {
       for (final p in h?.physicalDisks ?? const <SenseHealthPhysicalDisk>[]) {
         if (p.id == d.id) return p.tempC;
       }
     }
   }
+  // Sürüm 11 (#119): without an inventory disk list (Windows Hosts up to Sürüm 10 never had
+  // one), a computer with a single physical disk has every volume on it.
+  final live = h?.physicalDisks ?? const <SenseHealthPhysicalDisk>[];
+  if (invDisks.isEmpty && live.length == 1) return live.first.tempC;
   return null;
 }
 
@@ -280,7 +316,7 @@ SenseInvNetwork? _adapterFor(String name, List<SenseInvNetwork>? adapters) {
 
 // ------------------------------------------------------------------ İşlemci
 
-SenseStatusCategory _cpu(SenseHealthDetail? h, SenseInventory? inv) {
+SenseStatusCategory _cpu(SenseHealthDetail? h, SenseInventory? inv, SenseStatusPlatform os) {
   final c = inv?.cpu;
   final pct = h?.cpuPct, temp = h?.cpuTempC;
   final cores = c?.cores, threads = c?.threads;
@@ -297,8 +333,10 @@ SenseStatusCategory _cpu(SenseHealthDetail? h, SenseInventory? inv) {
       SenseStatusLine(_S.model, c?.model),
       SenseStatusLine(_S.coresThreads,
           cores == null && threads == null ? null : '${cores ?? _S.unreadable} / ${threads ?? _S.unreadable}'),
-      SenseStatusLine(_S.baseCurrentSpeed,
-          base == null && cur == null ? null : '${base == null ? _S.unreadable : senseGhz(base)} / ${cur == null ? _S.unreadable : senseGhz(cur)} GHz'),
+      // Apple Silicon publishes neither a base nor a current clock (Sürüm 11).
+      if (os != _P.mac || base != null || cur != null)
+        SenseStatusLine(_S.baseCurrentSpeed,
+            base == null && cur == null ? null : '${base == null ? _S.unreadable : senseGhz(base)} / ${cur == null ? _S.unreadable : senseGhz(cur)} GHz'),
       const SenseStatusGroup(_S.topProcesses),
       if (procs == null)
         const SenseStatusUnreadable()
@@ -317,7 +355,7 @@ String? _gpuKey(String? name) => name?.trim().replaceAll(RegExp(r'\s+'), ' ').to
 bool _gpuHasLive(SenseHealthGpu g) =>
     g.utilPct != null || g.vramUsedMb != null || g.tempC != null || g.fanPct != null || g.powerW != null;
 
-SenseStatusCategory _gpu(SenseHealthDetail? h, SenseInventory? inv) {
+SenseStatusCategory _gpu(SenseHealthDetail? h, SenseInventory? inv, SenseStatusPlatform os) {
   final cards = <SenseStatusCard>[];
   final live = List<SenseHealthGpu>.of(h?.gpus ?? const []);
   // A live entry with values is matched first, so a card listed twice by an older Host (one
@@ -331,7 +369,7 @@ SenseStatusCategory _gpu(SenseHealthDetail? h, SenseInventory? inv) {
   final shown = <String?>{};
   for (final g in inv?.gpus ?? const <SenseInvGpu>[]) {
     final i = liveFor(g.name);
-    cards.add(_gpuCard(g.name, g, i >= 0 ? live.removeAt(i) : null));
+    cards.add(_gpuCard(g.name, g, i >= 0 ? live.removeAt(i) : null, os));
     shown.add(_gpuKey(g.name));
   }
   // Live-only cards; an entry without values whose name is already shown is the same card twice.
@@ -339,7 +377,7 @@ SenseStatusCategory _gpu(SenseHealthDetail? h, SenseInventory? inv) {
   for (final x in live) {
     final k = _gpuKey(x.name);
     if (!_gpuHasLive(x) && k != null && (shown.contains(k) || liveKeys.contains(k))) continue;
-    cards.add(_gpuCard(x.name ?? _S.gpu, null, x));
+    cards.add(_gpuCard(x.name ?? _S.gpu, null, x, os));
     shown.add(k);
   }
   // Summary: the busiest card (the one v1 gpu_pct / gpu_temp_c describe).
@@ -364,35 +402,57 @@ SenseStatusCategory _gpu(SenseHealthDetail? h, SenseInventory? inv) {
   );
 }
 
-SenseStatusCard _gpuCard(String name, SenseInvGpu? inv, SenseHealthGpu? live) {
+/// Sürüm 11 (#124): only NVIDIA's driver tool gives a card's temperature, fan and power on
+/// Windows; AMD / Intel discrete cards publish none (no documented interface).
+bool _isNvidia(String name) {
+  final n = name.toLowerCase();
+  return n.contains('nvidia') || n.contains('geforce') || n.contains('quadro') || n.contains('tesla');
+}
+
+SenseStatusCard _gpuCard(String name, SenseInvGpu? inv, SenseHealthGpu? live, SenseStatusPlatform os) {
   final integrated = inv?.integrated == true;
   final util = live?.utilPct;
   final used = live?.vramUsedMb;
   final total = live?.vramTotalMb ?? inv?.vramMb;
   final vramPct = used != null && total != null ? used * 100 / total : null;
   final temp = live?.tempC;
+  // Windows: a non-NVIDIA card never reports these; an NVIDIA card that reports its temperature
+  // but no fan (laptop, "[N/A]") or power has none to report.
+  final noSensors = os == _P.windows && !_isNvidia(name);
+  final nvidiaSaysNa = os == _P.windows && _isNvidia(name) && temp != null;
   return SenseStatusCard(
     name,
     tags: integrated ? const [_S.integrated] : const [],
     [
       SenseStatusMeter(_S.usage, util, util == null ? null : sensePct(util), barLevel: _usage(util)),
-      SenseStatusMeter(_S.vram, vramPct, used != null && total != null ? senseUsedOfTotalMb(used, total) : null,
+      // A Mac's integrated GPU uses the computer's memory; its total is the installed memory
+      // (Sürüm 11: "Paylaşılan bellek").
+      SenseStatusMeter(integrated && os == _P.mac ? _S.sharedMemory : _S.vram, vramPct,
+          used != null && total != null ? senseUsedOfTotalMb(used, total) : null,
           barLevel: _usage(vramPct)),
-      // An integrated GPU shares the processor's sensors: no own temperature, fan or power.
-      if (!integrated) ...[
-        SenseStatusLine(_S.temperature, temp == null ? null : senseTemp(temp), valueLevel: _chip(temp)),
-        SenseStatusLine(_S.fan, live?.fanPct == null ? null : sensePct(live!.fanPct!)),
-        SenseStatusLine(_S.power, live?.powerW == null ? null : '${live!.powerW!.round()} W'),
+      // An integrated GPU shares the processor's sensors: no own temperature, fan or power. On a
+      // Mac no GPU publishes them (Sürüm 11).
+      if (!integrated && os != _P.mac) ...[
+        SenseStatusLine(_S.temperature, temp == null ? null : senseTemp(temp),
+            valueLevel: _chip(temp), notReported: noSensors),
+        SenseStatusLine(_S.fan, live?.fanPct == null ? null : sensePct(live!.fanPct!),
+            notReported: noSensors || nvidiaSaysNa),
+        SenseStatusLine(_S.power, live?.powerW == null ? null : '${live!.powerW!.round()} W',
+            notReported: noSensors || nvidiaSaysNa),
       ],
-      SenseStatusLine(_S.driverVersion, inv?.driverVersion),
-      SenseStatusLine(_S.driverDate, inv?.driverDate == null ? null : senseDate(inv!.driverDate!)),
+      // The graphics driver is part of macOS (no version of its own).
+      if (os != _P.mac || inv?.driverVersion != null) ...[
+        SenseStatusLine(_S.driverVersion, inv?.driverVersion),
+        SenseStatusLine(_S.driverDate, inv?.driverDate == null ? null : senseDate(inv!.driverDate!)),
+      ],
     ],
   );
 }
 
 // ------------------------------------------------------------------ Bellek
 
-SenseStatusCategory _memory(SenseHealthDetail? h, SenseInventory? inv) {
+SenseStatusCategory _memory(SenseHealthDetail? h, SenseInventory? inv, SenseStatusPlatform os) {
+  final mac = os == _P.mac;
   final used = h?.memUsedMb;
   final total = h?.memTotalMb ?? inv?.memory?.totalMb;
   final pct = used != null && total != null ? used * 100 / total : null;
@@ -412,8 +472,11 @@ SenseStatusCategory _memory(SenseHealthDetail? h, SenseInventory? inv) {
       if (mods == null)
         const SenseStatusUnreadable()
       else
-        for (var i = 0; i < mods.length; i++) SenseStatusLine(mods[i].slot ?? _S.slot(i + 1), _module(mods[i])),
-      SenseStatusLine(_S.freeSlots, slots == null || mods == null ? null : '${slots - mods.length} / $slots'),
+        for (var i = 0; i < mods.length; i++)
+          // A Mac's memory is soldered unified memory: one entry, no slot (Sürüm 11).
+          SenseStatusLine(mods[i].slot ?? (mac ? _S.unifiedMemory : _S.slot(i + 1)), _module(mods[i])),
+      if (!mac || slots != null)
+        SenseStatusLine(_S.freeSlots, slots == null || mods == null ? null : '${slots - mods.length} / $slots'),
     ],
   );
 }
@@ -427,31 +490,58 @@ String? _module(SenseInvMemoryModule m) {
 
 // ------------------------------------------------------------------ Depolama
 
-SenseStatusCategory _storage(SenseHealthDetail? h, SenseInventory? inv) {
+/// Disk temperature row; none on a Mac (no public interface, Sürüm 11).
+List<SenseStatusRow> _diskTemp(SenseHealthPhysicalDisk? live, SenseStatusPlatform os) {
+  final temp = live?.tempC;
+  return [
+    if (os != _P.mac || temp != null)
+      SenseStatusLine(_S.temperature, temp == null ? null : senseTemp(temp), valueLevel: _diskT(temp)),
+  ];
+}
+
+SenseStatusLine _diskRates(SenseHealthPhysicalDisk? live) => SenseStatusLine(_S.readWrite,
+    live?.readBps == null || live?.writeBps == null ? null : '${senseMBps(live!.readBps!)} / ${senseMBps(live.writeBps!)} MB/s');
+
+SenseStatusCategory _storage(SenseHealthDetail? h, SenseInventory? inv, SenseStatusPlatform os) {
   final volumes = h?.disks ?? const <SenseHealthDisk>[];
   final used = <String>{};
   final cards = <SenseStatusCard>[];
-  for (final d in inv?.physicalDisks ?? const <SenseInvDisk>[]) {
-    SenseHealthPhysicalDisk? live;
-    for (final p in h?.physicalDisks ?? const <SenseHealthPhysicalDisk>[]) {
-      if (p.id == d.id) live = p;
-    }
+  final liveDisks = List<SenseHealthPhysicalDisk>.of(h?.physicalDisks ?? const []);
+  final invDisks = inv?.physicalDisks ?? const <SenseInvDisk>[];
+  for (final d in invDisks) {
+    final at = liveDisks.indexWhere((p) => p.id == d.id);
+    final live = at >= 0 ? liveDisks.removeAt(at) : null;
     final rows = <SenseStatusRow>[];
     for (final m in d.mounts) {
       final v = volumes.where((x) => x.mount == m).firstOrNull;
       used.add(m);
       rows.add(_volumeMeter(m, v));
     }
-    final temp = live?.tempC;
     rows
-      ..add(SenseStatusLine(_S.temperature, temp == null ? null : senseTemp(temp), valueLevel: _diskT(temp)))
+      ..addAll(_diskTemp(live, os))
       ..add(_diskHealth(d))
       // Sürüm 9 (O8): lifetime total if read; macOS only knows since boot (own label); else "okunamadı".
       ..add(senseWrittenLine(live))
-      ..add(SenseStatusLine(_S.readWrite,
-          live?.readBps == null || live?.writeBps == null ? null : '${senseMBps(live!.readBps!)} / ${senseMBps(live.writeBps!)} MB/s'))
+      ..add(_diskRates(live))
       ..add(SenseStatusLine(_S.firmware, d.firmware));
     cards.add(SenseStatusCard(d.model, rows, tags: [if (_diskTag(d) != null) _diskTag(d)!]));
+  }
+  // Sürüm 11 (#119): disks the computer measures but the inventory does not list (a Windows
+  // Host up to Sürüm 10 sent no disk list) still show their temperature, written total and
+  // rates. A single physical disk carries the volumes; with several they stay separate. With an
+  // inventory list, a measured disk it does not have (a mounted disk image on a Mac) is left out
+  // as before.
+  final volumesOnLive = invDisks.isEmpty && liveDisks.length == 1;
+  for (final p in invDisks.isEmpty ? liveDisks : const <SenseHealthPhysicalDisk>[]) {
+    final rows = <SenseStatusRow>[
+      if (volumesOnLive)
+        for (final v in volumes) _volumeMeter(v.mount, v),
+      ..._diskTemp(p, os),
+      senseWrittenLine(p),
+      _diskRates(p),
+    ];
+    if (volumesOnLive) used.addAll(volumes.map((v) => v.mount));
+    cards.add(SenseStatusCard(_S.physicalDisk(p.id), rows));
   }
   // Volumes the inventory does not place on a disk (or no inventory at all).
   for (final v in volumes) {
@@ -504,7 +594,8 @@ SenseStatusLine _diskHealth(SenseInvDisk d) {
 /// "192.168.10.42/24" → "192.168.10.42 /24" (prefix only when the peer sends one).
 String _ipText(String ip) => ip.contains('/') ? ip.replaceFirst('/', ' /') : ip;
 
-SenseStatusCategory _network(SensePeerStatus st, SenseHealthDetail? h, SenseInventory? inv) {
+SenseStatusCategory _network(SensePeerStatus st, SenseHealthDetail? h, SenseInventory? inv, SenseStatusPlatform os) {
+  final mac = os == _P.mac;
   // Adapters: the base list (IPs) joined with the inventory by name; inventory-only
   // adapters (unplugged ones) come after. Order: ethernet, Wi-Fi, other (#: kablolu önce).
   final entries = <({String name, String kind, SensePeerNetwork? base, SenseInvNetwork? inv})>[];
@@ -535,7 +626,10 @@ SenseStatusCategory _network(SensePeerStatus st, SenseHealthDetail? h, SenseInve
         : connected
             ? _S.connected
             : (e.kind == 'wifi' ? _S.notConnected : _S.cableOut);
-    final rows = <SenseStatusRow>[SenseStatusLine(_S.card, i?.description)];
+    // macOS names no adapter model; the card title already says Wi-Fi / Ethernet (Sürüm 11).
+    final rows = <SenseStatusRow>[
+      if (!mac || i?.description != null) SenseStatusLine(_S.card, i?.description),
+    ];
     if (connected == false) {
       rows.add(SenseStatusLine(_S.mac, i?.mac));
     } else {
@@ -562,11 +656,11 @@ SenseStatusCategory _network(SensePeerStatus st, SenseHealthDetail? h, SenseInve
       for (final n in h?.netIo ?? const <SenseHealthNetIo>[]) {
         if (n.name == e.name || (i?.device != null && n.name == i!.device)) io = n;
       }
-      rows
-        ..add(io == null
-            ? SenseStatusMeter(_S.traffic, null, null, barLevel: SenseLevel.unknown)
-            : _trafficMeter(_S.traffic, null, inv?.network, io))
-        ..add(SenseStatusLine(_S.driverVersion, i?.driverVersion));
+      rows.add(io == null
+          ? SenseStatusMeter(_S.traffic, null, null, barLevel: SenseLevel.unknown)
+          : _trafficMeter(_S.traffic, null, inv?.network, io));
+      // Network drivers are part of macOS (Sürüm 11).
+      if (!mac || i?.driverVersion != null) rows.add(SenseStatusLine(_S.driverVersion, i?.driverVersion));
     }
     final title = e.name.isNotEmpty ? e.name : (e.kind == 'wifi' ? _S.wifi : _S.ethernet);
     cards.add(SenseStatusCard(title, rows, tags: [if (tag != null) tag]));
@@ -626,8 +720,10 @@ SenseStatusCategory _displays(SensePeerStatus st) {
 
 // ------------------------------------------------------------------ Bileşenler
 
-SenseStatusCategory _components(SenseInventory? inv) {
+SenseStatusCategory _components(SenseInventory? inv, SenseStatusPlatform os) {
   final board = _join([inv?.boardManufacturer, inv?.boardProduct], ' ');
+  // Sürüm 11 (#124): the firmware was read but has no serial (vendor placeholder dropped).
+  final serialNotGiven = inv?.serial == null && inv?.biosVersion != null;
   return SenseStatusCategory(
     id: 'components',
     title: _S.components,
@@ -636,11 +732,13 @@ SenseStatusCategory _components(SenseInventory? inv) {
     rows: [
       SenseStatusLine(_S.board, board),
       SenseStatusLine(_S.bios, _join([inv?.biosVersion, inv?.biosDate == null ? null : senseDate(inv!.biosDate!)])),
-      SenseStatusLine(_S.serial, inv?.serial),
+      SenseStatusLine(_S.serial, inv?.serial, notReported: serialNotGiven),
       SenseStatusLine(_S.audio, inv?.audio == null ? null : _join(inv!.audio!, ', ')),
       SenseStatusLine(_S.usb, inv?.usb == null ? null : _join(inv!.usb!, ', ')),
-      SenseStatusLine(_S.powerPlan, inv?.powerPlan),
-      SenseStatusLine(_S.powerRestore, inv?.powerRestore == null ? null : _S.powerRestoreValue(inv!.powerRestore!)),
+      // Power plans are Windows', "start after power loss" is read on a Mac only (Sürüm 11).
+      if (os != _P.mac || inv?.powerPlan != null) SenseStatusLine(_S.powerPlan, inv?.powerPlan),
+      if (os != _P.windows || inv?.powerRestore != null)
+        SenseStatusLine(_S.powerRestore, inv?.powerRestore == null ? null : _S.powerRestoreValue(inv!.powerRestore!)),
     ],
   );
 }
@@ -654,7 +752,9 @@ String? _role(String? r) => switch (r) {
       _ => null,
     };
 
-SenseStatusCategory _software(SensePeerStatus st, SenseHealthDetail? h, SenseInventory? inv) {
+SenseStatusCategory _software(SensePeerStatus st, SenseHealthDetail? h, SenseInventory? inv, SenseStatusPlatform platform) {
+  // A Mac's drivers are part of macOS: the group is left out (Sürüm 11).
+  final showDrivers = platform != _P.mac || inv?.drivers != null;
   final os = inv?.os;
   final osName = _join([os?.name, os?.version], ' ');
   final drivers = inv?.drivers;
@@ -679,12 +779,14 @@ SenseStatusCategory _software(SensePeerStatus st, SenseHealthDetail? h, SenseInv
       SenseStatusLine(_S.hostname, os?.hostname),
       SenseStatusLine(_S.timezone, os?.timezone),
       SenseStatusLine(_S.uptime, h?.uptimeS == null ? null : senseUptime(h!.uptimeS!)),
-      const SenseStatusGroup(_S.driversGroup),
-      SenseStatusLine(_S.driverDisplay, driver('display')),
-      SenseStatusLine(_S.driverNetwork, driver('network')),
-      SenseStatusLine(_S.driverWifi, driver('wifi')),
-      SenseStatusLine(_S.driverAudio, driver('audio')),
-      SenseStatusLine(_S.driverChipset, driver('chipset')),
+      if (showDrivers) ...[
+        const SenseStatusGroup(_S.driversGroup),
+        SenseStatusLine(_S.driverDisplay, driver('display')),
+        SenseStatusLine(_S.driverNetwork, driver('network')),
+        SenseStatusLine(_S.driverWifi, driver('wifi')),
+        SenseStatusLine(_S.driverAudio, driver('audio')),
+        SenseStatusLine(_S.driverChipset, driver('chipset')),
+      ],
       const SenseStatusGroup(_S.senseGroup),
       SenseStatusLine(_S.senseVersion, version == null ? null : _S.senseVersionValue(version, _role(st.role))),
       // The heartbeat comes from the Sense service: a computer the panel sees

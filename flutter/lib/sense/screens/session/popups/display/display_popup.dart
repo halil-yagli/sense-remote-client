@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../../../sense.dart';
 import '../../data/peer_status.dart';
+import '../status/status_model.dart';
 import '../status/status_strings.dart';
 import '../status/status_widgets.dart';
 import 'display_data.dart';
@@ -92,7 +93,11 @@ class _SenseDisplayPopupState extends State<SenseDisplayPopup> {
         listenable: Listenable.merge([widget.feed, widget.video]),
         builder: (context, _) {
           final video = widget.video.value;
-          final view = senseBuildDisplayView(panel: widget.feed.data?.status.displays ?? const [], video: video);
+          final data = widget.feed.data;
+          final view = senseBuildDisplayView(
+              panel: data?.status.displays ?? const [],
+              video: video,
+              platform: data == null ? SenseStatusPlatform.unknown : senseStatusPlatform(data));
           if (!_openSet) {
             // Opens on the watched display (prototype: Ekran 1 open).
             _open = video.watchingAll ? null : 'display-${video.watched}';

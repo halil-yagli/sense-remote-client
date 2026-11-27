@@ -1,0 +1,10 @@
+{
+  "_source": "Gercek cikti, 2026-11-27, Windows 11 Pro 26200, Windows PowerShell 5.1.26100 (tr-TR), normal kullanici, salt okuma. Seri numarasi ve MAC alinmadi; PCI ornek kimligi (son parca) ve arayuz GUID sifirlandi. text_values: Get-PhysicalDisk | Select-Object DeviceId,BusType,MediaType,HealthStatus | ConvertTo-Json (eski betigin gordugu metin degerler). script_disk / script_part: inventory_win.rs INVENTORY_SCRIPT'in disk ve part satirlari (Surum 11, CimInstanceProperties ham degerleri). gpu: Win32_VideoController Name,PNPDeviceID. plan: powercfg /getactivescheme. wear/temp normal kullanicida null (servis SYSTEM'de okur).",
+  "text_values": {"DeviceId":"0","BusType":"NVMe","MediaType":"SSD","HealthStatus":"Healthy"},
+  "script_disk": [{"id":"0","model":"CT2000P310SSD8","bus":17,"media":4,"size":2000398934016,"fw":"V8CR001","health":0,"wear":null}],
+  "script_part": [{"d":"0","l":"C"}],
+  "disk_temp": [{"id":"0","temp":null}],
+  "gpu": [{"Name":"Parsec Virtual Display Adapter","PNPDeviceID":"ROOT\\DISPLAY\\0000"},{"Name":"NVIDIA GeForce RTX 5070 Ti Laptop GPU","PNPDeviceID":"PCI\\VEN_10DE&DEV_2F18&SUBSYS_60541D05&REV_A1\\0000"},{"Name":"AMD Radeon(TM) 610M","PNPDeviceID":"PCI\\VEN_1002&DEV_13C0&SUBSYS_50041D05&REV_D8\\0000"}],
+  "plan": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Dengeli)",
+  "netsh_disconnected": "There is 1 interface on the system: \r\n\r\n    Name                   : Wi-Fi\r\n    Description            : MediaTek Wi-Fi 6E MT7922 160MHz Wireless LAN Card\r\n    GUID                   : 00000000-0000-0000-0000-000000000000\r\n    Physical address       : <gizli>\r\n    Interface type         : Primary\r\n    State                  : disconnected\r\n    Radio status           : Hardware On\r\n                             Software On\r\n\r\n"
+}

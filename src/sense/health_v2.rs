@@ -95,10 +95,24 @@ fn start_inventory_if_due() {
         state.started = Some(Instant::now());
     }
     std::thread::spawn(|| {
+        let started = Instant::now();
         let read = collect_inventory().map(|mut inventory| {
             inventory.at = super::report::unix_now();
             inventory
         });
+        // Sürüm 11 (#119): which parts this reading has (a part that always comes back empty
+        // was invisible before).
+        if let Some(inventory) = &read {
+            log::info!(
+                "Sense Remote: inventory/read {} ms={}",
+                inventory_part_counts(inventory),
+                started.elapsed().as_millis()
+            );
+            let missing = inventory_missing_parts(inventory);
+            if !missing.is_empty() {
+                log::warn!("Sense Remote: inventory/read empty parts: {}", missing.join(","));
+            }
+        }
         let mut state = INVENTORY.lock().unwrap_or_else(|e| e.into_inner());
         state.running = false;
         state.failed = read.is_none();
@@ -235,7 +249,7 @@ fn platform_extend(health: &mut SenseHealth, inventory: Option<&Inventory>) {
     let gpu = inventory
         .and_then(|i| i.gpus.as_ref())
         .filter(|g| g.len() == 1)
-        .map(|g| g[0].name.clone());
+        .map(|g| (g[0].name.clone(), g[0].integrated == Some(true)));
     super::health_mac::extend(health, gpu);
 }
 
