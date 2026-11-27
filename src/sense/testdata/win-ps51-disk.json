@@ -4,7 +4,7 @@
   "script_disk": [{"id":"0","model":"CT2000P310SSD8","bus":17,"media":4,"size":2000398934016,"fw":"V8CR001","health":0,"wear":null}],
   "script_part": [{"d":"0","l":"C"}],
   "disk_temp": [{"id":"0","temp":null}],
-  "gpu": [{"Name":"Parsec Virtual Display Adapter","PNPDeviceID":"ROOT\\DISPLAY\\0000"},{"Name":"NVIDIA GeForce RTX 5070 Ti Laptop GPU","PNPDeviceID":"PCI\\VEN_10DE&DEV_2F18&SUBSYS_60541D05&REV_A1\\0000"},{"Name":"AMD Radeon(TM) 610M","PNPDeviceID":"PCI\\VEN_1002&DEV_13C0&SUBSYS_50041D05&REV_D8\\4&176E0677&0&0041"}],
+  "gpu": [{"Name":"Parsec Virtual Display Adapter","PNPDeviceID":"ROOT\\DISPLAY\\0000"},{"Name":"NVIDIA GeForce RTX 5070 Ti Laptop GPU","PNPDeviceID":"PCI\\VEN_10DE&DEV_2F18&SUBSYS_60541D05&REV_A1\\0000"},{"Name":"AMD Radeon(TM) 610M","PNPDeviceID":"PCI\\VEN_1002&DEV_13C0&SUBSYS_50041D05&REV_D8\\0000"}],
   "plan": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Dengeli)",
   "netsh_disconnected": "There is 1 interface on the system: \r\n\r\n    Name                   : Wi-Fi\r\n    Description            : MediaTek Wi-Fi 6E MT7922 160MHz Wireless LAN Card\r\n    GUID                   : 00000000-0000-0000-0000-000000000000\r\n    Physical address       : <gizli>\r\n    Interface type         : Primary\r\n    State                  : disconnected\r\n    Radio status           : Hardware On\r\n                             Software On\r\n\r\n"
 }
