@@ -38,12 +38,22 @@ export 'sense_cm_panel.dart';
 export 'sense_cm_style.dart';
 export 'sense_cm_widgets.dart';
 
-/// The connection the card shows: one waiting for an answer first, then a
-/// live one, then any (#40: one Controller at a time, so normally just one).
+/// The connection the card (and its chat) shows: one with an incoming voice
+/// call, then a live screen connection, then any live one, then one waiting
+/// for an answer, then any. O6: a live connection comes before a waiting one,
+/// so "Bitir" stays in reach while a second login waits (approve mode
+/// "click"); the waiting one gets its own box ([senseCmWaiting]).
 Client senseCmPick(List<Client> clients) =>
-    clients.firstWhereOrNull(senseCmNeedsAttention) ??
+    clients.firstWhereOrNull((c) => !c.disconnected && c.incomingVoiceCall) ??
+    clients.firstWhereOrNull(
+        (c) => c.authorized && !c.disconnected && c.type_() == ClientType.remote) ??
     clients.firstWhereOrNull((c) => c.authorized && !c.disconnected) ??
+    clients.firstWhereOrNull(senseCmNeedsAttention) ??
     clients.first;
+
+/// O6: a connection waiting for "Kabul et" / "Reddet", if any.
+Client? senseCmWaiting(List<Client> clients) =>
+    clients.firstWhereOrNull((c) => !c.disconnected && !c.authorized);
 
 /// Connection manager root in icon mode (see `DesktopServerPage`).
 class SenseCmRoot extends StatefulWidget {
@@ -111,6 +121,7 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
       if (!ids.contains(id)) {
         final chat = _chats.remove(id)!;
         _fed.remove(id);
+        SenseHostChatCall.callEnded(id); // O8
         // After this frame: the card may still listen to it until rebuilt.
         WidgetsBinding.instance.addPostFrameCallback((_) {
           chat.clear();
@@ -150,6 +161,9 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
           inCall: selected.inVoiceCall,
           incoming: selected.incomingVoiceCall,
           current: chat.phase));
+      // O8: no call (ended on either side) → the next one starts unmuted,
+      // as the core does.
+      if (chat.phase == SenseCallPhase.idle) SenseHostChatCall.callEnded(selected.id);
       if (open) {
         chat.open();
         if (selected.unreadChatMessageCount.value > 0) {
@@ -165,8 +179,8 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
   }
 
   /// A peer waiting for an answer (access, voice call) opens the card.
-  void _autoOpen(Client selected) {
-    if (!senseCmNeedsAttention(selected) || SenseCm.open.value) return;
+  void _autoOpen(List<Client> clients) {
+    if (!clients.any(senseCmNeedsAttention) || SenseCm.open.value) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || SenseCm.open.value) return;
       SenseCm.openPanel();
@@ -203,9 +217,12 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
         return const ColoredBox(color: Colors.transparent);
       }
       final selected = senseCmPick(clients);
+      final waiting = senseCmWaiting(clients);
+      final asked = waiting ?? selected;
+      final live = senseHostLive(clients);
       final chat = _chats[selected.id];
       _syncState(selected, chat, open);
-      _autoOpen(selected);
+      _autoOpen(clients);
       return ListenableBuilder(
         listenable: chat ?? _idleChat,
         builder: (context, _) => LayoutBuilder(builder: (context, constraints) {
@@ -242,6 +259,8 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
             client: selected,
             chat: chat ?? _idleChat,
             whoLine: senseHostWhoLine(selected, _clock.connectedFor(selected.id)),
+            connectionsLine: senseHostConnectionsLine(live),
+            waiting: waiting,
             recording: selected.senseRecording ? _clock.recordingFor(selected.id) : null,
             canAccept: serverModel.approveMode != 'password',
             canCall: SenseHostChatCall.canStart,
@@ -254,18 +273,21 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
             actions: SenseHostCardActions(
               onMinimize: _logged(SenseHostLiveStrings.minimize, SenseCm.closePanel),
               onDragStart: windowManager.startDragging,
+              // O6: every connection that is on (screen, terminal, tunnel).
               onEnd: _logged(
-                  SenseHostLiveStrings.endConnection,
-                  () => _guarded(
-                      selected, () => bind.cmCloseConnection(connId: selected.id))),
+                  live.length > 1
+                      ? SenseHostLiveStrings.endAll
+                      : SenseHostLiveStrings.endConnection,
+                  () => senseHostEndAll(live, selected,
+                      (c) => _guarded(c, () => bind.cmCloseConnection(connId: c.id)))),
               onAccept: _logged(
                   SenseHostLiveStrings.accept,
-                  () => _guarded(selected,
-                      () => serverModel.sendLoginResponse(selected, true))),
+                  () => _guarded(asked,
+                      () => serverModel.sendLoginResponse(asked, true))),
               onReject: _logged(
                   SenseHostLiveStrings.reject,
-                  () => _guarded(selected,
-                      () => serverModel.sendLoginResponse(selected, false))),
+                  () => _guarded(asked,
+                      () => serverModel.sendLoginResponse(asked, false))),
               onCloseEnded: _logged(SenseHostLiveStrings.close,
                   () => _guarded(selected, () => _closeEnded(selected))),
               onAnswerCall: (accept) {
