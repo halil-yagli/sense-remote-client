@@ -78,6 +78,8 @@ class SenseUpdateStatus {
     this.checkedAt,
     this.macPermissionWarning = false,
     this.lastResult,
+    this.attempts,
+    this.retryAt,
   });
 
   static const none = SenseUpdateStatus();
@@ -102,6 +104,12 @@ class SenseUpdateStatus {
   final bool macPermissionWarning;
   final SenseUpdateLastResult? lastResult;
 
+  /// #134: attempts made in this period (null = none).
+  final int? attempts;
+
+  /// #134: Unix seconds of the next automatic attempt after a failed one.
+  final int? retryAt;
+
   factory SenseUpdateStatus.parse(String raw) {
     try {
       final v = jsonDecode(raw);
@@ -120,6 +128,8 @@ class SenseUpdateStatus {
         checkedAt: _int(v['checked_at']),
         macPermissionWarning: v['mac_permission_warning'] == true,
         lastResult: SenseUpdateLastResult.fromJson(v['last_result']),
+        attempts: _int(v['attempts']),
+        retryAt: _int(v['retry_at']),
       );
     } catch (_) {
       return none;
@@ -131,6 +141,10 @@ class SenseUpdateStatus {
       state == SenseUpdateState.available &&
       target != null &&
       target! > current;
+
+  /// #134: an attempt failed and the job waits for its automatic retry
+  /// (`available` with the job's source and the error kept).
+  bool get retryPending => hasReadyRelease && source != null && error != null;
 }
 
 /// Release notes open in the browser; only https (or http for a local panel
@@ -158,6 +172,15 @@ enum SenseUpdateAction {
 
   /// macOS second step: do not update now.
   macCancel,
+
+  /// #134: "Şimdi kur" while a connection is open; asks in place first.
+  installNow,
+
+  /// #134: second step of [installNow]: close the connections and install.
+  nowGo,
+
+  /// #134: second step of [installNow]: do not close anything.
+  nowCancel,
 }
 
 class SenseUpdateStrip {
@@ -192,6 +215,7 @@ class SenseUpdateUiState {
     this.seenInstalled,
     this.askingMac = false,
     this.canCancel = false,
+    this.askingNow = false,
   });
 
   /// False once the app learned updating from here is not possible (install
@@ -213,6 +237,9 @@ class SenseUpdateUiState {
   /// The backend can stop a running download (Vazgeç).
   final bool canCancel;
 
+  /// #134: "Şimdi kur" was pressed; the strip asks before closing connections.
+  final bool askingNow;
+
   SenseUpdateUiState copyWith({
     bool? supported,
     bool? requested,
@@ -221,6 +248,7 @@ class SenseUpdateUiState {
     String? seenInstalled,
     bool? askingMac,
     bool? canCancel,
+    bool? askingNow,
   }) =>
       SenseUpdateUiState(
         supported: supported ?? this.supported,
@@ -229,6 +257,7 @@ class SenseUpdateUiState {
         seenInstalled: seenInstalled ?? this.seenInstalled,
         askingMac: askingMac ?? this.askingMac,
         canCancel: canCancel ?? this.canCancel,
+        askingNow: askingNow ?? this.askingNow,
       );
 }
 
@@ -262,18 +291,35 @@ SenseUpdateStrip? senseUpdateStrip(SenseUpdateStatus s,
         actions: const [SenseUpdateAction.macCancel, SenseUpdateAction.macGo]);
   }
 
+  // #134: "Şimdi kur" during a connection asks in place before anything closes.
+  if (ui.askingNow && senseUpdateRequestVersion(s) != null && _withButtons.contains(s.state)) {
+    return SenseUpdateStrip(senseUpdateText('now_body', {'n': n}),
+        asking: true,
+        actions: const [SenseUpdateAction.nowCancel, SenseUpdateAction.nowGo]);
+  }
+
   // A refused install request is said where the button was, until the next
-  // status change clears it.
+  // status change clears it. #134: the buttons stay, so "Tekrar dene" can be
+  // pressed again after "servise ulaşılamadı" without waiting for a change.
   if (ui.answer != null && _withButtons.contains(s.state)) {
     if (s.state == SenseUpdateState.available && !s.hasReadyRelease) return null;
-    return SenseUpdateStrip(ui.answer!, actions: act(notes));
+    final base = senseUpdateStrip(s, ui.copyWith(clearAnswer: true));
+    return SenseUpdateStrip(ui.answer!, actions: base?.actions ?? act(notes));
   }
 
   switch (s.state) {
     case SenseUpdateState.available:
       if (!s.hasReadyRelease) return null;
+      // #134: a failed attempt waits for its automatic retry: said, in red,
+      // with "Tekrar dene" (before, the strip looked like nothing happened).
+      if (s.retryPending) {
+        return SenseUpdateStrip(
+            senseUpdateText('retry_pending', {'reason': senseUpdateReason(s.error)}),
+            problem: true,
+            actions: act([SenseUpdateAction.retry, ...notes]));
+      }
       if (ui.requested && s.blocked == 'session_active') {
-        return SenseUpdateStrip(sessionText);
+        return SenseUpdateStrip(sessionText, actions: act([SenseUpdateAction.installNow]));
       }
       return SenseUpdateStrip(senseUpdateText('available', {'n': n}),
           actions: act([SenseUpdateAction.update, ...notes]));
@@ -284,12 +330,18 @@ SenseUpdateStrip? senseUpdateStrip(SenseUpdateStatus s,
         return SenseUpdateStrip(senseUpdateText('scheduled_night', {'n': n}),
             actions: act([SenseUpdateAction.updateNow]));
       }
+      // #134: the user's own job waits only for an open connection; "Şimdi
+      // kur" closes it after asking.
       if (s.blocked == 'session_active' && s.source != 'panel') {
-        return SenseUpdateStrip(sessionText);
+        return SenseUpdateStrip(sessionText, actions: act([SenseUpdateAction.installNow]));
       }
-      return SenseUpdateStrip(s.source == 'panel'
-          ? senseUpdateText('scheduled_panel', {'n': n, 'dat': dat})
-          : senseUpdateText('scheduled_local', {'n': n}));
+      // #134: a panel order can be hurried from here ("Şimdi güncelle" makes it
+      // the user's own job, which waits only for an open connection).
+      if (s.source == 'panel') {
+        return SenseUpdateStrip(senseUpdateText('scheduled_panel', {'n': n, 'dat': dat}),
+            actions: act([SenseUpdateAction.updateNow]));
+      }
+      return SenseUpdateStrip(senseUpdateText('scheduled_local', {'n': n}));
     case SenseUpdateState.downloading:
       if (s.target == null) return null;
       final p = s.progressPct;
@@ -414,6 +466,14 @@ SenseAboutUpdateBox senseAboutUpdateBox(SenseUpdateStatus s, int nowSeconds, {re
   final body = checked == null
       ? senseUpdateText('box_not_checked')
       : senseUpdateText('box_checked', {'ago': senseAgoText(checked, nowSeconds)});
+  // #134: after a failed update About offers Güncelle too (it is taken at
+  // once now); before, only Denetle was there.
+  if (s.state == SenseUpdateState.failed && s.supported && senseUpdateRequestVersion(s) != null) {
+    return SenseAboutUpdateBox(
+        title: senseUpdateStrip(s)?.text ?? senseUpdateText('about_label'),
+        body: body,
+        action: SenseAboutUpdateAction.update);
+  }
   final idle = s.state == SenseUpdateState.idle || s.state == SenseUpdateState.installed;
   if (checked != null && idle) {
     return SenseAboutUpdateBox(

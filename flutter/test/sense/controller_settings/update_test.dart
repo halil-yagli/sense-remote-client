@@ -64,6 +64,15 @@ class _FakeBackend extends SenseUpdateBackend {
     return answer;
   }
 
+  /// #134: "Kapat ve kur".
+  final installsNow = <int>[];
+
+  @override
+  Future<String> installNow(int version) async {
+    installsNow.add(version);
+    return answer;
+  }
+
   @override
   String seenInstalled() => seen;
 
@@ -148,7 +157,8 @@ void main() {
       final json = {...(_available), 'blocked': 'session_active'};
       expect(_text(json, ui),
           'Bağlantı sürüyor; Sürüm 4 bağlantı bitince kurulacak.');
-      expect(_actions(json, ui), isEmpty);
+      // #134: "Şimdi kur" closes the connection, after asking.
+      expect(_actions(json, ui), [SenseUpdateAction.installNow]);
       // Before pressing, the offer stays.
       expect(_text(json), 'Yeni sürüm hazır: Sürüm 4');
       // Local request waiting for the connection to end.
@@ -160,6 +170,14 @@ void main() {
             'blocked': 'session_active'
           }),
           'Bağlantı sürüyor; Sürüm 4 bağlantı bitince kurulacak.');
+      expect(
+          _actions({
+            'state': 'waiting_idle',
+            'target': 4,
+            'source': 'local',
+            'blocked': 'session_active'
+          }),
+          [SenseUpdateAction.installNow]);
     });
 
     test('scheduled by the panel', () {
@@ -173,8 +191,66 @@ void main() {
             'blocked': 'session_active'
           }),
           "Sense ekibi bu bilgisayarı Sürüm 6'ya güncelliyor. Bağlantı yokken kendiliğinden kurulur.");
+      // #134 (D9): the panel's order can be hurried from the app.
       expect(_actions({'state': 'scheduled', 'target': 4, 'source': 'panel'}),
+          [SenseUpdateAction.updateNow]);
+      expect(
+          _actions({'state': 'waiting_idle', 'target': 4, 'source': 'panel', 'blocked': 'session_active'}),
+          [SenseUpdateAction.updateNow]);
+      expect(
+          _actions({'state': 'scheduled', 'target': 4, 'source': 'panel'}, const SenseUpdateUiState(supported: false)),
           isEmpty);
+    });
+
+    // #134 (D3, K-U3): a failed attempt that is retried by itself is said, with
+    // its reason and Tekrar dene; before, the strip showed "hazır" + Güncelle.
+    test('available_with_error_shows_reason', () {
+      final json = {
+        ..._available,
+        'source': 'local',
+        'error': 'download_failed',
+        'attempts': 1,
+        'retry_at': 2800,
+      };
+      final strip = senseUpdateStrip(_s(json))!;
+      expect(strip.text,
+          'Son deneme yapılamadı: indirme tamamlanamadı. Kendiliğinden yeniden denenecek; hemen denemek için Tekrar dene.');
+      expect(strip.problem, isTrue);
+      expect(strip.actions, [SenseUpdateAction.retry, SenseUpdateAction.notes]);
+      expect(_s(json).attempts, 1);
+      expect(_s(json).retryAt, 2800);
+      // An error without a job (a refused notice) does not claim an attempt.
+      expect(_text({..._available, 'error': 'manifest_invalid'}), 'Yeni sürüm hazır: Sürüm 4');
+    });
+
+    // #134 (D2, K-U2): after three failures the core takes Tekrar dene at once,
+    // so "busy" is never the answer to it; the busy text is only for a job
+    // that really runs.
+    test('failed_retry_busy_text_is_not_already_running', () {
+      expect(_actions({'state': 'failed', 'target': 4, 'error': 'download_failed'}),
+          [SenseUpdateAction.retry]);
+      expect(senseInstallAnswerText('retry_soon'), contains('meşgul'));
+      expect(senseInstallAnswerText('retry_soon'), isNot(contains('zaten sürüyor')));
+    });
+
+    test('a refused answer keeps the buttons (Tekrar dene can be pressed again)', () {
+      const ui = SenseUpdateUiState(answer: 'Sense Remote servisine ulaşılamadı. Biraz sonra yeniden dene.');
+      final failed = senseUpdateStrip(_s({'state': 'failed', 'target': 4}), ui)!;
+      expect(failed.text, contains('ulaşılamadı'));
+      expect(failed.actions, [SenseUpdateAction.retry]);
+      expect(senseUpdateStrip(_s(_available), ui)!.actions,
+          [SenseUpdateAction.update, SenseUpdateAction.notes]);
+    });
+
+    test('Şimdi kur: the second step asks before anything closes', () {
+      const ui = SenseUpdateUiState(askingNow: true, requested: true);
+      final json = {'state': 'waiting_idle', 'target': 4, 'source': 'local', 'blocked': 'session_active'};
+      final ask = senseUpdateStrip(_s(json), ui)!;
+      expect(ask.asking, isTrue);
+      expect(ask.text, contains('Açık bağlantılar kapanacak'));
+      expect(ask.actions, [SenseUpdateAction.nowCancel, SenseUpdateAction.nowGo]);
+      // Nothing to ask once the job runs.
+      expect(senseUpdateStrip(_s({'state': 'installing', 'target': 4}), ui)!.asking, isFalse);
     });
 
     test('scheduled for the night: Şimdi güncelle', () {
@@ -422,6 +498,57 @@ void main() {
       await tester.tap(find.byKey(const Key('sense-update-update')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('sense-update-macGo')));
+      await tester.pumpAndSettle();
+      expect(b.installs, [4]);
+    });
+
+    // #134 (D7): during a connection "Şimdi kur" asks first; Vazgeç closes
+    // nothing, "Kapat ve kur" sends the confirmed request.
+    testWidgets('Şimdi kur asks, then Kapat ve kur installs now', (tester) async {
+      final b = _FakeBackend(
+          {'state': 'waiting_idle', 'target': 4, 'source': 'local', 'blocked': 'session_active'});
+      await _pump(tester, _watch(b));
+      await tester.tap(find.byKey(const Key('sense-update-installNow')));
+      await tester.pumpAndSettle();
+      expect(find.text(senseUpdateText('now_body', {'n': '4'})), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-update-nowCancel')));
+      await tester.pumpAndSettle();
+      expect(b.installsNow, isEmpty);
+      expect(b.installs, isEmpty);
+      await tester.tap(find.byKey(const Key('sense-update-installNow')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('sense-update-nowGo')));
+      await tester.pumpAndSettle();
+      expect(b.installsNow, [4]);
+      expect(b.installs, isEmpty);
+    });
+
+    testWidgets('macOS: Şimdi kur asks about the permissions, then about the connection',
+        (tester) async {
+      final b = _FakeBackend({
+        'state': 'waiting_idle',
+        'target': 4,
+        'source': 'local',
+        'blocked': 'session_active',
+        'mac_permission_warning': true,
+      });
+      await _pump(tester, _watch(b));
+      await tester.tap(find.byKey(const Key('sense-update-installNow')));
+      await tester.pumpAndSettle();
+      expect(find.text(senseUpdateText('mac_body')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-update-macGo')));
+      await tester.pumpAndSettle();
+      expect(b.installs, isEmpty);
+      expect(find.text(senseUpdateText('now_body', {'n': '4'})), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-update-nowGo')));
+      await tester.pumpAndSettle();
+      expect(b.installsNow, [4]);
+    });
+
+    testWidgets('a panel order is hurried with Şimdi güncelle', (tester) async {
+      final b = _FakeBackend({'state': 'scheduled', 'target': 4, 'source': 'panel'});
+      await _pump(tester, _watch(b));
+      await tester.tap(find.byKey(const Key('sense-update-updateNow')));
       await tester.pumpAndSettle();
       expect(b.installs, [4]);
     });

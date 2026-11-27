@@ -133,9 +133,69 @@ pub fn observe(before: UpdateState, s: &State, now_s: i64, idle_s: u64) {
     super::super::diag::kinds::update_wait(neden); // Sense Remote (#103)
 }
 
+/// Sense Remote (#134): the fields of `update/fail` when this step made a new error after a
+/// failed attempt, `None` otherwise. `deneme` = attempts in this period, `sonraki_s` = seconds to
+/// the automatic retry (`-1` = none: the attempts are used up, or nothing was counted).
+pub fn fail_fields(before_error: Option<super::UpdateError>, s: &State, now_s: i64) -> Option<(String, u8, i64)> {
+    let error = s.error?;
+    let failed_attempt = matches!(s.phase, UpdateState::Available | UpdateState::Failed) && s.attempts > 0;
+    if before_error == Some(error) || !failed_attempt {
+        return None;
+    }
+    let next = match (s.phase, s.not_before_s) {
+        (UpdateState::Available, Some(t)) => (t - now_s).max(0),
+        _ => -1,
+    };
+    Some((error.as_str().to_owned(), s.attempts, next))
+}
+
+/// After one engine step: a failed attempt goes to the log and the event record with its
+/// number and the next try (the SYSTEM / root log the panel's diagnostics read).
+pub fn observe_fail(before_error: Option<super::UpdateError>, s: &State, now_s: i64) {
+    let Some((hata, deneme, sonraki_s)) = fail_fields(before_error, s, now_s) else {
+        return;
+    };
+    log::warn!(
+        "[sense-update] fail hata={hata} deneme={deneme}/{} sonraki_s={sonraki_s}",
+        super::engine::MAX_ATTEMPTS
+    );
+    super::super::diag::event(
+        "update",
+        "fail",
+        serde_json::json!({ "hata": hata, "deneme": deneme, "sonraki_s": sonraki_s }),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_attempt_is_logged_once_with_its_retry() {
+        let failed = State {
+            phase: UpdateState::Available,
+            error: Some(super::super::UpdateError::DownloadFailed),
+            attempts: 1,
+            not_before_s: Some(100 + 1800),
+            source: Some(super::super::UpdateSource::Local),
+            ..State::default()
+        };
+        assert_eq!(
+            fail_fields(None, &failed, 100),
+            Some(("download_failed".to_owned(), 1, 1800))
+        );
+        // The same error on the next step (a tick) is not a new failure.
+        assert_eq!(fail_fields(failed.error, &failed, 105), None);
+        let last = State { phase: UpdateState::Failed, attempts: 3, not_before_s: None, ..failed.clone() };
+        assert_eq!(fail_fields(None, &last, 100), Some(("download_failed".to_owned(), 3, -1)));
+        // A refused notice is an error without an attempt: not a failed attempt.
+        let refused = State { attempts: 0, ..failed };
+        assert_eq!(fail_fields(None, &refused, 100), None);
+        crate::sense::diag::sink::take();
+        observe_fail(None, &last, 100);
+        let got = crate::sense::diag::sink::take();
+        assert!(got.contains(&("update".to_owned(), "fail".to_owned())), "{got:?}");
+    }
 
     fn waiting(blocked: Option<Blocked>, sessions: Sessions) -> Option<&'static str> {
         reason(UpdateState::WaitingIdle, blocked, true, None, 100, sessions)

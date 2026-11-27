@@ -143,13 +143,32 @@ step=done
 }
 
 /// Runs the manual move from the setup screen and returns one of the codes above.
+/// Sense Remote (#134, D11): the result goes to the event record (`upgrade/result kod adim`);
+/// before, only an error line in the setup log showed why "Güncelle" failed.
 pub fn upgrade_in_place() -> String {
     #[cfg(windows)]
-    return win::upgrade_in_place();
+    let (code, step) = win::upgrade_in_place();
     #[cfg(target_os = "macos")]
-    return mac::upgrade_in_place();
+    let (code, step) = mac::upgrade_in_place();
     #[cfg(not(any(windows, target_os = "macos")))]
-    return FAILED.to_owned();
+    let (code, step) = (FAILED.to_owned(), STEP_PRECHECK);
+    crate::sense::diag::event("upgrade", "result", result_fields(&code, step));
+    code
+}
+
+/// Where the manual move ended (`upgrade/result adim`).
+pub const STEP_PRECHECK: &str = "precheck";
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const STEP_PATH: &str = "path";
+#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
+pub const STEP_PROMPT: &str = "uac";
+#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
+pub const STEP_ELEVATED: &str = "elevated";
+
+/// Pure: the fields of `upgrade/result`; `kod` is `ok` for the empty success code.
+pub fn result_fields(code: &str, step: &str) -> serde_json::Value {
+    let kod = if code.is_empty() { "ok" } else { code };
+    serde_json::json!({ "kod": kod, "adim": step })
 }
 
 #[cfg(windows)]
@@ -173,7 +192,7 @@ mod win {
         },
     };
 
-    pub fn upgrade_in_place() -> String {
+    pub fn upgrade_in_place() -> (String, &'static str) {
         let checked = precheck(
             crate::sense::installed_role().is_some(),
             store::installed_version(),
@@ -181,29 +200,29 @@ mod win {
         );
         if let Err(code) = checked {
             log::info!("Sense Remote: manual move not started: {code}");
-            return code.to_owned();
+            return (code.to_owned(), STEP_PRECHECK);
         }
         let exe = match std::env::current_exe() {
             Ok(exe) => exe,
             Err(err) => {
                 log::error!("Sense Remote: setup file path not known: {err}");
-                return FAILED.to_owned();
+                return (FAILED.to_owned(), STEP_PATH);
             }
         };
         if runs_as_installed_exe(&resolved(&exe), &resolved(Path::new(&installed_exe()))) {
             log::error!("Sense Remote: manual move refused, setup runs as the installed exe");
-            return FAILED.to_owned();
+            return (FAILED.to_owned(), STEP_PATH);
         }
         match run_elevated(&exe, ARG_UPGRADE_LOCAL) {
             Ok(exit) => {
                 let code = code_for_exit(exit as i32);
                 log::info!("Sense Remote: manual move, elevated step ended with {exit}");
-                code.to_owned()
+                (code.to_owned(), STEP_ELEVATED)
             }
-            Err(RunError::Cancelled) => CANCELLED.to_owned(),
+            Err(RunError::Cancelled) => (CANCELLED.to_owned(), STEP_PROMPT),
             Err(RunError::Other(err)) => {
                 log::error!("Sense Remote: manual move not started: {err}");
-                FAILED.to_owned()
+                (FAILED.to_owned(), STEP_PROMPT)
             }
         }
     }
@@ -280,11 +299,11 @@ mod mac {
     use crate::sense::update::current_version;
     use hbb_common::{config, libc, log};
 
-    pub fn upgrade_in_place() -> String {
+    pub fn upgrade_in_place() -> (String, &'static str) {
         if let Err(code) = precheck(crate::sense::installed_role().is_some(), 0, current_version())
         {
             log::info!("Sense Remote: manual move not started: {code}");
-            return code.to_owned();
+            return (code.to_owned(), STEP_PRECHECK);
         }
         let config_file = config::Config::file();
         let config_dir = config_file
@@ -303,22 +322,22 @@ mod mac {
             Ok(script) => script,
             Err(err) => {
                 log::error!("Sense Remote: manual move script not made: {err}");
-                return FAILED.to_owned();
+                return (FAILED.to_owned(), STEP_PRECHECK);
             }
         };
         match crate::platform::macos::sense_run_privileged("install.scpt", &script, PROMPT_MAC) {
             Ok((success, stderr)) => match mac_script::classify_osascript(success, &stderr) {
-                ScriptOutcome::Done => OK.to_owned(),
-                ScriptOutcome::Cancelled => CANCELLED.to_owned(),
+                ScriptOutcome::Done => (OK.to_owned(), STEP_ELEVATED),
+                ScriptOutcome::Cancelled => (CANCELLED.to_owned(), STEP_PROMPT),
                 ScriptOutcome::Failed(step) => {
                     let tail: String = stderr.chars().take(600).collect();
                     log::error!("Sense Remote: manual move step {step} failed: {tail}");
-                    FAILED.to_owned()
+                    (FAILED.to_owned(), STEP_ELEVATED)
                 }
             },
             Err(err) => {
                 log::error!("Sense Remote: manual move script not run: {err}");
-                FAILED.to_owned()
+                (FAILED.to_owned(), STEP_PROMPT)
             }
         }
     }
@@ -349,6 +368,53 @@ mod tests {
         assert_eq!(code_for_exit(EXIT_NOT_ELEVATED), FAILED);
         assert_eq!(code_for_exit(-1), FAILED);
         assert_eq!(code_for_exit(259), FAILED);
+    }
+
+    // Sense Remote (#134, D11): the result of every manual move is in the event record.
+    #[test]
+    fn manual_move_result_fields() {
+        assert_eq!(
+            result_fields(OK, STEP_ELEVATED),
+            serde_json::json!({ "kod": "ok", "adim": "elevated" })
+        );
+        assert_eq!(
+            result_fields(CANCELLED, STEP_PROMPT),
+            serde_json::json!({ "kod": "cancelled", "adim": "uac" })
+        );
+        assert_eq!(
+            result_fields(FAILED, STEP_PATH),
+            serde_json::json!({ "kod": "failed", "adim": "path" })
+        );
+        for step in [STEP_PRECHECK, STEP_PATH, STEP_PROMPT, STEP_ELEVATED] {
+            assert!(step.bytes().all(|b| b.is_ascii_lowercase()), "{step}");
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
+        {
+            crate::sense::diag::sink::take();
+            assert_eq!(upgrade_in_place(), FAILED);
+            let got = crate::sense::diag::sink::take();
+            assert!(got.contains(&("upgrade".to_owned(), "result".to_owned())), "{got:?}");
+        }
+    }
+
+    // #106 regression guard (Sürüm 3-9 refused every manual move on Windows): only the exact
+    // installed program is refused, also for the names a setup file runs under.
+    #[test]
+    fn setup_copies_under_any_name_may_run() {
+        let installed = r"C:\Program Files\SenseRemote\SenseRemote.exe";
+        for setup in [
+            r"C:\Users\ekip\AppData\Local\senseremote\SenseRemote.exe",
+            r"C:\Users\ekip\Downloads\SenseRemoteGuncelleme9.exe",
+            r"C:\Users\ekip\Downloads\SenseRemote-Kurulum-11.exe",
+            r"C:\Program Files\SenseRemote\SenseRemoteGuncelleme.exe",
+            r"D:\Program Files\SenseRemote\SenseRemote.exe",
+            r"C:\Program Files\SenseRemote\SenseRemote.exe.part",
+        ] {
+            assert!(!runs_as_installed_exe(setup, installed), "{setup}");
+        }
+        // Surrounding spaces and a trailing separator do not make it another program.
+        assert!(runs_as_installed_exe(r" C:\Program Files\SenseRemote\SenseRemote.exe ", installed));
+        assert!(runs_as_installed_exe(r"C:\Program Files\SenseRemote\SenseRemote.exe\", installed));
     }
 
     #[test]

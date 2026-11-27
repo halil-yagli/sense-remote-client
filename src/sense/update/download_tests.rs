@@ -263,3 +263,14 @@ fn plain_file_names() {
     }
     assert!(!is_plain_file_name(&"a".repeat(129)));
 }
+
+// Sense Remote (#134, D6): free space of the download volume, also when the folder does not
+// exist yet (the first download makes it).
+#[test]
+fn free_space_of_a_real_folder() {
+    let dir = std::env::temp_dir();
+    assert!(free_bytes(&dir).is_some_and(|free| free > 0));
+    let missing = dir.join(format!("sense-free-{}", std::process::id())).join("dl");
+    assert!(!missing.exists());
+    assert!(free_bytes(&missing).is_some_and(|free| free > 0));
+}

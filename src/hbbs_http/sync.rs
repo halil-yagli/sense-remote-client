@@ -268,7 +268,9 @@ async fn start_hbbs_sync_async() {
                         }
                     }
                 }
-                if conns.is_empty() && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
+                // Sense Remote (#134): "Denetle" in the app asks the panel at once.
+                let sense_check_now = crate::sense::update::take_check_now();
+                if conns.is_empty() && !sense_check_now && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
                     continue;
                 }
                 last_sent = Some(Instant::now());

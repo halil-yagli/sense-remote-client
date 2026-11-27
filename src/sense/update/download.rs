@@ -201,7 +201,16 @@ pub fn enough_disk(free_bytes: u64, size: u64) -> bool {
 }
 
 /// Free bytes on the volume holding `dir`.
+/// Sense Remote (#134, D6): on Windows only that volume is asked (`GetDiskFreeSpaceExW`); the
+/// whole disk list (`sysinfo`, every drive, network and cloud drives too) was read under the
+/// engine's lock at every "Güncelle", which could outlast the UI's wait. Falls back to the list.
 pub fn free_bytes(dir: &Path) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        if let Some(free) = free_bytes_win(dir) {
+            return Some(free);
+        }
+    }
     let disks = hbb_common::sysinfo::Disks::new_with_refreshed_list();
     let mounts: Vec<(PathBuf, u64)> = disks
         .list()
@@ -209,6 +218,20 @@ pub fn free_bytes(dir: &Path) -> Option<u64> {
         .map(|disk| (disk.mount_point().to_path_buf(), disk.available_space()))
         .collect();
     free_on(&mounts, dir)
+}
+
+#[cfg(windows)]
+fn free_bytes_win(dir: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::{core::PCWSTR, Win32::Storage::FileSystem::GetDiskFreeSpaceExW};
+    // The download folder may not exist yet: its nearest existing parent is on the same volume.
+    let dir = dir.ancestors().find(|p| p.is_dir())?;
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free: u64 = 0;
+    // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the call; `free` is a valid
+    // out pointer; the other two outputs are not asked for.
+    unsafe { GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut free), None, None) }.ok()?;
+    Some(free)
 }
 
 /// The deepest mount point that holds `path`.

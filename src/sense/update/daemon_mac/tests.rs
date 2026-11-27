@@ -115,9 +115,17 @@ fn only_the_four_service_messages_are_taken() {
         classify(&SenseUpdateIpc::Install { version: 4 }, true, &ctx(), None),
         Some(Call::Install(4))
     );
+    // Sense Remote (#134): "Kapat ve kur".
+    assert_eq!(
+        classify(&SenseUpdateIpc::InstallNow { version: 4 }, true, &ctx(), None),
+        Some(Call::InstallNow(4))
+    );
     for other in [
         SenseUpdateIpc::Status("{}".to_owned()),
         SenseUpdateIpc::InstallRequest { version: 4 },
+        // The UI's own requests never reach the daemon as such.
+        SenseUpdateIpc::InstallNowRequest { version: 4 },
+        SenseUpdateIpc::CheckNow,
         SenseUpdateIpc::InstallAnswer(String::new()),
         SenseUpdateIpc::DaemonStatus("{}".to_owned()),
         SenseUpdateIpc::CancelAnswer(String::new()),
@@ -155,6 +163,73 @@ fn limiter_tracks_a_bounded_number_of_peers() {
     }
     assert!(!limiter.allow(Some(9999), Some(9999), 1));
     assert!(limiter.allow(Some(9999), Some(9999), MIN_CALL_INTERVAL_MS));
+}
+
+// Sense Remote (#134, D5, K-U5): "Güncelle" in the same second as the strip's status question
+// of the same agent is answered; before, it fell under the one-call-per-second limit and got
+// no answer at all.
+#[test]
+fn install_after_status_in_same_second_is_answered() {
+    let mut limits = CallLimits::default();
+    let pid = Some(4242);
+    let uid = Some(501);
+    assert!(limits.allow(&SenseUpdateIpc::StatusQuery, pid, uid, 0));
+    assert!(limits.allow(&SenseUpdateIpc::Install { version: 4 }, pid, uid, 100));
+    assert_eq!(
+        classify(&SenseUpdateIpc::Install { version: 4 }, true, &ctx(), None),
+        Some(Call::Install(4))
+    );
+    // The periodic calls keep their limit...
+    assert!(!limits.allow(&SenseUpdateIpc::StatusQuery, pid, uid, 200));
+    assert!(!limits.allow(&offer("", None), pid, uid, 300));
+    // ...and so do the actions among themselves (a process cannot press for ever).
+    assert!(!limits.allow(&SenseUpdateIpc::InstallNow { version: 4 }, pid, uid, 400));
+    assert!(!limits.allow(&SenseUpdateIpc::CancelRequest, pid, uid, 500));
+    assert!(limits.allow(&SenseUpdateIpc::InstallNow { version: 4 }, pid, uid, MIN_CALL_INTERVAL_MS + 100));
+    for action in [
+        SenseUpdateIpc::Install { version: 4 },
+        SenseUpdateIpc::InstallNow { version: 4 },
+        SenseUpdateIpc::CancelRequest,
+    ] {
+        assert!(is_user_action(&action), "{action:?}");
+    }
+    assert!(!is_user_action(&SenseUpdateIpc::StatusQuery));
+    assert!(!is_user_action(&offer("", None)));
+}
+
+// Sense Remote (#134, D5): a call above the limit is answered at once (nothing is done), so
+// the agent does not wait its whole timeout.
+#[test]
+fn a_limited_call_is_answered_quickly() {
+    assert_eq!(
+        limited_answer(&SenseUpdateIpc::StatusQuery, Some("{\"state\":\"idle\"}")),
+        Some(SenseUpdateIpc::DaemonStatus("{\"state\":\"idle\"}".to_owned()))
+    );
+    assert_eq!(limited_answer(&SenseUpdateIpc::StatusQuery, None), None);
+    assert_eq!(
+        limited_answer(&SenseUpdateIpc::Install { version: 4 }, None),
+        Some(SenseUpdateIpc::InstallAnswer("retry_soon".to_owned()))
+    );
+    assert_eq!(
+        limited_answer(&SenseUpdateIpc::InstallNow { version: 4 }, None),
+        Some(SenseUpdateIpc::InstallAnswer("retry_soon".to_owned()))
+    );
+    assert_eq!(
+        limited_answer(&SenseUpdateIpc::CancelRequest, None),
+        Some(SenseUpdateIpc::CancelAnswer("retry_soon".to_owned()))
+    );
+    assert_eq!(limited_answer(&offer("", None), Some("{}")), None);
+    assert!(crate::sense::update::is_install_code("retry_soon"));
+    assert!(crate::sense::update::is_cancel_code("retry_soon"));
+    assert_eq!(call_kind(&SenseUpdateIpc::InstallNow { version: 4 }), "install_now");
+    assert_eq!(call_kind(&offer("", None)), "offer");
+}
+
+// Sense Remote (#134, K-U4): connect + answer of the daemon fit inside the UI's wait.
+#[test]
+fn daemon_timeout_shorter_than_ui_timeout() {
+    assert!(DAEMON_CONNECT_MS + DAEMON_TIMEOUT_MS < crate::sense::update::IPC_TIMEOUT_MS);
+    assert!(DAEMON_TIMEOUT_MS < crate::sense::update::IPC_TIMEOUT_MS);
 }
 
 #[cfg(not(target_os = "macos"))]
