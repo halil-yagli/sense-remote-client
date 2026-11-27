@@ -1,6 +1,8 @@
 // Sense Remote: the connection layers' link to the RustDesk session (YH O13–O15).
 // Quality values: `QualityMonitorModel.data` (TK7; D1 `last_frame_ms`, `loss_est`).
 // Session-ending messages: [SenseSessionHub] (models/model.dart `handleMsgBox`).
+import 'package:flutter/foundation.dart' show VoidCallback;
+
 import '../../../../../common.dart' show closeConnection;
 import '../../../../../common/shared_state.dart' show ConnectionType, ConnectionTypeState;
 import '../../../../../consts.dart' show kInvalidValueStr;
@@ -8,8 +10,11 @@ import '../../../../../models/chat_model.dart';
 import '../../../../../models/model.dart';
 import '../../../../../models/platform_model.dart';
 import '../../../shared/chat/data/files.dart' show senseParseFileJobs;
+import '../../../../strings/connect.dart';
 import '../../bar/session_popups.dart' show SenseSessionPopups;
+import '../connect_cards.dart';
 import '../layer_controller.dart';
+import '../link_machine.dart' show SenseLinkPhase;
 
 class SenseFfiLayerHost implements SenseLayerHost {
   SenseFfiLayerHost(this.id, this.ffi);
@@ -143,5 +148,101 @@ class SenseFfiLayerHost implements SenseLayerHost {
     ffi.dialogManager.dismissAll();
     // Status, display info and the bar lists share one popup place (C1).
     SenseSessionPopups.closeAllOf(id);
+  }
+}
+
+/// Sürüm 12 (#164): the connecting cards' link to a RustDesk session of any window kind.
+class SenseFfiConnectHost implements SenseConnectHost {
+  SenseFfiConnectHost(this.id, this.ffi, {this.kind = SenseConnectKind.screen, VoidCallback? onClose})
+      : _onClose = onClose;
+
+  final String id;
+  final FFI ffi;
+  final SenseConnectKind kind;
+  final VoidCallback? _onClose;
+
+  @override
+  String get peerName {
+    try {
+      final alias = bind.mainGetPeerOptionSync(id: id, key: 'alias').trim();
+      if (alias.isNotEmpty) return alias;
+    } catch (_) {}
+    final host = ffi.ffiModel.pi.hostname.trim();
+    return host.isNotEmpty ? host : SenseConnectStrings.remoteFallback;
+  }
+
+  bool get _peerInfo {
+    try {
+      return ffi.ffiModel.pi.isSet.value;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  bool get connected {
+    if (!_peerInfo) return false;
+    if (kind != SenseConnectKind.screen && kind != SenseConnectKind.camera) return true;
+    try {
+      if (!ffi.ffiModel.waitForFirstImage.value) return true;
+    } catch (_) {
+      return true;
+    }
+    // The session layers' "Görüntü bekleniyor" card is up: it takes over.
+    return SenseLayerController.find(id)?.waitingImage ?? false;
+  }
+
+  @override
+  bool get layerOwnsScreen {
+    final c = SenseLayerController.find(id);
+    if (c == null) return false;
+    return c.ended != null || c.link.phase != SenseLinkPhase.normal;
+  }
+
+  @override
+  int get step {
+    if (_peerInfo) return 2;
+    try {
+      final v = ConnectionTypeState.find(ffi.id).direct.value;
+      if (v != kInvalidValueStr && v.isNotEmpty) return 1;
+    } catch (_) {}
+    return 0;
+  }
+
+  @override
+  bool get trustAvailable {
+    try {
+      return bind.sessionGetEnableTrustedDevices(sessionId: ffi.sessionId);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> remembered() async => await bind.sessionGetRemember(sessionId: ffi.sessionId) ?? false;
+
+  @override
+  void login(String password, bool remember) =>
+      ffi.login('', '', ffi.sessionId, password, remember);
+
+  @override
+  void send2fa(String code, bool trust) => ffi.send2FA(ffi.sessionId, code, trust);
+
+  @override
+  void retry() {
+    try {
+      ffi.inputModel.setRelativeMouseMode(false);
+    } catch (_) {}
+    bind.sessionReconnect(sessionId: ffi.sessionId, forceRelay: false);
+  }
+
+  @override
+  void close() {
+    final f = _onClose;
+    if (f != null) {
+      f();
+    } else {
+      closeConnection(id: id);
+    }
   }
 }

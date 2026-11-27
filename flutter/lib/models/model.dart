@@ -50,6 +50,19 @@ import 'input_model.dart';
 import 'platform_model.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/data/session_hub.dart';
+// Sense Remote (Sürüm 12, #162, #164, #159): Sense cards and dialogs instead of stock boxes.
+import 'package:flutter_hbb/sense/screens/session/layers/connect_cards.dart'
+    show SenseConnectCards;
+import 'package:flutter_hbb/sense/components/sense_dialog.dart';
+import 'package:flutter_hbb/sense/components/button.dart' show SenseButtonKind;
+import 'package:flutter_hbb/sense/strings/connect.dart';
+import 'package:flutter_hbb/sense/strings/common.dart' show SenseCommonStrings;
+import 'package:flutter_hbb/sense/screens/shared/reveal_file.dart'
+    show senseRevealFile;
+import 'package:flutter_hbb/sense/tokens/sense_tokens.dart' show SenseLevel;
+import 'package:path_provider/path_provider.dart' show getDownloadsDirectory;
+import 'dart:io' show File;
+import 'package:url_launcher/url_launcher.dart' show launchUrl;
 
 import 'package:flutter_hbb/generated_bridge.dart'
     if (dart.library.html) 'package:flutter_hbb/web/bridge.dart';
@@ -500,6 +513,12 @@ class FfiModel with ChangeNotifier {
       Map<String, dynamic> evt, SessionID sessionId, String peerId) {
     timerScreenshot?.cancel();
     timerScreenshot = null;
+    // Sense Remote (Sürüm 12, #159): no question; saved to Downloads as
+    // `{bilgisayar}_{tarih-saat}.png`, then "Bu bilgisayara kaydedildi · Klasörü aç".
+    if (kSenseDialogs) {
+      _senseSaveScreenshot(evt, sessionId, peerId);
+      return;
+    }
     final msg = evt['msg'] ?? '';
     final msgBoxType = 'custom-nook-nocancel-hasclose';
     final msgBoxTitle = 'Take screenshot';
@@ -564,11 +583,52 @@ class FfiModel with ChangeNotifier {
     }
   }
 
+  /// Sense Remote (Sürüm 12, #159): the screenshot goes straight to Downloads.
+  Future<void> _senseSaveScreenshot(
+      Map<String, dynamic> evt, SessionID sessionId, String peerId) async {
+    final overlay = globalKey.currentState?.overlay;
+    final msg = '${evt['msg'] ?? ''}';
+    if (msg.isNotEmpty) {
+      senseShowNotice(overlay, SenseConnectStrings.screenshotFailed(senseScreenshotReason(msg)),
+          level: SenseLevel.hot);
+      return;
+    }
+    String? dir;
+    try {
+      dir = (await getDownloadsDirectory())?.path;
+    } catch (_) {}
+    if (dir == null || dir.isEmpty) {
+      bind.sessionHandleScreenshot(sessionId: sessionId, action: '2');
+      senseShowNotice(overlay,
+          SenseConnectStrings.screenshotFailed(SenseConnectStrings.screenshotNoFolder),
+          level: SenseLevel.hot);
+      return;
+    }
+    final alias = bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
+    final name = senseScreenshotFileName(alias.isNotEmpty ? alias : _pi.hostname, DateTime.now());
+    final path = senseScreenshotTarget(dir, name, (p) => File(p).existsSync());
+    final res = await bind.sessionHandleScreenshot(sessionId: sessionId, action: '0:$path');
+    if (res.isNotEmpty) {
+      senseShowNotice(overlay, SenseConnectStrings.screenshotFailed(senseScreenshotReason(res)),
+          level: SenseLevel.hot);
+      return;
+    }
+    senseShowNotice(overlay, SenseConnectStrings.screenshotSaved,
+        level: SenseLevel.ok,
+        actionLabel: SenseConnectStrings.openFolder,
+        onAction: () => senseRevealFile(path));
+  }
+
   _handlePrinterRequest(
       Map<String, dynamic> evt, SessionID sessionId, String peerId) {
     final id = evt['id'];
     final path = evt['path'];
     final dialogManager = parent.target!.dialogManager;
+    // Sense Remote (Sürüm 12, ST 17): the print request in the Sense dialog pattern.
+    if (kSenseDialogs) {
+      _sensePrinterRequest(id, path, sessionId, dialogManager);
+      return;
+    }
     dialogManager.show((setState, close, context) {
       PrinterOptions printerOptions = PrinterOptions.load();
       final saveSettings = mainGetLocalBoolOptionSync(kKeyPrinterSave).obs;
@@ -736,13 +796,83 @@ class FfiModel with ChangeNotifier {
     });
   }
 
+  /// Sense Remote (Sürüm 12, ST 17): same choices as the stock box (default or a chosen
+  /// printer, keep the choice, do not ask again), in the Sense pattern.
+  void _sensePrinterRequest(dynamic id, dynamic path, SessionID sessionId,
+      OverlayDialogManager dialogManager) {
+    final printerOptions = PrinterOptions.load();
+    final names = printerOptions.printerNames;
+    var selected = 0; // 0 = default printer, i = names[i - 1]
+    if (printerOptions.action == kValuePrinterIncomingJobSelected) {
+      final i = names.indexOf(printerOptions.printerName);
+      if (i >= 0) selected = i + 1;
+    }
+    var save = mainGetLocalBoolOptionSync(kKeyPrinterSave);
+    var dontAsk = false;
+    senseDialog<void>(dialogManager, (setState, close) {
+      void submit() {
+        final printerName = selected == 0 ? '' : names[selected - 1];
+        final action = selected == 0
+            ? kValuePrinterIncomingJobDefault
+            : kValuePrinterIncomingJobSelected;
+        bind.sessionPrinterResponse(
+            sessionId: sessionId, id: id, path: path, printerName: printerName);
+        if (save || dontAsk) {
+          bind.mainSetLocalOption(key: kKeyPrinterSelected, value: printerName);
+          bind.mainSetLocalOption(key: kKeyPrinterIncomingJobAction, value: action);
+        }
+        if (dontAsk) mainSetLocalBoolOption(kKeyPrinterAllowAutoPrint, true);
+        close();
+      }
+
+      void cancel() {
+        if (dontAsk) {
+          bind.mainSetLocalOption(
+              key: kKeyPrinterIncomingJobAction,
+              value: kValuePrinterIncomingJobDismiss);
+        }
+        close();
+      }
+
+      return SenseDialog(
+        title: SenseConnectStrings.printerTitle,
+        message: SenseConnectStrings.printerBody,
+        onCancel: cancel,
+        onSubmit: submit,
+        children: [
+          SenseDialogChoices(
+              labels: [SenseConnectStrings.printerDefault, ...names],
+              selected: selected,
+              onSelected: (i) => setState(() => selected = i)),
+          SenseDialogCheck(
+              label: SenseConnectStrings.printerSave,
+              value: save,
+              onChanged: (v) {
+                setState(() => save = v);
+                mainSetLocalBoolOption(kKeyPrinterSave, v);
+              }),
+          SenseDialogCheck(
+              label: SenseConnectStrings.printerDontAsk,
+              value: dontAsk,
+              onChanged: (v) => setState(() => dontAsk = v)),
+        ],
+        actions: [
+          SenseDialogAction(SenseCommonStrings.cancel, cancel),
+          SenseDialogAction(SenseConnectStrings.print, submit,
+              kind: SenseButtonKind.primary),
+        ],
+      );
+    });
+  }
+
   _handleUseTextureRender(
       Map<String, dynamic> evt, SessionID sessionId, String peerId) {
     parent.target?.imageModel.setUseTextureRender(evt['v'] == 'Y');
     waitForFirstImage.value = true;
     isRefreshing = true;
     showConnectedWaitingForImage(parent.target!.dialogManager, sessionId,
-        'success', 'Successful', kMsgboxTextWaitingForImage);
+        'success', 'Successful', kMsgboxTextWaitingForImage,
+        senseCard: SenseConnectCards.find(peerId) != null); // Sense Remote (#164)
   }
 
   _handleSyncPeerOption(Map<String, dynamic> evt, String peer) {
@@ -909,8 +1039,11 @@ class FfiModel with ChangeNotifier {
     final link = evt['link'];
 
     // Sense Remote (O14): a session-ending message shows the Sense card instead.
+    // Sürüm 12 (#164): the connecting cards are asked first (password, 2-step code, busy,
+    // offline, denied, timeout, network error), also before the session is up.
     if (SenseSessionHub.onMessage(
-        peerId, '${type ?? ''}', '${title ?? ''}', '${text ?? ''}')) {
+        peerId, '${type ?? ''}', '${title ?? ''}', '${text ?? ''}',
+        hasRetry: evt['hasRetry'] == 'true')) {
       return;
     }
 
@@ -943,9 +1076,11 @@ class FfiModel with ChangeNotifier {
       enterPasswordDialog(sessionId, dialogManager);
     } else if (type == 'terminal-admin-login' ||
         type == 'terminal-admin-login-request-approval') {
+      SenseConnectCards.noteStockDialog(type); // Sense Remote: TT draws it (Sürüm 12)
       enterUserLoginDialog(sessionId, dialogManager, 'terminal-admin-login-tip',
           waitForAccept: type == 'terminal-admin-login-request-approval');
     } else if (type == 'terminal-admin-login-password') {
+      SenseConnectCards.noteStockDialog(type); // Sense Remote: TT draws it (Sürüm 12)
       enterUserLoginAndPasswordDialog(
           sessionId, dialogManager, 'terminal-admin-login-tip');
     } else if (type == 'restarting') {
@@ -983,7 +1118,9 @@ class FfiModel with ChangeNotifier {
     } else if (type == 'relay-hint' || type == 'relay-hint2') {
       showRelayHintDialog(sessionId, type, title, text, dialogManager, peerId);
     } else if (text == kMsgboxTextWaitingForImage) {
-      showConnectedWaitingForImage(dialogManager, sessionId, type, title, text);
+      // Sense Remote (#164): the card says "Görüntü bekleniyor"; only the stock box goes.
+      showConnectedWaitingForImage(dialogManager, sessionId, type, title, text,
+          senseCard: SenseConnectCards.find(peerId) != null);
     } else if (title == 'Privacy mode') {
       final hasRetry = evt['hasRetry'] == 'true';
       showPrivacyFailedDialog(
@@ -993,6 +1130,9 @@ class FfiModel with ChangeNotifier {
       if (!hasRetry) {
         hasRetry = shouldAutoRetryOnOffline(type, title, text);
       }
+      // Sense Remote (Sürüm 12): no Sense card knows this message; the stock box is the
+      // fallback, counted and recorded (`ui/dialog`, target 0).
+      SenseConnectCards.noteStockDialog('${type ?? ''}', title: '${title ?? ''}');
       showMsgBox(sessionId, type, title, text, link, hasRetry, dialogManager);
     }
   }
@@ -1056,6 +1196,12 @@ class FfiModel with ChangeNotifier {
     final text = evt['text'] ?? '';
     final durMsc = evt['dur_msec'] ?? 2000;
     final duration = Duration(milliseconds: durMsc);
+    // Sense Remote (Sürüm 12, #162 ST 11): the Sense pill / notice instead of BotToast.
+    if (kSenseDialogs && text.isNotEmpty) {
+      senseShowOverlayToast(globalKey.currentState?.overlay, translate(text),
+          hold: duration, error: type.contains('error'));
+      return;
+    }
     if ((text).isEmpty) {
       BotToast.showLoading(
         duration: duration,
@@ -1143,6 +1289,8 @@ class FfiModel with ChangeNotifier {
     bind.sessionReconnect(sessionId: sessionId, forceRelay: forceRelay);
     clearPermissions();
     dialogManager.dismissAll();
+    // Sense Remote (Sürüm 12, #164): the "Bağlanılıyor" card instead of the stock box.
+    if (SenseSessionHub.onConnecting(parent.target?.id ?? '')) return;
     dialogManager.showLoading(translate('Connecting...'),
         onCancel: closeConnection);
   }
@@ -1168,6 +1316,38 @@ class FfiModel with ChangeNotifier {
         return;
       }
       closeConnection();
+      return;
+    }
+
+    // Sense Remote (Sürüm 12, ST 18): the same three ways out in the Sense pattern.
+    if (kSenseDialogs) {
+      senseDialog<void>(dialogManager, (setState, close) {
+        void onClose() {
+          closeConnection();
+          close();
+        }
+
+        return SenseDialog(
+          title: SenseConnectStrings.relayTitle,
+          level: SenseLevel.warn,
+          headline: SenseConnectStrings.relayTitle,
+          message: SenseConnectStrings.relayBody,
+          onCancel: onClose,
+          actions: [
+            SenseDialogAction(SenseConnectStrings.close, onClose),
+            SenseDialogAction(SenseConnectStrings.viaRelay,
+                () => reconnect(dialogManager, sessionId, true),
+                kind: type == 'relay-hint2'
+                    ? SenseButtonKind.primary
+                    : SenseButtonKind.normal),
+            SenseDialogAction(SenseConnectStrings.retry,
+                () => reconnect(dialogManager, sessionId, false),
+                kind: type == 'relay-hint'
+                    ? SenseButtonKind.primary
+                    : SenseButtonKind.normal),
+          ],
+        );
+      }, tag: '$sessionId-$type');
       return;
     }
 
@@ -1203,13 +1383,16 @@ class FfiModel with ChangeNotifier {
   }
 
   void showConnectedWaitingForImage(OverlayDialogManager dialogManager,
-      SessionID sessionId, String type, String title, String text) {
+      SessionID sessionId, String type, String title, String text,
+      {bool senseCard = false}) {
     onClose() {
       closeConnection();
     }
 
     if (waitForFirstImage.isFalse) return;
-    dialogManager.show(
+    // Sense Remote (#164): with the Sense card up the box is not drawn; the timer and the
+    // core calls below stay the same.
+    if (!senseCard) dialogManager.show(
       (setState, close, context) => CustomAlertDialog(
           title: null,
           content: SelectionArea(child: msgboxContent(type, title, text)),
@@ -1240,6 +1423,27 @@ class FfiModel with ChangeNotifier {
     // which will cause some messages to refresh the canvas and dismiss dialogs.
     // So we add a delay here to ensure the dialog is displayed.
     Future.delayed(Duration(milliseconds: 3000), () {
+      // Sense Remote (Sürüm 12, ST 18): the ghost mode message in the Sense pattern.
+      if (kSenseDialogs) {
+        senseDialog<void>(dialogManager, (setState, close) {
+          return SenseDialog(
+            title: SenseConnectStrings.privacyTitle,
+            level: senseMsgBoxLevel(type) ?? SenseLevel.warn,
+            headline: SenseConnectStrings.privacyTitle,
+            message: translate(text),
+            onCancel: () => close(),
+            onSubmit: () => close(),
+            actions: [
+              if (link.startsWith('http'))
+                SenseDialogAction(SenseConnectStrings.privacyMore,
+                    () => launchUrl(Uri.parse(link))),
+              SenseDialogAction(SenseConnectStrings.ok, () => close(),
+                  kind: SenseButtonKind.primary),
+            ],
+          );
+        });
+        return;
+      }
       showMsgBox(sessionId, type, title, text, link, hasRetry, dialogManager);
     });
   }
@@ -4748,4 +4952,40 @@ Future<void> initializeCursorAndCanvas(FFI ffi) async {
 
 clearWaitingForImage(OverlayDialogManager? dialogManager, SessionID sessionId) {
   dialogManager?.dismissByTag('$sessionId-waiting-for-image');
+}
+
+// ---- Sense Remote (Sürüm 12, #159): screenshot file name ----
+
+/// `{bilgisayar}_{tarih-saat}.png`: the computer name without characters a file name cannot
+/// hold, then the local time `2026-11-28_14-05-33`. Pure.
+String senseScreenshotFileName(String computer, DateTime t) {
+  var name = computer
+      .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1F]'), '')
+      .trim()
+      .replaceAll(RegExp(r'\s+'), '-');
+  if (name.isEmpty) name = SenseConnectStrings.screenshotFallbackName;
+  String two(int v) => v.toString().padLeft(2, '0');
+  final stamp = '${t.year}-${two(t.month)}-${two(t.day)}_${two(t.hour)}-${two(t.minute)}-${two(t.second)}';
+  return '${name}_$stamp.png';
+}
+
+/// Full path in [dir]; a file already there gets "-2", "-3" … before ".png". Pure.
+String senseScreenshotTarget(String dir, String name, bool Function(String path) exists) {
+  final sep = dir.contains('\\') && !dir.contains('/') ? '\\' : '/';
+  final base = dir.endsWith(sep) ? dir : '$dir$sep';
+  var path = '$base$name';
+  final stem = name.endsWith('.png') ? name.substring(0, name.length - 4) : name;
+  for (var i = 2; exists(path) && i < 1000; i++) {
+    path = '$base$stem-$i.png';
+  }
+  return path;
+}
+
+/// Turkish reason for the core's screenshot error (the core text is not shown).
+String senseScreenshotReason(String coreText) {
+  final t = coreText.toLowerCase();
+  if (t.contains('no cached') || t.contains('capture') || t.contains('screenshot')) {
+    return SenseConnectStrings.screenshotNoImage;
+  }
+  return SenseConnectStrings.screenshotWriteFailed;
 }

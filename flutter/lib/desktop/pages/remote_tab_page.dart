@@ -27,7 +27,8 @@ import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemote
 import '../../sense/screens/session/bar/sense_session_host.dart' show SenseSessionTabFrame;
 
 class _MenuTheme {
-  static const Color blueColor = MyTheme.button;
+  // Sense Remote (Sürüm 12, ST 10): white marks instead of RustDesk's blue (T1).
+  static const Color blueColor = kSenseRemoteWindow ? MyTheme.accent : MyTheme.button;
   // kMinInteractiveDimension
   static const double height = 20.0;
   static const double dividerHeight = 12.0;
@@ -417,7 +418,10 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           bind.mainGetLocalOption(key: kOptionEnableConfirmClosingTabs))) {
         res = true;
       } else {
-        res = await closeConfirmDialog();
+        // Sense Remote (Sürüm 12, ST 14): the Sense confirm; the stock box stays the fallback.
+        res = kSenseRemoteWindow
+            ? await senseCloseTabsConfirm(connLength)
+            : await closeConfirmDialog();
       }
       if (res) {
         tabController.clear();

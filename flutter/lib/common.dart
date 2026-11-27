@@ -43,6 +43,11 @@ import 'models/platform_model.dart';
 import 'common/sense_theme.dart'; // Sense Remote
 import 'sense/tokens/sense_tokens.dart'; // Sense Remote (T1)
 import 'sense/strings/common.dart'; // Sense Remote (A2c)
+// Sense Remote (Sürüm 12, #162): the one dialog pattern, notices and window titles.
+import 'sense/components/sense_dialog.dart';
+import 'sense/components/button.dart' show SenseButtonKind;
+import 'sense/components/spinner.dart' show SenseSpinner;
+import 'sense/strings/connect.dart';
 import 'sense/screens/controller/data/tray_link.dart'; // Sense Remote (D3e)
 
 import 'package:flutter_hbb/native/win32.dart'
@@ -749,7 +754,8 @@ Future<void> windowOnTop(int? id) async {
   }
 }
 
-typedef DialogBuilder = CustomAlertDialog Function(
+// Sense Remote (Sürüm 12): any widget, so a [SenseDialog] goes through the same manager.
+typedef DialogBuilder = Widget Function(
     StateSetter setState, void Function([dynamic]) close, BuildContext context);
 
 class Dialog<T> {
@@ -903,6 +909,22 @@ class OverlayDialogManager {
         }
       }
 
+      // Sense Remote (Sürüm 12, #162 ST 1): the Sense frame and spinner.
+      if (kSenseDialogs) {
+        return Center(
+          child: SenseDialog(
+            title: translate(text),
+            width: SenseSizes.popupWidthNarrow,
+            onCancel: showCancel ? cancel : null,
+            children: const [Center(child: SenseSpinner(size: 22))],
+            actions: [
+              if (showCancel)
+                SenseDialogAction(SenseConnectStrings.cancel, cancel,
+                    key: const Key('sense-loading-cancel')),
+            ],
+          ),
+        );
+      }
       return CustomAlertDialog(
         content: Container(
             constraints: const BoxConstraints(maxWidth: 240),
@@ -1023,6 +1045,11 @@ void showToast(String text,
     Alignment alignment = const Alignment(0.0, 0.8)}) {
   final overlayState = globalKey.currentState?.overlay;
   if (overlayState == null) return;
+  // Sense Remote (Sürüm 12, #162 ST 11): the Sense pill (one at a time).
+  if (kSenseDialogs) {
+    senseShowOverlayToast(overlayState, text, hold: timeout);
+    return;
+  }
   final entry = OverlayEntry(builder: (context) {
     return IgnorePointer(
         child: Align(
@@ -1310,6 +1337,11 @@ void msgBox(SessionID sessionId, String type, String title, String text,
 }
 
 Color? _msgboxColor(String type) {
+  // Sense Remote (Sürüm 12, ST 0, T1): colours from the tokens, no stock blue.
+  if (kSenseDialogs) {
+    final level = senseMsgBoxLevel(type);
+    return level == null ? SenseColors.textSecondary : level.color;
+  }
   if (type == "input-password" || type == "custom-os-password") {
     return Color(0xFFAD448E);
   }
@@ -1378,7 +1410,14 @@ Widget msgboxContent(String type, String title, String text) {
           children: [
             Text(
               translate(title),
-              style: TextStyle(fontSize: 21),
+              // Sense Remote (ST 0): the card title size (prototype `.nc>b`).
+              style: kSenseDialogs
+                  ? const TextStyle(
+                      fontFamily: SenseFont.family,
+                      fontSize: 15,
+                      fontWeight: SenseFontWeight.bold,
+                      color: SenseColors.text)
+                  : TextStyle(fontSize: 21),
             ).marginOnly(bottom: 10),
             createDialogContent(translateText(text)),
           ],
@@ -3068,17 +3107,20 @@ String getWindowName({WindowType? overrideType}) {
   // Sense Remote (A2c, T2): window, taskbar and Dock show "Sense Remote"
   // (the internal app name "SenseRemote" has no space).
   const name = SenseCommonStrings.appName;
+  // Sense Remote (Sürüm 12, #162-8, ST 16): Turkish window titles (taskbar, Alt+Tab).
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;
     case WindowType.FileTransfer:
-      return "File Transfer - $name";
+      return SenseConnectStrings.windowTitle(SenseConnectStrings.windowFiles, name);
     case WindowType.ViewCamera:
-      return "View Camera - $name";
+      return SenseConnectStrings.windowTitle(SenseConnectStrings.windowCamera, name);
     case WindowType.PortForward:
-      return "Port Forward - $name";
+      return SenseConnectStrings.windowTitle(SenseConnectStrings.windowTunnel, name);
     case WindowType.RemoteDesktop:
-      return "Remote Desktop - $name";
+      return SenseConnectStrings.windowTitle(SenseConnectStrings.windowRemote, name);
+    case WindowType.Terminal:
+      return SenseConnectStrings.windowTitle(SenseConnectStrings.windowTerminal, name);
     default:
       break;
   }
@@ -3086,6 +3128,8 @@ String getWindowName({WindowType? overrideType}) {
 }
 
 String getWindowNameWithId(String id, {WindowType? overrideType}) {
+  // Sense Remote (Sürüm 12, #162-8): no computer id in the title; the stock line stays below.
+  if (kSenseDialogs) return getWindowName(overrideType: overrideType);
   return "${DesktopTab.tablabelGetter(id).value} - ${getWindowName(overrideType: overrideType)}";
 }
 
@@ -4333,4 +4377,57 @@ Widget? buildAvatarWidget({
       errorBuilder: (_, __, ___) => fallback ?? SizedBox.shrink(),
     ),
   );
+}
+
+// ---- Sense Remote (Sürüm 12, #162): the Sense dialog pattern ----
+
+/// Stock boxes are drawn in the Sense pattern (the Sense window is always on, T1).
+const bool kSenseDialogs = true;
+
+/// Shows a [SenseDialog] (from [builder]) centred through the dialog manager. One popup at a
+/// time: the others close first unless [keepOthers].
+Future<T?> senseDialog<T>(OverlayDialogManager dialogManager,
+    Widget Function(StateSetter setState, void Function([T? res]) close) builder,
+    {String? tag, bool keepOthers = false}) {
+  if (!keepOthers) dialogManager.dismissAll();
+  return dialogManager.show<T>(
+      (setState, close, context) =>
+          Center(child: builder(setState, ([T? res]) => close(res))),
+      tag: tag);
+}
+
+/// Sürüm 12 (ST 14): "Bütün bağlantılar kapatılsın mı?" in the Sense pattern (same option as
+/// the stock box: Ayarlar › "Sekmeleri kapatmadan önce sor").
+Future<bool> senseCloseTabsConfirm(int tabs) async {
+  var askAgain = true;
+  final res = await senseDialog<bool>(gFFI.dialogManager, (setState, close) {
+    void submit() {
+      bind.mainSetLocalOption(
+          key: kOptionEnableConfirmClosingTabs,
+          value: bool2option(kOptionEnableConfirmClosingTabs, askAgain));
+      close(true);
+    }
+
+    return SenseDialog(
+      title: SenseConnectStrings.closeTabsTitle,
+      level: SenseLevel.warn,
+      headline: SenseConnectStrings.closeTabsTitle,
+      message: SenseConnectStrings.closeTabsBody(tabs),
+      onCancel: () => close(false),
+      onSubmit: submit,
+      children: [
+        SenseDialogCheck(
+            key: const Key('sense-close-tabs-ask'),
+            label: SenseConnectStrings.closeTabsAskAgain,
+            value: askAgain,
+            onChanged: (v) => setState(() => askAgain = v)),
+      ],
+      actions: [
+        SenseDialogAction(SenseCommonStrings.cancel, () => close(false)),
+        SenseDialogAction(SenseConnectStrings.closeAll, submit,
+            kind: SenseButtonKind.danger, key: const Key('sense-close-tabs-ok')),
+      ],
+    );
+  }, keepOthers: true);
+  return res == true;
 }

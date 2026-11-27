@@ -79,6 +79,72 @@ ThemeData senseDarkTheme(ThemeData base) {
     ),
     menuBarTheme: const MenuBarThemeData(
         style: MenuStyle(backgroundColor: MaterialStatePropertyAll(SenseColors.bg))),
+    // Sürüm 12 (#162, ST 0): stock boxes that still open (fallback) wear the Sense frame —
+    // surface, 1 px line, 12 px corners, Poppins 13/600 title, white accent, no blue.
+    dialogTheme: DialogTheme(
+      backgroundColor: SenseColors.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(SenseRadii.popup),
+        side: const BorderSide(color: SenseColors.line),
+      ),
+      titleTextStyle: const TextStyle(
+          fontFamily: kSenseFont,
+          fontSize: SenseFontSize.popupTitle,
+          fontWeight: SenseFontWeight.bold,
+          color: SenseColors.text),
+      contentTextStyle: const TextStyle(
+          fontFamily: kSenseFont,
+          fontSize: SenseFontSize.bodySmall,
+          color: SenseColors.textSecondary),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      isDense: true,
+      filled: true,
+      fillColor: SenseColors.bg,
+      hintStyle: const TextStyle(
+          fontFamily: kSenseFont,
+          fontSize: SenseFontSize.bodySmall,
+          color: SenseColors.textMuted),
+      labelStyle: const TextStyle(
+          fontFamily: kSenseFont, color: SenseColors.textMuted),
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(SenseRadii.button),
+          borderSide: const BorderSide(color: SenseColors.line)),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(SenseRadii.button),
+          borderSide: const BorderSide(color: SenseColors.textDim)),
+      errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(SenseRadii.button),
+          borderSide: const BorderSide(color: SenseColors.dangerText)),
+      border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(SenseRadii.button),
+          borderSide: const BorderSide(color: SenseColors.line)),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: SenseColors.text,
+        textStyle: const TextStyle(
+            fontFamily: kSenseFont, fontWeight: FontWeight.w500),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(SenseRadii.button)),
+      ),
+    ),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: MaterialStateProperty.resolveWith((s) =>
+          s.contains(MaterialState.selected) ? SenseColors.text : SenseColors.bg),
+      checkColor: const MaterialStatePropertyAll(SenseColors.bg),
+      side: const BorderSide(color: SenseColors.lineStrong),
+    ),
+    radioTheme: RadioThemeData(
+      fillColor: MaterialStateProperty.resolveWith((s) =>
+          s.contains(MaterialState.selected)
+              ? SenseColors.text
+              : SenseColors.lineStrong),
+    ),
+    progressIndicatorTheme:
+        const ProgressIndicatorThemeData(color: SenseColors.text),
   );
 }
 
