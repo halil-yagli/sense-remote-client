@@ -834,6 +834,12 @@ pub mod log_upload;
 pub mod wol;
 // Sense Remote (#103): structured event record, panic hook, crash records (log_upload sends them).
 pub mod diag;
+// Sense Remote (S11, M5): the Mac capture backend choice (`libs/scrap`); CI runs only this crate's
+// tests, so they are compiled here too.
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../libs/scrap/src/quartz/select.rs"]
+mod scrap_mac_capture_select;
 
 #[cfg(test)]
 mod tests {

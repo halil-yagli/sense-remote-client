@@ -40,14 +40,21 @@ impl Frame {
 
     pub fn surface_to_bgra<'a>(&'a mut self, h: usize) {
         unsafe {
-            let plane0 = IOSurfaceGetBaseAddressOfPlane(self.surface, 0);
+            let mut plane0 = IOSurfaceGetBaseAddressOfPlane(self.surface, 0);
             self.bgra_stride = IOSurfaceGetBytesPerRowOfPlane(self.surface, 0);
+            // Sense Remote (S11, M5): a non-planar surface (ScreenCaptureKit's pixel buffers)
+            // may report no plane 0; read the whole surface then. CGDisplayStream frames keep
+            // the plane values as before.
+            if plane0.is_null() || self.bgra_stride == 0 {
+                plane0 = IOSurfaceGetBaseAddress(self.surface);
+                self.bgra_stride = IOSurfaceGetBytesPerRow(self.surface);
+            }
+            // Never read past the surface.
+            let len = (self.bgra_stride * h).min(IOSurfaceGetAllocSize(self.surface));
             self.bgra.resize(self.bgra_stride * h, 0);
-            std::ptr::copy_nonoverlapping(
-                plane0 as _,
-                self.bgra.as_mut_ptr(),
-                self.bgra_stride * h,
-            );
+            if !plane0.is_null() {
+                std::ptr::copy_nonoverlapping(plane0 as *const u8, self.bgra.as_mut_ptr(), len);
+            }
         }
     }
 }
