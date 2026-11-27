@@ -61,6 +61,22 @@ pub const APP_PERMISSIONS: [&str; 8] = [
 ];
 /// Poll interval while the app runs (panel `GRANTS_POLL_INTERVAL_MS`).
 pub const POLL_INTERVAL: Duration = Duration::from_secs(10);
+/// Sense Remote (#149): while nothing is stored yet, a first fetch that fails (network not up
+/// right after the start, the panel slow) is tried again after this wait, at most
+/// `FIRST_FETCH_RETRIES` times (about 10 s in all), before the usual poll takes over.
+pub const FIRST_FETCH_RETRY: Duration = Duration::from_millis(3_300);
+pub const FIRST_FETCH_RETRIES: u32 = 3;
+
+/// How long the poller waits after a fetch. `failures` = fetches in a row that got no answer
+/// from the panel; `has_grants` = a checked envelope is stored (then its own `exp` covers a
+/// short outage and the plain poll is enough).
+pub(crate) fn next_wait(failures: u32, has_grants: bool) -> Duration {
+    if !has_grants && (1..=FIRST_FETCH_RETRIES).contains(&failures) {
+        FIRST_FETCH_RETRY
+    } else {
+        POLL_INTERVAL
+    }
+}
 const GRANTS_PATH: &str = "/api/sense/grants";
 const STORE_FILE: &str = "grants.json";
 const MAX_PAYLOAD_CHARS: usize = 65_536;
@@ -535,8 +551,9 @@ fn sync_session() -> Option<Session> {
     Some(session)
 }
 
-/// One `GET /api/sense/grants`.
-fn fetch_once(session: &Session) {
+/// One `GET /api/sense/grants`. `false` = the panel did not answer (or not in a way that
+/// settles anything): network error, odd answer, rate limit, 409.
+fn fetch_once(session: &Session) -> bool {
     let stored = stored_for(&session.email)
         .and_then(|stored| check(&stored.envelope, &session.email, stored.rev).ok());
     let mut header = serde_json::Map::new();
@@ -560,7 +577,7 @@ fn fetch_once(session: &Session) {
         Ok(response) => response,
         Err(err) => {
             log::debug!("Sense Remote: grants request failed: {err}");
-            return;
+            return false;
         }
     };
     let parsed: Option<(u16, String)> = serde_json::from_str::<Value>(&response)
@@ -571,33 +588,47 @@ fn fetch_once(session: &Session) {
             Some((status, body))
         });
     let Some((status, body)) = parsed else {
-        return;
+        return false;
     };
     match outcome(status, &body) {
-        Outcome::Envelope(envelope) => accept(envelope, &session.email),
-        Outcome::NotModified => {}
+        Outcome::Envelope(envelope) => {
+            accept(envelope, &session.email);
+            true
+        }
+        Outcome::NotModified => true,
         Outcome::Revoked => {
             log::info!("Sense Remote: grants refused by the panel ({status}), everything off");
             forget();
+            true
         }
-        Outcome::Retry => log::debug!("Sense Remote: grants answer {status}, trying later"),
+        Outcome::Retry => {
+            log::debug!("Sense Remote: grants answer {status}, trying later");
+            false
+        }
     }
 }
 
-/// Asks the panel now; `wait` = wait for a running fetch instead of skipping.
-fn refresh(wait: bool) {
-    let Some(session) = sync_session() else {
-        return;
-    };
+/// Asks the panel now; `wait` = wait for a running fetch instead of skipping. Returns the
+/// poller's view: `Some(answered)`, `None` when nobody is signed in (nothing to fetch).
+fn refresh(wait: bool) -> Option<bool> {
+    let session = sync_session()?;
     let _guard = if wait {
         fetch_lock().lock().unwrap_or_else(|e| e.into_inner())
     } else {
         match fetch_lock().try_lock() {
             Ok(guard) => guard,
-            Err(_) => return,
+            Err(_) => return Some(true),
         }
     };
-    fetch_once(&session);
+    Some(fetch_once(&session))
+}
+
+/// A checked envelope for the signed-in account is stored.
+fn has_grants() -> bool {
+    session().is_some_and(|session| {
+        stored_for(&session.email)
+            .is_some_and(|stored| check(&stored.envelope, &session.email, stored.rev).is_ok())
+    })
 }
 
 /// Starts the 10 s poll once per process (the first time the app asks for grants or signs in).
@@ -606,9 +637,15 @@ fn ensure_poller() {
     STARTED.get_or_init(|| {
         let spawned = std::thread::Builder::new()
             .name("sense-grants".to_owned())
-            .spawn(|| loop {
-                refresh(false);
-                std::thread::sleep(POLL_INTERVAL);
+            .spawn(|| {
+                let mut failures = 0u32;
+                loop {
+                    match refresh(false) {
+                        Some(false) => failures = failures.saturating_add(1),
+                        _ => failures = 0,
+                    }
+                    std::thread::sleep(next_wait(failures, has_grants()));
+                }
             });
         if let Err(err) = spawned {
             log::error!("Sense Remote: grants poll could not start: {err}");

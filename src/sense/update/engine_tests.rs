@@ -18,6 +18,7 @@ fn release(version: u32) -> Release {
         sha256: sha256.clone(),
         size: 1000,
         notes_url: Some(format!("https://panel.example/#surum-{version}")),
+        notes_summary: None,
         published_at: NOW - 60,
         iat: NOW - 60,
         exp: NOW + 7 * 86_400,
@@ -759,6 +760,7 @@ fn status_reports_have_and_hides_progress_outside_downloading() {
     assert_eq!(State::default().status(NOW, None).have, None);
     let gui = state.gui_status(3, Some(NOW));
     assert_eq!(gui.notes_url.as_deref(), Some("https://panel.example/#surum-4"));
+    assert_eq!(gui.notes_summary, None);
     assert_eq!(gui.blocked, Some(Blocked::NightWindow));
     assert_eq!(gui.checked_at, Some(NOW));
     // A detail that does not fit the contract is never reported.

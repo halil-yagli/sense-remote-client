@@ -271,6 +271,10 @@ pub struct GuiStatus {
     pub error_detail: Option<String>,
     pub blocked: Option<Blocked>,
     pub notes_url: Option<String>,
+    /// Sense Remote (Sürüm 12, #166): the release's one-line "Neler yeni" text; `null` when the
+    /// panel sent none (an older panel or daemon).
+    #[serde(default)]
+    pub notes_summary: Option<String>,
     /// Last successful heartbeat answer, Unix seconds.
     pub checked_at: Option<i64>,
     /// macOS, Host or Host + Controller, `sign != "cert"` (§7).
@@ -309,6 +313,7 @@ impl GuiStatus {
             error_detail: None,
             blocked: None,
             notes_url: None,
+            notes_summary: None,
             checked_at: None,
             mac_permission_warning: false,
             last_result: None,
@@ -957,7 +962,7 @@ mod tests {
             keys,
             [
                 "attempts", "blocked", "checked_at", "current", "error", "error_detail",
-                "last_result", "mac_permission_warning", "notes_url", "progress_pct",
+                "last_result", "mac_permission_warning", "notes_summary", "notes_url", "progress_pct",
                 "retry_at", "source", "state", "supported", "target",
             ]
         );
@@ -970,6 +975,7 @@ mod tests {
             "current": 3, "supported": true, "state": "available", "target": 4, "source": null,
             "progress_pct": null, "error": null, "error_detail": null,
             "blocked": "session_active", "notes_url": "https://panel.example/#surum-4",
+            "notes_summary": null,
             "checked_at": 1_795_000_000, "mac_permission_warning": false,
             "last_result": { "state": "installed", "from": 3, "to": 4, "at": 1_795_000_000 },
             "attempts": null, "retry_at": null,
@@ -981,6 +987,7 @@ mod tests {
         // `--server` during an update) still reads.
         let mut older = example.clone();
         older.as_object_mut().unwrap().remove("attempts");
+        older.as_object_mut().unwrap().remove("notes_summary");
         older.as_object_mut().unwrap().remove("retry_at");
         let parsed: GuiStatus = serde_json::from_value(older).unwrap();
         assert_eq!((parsed.attempts, parsed.retry_at), (None, None));

@@ -196,6 +196,26 @@ fn resolve_lang(saved_lang: &str, locale: &str, cjk_fallback: bool) -> String {
     }
 }
 
+// Sense Remote: a computer with Sense Remote installed shows the stock texts in Turkish whatever
+// the system language is (decision #59). A copy that is not installed (portable, development)
+// keeps the system language. Role changes restart the app, so one read per process is enough.
+fn sense_installed() -> bool {
+    static INSTALLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *INSTALLED.get_or_init(|| crate::sense::installed_role().is_some())
+}
+
+fn resolve_lang_sense(
+    saved_lang: &str,
+    locale: &str,
+    cjk_fallback: bool,
+    sense_installed: bool,
+) -> String {
+    if sense_installed {
+        return "tr".to_owned();
+    }
+    resolve_lang(saved_lang, locale, cjk_fallback)
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn translate(name: String) -> String {
     let locale = sys_locale::get_locale().unwrap_or_default();
@@ -203,10 +223,11 @@ pub fn translate(name: String) -> String {
 }
 
 pub fn translate_locale(name: String, locale: &str) -> String {
-    let lang = resolve_lang(
+    let lang = resolve_lang_sense(
         &hbb_common::config::LocalConfig::get_option("lang"),
         locale,
         cjk_ui_unavailable(),
+        sense_installed(),
     );
     let m = match lang.as_str() {
         "fr" => fr::T.deref(),
@@ -356,6 +377,18 @@ mod test {
             f("{2} times {4} makes {8}"),
             ("{} times {4} makes {8}".to_string(), Some("2".to_string()))
         );
+    }
+
+    #[test]
+    fn test_sense_installed_forces_turkish_and_not_installed_keeps_the_system_language() {
+        use super::resolve_lang_sense as f;
+
+        assert_eq!(f("", "en-US", false, true), "tr");
+        assert_eq!(f("de", "de-DE", false, true), "tr");
+        assert_eq!(f("zh-cn", "zh_CN", true, true), "tr");
+        assert_eq!(f("", "en-US", false, false), "en");
+        assert_eq!(f("de", "en-US", false, false), "de");
+        assert_eq!(f("", "ja-JP", true, false), "en");
     }
 
     #[test]

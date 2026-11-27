@@ -47,6 +47,7 @@ fn held_release(value: &Value) -> Option<Release> {
         sha256: str_of(value, "sha256").to_owned(),
         size: 1,
         notes_url: None,
+        notes_summary: None,
         published_at: 0,
         iat: 0,
         exp: MAX_UNIX_SECONDS,
@@ -171,6 +172,46 @@ fn url_rule_follows_the_build_api_server() {
     assert_eq!(run_case(&v, &swap(http, &https["api_server"])), "bad_url");
     let trailing_slash = Value::String(format!("{}/", str_of(https, "api_server")));
     assert_eq!(run_case(&v, &swap(https, &trailing_slash)), "bad_url");
+}
+
+/// Sense Remote (Sürüm 12, #166): the signed payload of the vector, decoded, with
+/// `notes_summary` added (the signature is not what this checks, only the wire schema).
+fn wire_with_summary(summary: Option<Value>) -> Value {
+    let v = vector();
+    let input = &case(&v, "release_ok_notes_url")["input"];
+    let p = input["release"]["p"].as_str().unwrap();
+    let bytes = URL_SAFE_NO_PAD.decode(p).unwrap();
+    let mut payload: Value = serde_json::from_slice(&bytes).unwrap();
+    if let Some(summary) = summary {
+        payload["notes_summary"] = summary;
+    }
+    payload
+}
+
+fn wire_valid(payload: Value) -> Option<bool> {
+    serde_json::from_value::<ReleaseWire>(payload)
+        .ok()
+        .map(|w| w.is_valid())
+}
+
+#[test]
+fn release_notes_summary_is_optional_and_limited_to_120() {
+    // Without it (an older panel): still valid.
+    assert_eq!(wire_valid(wire_with_summary(None)), Some(true));
+    // With a short text, and one of exactly 120 UTF-16 units.
+    let short = Value::String("Yeni sohbet penceresi ve hata düzeltmeleri".to_owned());
+    assert_eq!(wire_valid(wire_with_summary(Some(short))), Some(true));
+    let full = Value::String("ş".repeat(MAX_NOTES_SUMMARY));
+    assert_eq!(wire_valid(wire_with_summary(Some(full))), Some(true));
+    // 121 units, or `null`, or a number: refused (zod `.string().max(120).optional()`).
+    let long = Value::String("ş".repeat(MAX_NOTES_SUMMARY + 1));
+    assert_eq!(wire_valid(wire_with_summary(Some(long))), Some(false));
+    assert_eq!(wire_valid(wire_with_summary(Some(Value::Null))), None);
+    assert_eq!(wire_valid(wire_with_summary(Some(Value::from(5)))), None);
+    // An unknown key is still refused (`deny_unknown_fields` keeps its job).
+    let mut odd = wire_with_summary(None);
+    odd["surprise"] = Value::from(1);
+    assert_eq!(wire_valid(odd), None);
 }
 
 #[test]

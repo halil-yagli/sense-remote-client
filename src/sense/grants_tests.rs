@@ -11,6 +11,21 @@ fn vector() -> Value {
     serde_json::from_str(VECTOR).expect("grants-v1.json is valid JSON")
 }
 
+#[test]
+fn first_fetch_failures_are_retried_three_times_in_about_ten_seconds() {
+    // Nothing stored: 3 quick retries after the first failure, then the usual 10 s poll.
+    let waits: Vec<Duration> = (0..=5).map(|n| next_wait(n, false)).collect();
+    assert_eq!(waits[0], POLL_INTERVAL);
+    assert_eq!(&waits[1..=3], &[FIRST_FETCH_RETRY; 3]);
+    assert_eq!(&waits[4..], &[POLL_INTERVAL; 2]);
+    let total = FIRST_FETCH_RETRY * FIRST_FETCH_RETRIES;
+    assert!(total >= Duration::from_secs(9) && total <= Duration::from_secs(11));
+    // With a checked envelope stored (its own `exp` covers a short outage): no quick retries.
+    for n in 0..=5 {
+        assert_eq!(next_wait(n, true), POLL_INTERVAL);
+    }
+}
+
 fn str_of<'a>(value: &'a Value, field: &str) -> &'a str {
     value[field]
         .as_str()
