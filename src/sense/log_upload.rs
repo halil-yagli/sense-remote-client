@@ -1350,8 +1350,9 @@ fn start_ticker() {
             loop {
                 std::thread::sleep(Duration::from_secs(30));
                 ticks = ticks.wrapping_add(1);
-                if ticks == 4 {
-                    super::diag::sys::read_hardware_once();
+                // Hardware from the second minute on, until the inventory is there (K45).
+                if ticks >= 4 {
+                    super::diag::sys::refresh_hardware();
                 }
                 if ticks % 2 == 0 {
                     if let Some(fields) = load.sample() {
