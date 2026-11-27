@@ -3,6 +3,7 @@
 // `update_quality_status` event: `delay`, `fps`, D1's `last_frame_ms` and `loss_est`)
 // and passes the raw fields here. Ages are counted up to *now*, so a frozen link —
 // which sends no event — still ages every tick.
+import '../../data/screen_still.dart' show senseParseSpeedMbit;
 import '../link_machine.dart';
 
 /// "22" / "22ms" → 22.
@@ -32,6 +33,7 @@ SenseLinkSample senseLinkSample({
   DateTime? lastFrameAt,
   DateTime? probeAt,
   DateTime? watchingSince,
+  String? speed,
 }) {
   // Nothing older than the start of watching (connect / reconnect) counts.
   if (watchingSince != null) {
@@ -51,6 +53,7 @@ SenseLinkSample senseLinkSample({
     fps: senseParseFps(fps),
     frameAge: frameAge,
     probeAge: probeAt == null ? null : _since(now, probeAt),
+    bandwidthMbit: senseParseSpeedMbit(speed),
   );
 }
 

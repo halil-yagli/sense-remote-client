@@ -318,4 +318,66 @@ void main() {
     expect(m.tick(const Duration(milliseconds: 14900), _weakFps).phase, SenseLinkPhase.normal);
     expect(m.tick(const Duration(seconds: 15), _weakFps).phase, SenseLinkPhase.weak);
   });
+
+  group('still screen (Sürüm 10 #118, denetim K44: same rule as Ekran bilgisi)', () {
+    // Good link, a few frames a second, hardly any picture data: the screen is not changing.
+    const stillLowData = SenseLinkSample(
+      rttMs: 5,
+      lossPct: 0,
+      fps: 2,
+      frameAge: Duration(milliseconds: 300),
+      probeAge: Duration(milliseconds: 400),
+      bandwidthMbit: 0.1,
+    );
+    // Good link, last frame 2.5 s old: nothing changed since.
+    const stillOldFrame = SenseLinkSample(
+      rttMs: 5,
+      lossPct: 0,
+      fps: 2,
+      frameAge: Duration(milliseconds: 2500),
+      probeAge: Duration(milliseconds: 400),
+    );
+
+    test('fps 2 on a still screen for 30 s never opens the weak card', () {
+      for (final s in [stillLowData, stillOldFrame]) {
+        final r = _Run();
+        final v = r.steps(30, s);
+        expect(v.phase, SenseLinkPhase.normal);
+        expect(v.layerUp, isFalse);
+        expect(s.still, isTrue);
+        expect(s.fpsWeak, isFalse);
+      }
+    });
+
+    test('the card tile is not coloured for a still screen, the raw level stays', () {
+      expect(stillLowData.fpsShownLevel, SenseLevel.ok);
+      expect(stillLowData.fpsLevel, SenseLevel.hot);
+      expect(_weakFps.fpsShownLevel, SenseLevel.hot);
+    });
+
+    test('real weakness keeps the karar #94 card: lots of data, or a bad link', () {
+      const busy = SenseLinkSample(
+          rttMs: 5, lossPct: 0, fps: 2, frameAge: Duration(milliseconds: 300),
+          probeAge: Duration(milliseconds: 400), bandwidthMbit: 6);
+      const slow = SenseLinkSample(
+          rttMs: 200, lossPct: 0, fps: 2, frameAge: Duration(milliseconds: 2500),
+          probeAge: Duration(milliseconds: 400), bandwidthMbit: 0.1);
+      const lossy = SenseLinkSample(
+          rttMs: 5, lossPct: 3, fps: 2, frameAge: Duration(milliseconds: 300),
+          probeAge: Duration(milliseconds: 400), bandwidthMbit: 0.1);
+      for (final s in [busy, slow, lossy, _weakFps]) {
+        expect(s.still, isFalse);
+        final r = _Run();
+        expect(r.steps(16, s).phase, SenseLinkPhase.weak);
+      }
+    });
+
+    test('the open weak card goes once the screen turns out to be still', () {
+      final r = _Run();
+      expect(r.steps(16, _weakFps).phase, SenseLinkPhase.weak);
+      final v = r.steps(4, stillLowData);
+      expect(v.phase, SenseLinkPhase.normal);
+      expect(r.m.lastEvent, SenseLinkEvent.recovered);
+    });
+  });
 }

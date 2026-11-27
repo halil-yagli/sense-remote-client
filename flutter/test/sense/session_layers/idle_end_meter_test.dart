@@ -144,8 +144,15 @@ void main() {
       expect(s.probeAge, _s(1));
     });
 
+    test('the picture data rate is read for the still-screen rule (K44)', () {
+      final s = senseLinkSample(now: now, speed: '12.5kB/s');
+      expect(s.bandwidthMbit, closeTo(0.1024, 0.0001));
+      expect(senseLinkSample(now: now, speed: '').bandwidthMbit, isNull);
+    });
+
     test('unknown values stay unknown', () {
       final s = senseLinkSample(now: now);
+      expect(s.bandwidthMbit, isNull);
       expect(s.rttMs, isNull);
       expect(s.lossPct, isNull);
       expect(s.frameAge, isNull);
