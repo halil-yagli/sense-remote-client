@@ -1626,12 +1626,10 @@ class FfiModel with ChangeNotifier {
       sessionId: sessionId,
       value: Int32List.fromList([0]),
     );
-    _pi.currentDisplay = 0;
-    try {
-      CurrentDisplayState.find(peerId).value = _pi.currentDisplay;
-    } catch (e) {
-      //
-    }
+    // Sense Remote (#112): also recompute the canvas rect. A multi-UI peer does not answer
+    // with SwitchDisplay, so the rect stayed on the peer's current display (e.g. 1) and the
+    // display 0 texture was placed outside the view: black until the user switched displays.
+    switchToNewDisplay(0, sessionId, peerId);
     await tryMoveToScreenAndSetFullscreen(screenRectList[0]);
 
     final length = _pi.displays.length < screenRectList.length
@@ -4416,6 +4414,9 @@ class FFI {
       ffiModel.resetRestartReconnectState();
       dialogManager.dismissAll();
       try {
+        // Sense Remote (#112): the canvas rect must match the shown display before the
+        // first image is laid out; a no-op when it already does.
+        await ffiModel.updateCurDisplay(sessionId);
         await canvasModel.updateViewStyle();
         await canvasModel.updateScrollStyle();
         await canvasModel.initializeEdgeScrollEdgeThickness();

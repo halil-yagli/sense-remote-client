@@ -907,6 +907,8 @@ impl InvokeUiSession for FlutterHandler {
         }
         for (_, session) in self.session_handlers.read().unwrap().iter() {
             if session.renderer.on_texture(display, texture) {
+                // Sense Remote (#112): first frame on this texture since it was (re)bound.
+                crate::sense::diag::kinds::first_frame(display, None, "gpu");
                 if let Some(stream) = &session.event_stream {
                     stream.add(EventToUI::Texture(display, true));
                 }
@@ -1287,6 +1289,8 @@ impl FlutterHandler {
         for (_, session) in self.session_handlers.read().unwrap().iter() {
             if use_texture_render || session.displays.len() > 1 {
                 if session.renderer.on_rgba(display, rgba) {
+                    // Sense Remote (#112): first frame on this texture since it was (re)bound.
+                    crate::sense::diag::kinds::first_frame(display, Some((rgba.w, rgba.h)), "piksel");
                     if let Some(stream) = &session.event_stream {
                         stream.add(EventToUI::Texture(display, false));
                     }
