@@ -834,6 +834,8 @@ pub mod log_upload;
 pub mod wol;
 // Sense Remote (#103): structured event record, panic hook, crash records (log_upload sends them).
 pub mod diag;
+// Sense Remote (#136): the Controller's session recording as the UI and the log see it.
+pub mod recording;
 
 #[cfg(test)]
 mod tests {
