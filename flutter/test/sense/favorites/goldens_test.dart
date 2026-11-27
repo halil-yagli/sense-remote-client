@@ -86,7 +86,7 @@ void main() {
       }), skip: goldenSkip('fav_ask_ip'), tags: const ['golden']);
 
   testWidgets('key slots under a row', (t) => shot(t, 'fav_keys', io: winIo(),
-      act: (t, m) => tapKey(t, 'sense-fav-key-win.thispc')), skip: goldenSkip('fav_keys'), tags: const ['golden']);
+      act: (t, m) => tapKey(t, 'sense-fav-key-win.taskmgr')), skip: goldenSkip('fav_keys'), tags: const ['golden']);
 
   testWidgets('custom form and a pending request', (t) => shot(t, 'fav_custom_form',
           io: FakeFavIo(
@@ -105,7 +105,7 @@ void main() {
       }), skip: goldenSkip('fav_custom_form'), tags: const ['golden']);
 
   testWidgets('dar: bar buttons, name (wide) and star (narrow, #167)', (t) async {
-    setWindow(t, const Size(420, 140));
+    setWindow(t, const Size(420, 220));
     await t.pumpWidget(listApp(const Column(mainAxisSize: MainAxisSize.min, children: [
       Row(mainAxisSize: MainAxisSize.min, children: [
         SenseFavoritesButton(compact: false),

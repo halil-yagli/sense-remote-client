@@ -16,6 +16,9 @@ import '../../../../tokens/theme.dart';
 import 'catalog.dart';
 import 'favorites_model.dart';
 
+/// Turkish capitals: "Eklenebilecek" → "EKLENEBİLECEK" (Dart's own gives a dotless I).
+String senseFavUpper(String s) => s.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
+
 /// Small caps section title (`.fvh`).
 class SenseFavSectionTitle extends StatelessWidget {
   const SenseFavSectionTitle(this.text, {super.key, this.top = 8});
@@ -25,7 +28,7 @@ class SenseFavSectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: EdgeInsets.fromLTRB(14, top, 14, 2),
-        child: Text(text.toUpperCase(),
+        child: Text(senseFavUpper(text),
             style: SenseTextStyles.of(
                 size: SenseFontSize.caps,
                 weight: SenseFontWeight.bold,

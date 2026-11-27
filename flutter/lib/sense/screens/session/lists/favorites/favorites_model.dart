@@ -641,6 +641,7 @@ class SenseFavoritesModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
     for (final w in _waiting.values) {
       w.$2.cancel();

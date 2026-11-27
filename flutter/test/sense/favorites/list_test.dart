@@ -77,7 +77,7 @@ void main() {
   testWidgets('one click runs, the list closes, the Host is asked by id only', (t) async {
     final io = FakeFavIo(prefs: {SenseFavOs.win: prototypeWinPrefs()}, setAnswer: '');
     var closed = 0;
-    await pumpList(t, io, onClose: () => closed++);
+    final m = await pumpList(t, io, onClose: () => closed++);
     expect(find.text('3 kısayol'), findsOneWidget);
     expect(find.text('Ctrl+Alt+Shift+1'), findsOneWidget);
     expect(find.text(SenseFavoritesStrings.footer), findsOneWidget);
@@ -85,6 +85,7 @@ void main() {
     await t.pump();
     expect(io.sent.single.$2, {'req': 1, 'id': 'win.taskmgr'});
     expect(closed, 1);
+    m.dispose(); // the 8 s answer timer
   });
 
   testWidgets('a row that cannot be undone asks in place first', (t) async {
@@ -93,7 +94,7 @@ void main() {
         {'id': 'win.logoff', 'key': null}
       ])
     }, setAnswer: '');
-    await pumpList(t, io);
+    final m = await pumpList(t, io);
     expect(find.text('Sor ›'), findsOneWidget);
     await t.tap(find.byKey(const ValueKey('sense-fav-run-win.logoff')));
     await t.pump();
@@ -108,6 +109,7 @@ void main() {
     await t.tap(find.byKey(const ValueKey('sense-fav-ask-ok')));
     await t.pump();
     expect(io.sent.single.$2['id'], 'win.logoff');
+    m.dispose();
   });
 
   testWidgets('IP card and ping open under their rows', (t) async {
@@ -247,7 +249,7 @@ void main() {
     SenseFavoritesHotkeys.macOverride = false;
     addTearDown(() => SenseFavoritesHotkeys.macOverride = null);
     final io = FakeFavIo(prefs: {SenseFavOs.win: prototypeWinPrefs()}, setAnswer: '');
-    await pumpList(t, io);
+    final m = await pumpList(t, io);
     var used = false;
     await t.pumpWidget(listApp(Focus(
       autofocus: true,
@@ -269,6 +271,7 @@ void main() {
     await t.pump();
     expect(used, isTrue);
     expect(io.sent.single.$2['id'], 'win.taskmgr');
+    m.dispose();
   });
 
   test('the bridge implementation builds (generated bindings exist)', () {
