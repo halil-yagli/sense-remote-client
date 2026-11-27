@@ -18,7 +18,8 @@ import 'widgets.dart';
 
 // Prototype `.amain` gap 10; `.ahead` gap 10, padding 4/0/8; search min 240;
 // `.locbar` gap 6, label margin 4; chip 4×11, corner 16.
-const double _kGap = 10, _kHeadBottom = 8, _kSearch = 240, _kLocGap = 6;
+// TS-3: wide enough for the whole hint ("Bilgisayar, proje, konum ya da kimlik").
+const double _kGap = 10, _kHeadBottom = 8, _kSearch = 330, _kLocGap = 6;
 const double _kChipPadV = 4, _kChipPadH = 11, _kChipRadius = 16;
 
 enum SenseListState { loading, error, ready }

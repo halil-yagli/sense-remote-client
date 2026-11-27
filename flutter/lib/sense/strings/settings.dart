@@ -73,6 +73,15 @@ abstract final class SenseSettingsStrings {
   static const String passwordController = 'Bu bilgisayar yalnız bağlanır; kalıcı şifre gerekmez.';
   static const String acceptConn = 'Bağlantıyı kabul etme';
   static const String acceptConnHost = 'Şifreyle ya da sahadaki kişinin onayıyla';
+  static const String acceptConnPassword = 'Yalnız şifreyle';
+  static const String acceptConnClick = 'Yalnız sahadaki kişinin onayıyla';
+
+  /// B10: read from the real `approve-mode` ('password', 'click', else both).
+  static String acceptConnFor(String mode) => switch (mode) {
+        'password' => acceptConnPassword,
+        'click' => acceptConnClick,
+        _ => acceptConnHost,
+      };
   static const String acceptConnNone = 'Kabul etmez · yalnız bağlanır';
   static const String idleDisconnect = 'Hareketsiz bağlantıyı kes';
   static String idleMinutes(int m) => '$m dk sonra';
@@ -111,15 +120,21 @@ abstract final class SenseSettingsStrings {
   static const String proxySet = 'Ayarlı';
   static const String direct = 'Doğrudan bağlantı (TCP · UDP · IPv6)';
   static const String directRelay = 'Kapalı · hep aktarmalı';
-  static String sumNetwork(bool direct) =>
-      'Sense sunucusu · doğrudan bağlantı ${direct ? 'açık' : 'kapalı'}';
+  /// B8: "Genel sunucu" while no Sense server is set.
+  static String sumNetwork(bool direct, {bool publicServer = false}) =>
+      '${publicServer ? serverPublic : serverSense} · doğrudan bağlantı ${direct ? 'açık' : 'kapalı'}';
 
   // Güncelleme.
   static const String autoUpdate = 'Otomatik güncelleme';
   static const String autoUpdateController = 'Açık · onayla kurulur';
   static const String autoUpdateHost = 'Açık · bağlantı yokken kurulur';
-  static const String autoUpdateHint = 'Sürümler panelden, imza ve SHA-256 doğrulamasıyla gelir.';
+  static const String autoUpdateHint =
+      'Sürümler panelden, imza ve SHA-256 doğrulamasıyla gelir. Yönetici “Hemen” derse onay beklenmeden de kurulur.';
   static const String sumUpdate = 'panelden · otomatik';
+
+  // B9: a setting could not be written.
+  static const String saveFailedTitle = 'Kaydedilemedi';
+  static const String saveFailedBody = 'Ayar yazılamadı; eski değeri duruyor. Yeniden dene.';
 
   // Shared values.
   static const String on = 'Açık';

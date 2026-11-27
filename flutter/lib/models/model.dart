@@ -1506,13 +1506,14 @@ class FfiModel with ChangeNotifier {
     }
 
     _pi.isSet.value = true;
-    // Sense Remote (S7, #91): Mac Controller to a Windows Host swaps Ctrl and Cmd by default.
+    // Sense Remote (S7, #91, #135): Mac <-> Windows swaps Ctrl and Cmd by default.
     if (isDesktop) {
       final sid = parent.target?.sessionId;
       if (sid != null) {
         try {
           await senseApplySwapKeyDefault(
             controllerIsMac: isMacOS,
+            controllerIsWindows: isWindows, // Sense Remote (#135): Windows to Mac too
             peerPlatform: _pi.platform,
             readDecided: () async =>
                 (await bind.sessionGetPeerOption(

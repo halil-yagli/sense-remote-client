@@ -2,6 +2,8 @@
 // Turkish only (YH T2, #59). The permanent password texts stay in
 // screens/host/sense_password_strings.dart (kept, plan B2).
 
+import 'format.dart';
+
 abstract final class SenseHostStrings {
   // Shell (H1): left menu.
   static const String thisComputer = 'Bu bilgisayar';
@@ -57,12 +59,7 @@ abstract final class SenseHostStrings {
   static const String errOther = 'Kaydedilemedi. Yeniden dene.';
 
   /// Minutes / hours of a connection ("14 dk", "1 sa 5 dk").
-  static String duration(int seconds) {
-    final m = seconds ~/ 60;
-    if (m < 60) return '${m < 1 ? 1 : m} dk';
-    final h = m ~/ 60, r = m % 60;
-    return r == 0 ? '$h sa' : '$h sa $r dk';
-  }
+  static String duration(int seconds) => senseShortDuration(seconds ~/ 60);
 
   // Categories (H2).
   static const String permissions = 'Yetkiler';

@@ -22,8 +22,11 @@ import '../../../diag_log.dart';
 import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart';
 import '../../../tokens/theme.dart';
+import '../data/grants.dart' show SenseGrant;
 import '../data/session_state.dart';
 import '../lists/backend.dart';
+import '../lists/list_specs.dart' show senseRecordingShown;
+import '../record_notice.dart' show SenseRecordNotice;
 import '../lists/session_list.dart' show SenseStateChip;
 
 /// The popups the bar opens (Bilgisayar durumu, Ekran bilgisi; drawn by their owner).
@@ -79,6 +82,13 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
   Timer? _noteTimer;
   int _seenSerial = 0;
 
+  // B14: the interface record "ghost on/off" is written when the state really changed.
+  bool? _pendingGhost;
+  Timer? _pendingGhostTimer;
+
+  // B1: "Yalnız izleyerek başla" keeps the automatic ghost mode from starting; say so once.
+  bool _startChecked = false;
+
   SenseSessionBackend get b => widget.backend;
 
   @override
@@ -102,10 +112,23 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
   void dispose() {
     b.removeListener(_onBackend);
     _noteTimer?.cancel();
+    _pendingGhostTimer?.cancel();
     super.dispose();
   }
 
   void _onBackend() {
+    final pending = _pendingGhost;
+    if (pending != null && b.ghostOn == pending) {
+      _pendingGhost = null;
+      _pendingGhostTimer?.cancel();
+      senseUiGhost(pending, reason: 'user');
+    }
+    if (!_startChecked && b.ready) {
+      _startChecked = true;
+      if (b.viewOnly && !b.ghostOn && b.grants.allows(SenseGrant.privacyMode)) {
+        _showNote(SenseSessionStrings.ghostSkippedViewOnly);
+      }
+    }
     if (b.ghostNoteSerial != _seenSerial) {
       _seenSerial = b.ghostNoteSerial;
       final code = b.ghostNote;
@@ -126,8 +149,18 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
       _showNote(SenseSessionStrings.ghostDisplay1);
       return;
     }
-    senseUiGhost(!b.ghostOn, reason: 'user');
+    _pendingGhost = !b.ghostOn;
+    _pendingGhostTimer?.cancel();
+    _pendingGhostTimer = Timer(const Duration(seconds: 6), () => _pendingGhost = null);
     b.toggleGhost();
+  }
+
+  /// B1: the grey ghost button says why it is grey.
+  String _ghostTooltip() {
+    if (b.ghostAvailable) return SenseSessionStrings.ghostTooltip;
+    if (b.viewOnly && !b.ghostOn) return SenseSessionStrings.ghostUnavailableViewOnly;
+    if (!b.grants.allows(SenseGrant.privacyMode)) return SenseSessionStrings.ghostUnavailableRights;
+    return SenseSessionStrings.ghostUnavailable;
   }
 
   @override
@@ -136,9 +169,10 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
     final labels = senseBarLabels(width);
     final compact = width <= SenseBreakpoints.narrow;
     return ListenableBuilder(
-      listenable: Listenable.merge([b, widget.menus, widget.popups]),
+      listenable: Listenable.merge([b, widget.menus, widget.popups, SenseRecordNotice.statusOf(b.peerId)]),
       builder: (context, _) {
         final ready = b.ready;
+        final recording = senseRecordingShown(b);
         final menus = widget.menus;
         Widget menu(SenseBarMenu m, String label, {List<Widget> leading = const [], List<Widget> tags = const []}) {
           final button = _MenuButton(
@@ -186,10 +220,10 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
               SenseStateChip(key: const ValueKey('sense-bar-tag-keyboard'), label: keyboardTag, level: SenseLevel.warn),
           ]),
           menu(SenseBarMenu.actions, labels.actions, leading: [
-            if (b.recordingOn)
+            if (recording)
               const SenseStatusDot(key: ValueKey('sense-bar-rec-dot'), color: SenseColors.hot, blinking: true, glow: true),
           ], tags: [
-            if (b.recordingOn)
+            if (recording)
               const SenseStateChip(
                   key: ValueKey('sense-bar-tag-recording'),
                   label: SenseSessionStrings.tagRecording,
@@ -239,7 +273,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
             SenseButton(
               key: const ValueKey('sense-bar-ghost'),
               label: labels.ghost(b.ghostOn),
-              tooltip: b.ghostAvailable ? SenseSessionStrings.ghostTooltip : SenseSessionStrings.ghostUnavailable,
+              tooltip: _ghostTooltip(),
               kind: b.ghostOn ? SenseButtonKind.on : SenseButtonKind.normal,
               onPressed: ready && b.ghostAvailable ? _ghost : null,
             ),

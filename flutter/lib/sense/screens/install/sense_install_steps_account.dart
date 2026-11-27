@@ -153,7 +153,7 @@ extension _SenseInstallAccountStep on _SenseInstallWizardState {
         .split(RegExp(r'[\s.@_-]+'))
         .where((w) => w.isNotEmpty)
         .take(2)
-        .map((w) => w.characters.first.toUpperCase())
+        .map((w) => senseUpperTr(w.characters.first))
         .join();
     // YH K2 "Tamam": green frame.
     return _box(

@@ -1263,7 +1263,9 @@ List<TToggleMenu> toolbarPrivacyMode(
 
   getDefaultMenu(Future<void> Function(SessionID sid, String opt) toggleFunc,
       String targetImplKey) {
-    final enabled = !ffiModel.viewOnly &&
+    // Sense Remote: B1 - an open ghost mode can always be switched off, also while
+    // "Yalnız izle" is on (turning it on stays blocked: no input is sent in view only).
+    final enabled = (!ffiModel.viewOnly || privacyModeState.isNotEmpty) &&
         (hasPrivacyModePermission || privacyModeState.isNotEmpty);
     return TToggleMenu(
         value: privacyModeState.isNotEmpty,
