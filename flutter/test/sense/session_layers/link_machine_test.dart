@@ -264,17 +264,36 @@ void main() {
       expect(r.events, isNot(contains(SenseLinkEvent.dropped)));
     });
 
-    test('transport lost: the lost card shows at once, text counts attempts and seconds', () {
+    // Sürüm 11 (O1): the card counts real attempts (set by the controller), and the session
+    // closes 30 s after the transport was lost.
+    test('transport lost: the lost card shows at once, text counts real attempts', () {
       final r = _Run();
       r.m.transportLost(Duration.zero);
       var v = r.step(_frozen(9));
       expect(v.phase, SenseLinkPhase.lost);
       expect(v.layerUp, isTrue);
       expect(v.stallSeconds, 8);
-      expect(v.attempt, 3, reason: '8.98 s / 4 s, rounded up');
-      expect(v.closeIn, 22);
-      v = r.step(_frozen(4));
-      expect(v.attempt, 1);
+      expect(v.attempt, 0, reason: 'no attempt made yet; nothing is counted from the time');
+      expect(v.closeIn, 30);
+      r.m.retries = 2;
+      v = r.step(_frozen(10));
+      expect(v.attempt, 2);
+      expect(v.closeIn, 29);
+    });
+
+    test('retry plan: first after 1 s, then 2, 4, 8, 8 s apart', () {
+      final p = SenseRetryPlan();
+      expect(p.due(const Duration(seconds: 5)), isFalse, reason: 'not begun');
+      p.begin(Duration.zero);
+      final at = <int>[];
+      for (var s = 0; s <= 40; s++) {
+        if (p.due(Duration(seconds: s))) at.add(s);
+      }
+      expect(at, [1, 3, 7, 15, 23, 31, 39]);
+      expect(p.attempts, 7);
+      p.stop();
+      expect(p.active, isFalse);
+      expect(p.attempts, 0);
     });
 
     test('transport lost without data: dropped after 30 s', () {

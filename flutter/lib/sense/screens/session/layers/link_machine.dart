@@ -9,7 +9,10 @@
 //   any ── transport lost (RustDesk "restarting") ──▶ lost
 //   weak / lost ── good 3 s without a break ──▶ normal  (+ "Bağlantı düzeldi")
 //   any ── no frame and no delay measurement 30 s ──▶ dropped (O14 "Uzak bilgisayar…")
-// While frames or probes keep coming the machine never drops.
+//   transport lost ── 30 s without the link coming back ──▶ dropped
+// While frames or probes keep coming the machine never drops. Sürüm 11 (O1): while the
+// transport is lost the controller really connects again ([SenseRetryPlan]); the card counts
+// those attempts, not the seconds.
 //
 // A short shake shows no layer; the top bar says "Dalgalı" ([SenseLinkView.wavy]).
 import '../../../tokens/sense_tokens.dart';
@@ -104,6 +107,8 @@ class SenseLinkView {
     this.recoveringIn,
     this.stall = Duration.zero,
     this.dropped = false,
+    this.retries = 0,
+    this.lostFor,
   });
 
   static const SenseLinkView initial =
@@ -124,18 +129,22 @@ class SenseLinkView {
   /// Stalled for [SenseLinkTiming.drop]: the session is over.
   final bool dropped;
 
+  /// Sürüm 11 (O1): reconnect attempts really made since the transport was lost.
+  final int retries;
+
+  /// Time since the transport was lost (null = not lost); the session closes
+  /// [SenseLinkTiming.drop] after that.
+  final Duration? lostFor;
+
   bool get layerUp => phase != SenseLinkPhase.normal && !dropped;
 
   int get stallSeconds => stall.inSeconds;
 
-  /// Prototype: one reconnect attempt per 4 s of the outage, at least 1.
-  int get attempt {
-    final n = (stall.inMilliseconds / SenseLinkTiming.attemptEvery.inMilliseconds).ceil();
-    return n < 1 ? 1 : n;
-  }
+  /// Sürüm 11 (O1): the reconnect attempt the card shows — the real ones (0 = none yet).
+  int get attempt => retries;
 
   int get closeIn {
-    final s = SenseLinkTiming.drop.inSeconds - stallSeconds;
+    final s = SenseLinkTiming.drop.inSeconds - (lostFor ?? stall).inSeconds;
     return s < 0 ? 0 : s;
   }
 }
@@ -156,6 +165,12 @@ class SenseLinkMachine {
 
   SenseLinkView get view => _view;
 
+  /// Sürüm 11 (O1): reconnect attempts made in this outage (the controller sets it).
+  int retries = 0;
+
+  /// The transport is reported lost and has not come back yet.
+  bool get transportDown => _transportLostAt != null;
+
   /// What happened on the last tick.
   SenseLinkEvent get lastEvent => _event;
 
@@ -166,6 +181,7 @@ class SenseLinkMachine {
   /// Starts over (after a reconnect).
   void reset() {
     _transportLostAt = null;
+    retries = 0;
     _phase = SenseLinkPhase.normal;
     _badSince = null;
     _goodSince = null;
@@ -189,6 +205,7 @@ class SenseLinkMachine {
       }
     }
     final lostNow = _transportLostAt != null;
+    final lostFor = lostNow ? now - _transportLostAt! : null;
     // Short shake for the bar word: bad values or a missing picture for a second.
     final shake = s.valuesBad || stall >= SenseLinkTiming.tick;
     // The weak card only cares about the frame rate.
@@ -202,11 +219,17 @@ class SenseLinkMachine {
       _goodSince ??= now;
     }
 
-    if (stall >= SenseLinkTiming.drop) {
+    // Sürüm 11 (O1): with the transport lost, the reconnect attempts get the full window.
+    if (lostFor != null ? lostFor >= SenseLinkTiming.drop : stall >= SenseLinkTiming.drop) {
       _dropped = true;
       _event = SenseLinkEvent.dropped;
       _view = SenseLinkView(
-          phase: SenseLinkPhase.lost, sample: s, stall: stall, dropped: true);
+          phase: SenseLinkPhase.lost,
+          sample: s,
+          stall: stall,
+          dropped: true,
+          retries: retries,
+          lostFor: lostFor);
       return _view;
     }
 
@@ -240,7 +263,47 @@ class SenseLinkMachine {
       wavy: _phase == SenseLinkPhase.normal && shake,
       recoveringIn: recoveringIn,
       stall: stall,
+      retries: lostNow ? retries : 0,
+      lostFor: lostFor,
     );
     return _view;
+  }
+}
+
+/// Sürüm 11 (O1): when the next reconnect attempt goes out while the transport is lost.
+/// First one [SenseLinkTiming.retryFirst] after the loss, then 2, 4, 8, 8 … s apart. Pure.
+class SenseRetryPlan {
+  Duration? _since;
+  Duration? _last;
+  int _attempts = 0;
+
+  bool get active => _since != null;
+  int get attempts => _attempts;
+
+  void begin(Duration now) => _since ??= now;
+
+  void stop() {
+    _since = null;
+    _last = null;
+    _attempts = 0;
+  }
+
+  /// True = make one attempt now (it is counted).
+  bool due(Duration now) {
+    final since = _since;
+    if (since == null) return false;
+    final last = _last;
+    final next = last == null ? since + SenseLinkTiming.retryFirst : last + gapAfter(_attempts);
+    if (now < next) return false;
+    _attempts++;
+    _last = now;
+    return true;
+  }
+
+  /// Wait after attempt [n] (1-based): 2, 4, 8, 8 … s.
+  static Duration gapAfter(int n) {
+    final s = n <= 1 ? 2 : (n == 2 ? 4 : 8);
+    final capped = Duration(seconds: s);
+    return capped > SenseLinkTiming.retryMaxGap ? SenseLinkTiming.retryMaxGap : capped;
   }
 }

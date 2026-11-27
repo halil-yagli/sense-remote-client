@@ -170,6 +170,178 @@ pub fn key_request_due(since_last_ms: Option<u64>) -> bool {
     since_last_ms.map_or(true, |ms| ms >= KEY_REQUEST_INTERVAL_MS)
 }
 
+// Sense Remote (#121): the wait is bounded by time too, not only by frames. On a still screen
+// the Host sends few frames, so a request that only goes out when a delta frame arrives can
+// leave a new display frozen for tens of seconds. The video thread wakes up on its own
+// ([`VIDEO_TICK_MS`]) and asks again while the decoder waits.
+
+/// The video thread's wake-up while no frame comes.
+pub const VIDEO_TICK_MS: u64 = 500;
+/// A wait this long asks for a key frame without waiting for the next delta frame.
+pub const KEY_WAIT_TIMED_AFTER_MS: u64 = 1_000;
+/// After this long without a key frame, delta frames are decoded (stock behaviour), as after
+/// [`KEY_WAIT_MAX_FRAMES`].
+pub const KEY_WAIT_MAX_MS: u64 = 3_000;
+/// A wait longer than this asks only every [`KEY_REQUEST_SLOW_INTERVAL_MS`] (a Host that sends
+/// nothing is not asked every two seconds forever).
+pub const KEY_WAIT_SLOW_AFTER_MS: u64 = 20_000;
+pub const KEY_REQUEST_SLOW_INTERVAL_MS: u64 = 10_000;
+
+/// [`key_gate`] with the time already waited (`waited_ms`; `None` = not known).
+pub fn key_gate_timed(
+    waiting_for_key: bool,
+    is_key: bool,
+    skipped: u32,
+    waited_ms: Option<u64>,
+) -> KeyGate {
+    if waiting_for_key
+        && !is_key
+        && skipped > 0
+        && waited_ms.is_some_and(|ms| ms >= KEY_WAIT_MAX_MS)
+    {
+        return KeyGate::Decode;
+    }
+    key_gate(waiting_for_key, is_key, skipped)
+}
+
+/// No frame came for a while: whether the waiting decoder asks for a key frame now.
+/// `waited_ms`: time since the wait began; `since_last_ms`: since the previous request.
+pub fn key_wait_tick_due(waited_ms: u64, since_last_ms: Option<u64>) -> bool {
+    if waited_ms < KEY_WAIT_TIMED_AFTER_MS {
+        return false;
+    }
+    let interval = if waited_ms >= KEY_WAIT_SLOW_AFTER_MS {
+        KEY_REQUEST_SLOW_INTERVAL_MS
+    } else {
+        KEY_REQUEST_INTERVAL_MS
+    };
+    since_last_ms.map_or(true, |ms| ms >= interval)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sense Remote (#121): the Controller's "no picture" watch.
+//
+// Login done (the Host sent its peer info) but no video frame: the Controller asks for a key
+// frame once at 3 s and connects again at 8 s (the second round usually finds the direct path
+// the first one missed). At most one such reconnect per computer in
+// [`NO_FRAME_RECONNECT_EVERY_MS`], so a slow relay that needs longer for its first frame is not
+// cut again and again.
+
+pub const NO_FRAME_REFRESH_MS: u64 = 3_000;
+pub const NO_FRAME_RECONNECT_MS: u64 = 8_000;
+pub const NO_FRAME_RECONNECT_EVERY_MS: u64 = 120_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoFrameStep {
+    Wait,
+    RequestKey,
+    Reconnect,
+}
+
+/// One connection round's watch (each step fires once).
+#[derive(Debug, Default, Clone)]
+pub struct NoFrameWatch {
+    refreshed: bool,
+    reconnected: bool,
+}
+
+impl NoFrameWatch {
+    /// `since_login_ms`: time since the peer info; `reconnect_allowed` is asked only when the
+    /// reconnect is due ([`no_frame_reconnect_allowed`]).
+    pub fn step(
+        &mut self,
+        since_login_ms: u64,
+        reconnect_allowed: impl FnOnce() -> bool,
+    ) -> NoFrameStep {
+        if since_login_ms >= NO_FRAME_RECONNECT_MS && !self.reconnected {
+            self.reconnected = true;
+            self.refreshed = true;
+            if reconnect_allowed() {
+                return NoFrameStep::Reconnect;
+            }
+            return NoFrameStep::Wait;
+        }
+        if since_login_ms >= NO_FRAME_REFRESH_MS && !self.refreshed {
+            self.refreshed = true;
+            return NoFrameStep::RequestKey;
+        }
+        NoFrameStep::Wait
+    }
+}
+
+/// Pure part of the reconnect limit: `since_last_ms` = since this computer's last watch
+/// reconnect.
+pub fn reconnect_allowed(since_last_ms: Option<u64>) -> bool {
+    since_last_ms.map_or(true, |ms| ms >= NO_FRAME_RECONNECT_EVERY_MS)
+}
+
+/// Whether the watch may reconnect to `peer` now; a yes is counted.
+pub fn no_frame_reconnect_allowed(peer: &str) -> bool {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+    let mut guard = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(HashMap::new);
+    let since = map.get(peer).map(|t| t.elapsed().as_millis() as u64);
+    if !reconnect_allowed(since) {
+        return false;
+    }
+    if map.len() > 64 {
+        map.retain(|_, t| (t.elapsed().as_millis() as u64) < NO_FRAME_RECONNECT_EVERY_MS);
+    }
+    map.insert(peer.to_owned(), Instant::now());
+    true
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sense Remote (#121): the direct attempt toward a computer on the same network.
+//
+// Stock RustDesk gives a peer on the same network one TCP try of 1 s; when it misses (cold ARP
+// cache, Wi-Fi power saving) the session goes through a relay far away. Here it gets 3 s and,
+// after a short pause, a second try of 2 s before the relay is asked.
+
+/// Sense Remote (O2): the message text the other windows of a connection get when the user ended
+/// it in one of them (`flutter::sessions::sense_end_all`; Dart `session_end.dart`).
+pub const ENDED_HERE: &str = "sense_ended_here";
+
+pub const LAN_DIRECT_TIMEOUT_MS: u64 = 3_000;
+pub const LAN_DIRECT_RETRY_MS: u64 = 2_000;
+pub const LAN_DIRECT_PAUSE_MS: u64 = 300;
+
+/// The timeout the direct attempts start from: at least [`LAN_DIRECT_TIMEOUT_MS`] on the same
+/// network, `stock_ms` otherwise.
+pub fn direct_timeout_ms(is_local: bool, stock_ms: u64) -> u64 {
+    if is_local {
+        stock_ms.max(LAN_DIRECT_TIMEOUT_MS)
+    } else {
+        stock_ms
+    }
+}
+
+/// The TCP tries (their timeouts, in order).
+pub fn direct_tcp_attempts(is_local: bool, timeout_ms: u64) -> Vec<u64> {
+    if is_local {
+        vec![timeout_ms, LAN_DIRECT_RETRY_MS]
+    } else {
+        vec![timeout_ms]
+    }
+}
+
+/// `sonuc` of the `conn/direct` event from the error text (`None` = it worked).
+pub fn direct_result_name(error: Option<&str>) -> &'static str {
+    let Some(e) = error else {
+        return "basarili";
+    };
+    let e = e.to_lowercase();
+    if e.contains("timed out") || e.contains("timeout") || e.contains("deadline") {
+        "zaman_asimi"
+    } else if e.contains("refused") || e.contains("10061") {
+        "reddedildi"
+    } else {
+        "hata"
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Sense Remote (#100): why a connection went through the relay.
 //
@@ -254,6 +426,79 @@ mod tests {
         assert_eq!(requests, 1);
         // An encoder that never flags key frames still gets decoded (stock behaviour).
         assert_eq!(key_gate(true, false, KEY_WAIT_MAX_FRAMES), KeyGate::Decode);
+    }
+
+    #[test]
+    fn key_wait_is_bounded_by_time_too() {
+        // Under the bound: the frame rules.
+        assert_eq!(key_gate_timed(true, false, 1, Some(KEY_WAIT_MAX_MS - 1)), KeyGate::Skip);
+        assert_eq!(key_gate_timed(true, false, 0, Some(10_000)), KeyGate::Skip);
+        // A long wait decodes the next delta frame (stock behaviour), a key frame always.
+        assert_eq!(key_gate_timed(true, false, 1, Some(KEY_WAIT_MAX_MS)), KeyGate::Decode);
+        assert_eq!(key_gate_timed(true, true, 0, Some(0)), KeyGate::Decode);
+        assert_eq!(key_gate_timed(false, false, 0, None), KeyGate::Decode);
+        assert_eq!(
+            key_gate_timed(true, false, KEY_WAIT_REQUEST_AFTER - 1, None),
+            KeyGate::SkipAndRequestKey
+        );
+    }
+
+    #[test]
+    fn a_waiting_decoder_asks_without_frames() {
+        // The 30 s freeze of #121: 2.5 s into the wait and not a single frame: ask.
+        assert!(!key_wait_tick_due(500, None));
+        assert!(key_wait_tick_due(2_500, None));
+        assert!(!key_wait_tick_due(2_500, Some(1_000)));
+        assert!(key_wait_tick_due(2_500, Some(KEY_REQUEST_INTERVAL_MS)));
+        // A very long wait asks seldom.
+        assert!(!key_wait_tick_due(30_000, Some(KEY_REQUEST_INTERVAL_MS)));
+        assert!(key_wait_tick_due(30_000, Some(KEY_REQUEST_SLOW_INTERVAL_MS)));
+    }
+
+    #[test]
+    fn no_frame_watch_asks_at_3_s_and_reconnects_at_8_s() {
+        let mut w = NoFrameWatch::default();
+        assert_eq!(w.step(1_000, || true), NoFrameStep::Wait);
+        assert_eq!(w.step(3_000, || true), NoFrameStep::RequestKey);
+        assert_eq!(w.step(4_000, || true), NoFrameStep::Wait);
+        assert_eq!(w.step(8_000, || true), NoFrameStep::Reconnect);
+        assert_eq!(w.step(20_000, || true), NoFrameStep::Wait, "once per round");
+        // The computer was reconnected a moment ago: wait instead.
+        let mut w = NoFrameWatch::default();
+        assert_eq!(w.step(9_000, || false), NoFrameStep::Wait);
+        assert_eq!(w.step(12_000, || true), NoFrameStep::Wait);
+    }
+
+    #[test]
+    fn watch_reconnects_are_limited_per_computer() {
+        assert!(reconnect_allowed(None));
+        assert!(!reconnect_allowed(Some(NO_FRAME_RECONNECT_EVERY_MS - 1)));
+        assert!(reconnect_allowed(Some(NO_FRAME_RECONNECT_EVERY_MS)));
+        assert!(no_frame_reconnect_allowed("test-peer-121"));
+        assert!(!no_frame_reconnect_allowed("test-peer-121"));
+        assert!(no_frame_reconnect_allowed("test-peer-121-b"));
+    }
+
+    #[test]
+    fn same_network_gets_3_s_and_a_second_try() {
+        assert_eq!(direct_timeout_ms(true, 1_000), LAN_DIRECT_TIMEOUT_MS);
+        assert!(direct_timeout_ms(true, 1_000) >= 3_000);
+        assert_eq!(direct_timeout_ms(true, 18_000), 18_000);
+        assert_eq!(direct_timeout_ms(false, 1_000), 1_000);
+        assert_eq!(direct_tcp_attempts(true, 3_000), vec![3_000, LAN_DIRECT_RETRY_MS]);
+        assert_eq!(direct_tcp_attempts(false, 6_000), vec![6_000]);
+    }
+
+    #[test]
+    fn direct_result_names() {
+        assert_eq!(direct_result_name(None), "basarili");
+        assert_eq!(direct_result_name(Some("connection timed out")), "zaman_asimi");
+        assert_eq!(direct_result_name(Some("Timeout")), "zaman_asimi");
+        assert_eq!(
+            direct_result_name(Some("Connection refused (os error 10061)")),
+            "reddedildi"
+        );
+        assert_eq!(direct_result_name(Some("No route to host")), "hata");
     }
 
     #[test]

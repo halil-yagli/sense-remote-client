@@ -1,6 +1,6 @@
 // Sense Remote (C2, YH O9): "Ekran bilgisi" content — displays from the panel,
 // session numbers from RustDesk; different refresh / 4:2:2 in orange with a
-// note; latency 80 / 150 ms; frame rate by T6.
+// note; latency 150 / 300 ms (karar #135); frame rate by T6.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/display/display_data.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/display/display_model.dart';
@@ -71,16 +71,16 @@ void main() {
     expect(line(rows, 'Kayıp kare').value, '%0,2 (tahmini)');
   });
 
-  test('latency 80 ms orange, 150 ms red; frame rate under 15 orange, under 8 red', () {
+  test('latency 150 ms orange, 300 ms red (karar #135); frame rate under 15 orange, under 8 red', () {
     SenseLevel lat(double ms) => (view(SenseSessionVideo(rttMs: ms, fps: 60)).meters[1] as SenseStatusMeter).barLevel;
-    expect(lat(79), SenseLevel.ok);
-    expect(lat(80), SenseLevel.warn);
-    expect(lat(150), SenseLevel.hot);
+    expect(lat(149), SenseLevel.ok);
+    expect(lat(150), SenseLevel.warn);
+    expect(lat(300), SenseLevel.hot);
     SenseLevel fps(double f) => (view(SenseSessionVideo(fps: f)).meters[0] as SenseStatusMeter).barLevel;
     expect(fps(15), SenseLevel.ok);
     expect(fps(14), SenseLevel.warn);
     expect(fps(7), SenseLevel.hot);
-    expect(view(const SenseSessionVideo(rttMs: 200)).alerts.map((c) => c.title), contains('Oturum görüntüsü'));
+    expect(view(const SenseSessionVideo(rttMs: 350)).alerts.map((c) => c.title), contains('Oturum görüntüsü'));
   });
 
   // Sürüm 10 (#118): direct link, 4 ms, a still screen at 7 fps showed red "Dikkat gerekiyor".

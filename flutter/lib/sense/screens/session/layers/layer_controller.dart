@@ -24,6 +24,7 @@ class SenseLinkRaw {
     this.probeAt,
     this.direct,
     this.speed,
+    this.waitingImage = false,
   });
 
   final String? delay;
@@ -39,6 +40,9 @@ class SenseLinkRaw {
 
   /// RustDesk `speed` ("123.45kB/s"): with a good link, little data means a still screen (K44).
   final String? speed;
+
+  /// Sürüm 11 (#121): logged in (peer info came) but no picture yet.
+  final bool waitingImage;
 }
 
 /// What the layers need from the RustDesk session.
@@ -54,6 +58,20 @@ abstract class SenseLayerHost {
 
   /// Connect again to the same computer, in this window.
   void reconnect();
+
+  /// Sürüm 11 (O1): one silent reconnect attempt while the transport is lost (no RustDesk
+  /// dialog; the lost card shows the attempts).
+  void retry();
+
+  /// Sürüm 11 (O2): "Bağlantıyı bitir": the connection ends in every window that shows it,
+  /// and this window closes.
+  void endConnection();
+
+  /// Sürüm 11 (O3): input in this window, shared by every window of the connection.
+  void shareActivity();
+
+  /// Sürüm 11 (O3): time since the last input in any window of the connection (null = none).
+  Duration? sharedIdle();
 
   /// Tell the Host someone is still here (its idle timer starts over).
   void keepAlive();
@@ -104,6 +122,22 @@ class SenseLayerController extends ChangeNotifier {
   late DateTime _watchingSince;
   late final SenseIdleWatch _idle;
   final SenseLinkMachine _link = SenseLinkMachine();
+  // Sürüm 11 (O1): real reconnect attempts while the transport is lost.
+  final SenseRetryPlan _retry = SenseRetryPlan();
+  // A delay probe came since watching began: the link was up once (no retries before that,
+  // e.g. while the Host still has to accept).
+  bool _everUp = false;
+  // Sürüm 11 (#121): since when the picture is awaited after login.
+  Duration? _waitingSince;
+  // Sürüm 11 (O7): when "Yeniden bağlan" was pressed.
+  Duration? _reconnectAt;
+  bool _reconnectFailed = false;
+  // Sürüm 11 (O3): last time this window's input was handed to the shared count.
+  Duration? _sharedAt;
+
+  /// Sürüm 11 (O5): the connection came back (after "Yeniden bağlan" or a reconnect attempt);
+  /// the window reads the panel's idle limit again.
+  VoidCallback? onReconnected;
   Timer? _timer;
   bool _disposed = false;
 
@@ -176,6 +210,16 @@ class SenseLayerController extends ChangeNotifier {
   SenseSessionSummary? get ended => _ended;
   SenseReconnectState get reconnectState => _reconnect;
 
+  /// Sürüm 11 (O7): the last "Yeniden bağlan" got no answer in time.
+  bool get reconnectFailed => _reconnectFailed;
+
+  /// Sürüm 11 (#121): logged in and no picture for [SenseLinkTiming.noImageAfter]: the
+  /// "Görüntü bekleniyor" card instead of a black screen.
+  bool get waitingImage {
+    final since = _waitingSince;
+    return _ended == null && since != null && _clock() - since >= SenseLinkTiming.noImageAfter;
+  }
+
   /// Goes up by one each time the layer leaves ("Bağlantı düzeldi").
   int get recoveredSerial => _recoveredSerial;
 
@@ -204,7 +248,14 @@ class SenseLayerController extends ChangeNotifier {
     if (_ended != null) {
       if (_reconnect == SenseReconnectState.connecting) {
         final probe = host.readLink().probeAt;
-        if (probe != null && probe.isAfter(_watchingSince)) _connectedAgain(now);
+        if (probe != null && probe.isAfter(_watchingSince)) {
+          _connectedAgain(now);
+        } else if (_reconnectAt != null && now - _reconnectAt! >= SenseEndTiming.reconnectTimeout) {
+          // Sürüm 11 (O7): no answer: the buttons come back, the count starts again.
+          _reconnect = SenseReconnectState.idle;
+          _reconnectFailed = true;
+          _endedAt = now;
+        }
       } else if (backHomeIn <= 0) {
         _finishHome();
         return;
@@ -214,6 +265,17 @@ class SenseLayerController extends ChangeNotifier {
     }
     final raw = host.readLink();
     _direct = raw.direct ?? _direct;
+    final probe = raw.probeAt;
+    if (probe != null && probe.isAfter(_watchingSince)) _everUp = true;
+    // Sürüm 11 (#121): logged in, no picture yet.
+    if (raw.waitingImage) {
+      _waitingSince ??= now;
+    } else {
+      _waitingSince = null;
+    }
+    // Sürüm 11 (O3): input in another window of the connection counts here too.
+    final shared = host.sharedIdle();
+    if (shared != null) _idle.seen(now - shared);
     final view = _link.tick(
       now,
       senseLinkSample(
@@ -229,6 +291,7 @@ class SenseLayerController extends ChangeNotifier {
       ),
     );
     _trackDismissal(now, view.phase);
+    _runRetries(now, view);
     // The bar keeps the warning colour while the card is up or minimized.
     wavy.value = view.wavy || view.phase != SenseLinkPhase.normal;
     if (_link.lastEvent == SenseLinkEvent.recovered) _recoveredSerial++;
@@ -241,6 +304,25 @@ class SenseLayerController extends ChangeNotifier {
       return;
     }
     _notify();
+  }
+
+  /// Sürüm 11 (O1): while the transport is lost, connect again for real (1, 2, 4, 8 s apart)
+  /// until it comes back or the session closes; a link that was up and went silent for
+  /// [SenseLinkTiming.lostAfter] (TCP says nothing by itself) counts as lost.
+  void _runRetries(Duration now, SenseLinkView view) {
+    if (_everUp && !_link.transportDown && !view.dropped && view.stall >= SenseLinkTiming.lostAfter) {
+      _link.transportLost(now);
+    }
+    if (_link.transportDown) {
+      _retry.begin(now);
+      if (_retry.due(now)) host.retry();
+      _link.retries = _retry.attempts;
+    } else if (_retry.active) {
+      final hadAttempts = _retry.attempts > 0;
+      _retry.stop();
+      _link.retries = 0;
+      if (hadAttempts) onReconnected?.call();
+    }
   }
 
   /// Card state across phase changes: a card closed with "×" stays closed while the
@@ -263,8 +345,15 @@ class SenseLayerController extends ChangeNotifier {
   /// Mouse or keyboard input in this window.
   void activity() {
     if (_ended != null) return;
+    final now = _clock();
     final was = _idle.view.warning;
-    _idle.activity(_clock());
+    _idle.activity(now);
+    // Sürüm 11 (O3): at most once a second to the shared count.
+    final at = _sharedAt;
+    if (at == null || now - at >= SenseLinkTiming.tick) {
+      _sharedAt = now;
+      host.shareActivity();
+    }
     if (was) _notify();
   }
 
@@ -280,6 +369,11 @@ class SenseLayerController extends ChangeNotifier {
   bool onMessage(String type, String title, String text) {
     if (_disposed) return false;
     final kind = senseClassifyMessage(type, title, text);
+    // Sürüm 11 (O2): the connection was ended in another of its windows: this one closes too.
+    if (kind == SenseMessageKind.endedHere) {
+      _finishHome();
+      return true;
+    }
     if (_ended != null) {
       if (_reconnect == SenseReconnectState.connecting) {
         if (kind == SenseMessageKind.busy) {
@@ -288,8 +382,11 @@ class SenseLayerController extends ChangeNotifier {
           _notify();
           return true;
         }
-        if (kind != null) {
+        // Sürüm 11 (O7): any connection error ends the attempt (no endless "Bağlanıyor…",
+        // no RustDesk dialog over the card).
+        if (kind != null || _isError(type, title)) {
           _reconnect = SenseReconnectState.idle;
+          _reconnectFailed = true;
           _endedAt = _clock();
           _notify();
           return true;
@@ -298,6 +395,26 @@ class SenseLayerController extends ChangeNotifier {
       }
       // The card is up: RustDesk's own retry / error dialogs stay away.
       return kind != null || type == 'restarting-show' || title == 'Connection Error';
+    }
+    // Sürüm 11 (O7): the first login to a busy computer: the Sense card, in Turkish.
+    if (kind == SenseMessageKind.busy) {
+      _end(SenseEndReason.busy);
+      return true;
+    }
+    if (kind == SenseMessageKind.hostEnded || kind == SenseMessageKind.idle) {
+      _end(senseEndReasonOf(kind!)!);
+      return true;
+    }
+    // Sürüm 11 (O1): while reconnecting, the failed rounds' messages stay away; the lost card
+    // says what happens.
+    if (_link.transportDown && (type == 'restarting-show' || _isError(type, title))) {
+      return true;
+    }
+    // A link that was up dropped (reset, timeout): connect again for real instead of ending.
+    if (kind == SenseMessageKind.peerGone && _everUp) {
+      _link.transportLost(_clock());
+      tick();
+      return true;
     }
     // Karar #94: the transport is gone: the "kesildi" card shows; the session closes
     // only when no frame and no delay measurement came for 30 s.
@@ -308,15 +425,20 @@ class SenseLayerController extends ChangeNotifier {
       tick();
       return true;
     }
-    if (kind == null || kind == SenseMessageKind.busy) return false;
+    if (kind == null) return false;
     _end(senseEndReasonOf(kind)!);
     return true;
   }
 
+  static bool _isError(String type, String title) =>
+      title == 'Connection Error' || type == 'error' || type.contains('error');
+
   /// "Bağlantıyı bitir" (after the in-place second step).
   void endByUser() {
     if (_disposed) return;
-    _finishHome();
+    _timer?.cancel();
+    _timer = null;
+    host.endConnection();
   }
 
   /// "Kapat" on the ended card.
@@ -326,6 +448,8 @@ class SenseLayerController extends ChangeNotifier {
   void reconnectEnded() {
     if (_ended == null || _reconnect == SenseReconnectState.connecting) return;
     _reconnect = SenseReconnectState.connecting;
+    _reconnectFailed = false;
+    _reconnectAt = _clock();
     _watchingSince = _wall();
     host.reconnect();
     _notify();
@@ -335,12 +459,15 @@ class SenseLayerController extends ChangeNotifier {
     _ended = null;
     _endedAt = null;
     _reconnect = SenseReconnectState.idle;
+    _reconnectFailed = false;
     _link.reset();
+    _retry.stop();
     _dismissed = false;
     _prevPhase = SenseLinkPhase.normal;
     _startedAt = now;
     _idle.activity(now);
     wavy.value = false;
+    onReconnected?.call();
   }
 
   void _end(SenseEndReason reason) {
@@ -354,6 +481,8 @@ class SenseLayerController extends ChangeNotifier {
     );
     _endedAt = now;
     _reconnect = SenseReconnectState.idle;
+    _retry.stop();
+    _waitingSince = null;
     _infoOpen = false;
     wavy.value = false;
     host.closePopups();

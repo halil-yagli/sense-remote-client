@@ -30,7 +30,17 @@ class SenseFfiLayerHost implements SenseLayerHost {
       probeAt: d.probeAt,
       direct: _direct(),
       speed: d.speed,
+      waitingImage: _waitingImage(),
     );
+  }
+
+  /// Sürüm 11 (#121): the Host's peer info came (login done) but no picture yet.
+  bool _waitingImage() {
+    try {
+      return ffi.ffiModel.pi.isSet.isTrue && ffi.ffiModel.waitForFirstImage.isTrue;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Sürüm 10 (#110): connection type for the good-link card (same source as the bar).
@@ -74,6 +84,40 @@ class SenseFfiLayerHost implements SenseLayerHost {
 
   @override
   void reconnect() => ffi.ffiModel.reconnect(ffi.dialogManager, ffi.sessionId, false);
+
+  /// Sürüm 11 (O1): the same new round as RustDesk's reconnect, without its "Connecting…"
+  /// dialog (the lost card shows the attempt). A round still connecting is left alone
+  /// (`Session::reconnect`).
+  @override
+  void retry() {
+    try {
+      ffi.inputModel.setRelativeMouseMode(false);
+    } catch (_) {}
+    bind.sessionReconnect(sessionId: ffi.sessionId, forceRelay: false);
+  }
+
+  /// Sürüm 11 (O2): every window of the connection closes, then this one.
+  @override
+  void endConnection() {
+    // The other windows are found through this window's session: close it only afterwards.
+    bind
+        .sessionSenseEndAll(sessionId: ffi.sessionId)
+        .catchError((_) {})
+        .whenComplete(() => closeConnection(id: id));
+  }
+
+  @override
+  void shareActivity() => bind.sessionSenseActivity(sessionId: ffi.sessionId);
+
+  @override
+  Duration? sharedIdle() {
+    try {
+      final ms = bind.sessionSenseIdleMs(sessionId: ffi.sessionId);
+      return ms < 0 ? null : Duration(milliseconds: ms);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// A video refresh request resets the Host's idle timer
   /// (`connection.rs` `RefreshVideoDisplay` → `update_auto_disconnect_timer`).

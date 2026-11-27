@@ -22,6 +22,8 @@ class SenseConnectionLayers extends StatelessWidget {
   static SenseLayerController controllerFor(String id, FFI ffi) => _byId.putIfAbsent(id, () {
         final c = SenseLayerController(host: SenseFfiLayerHost(id, ffi));
         SenseIdlePolicy.load(id, c);
+        // Sürüm 11 (O5): the limit may have changed in the panel while the link was down.
+        c.onReconnected = () => SenseIdlePolicy.load(id, c);
         return c;
       });
 

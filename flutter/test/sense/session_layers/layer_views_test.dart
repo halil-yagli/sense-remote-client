@@ -100,6 +100,7 @@ const _lost = SenseLinkView(
   phase: SenseLinkPhase.lost,
   sample: SenseLinkSample(fps: 0),
   stall: Duration(seconds: 9),
+  retries: 3,
 );
 
 const _summary = SenseSessionSummary(
@@ -141,7 +142,7 @@ void main() {
     });
 
     testWidgets('"Bağlantıyı bitir" asks in place, Vazgeç goes back, Bitir ends', (tester) async {
-      var ended = 0;
+
       await _pump(tester, SenseLinkLayer(view: _weak, onEnd: () => ended++));
       await tester.tap(find.byKey(const Key('sense-layer-end')));
       await tester.pump();
@@ -282,6 +283,38 @@ void main() {
       await _pump(tester, SenseLinkLayer(view: _lost, onEnd: () {}));
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(_golden('o13_lost_c12')));
     }, skip: _skip('o13_lost_c12'), tags: ['golden']);
+  });
+
+  // Sürüm 11 (#121): logged in, no picture: a Turkish card instead of a black screen.
+  group('#121 waiting for the picture', () {
+    testWidgets('relay: title, path, status line, end button', (tester) async {
+
+      await _pump(tester, SenseWaitingImageLayer(direct: false, onEnd: () {}));
+      expect(find.text('Görüntü bekleniyor'), findsOneWidget);
+      expect(find.text('Aktarma sunucusu üzerinden; yavaş olabilir'), findsOneWidget);
+      expect(find.text('Uzak bilgisayardan ilk görüntü isteniyor…'), findsOneWidget);
+      expect(find.byKey(const Key('sense-waiting-end')), findsOneWidget);
+    });
+
+    testWidgets('direct and unknown path', (tester) async {
+      await _pump(tester, SenseWaitingImageLayer(direct: true, onEnd: () {}));
+      expect(find.text('Doğrudan bağlantı'), findsOneWidget);
+      await _pump(tester, SenseWaitingImageLayer(direct: null, onEnd: () {}));
+      expect(find.text('Bağlantı türü ölçülüyor'), findsOneWidget);
+    });
+
+    testWidgets('lost card with no attempt yet says so without a count', (tester) async {
+      await _pump(
+          tester,
+          SenseLinkLayer(
+              view: const SenseLinkView(
+                  phase: SenseLinkPhase.lost,
+                  sample: SenseLinkSample(fps: 0),
+                  stall: Duration(seconds: 2),
+                  lostFor: Duration(seconds: 1)),
+              onEnd: () {}));
+      expect(find.text('Yeniden bağlanılıyor · 29 sn sonra oturum kapanır'), findsOneWidget);
+    });
   });
 
   group('O14 ended (n07)', () {
