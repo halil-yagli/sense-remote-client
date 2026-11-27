@@ -205,6 +205,8 @@ extern "C" {
     pub fn IOSurfaceUnlock(buffer: IOSurfaceRef, options: u32, seed: *mut u32) -> i32;
     pub fn IOSurfaceGetBaseAddressOfPlane(buffer: IOSurfaceRef, index: usize) -> *mut c_void;
     pub fn IOSurfaceGetBytesPerRowOfPlane(buffer: IOSurfaceRef, index: usize) -> usize;
+    // Sense Remote (S11, M5): non-planar surfaces (ScreenCaptureKit).
+    pub fn IOSurfaceGetBytesPerRow(buffer: IOSurfaceRef) -> usize;
 
     // Dispatch
 

@@ -260,6 +260,14 @@ fn main() {
     } else if cfg!(target_os = "macos") {
         // Quartz is second because macOS is the (annoying) exception.
         println!("cargo:rustc-cfg=quartz");
+        // Sense Remote (S11, M5): the ScreenCaptureKit capturer. ScreenCaptureKit itself is
+        // loaded at run time (dlopen), not linked.
+        let sck = "src/quartz/sck.m";
+        cc::Build::new().file(sck).flag("-fobjc-arc").compile("sense_sck");
+        println!("cargo:rerun-if-changed={}", sck);
+        for framework in ["Foundation", "CoreMedia", "CoreVideo"] {
+            println!("cargo:rustc-link-lib=framework={}", framework);
+        }
     } else if cfg!(unix) {
         // On UNIX we pray that X11 (with XCB) is available.
         println!("cargo:rustc-cfg=x11");

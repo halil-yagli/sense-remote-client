@@ -9,6 +9,9 @@ mod config;
 mod display;
 pub mod ffi;
 mod frame;
+// Sense Remote (S11, M5): ScreenCaptureKit backend and the choice between the two.
+pub mod sck;
+pub mod select;
 
 use std::sync::{Arc, Mutex};
 
