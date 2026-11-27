@@ -2,6 +2,8 @@
 // Quality values: `QualityMonitorModel.data` (TK7; D1 `last_frame_ms`, `loss_est`).
 // Session-ending messages: [SenseSessionHub] (models/model.dart `handleMsgBox`).
 import '../../../../../common.dart' show closeConnection;
+import '../../../../../common/shared_state.dart' show ConnectionType, ConnectionTypeState;
+import '../../../../../consts.dart' show kInvalidValueStr;
 import '../../../../../models/chat_model.dart';
 import '../../../../../models/model.dart';
 import '../../../../../models/platform_model.dart';
@@ -26,7 +28,19 @@ class SenseFfiLayerHost implements SenseLayerHost {
       lastFrameMs: d.lastFrameMs,
       lastFrameAt: d.lastFrameAt,
       probeAt: d.probeAt,
+      direct: _direct(),
     );
+  }
+
+  /// Sürüm 10 (#110): connection type for the good-link card (same source as the bar).
+  bool? _direct() {
+    try {
+      final v = ConnectionTypeState.find(ffi.id).direct.value;
+      if (v == kInvalidValueStr) return null;
+      return v == ConnectionType.strDirect;
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

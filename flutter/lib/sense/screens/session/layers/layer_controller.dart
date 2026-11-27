@@ -22,6 +22,7 @@ class SenseLinkRaw {
     this.lastFrameMs,
     this.lastFrameAt,
     this.probeAt,
+    this.direct,
   });
 
   final String? delay;
@@ -30,6 +31,10 @@ class SenseLinkRaw {
   final int? lastFrameMs;
   final DateTime? lastFrameAt;
   final DateTime? probeAt;
+
+  /// Sürüm 10 (#110): true = direct, false = through the relay, null = not known yet
+  /// (the good-link card shows the connection type).
+  final bool? direct;
 }
 
 /// What the layers need from the RustDesk session.
@@ -113,6 +118,37 @@ class SenseLayerController extends ChangeNotifier {
 
   SenseLinkView get link => _link.view;
 
+  // Sürüm 10 (#110): the link card opened from the bar's logo area while the link is good.
+  bool _infoOpen = false;
+  bool? _direct;
+
+  /// Connection type of the last reading (null = not known yet).
+  bool? get direct => _direct;
+
+  /// The good-link card (O13 layout, current values) is up. It gives way to the weak /
+  /// lost card when trouble starts and to the ended card.
+  bool get infoOpen => _infoOpen && _ended == null && _link.view.phase == SenseLinkPhase.normal;
+
+  /// Click on the bar's logo / status area (karar #94, #110): the minimized weak card
+  /// comes back; with a good link the same card opens with the current values.
+  void openCard() {
+    if (_ended != null) return;
+    if (_dismissed) {
+      restoreCard();
+      return;
+    }
+    if (_link.view.phase != SenseLinkPhase.normal || _infoOpen) return;
+    _infoOpen = true;
+    _notify();
+  }
+
+  /// "×" / Kapat on the good-link card.
+  void closeInfo() {
+    if (!_infoOpen) return;
+    _infoOpen = false;
+    _notify();
+  }
+
   /// The weak card was closed with "×" and sits in the bar's logo area. Never true
   /// for the lost card (it stays).
   bool get minimized => _dismissed && _link.view.phase == SenseLinkPhase.weak && !_link.view.dropped;
@@ -173,6 +209,7 @@ class SenseLayerController extends ChangeNotifier {
       return;
     }
     final raw = host.readLink();
+    _direct = raw.direct ?? _direct;
     final view = _link.tick(
       now,
       senseLinkSample(
@@ -208,6 +245,8 @@ class SenseLayerController extends ChangeNotifier {
     final was = _prevPhase;
     _prevPhase = phase;
     if (phase == was) return;
+    // Trouble took the place of the good-link card: it does not come back by itself.
+    if (phase != SenseLinkPhase.normal) _infoOpen = false;
     if (phase == SenseLinkPhase.normal || phase == SenseLinkPhase.lost) {
       _dismissed = false;
     } else if (phase == SenseLinkPhase.weak) {
@@ -310,6 +349,7 @@ class SenseLayerController extends ChangeNotifier {
     );
     _endedAt = now;
     _reconnect = SenseReconnectState.idle;
+    _infoOpen = false;
     wavy.value = false;
     host.closePopups();
     _notify();

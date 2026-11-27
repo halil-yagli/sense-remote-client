@@ -150,6 +150,9 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
             shrink: lost ? 0 : _shrinkCurve.value,
             shrinkTo: widget.shrinkTo ?? Offset(40, widget.stripTop / 2),
           );
+    } else if (_c.infoOpen) {
+      // Sürüm 10 (#110): the card opened from the logo area while the link is good.
+      layer = (t) => SenseLinkInfoLayer(view: link, direct: _c.direct, onClose: _c.closeInfo, appear: t);
     }
     return SenseToastHost(
       controller: _toast,
@@ -165,7 +168,7 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
           if (layer != null)
             Positioned.fill(
               // Weak → lost keeps the layer (no second fade); ended fades in anew.
-              child: _FadeIn(key: ValueKey(ended != null), builder: layer),
+              child: _FadeIn(key: ValueKey(ended != null ? 'ended' : (_c.infoOpen ? 'info' : 'link')), builder: layer),
             ),
         ],
       ),

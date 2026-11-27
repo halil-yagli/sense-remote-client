@@ -27,22 +27,26 @@ bool _skip(String name) => !autoUpdateGoldenFiles && !File('$_goldenDir/$name.pn
 /// (`SenseSessionFrame` with the test backend), the glow "remote screen" and an
 /// open Bilgisayar durumu popup drawn with the real popup frame and status box.
 class _FakeWindow extends StatelessWidget {
-  const _FakeWindow({this.link});
+  const _FakeWindow({this.link, this.popupOpen = true});
 
   /// What the bar's logo / status area shows (null = the healthy default).
   final bar.SenseLinkSample? link;
+
+  /// Bilgisayar durumu open behind the layer (closed when the logo area opens a card).
+  final bool popupOpen;
 
   @override
   Widget build(BuildContext context) {
     final popups = FakePopups()
       ..statusLevel = SenseLevel.ok
-      ..infoLevel = null
-      ..open.add(bar.SenseBarPopup.status);
+      ..infoLevel = null;
+    if (popupOpen) popups.open.add(bar.SenseBarPopup.status);
     return SenseSessionFrame(
       backend: link == null ? FakeBackend() : FakeBackend(link: link!),
       popups: popups,
       child: Stack(children: [
         const Positioned.fill(child: SenseGlowScene(style: SenseGlowStyle.scene)),
+        if (popupOpen)
         Positioned(
           top: 10,
           right: 10,
@@ -61,7 +65,7 @@ class _FakeWindow extends StatelessWidget {
   }
 }
 
-Future<void> _pump(WidgetTester tester, Widget layer, {bar.SenseLinkSample? link}) async {
+Future<void> _pump(WidgetTester tester, Widget layer, {bar.SenseLinkSample? link, bool popupOpen = true}) async {
   tester.view.physicalSize = const Size(1280, 720);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -78,7 +82,7 @@ Future<void> _pump(WidgetTester tester, Widget layer, {bar.SenseLinkSample? link
       body: RepaintBoundary(
         key: const Key('golden'),
         child: Stack(children: [
-          Positioned.fill(child: _FakeWindow(link: link)),
+          Positioned.fill(child: _FakeWindow(link: link, popupOpen: popupOpen)),
           Positioned.fill(child: layer),
         ]),
       ),
@@ -200,6 +204,61 @@ void main() {
       await expectLater(
           find.byKey(const Key('golden')), matchesGoldenFile(_golden('o13_weak_minimized')));
     }, skip: _skip('o13_weak_minimized'), tags: ['golden']);
+  });
+
+  // Sürüm 10 (#110): the same card opened from the logo area while the link is good.
+  group('O13 good-link card (#110)', () {
+    const good = SenseLinkView(
+      phase: SenseLinkPhase.normal,
+      sample: SenseLinkSample(rttMs: 18, lossPct: 0.2, fps: 60),
+    );
+
+    testWidgets('type, current values, limits line; no end button, no breathing logo', (tester) async {
+      await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, onClose: () {}), popupOpen: false);
+      expect(find.text('Bağlantı iyi'), findsOneWidget);
+      expect(find.text('Doğrudan bağlantı (aktarma yok)'), findsOneWidget);
+      expect(find.text('18 ms'), findsOneWidget);
+      expect(find.text('%0,2'), findsOneWidget);
+      expect(find.text('60 fps'), findsOneWidget);
+      expect(_valueColor(tester, '18 ms'), SenseColors.text, reason: 'large tiles: good values in white');
+      expect(find.textContaining('Çalışılabilir bağlantı'), findsOneWidget);
+      expect(find.byKey(const Key('sense-layer-end')), findsNothing);
+      expect(find.byType(SenseBreathe), findsNothing);
+    });
+
+    testWidgets('relay, unknown type and "Dalgalı" wording', (tester) async {
+      await _pump(tester, SenseLinkInfoLayer(view: good, direct: false, onClose: () {}), popupOpen: false);
+      expect(find.text('Aktarma sunucusu üzerinden'), findsOneWidget);
+      await _pump(
+          tester,
+          SenseLinkInfoLayer(
+              view: const SenseLinkView(phase: SenseLinkPhase.normal, sample: SenseLinkSample(rttMs: 272, fps: 8), wavy: true),
+              direct: null,
+              onClose: () {}),
+          popupOpen: false);
+      expect(find.text('Bağlantı türü ölçülüyor'), findsOneWidget);
+      expect(find.text('Bağlantı dalgalı'), findsOneWidget);
+      expect(_valueColor(tester, '272 ms'), SenseColors.warn);
+    });
+
+    testWidgets('x, Kapat and a click beside the card close it; a click on the card does not', (tester) async {
+      var closed = 0;
+      await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, onClose: () => closed++), popupOpen: false);
+      await tester.tap(find.text('Bağlantı iyi'));
+      expect(closed, 0);
+      await tester.tap(find.byKey(const Key('sense-layer-minimize')));
+      expect(closed, 1);
+      await tester.tap(find.byKey(const Key('sense-layer-info-close')));
+      expect(closed, 2);
+      await tester.tapAt(const Offset(40, 680));
+      expect(closed, 3);
+    });
+
+    testWidgets('golden: good-link card', (tester) async {
+      await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, onClose: () {}),
+          link: const bar.SenseLinkSample(path: bar.SenseLinkPath.direct, fps: 60, rttMs: 18), popupOpen: false);
+      await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(_golden('o13_good_card')));
+    }, skip: _skip('o13_good_card'), tags: ['golden']);
   });
 
   group('O13 lost (c12)', () {
@@ -389,6 +448,20 @@ void main() {
       c.restoreCard(); // what the bar's logo area calls
       await tester.pump();
       expect(find.text(SenseLayerStrings.weakTitle), findsOneWidget);
+    });
+
+    testWidgets('#110: logo area on a good link opens the info card; x closes it', (tester) async {
+      await _pump(tester, SenseSessionLayers(id: 'p1', controller: c, listenToInput: false), popupOpen: false);
+      await seconds(tester, 3, host.healthy);
+      expect(find.byType(SenseLayerVeil), findsNothing);
+      c.openCard(); // what the bar's logo area calls
+      await tester.pump();
+      expect(find.text(SenseLayerStrings.goodTitle), findsOneWidget);
+      expect(find.text('20 ms'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-layer-minimize')));
+      await tester.pump();
+      expect(c.infoOpen, isFalse);
+      expect(find.byType(SenseLayerVeil), findsNothing);
     });
 
     testWidgets('lost card keeps showing and has no x', (tester) async {

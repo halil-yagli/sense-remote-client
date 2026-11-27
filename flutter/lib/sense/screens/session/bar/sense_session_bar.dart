@@ -206,16 +206,16 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
           name: b.peerName,
           line: line.text,
           level: line.level,
-          // Karar #94: while the weak card sits minimized here, a click opens it again.
-          onTap: ready
+          // Karar #94, Sürüm 10 (#110): the logo area opens the connection card (O13
+          // layout): the minimized weak card comes back, with a good link the same card
+          // shows the current values. Ekran bilgisi opens only from its own button.
+          // One popup at a time: open lists and popups close first.
+          onTap: ready && b.link.onRestoreLayer != null
               ? () {
-                  final restore = b.link.onRestoreLayer;
-                  if (restore != null) {
-                    restore();
-                    return;
-                  }
+                  final open = b.link.onRestoreLayer!;
                   menus.close();
-                  if (!widget.popups.isOpen(SenseBarPopup.info)) widget.popups.toggle(SenseBarPopup.info);
+                  widget.popups.closeAll();
+                  open();
                 }
               : null,
         );

@@ -70,9 +70,12 @@ class SenseLayerVeil extends StatelessWidget {
 
 /// The card of the layers (`.nc`).
 class SenseLayerCard extends StatelessWidget {
-  const SenseLayerCard({super.key, required this.children, this.onClose});
+  const SenseLayerCard({super.key, required this.children, this.onClose, this.closeLabel});
 
   final List<Widget> children;
+
+  /// Tooltip of the "x"; default: the weak card's "Kapat (durum alanına küçülür)".
+  final String? closeLabel;
 
   /// "x" in the top right corner (weak card only, karar #94); null = none.
   final VoidCallback? onClose;
@@ -114,8 +117,8 @@ class SenseLayerCard extends StatelessWidget {
           child: SenseInteractive(
             key: const Key('sense-layer-minimize'),
             onTap: onClose,
-            semanticLabel: SenseLayerStrings.minimize,
-            tooltip: SenseLayerStrings.minimize,
+            semanticLabel: closeLabel ?? SenseLayerStrings.minimize,
+            tooltip: closeLabel ?? SenseLayerStrings.minimize,
             builder: (context, s) => SizedBox(
               width: SenseLayerLook.closeSize,
               height: SenseLayerLook.closeSize,
@@ -316,6 +319,104 @@ class SenseLinkLayer extends StatelessWidget {
         ),
       ]),
     );
+  }
+}
+
+/// Sürüm 10 (#110): the O13 card opened from the bar's logo / status area while the link is
+/// good — same layout (logo, title, three value boxes, limits line), with the current
+/// connection type and values; "×" or Kapat closes it, so does a click beside the card.
+class SenseLinkInfoLayer extends StatelessWidget {
+  const SenseLinkInfoLayer({
+    super.key,
+    required this.view,
+    required this.direct,
+    required this.onClose,
+    this.appear = 1,
+  });
+
+  final SenseLinkView view;
+
+  /// true = direct, false = relay, null = not known yet.
+  final bool? direct;
+  final VoidCallback onClose;
+  final double appear;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = view.sample;
+    final tiles = [
+      SenseStatTile(
+        label: SenseLayerStrings.latency,
+        value: s.rttMs == null ? null : SenseLayerStrings.ms(s.rttMs!.round()),
+        level: s.rttMs == null ? null : s.latencyLevel,
+        large: true,
+      ),
+      SenseStatTile(
+        label: SenseLayerStrings.lossEstimated,
+        value: s.lossPct == null ? null : SenseLayerStrings.percent(s.lossPct!),
+        level: s.lossPct == null ? null : s.lossLevel,
+        large: true,
+      ),
+      SenseStatTile(
+        label: SenseLayerStrings.frames,
+        value: s.fps == null ? null : SenseLayerStrings.fps(s.fps!.round()),
+        level: s.fps == null ? null : s.fpsLevel,
+        large: true,
+      ),
+    ];
+    final path = switch (direct) {
+      true => SenseLayerStrings.pathDirect,
+      false => SenseLayerStrings.pathRelay,
+      null => SenseLayerStrings.pathUnknown,
+    };
+    return Stack(children: [
+      Positioned.fill(
+        child: SenseLayerVeil(
+          key: const Key('sense-layer-info'),
+          blur: SenseLayerLook.weakBlur,
+          brightness: SenseLayerLook.weakBrightness,
+          appear: appear,
+          child: const SizedBox.shrink(),
+        ),
+      ),
+      // A click beside the card closes it (the card itself takes its own clicks).
+      Positioned.fill(
+        child: GestureDetector(
+          key: const Key('sense-layer-info-barrier'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onClose,
+        ),
+      ),
+      Center(
+        child: Opacity(
+          opacity: appear,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {},
+            child: SenseLayerCard(onClose: onClose, closeLabel: SenseLayerStrings.closeCard, children: [
+              _logo(breathe: false),
+              _title(view.wavy ? SenseLayerStrings.wavyTitle : SenseLayerStrings.goodTitle,
+                  view.wavy ? SenseColors.warn : SenseColors.ok),
+              _sub(path),
+              _tiles(tiles),
+              Text(
+                senseWorkingLimitsText(),
+                textAlign: TextAlign.center,
+                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: SenseLayerLook.buttonsTop - SenseLayerLook.cardGap),
+                child: SenseButton(
+                  key: const Key('sense-layer-info-close'),
+                  label: SenseLayerStrings.closeCard,
+                  onPressed: onClose,
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    ]);
   }
 }
 

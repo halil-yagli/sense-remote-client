@@ -290,7 +290,9 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       lossPct: d.lossEst,
       // O13: the connection layer decides "Dalgalı" (C4); the T6 limits only without it.
       wavy: SenseLayerController.find(ffi.id)?.wavy.value,
-      onRestoreLayer: layer != null && layer.minimized ? layer.restoreCard : null,
+      // Sürüm 10 (#110): the logo area opens the link card (minimized weak card, or the
+      // same card with the current values while the link is good) — not Ekran bilgisi.
+      onRestoreLayer: layer?.openCard,
     );
   }
 
@@ -510,9 +512,41 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   bool get useAllMyDisplays =>
       _try(() => bind.sessionGetUseAllMyDisplaysForTheRemoteSession(sessionId: _sid), 'N') == 'Y';
 
+  /// Sürüm 10 (#116): whether this session's windows are spread over the local monitors.
+  /// Starts as RustDesk left it at connect (`tryUseAllMyDisplaysForTheRemoteSession` runs
+  /// when the stored value is "Y" and both sides have several screens).
+  bool? _spread;
+  bool _allMinePending = false;
+
+  bool get _canSpread => _pi.isSupportMultiDisplay && _pi.displays.length > 1 && _localMultiScreens;
+
+  @override
+  bool get useAllMyDisplaysPending => _allMinePending;
+
+  /// Sürüm 10 (#116): on → spread at once through RustDesk's own layout path (display 1
+  /// full screen here, the others in their own windows on the other monitors). Off → the
+  /// extra windows are separate RustDesk windows this session cannot close, so the change
+  /// waits for the next connection and the row says so. "Her ekranı ayrı pencerede aç"
+  /// (#97) is not touched.
   @override
   void setUseAllMyDisplays(bool v) {
+    final spread = _spread ??= useAllMyDisplays && _canSpread;
     bind.sessionSetUseAllMyDisplaysForTheRemoteSession(sessionId: _sid, value: v ? 'Y' : 'N');
+    if (v == spread) {
+      _allMinePending = false;
+    } else if (v && _canSpread) {
+      _spread = true;
+      _allMinePending = false;
+      unawaited(Future<void>(() async {
+        try {
+          await _m.tryUseAllMyDisplaysForTheRemoteSession(ffi.id);
+        } catch (e) {
+          debugPrint('Sense: use all my displays failed: $e');
+        }
+      }));
+    } else {
+      _allMinePending = true;
+    }
     _notify();
   }
 

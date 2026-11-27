@@ -339,7 +339,8 @@ class SenseListEntryView extends StatelessWidget {
               : (v) {
                   senseUiSetting(e.id, e.value, v, where: _where);
                   change(v);
-                  notify('${e.label} · ${v ? SenseSessionStrings.on : SenseSessionStrings.off}');
+                  notify(e.toastAfterChange?.call() ??
+                      '${e.label} · ${v ? SenseSessionStrings.on : SenseSessionStrings.off}');
                 },
         ),
       ]),
@@ -432,34 +433,51 @@ class SenseListEntryView extends StatelessWidget {
     );
   }
 
+  /// Sürüm 10 (#111): tiles wrap into rows of [kSenseTilesPerRow]; "Tümü birlikte" is the
+  /// last tile of the list (list_specs) so it always lands at the end and stays visible —
+  /// the old single row drew a fixed 4 slots and dropped the 5th tile on a 4-screen PC.
   Widget _tiles(SenseTilesEntry e) {
     final pick = e.onPick;
+    final rows = <List<SenseTile>>[];
+    for (var i = 0; i < e.tiles.length; i += kSenseTilesPerRow) {
+      final end = i + kSenseTilesPerRow;
+      rows.add(e.tiles.sublist(i, end > e.tiles.length ? e.tiles.length : end));
+    }
+    Widget row(List<SenseTile> tiles) => Row(children: [
+          for (var i = 0; i < kSenseTilesPerRow; i++) ...[
+            if (i > 0) const SizedBox(width: 6),
+            Expanded(
+              child: i < tiles.length
+                  ? _TileButton(
+                      tile: tiles[i],
+                      selected: tiles[i].value == e.value,
+                      onTap: pick == null
+                          ? null
+                          : () {
+                              pick(tiles[i].value);
+                              notify(tiles[i].value < 0
+                                  ? SenseSessionStrings.allScreens
+                                  : SenseSessionStrings.screenN(tiles[i].value + 1));
+                            },
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ]);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-      child: Row(children: [
-        for (var i = 0; i < 4; i++) ...[
-          if (i > 0) const SizedBox(width: 6),
-          Expanded(
-            child: i < e.tiles.length
-                ? _TileButton(
-                    tile: e.tiles[i],
-                    selected: e.tiles[i].value == e.value,
-                    onTap: pick == null
-                        ? null
-                        : () {
-                            pick(e.tiles[i].value);
-                            notify(e.tiles[i].value < 0
-                                ? SenseSessionStrings.allScreens
-                                : SenseSessionStrings.screenN(e.tiles[i].value + 1));
-                          },
-                  )
-                : const SizedBox.shrink(),
-          ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        for (var r = 0; r < rows.length; r++) ...[
+          if (r > 0) const SizedBox(height: 6),
+          row(rows[r]),
         ],
       ]),
     );
   }
 }
+
+/// Tiles per row in the Ekranlar list (prototype `.tiles`, 4 columns).
+const int kSenseTilesPerRow = 4;
 
 class _Tag extends StatelessWidget {
   const _Tag({required this.label, this.level});
