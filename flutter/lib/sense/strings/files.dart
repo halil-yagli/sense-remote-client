@@ -104,7 +104,8 @@ abstract final class SenseFilesStrings {
   static const String transfersEmptyTail = ' ile aktar.';
   static const String sending = 'Gönderiliyor';
   static const String receiving = 'Alınıyor';
-  static String route(String from, String to, String path) => '$from → $to · $path';
+  /// "Bu bilgisayar → PC · C:\…": the arrow is drawn (SenseGlyph; Poppins has no →).
+  static String routeTail(String to, String path) => '$to · $path';
   static const String done = 'Tamamlandı';
   static const String stopped = 'Aktarım durdu';
   static const String paused = 'Duraklatıldı';
