@@ -144,7 +144,8 @@ async fn run(mut jobs: tokio::sync::mpsc::UnboundedReceiver<Job>) {
 impl Runner {
     fn ctx(&mut self, with_disk: bool) -> Ctx {
         let now = now_s();
-        if crate::updater::has_no_active_conns() {
+        let idle = crate::updater::has_no_active_conns();
+        if idle {
             self.idle_since.get_or_insert(now);
         } else {
             self.idle_since = None;
@@ -159,6 +160,7 @@ impl Runner {
             local_hour: local_hour(),
             installed: super::current_version(),
             idle_s: self.idle_since.map_or(0, |t| (now - t).max(0) as u64),
+            connected: !idle,
             free_bytes,
             jitter_s: hbb_common::rand::random::<u64>() % (MAX_JITTER_S + 1),
         }
@@ -166,7 +168,10 @@ impl Runner {
 
     /// Disk space is read only when a download may start.
     fn needs_disk(&self, event: &Event) -> bool {
-        matches!(event, Event::InstallRequested { .. } | Event::Order(Ok(_)))
+        matches!(
+            event,
+            Event::InstallRequested { .. } | Event::InstallNowRequested { .. } | Event::Order(Ok(_))
+        )
             || matches!(
                 self.state.phase,
                 UpdateState::Available | UpdateState::Scheduled | UpdateState::WaitingIdle
@@ -176,10 +181,13 @@ impl Runner {
     fn advance(&mut self, event: Event, ctx: &Ctx) {
         let state = std::mem::take(&mut self.state);
         let before = state.phase;
+        let before_error = state.error;
         let (state, actions) = engine::next(state, event, ctx);
         self.state = state;
         // Sense Remote (S9 P5): phase changes and the reason an update waits, to the log.
         super::wait_log::observe(before, &self.state, ctx.now_s, ctx.idle_s);
+        // Sense Remote (#134): every failed attempt, with its number and the next try.
+        super::wait_log::observe_fail(before_error, &self.state, ctx.now_s);
         for action in actions {
             if let Some(job) = self.job_for(action) {
                 let _ = self.jobs.send(job);
@@ -226,7 +234,8 @@ impl Runner {
                 size: release.size,
                 source: self.state.source.unwrap_or(UpdateSource::Local),
                 oid: self.state.order.as_ref().map(|o| o.oid.clone()),
-                now: self.state.order.as_ref().is_some_and(|o| o.window == crate::sense::update::order::Window::Now),
+                now: self.state.local_now
+                    || self.state.order.as_ref().is_some_and(|o| o.window == crate::sense::update::order::Window::Now),
             }),
         })
     }
@@ -411,17 +420,24 @@ pub fn gui_status() -> Option<GuiStatus> {
     Some(runner.state.gui_status(super::current_version(), runner.checked_at))
 }
 
-/// "Güncelle": checked and started under one lock, so the answer matches what happens.
-pub fn request_install(version: u32) -> String {
+/// "Güncelle" (`now` = "Kapat ve kur", #134): checked and started under one lock, so the
+/// answer matches what happens.
+pub fn request_install(version: u32, now: bool) -> String {
     let mut guard = lock();
     let Some(runner) = guard.as_mut() else {
         return super::UNSUPPORTED.to_owned();
     };
     let ctx = runner.ctx(true);
-    if let Err(code) = engine::check_install(&runner.state, version, &ctx) {
+    let (checked, event) = if now {
+        (engine::check_install_now(&runner.state, version, &ctx), Event::InstallNowRequested { version })
+    } else {
+        (engine::check_install(&runner.state, version, &ctx), Event::InstallRequested { version })
+    };
+    if let Err(code) = checked {
+        super::log_busy(code, &runner.state);
         return code.to_owned();
     }
-    runner.advance(Event::InstallRequested { version }, &ctx);
+    runner.advance(event, &ctx);
     engine::INSTALL_ACCEPTED.to_owned()
 }
 
@@ -449,7 +465,11 @@ pub fn on_ipc(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
                 .map(SenseUpdateIpc::Status)
         }
         SenseUpdateIpc::InstallRequest { version } => {
-            Some(SenseUpdateIpc::InstallAnswer(request_install(version)))
+            Some(SenseUpdateIpc::InstallAnswer(request_install(version, false)))
+        }
+        // Sense Remote (#134): "Kapat ve kur".
+        SenseUpdateIpc::InstallNowRequest { version } => {
+            Some(SenseUpdateIpc::InstallAnswer(request_install(version, true)))
         }
         SenseUpdateIpc::CancelRequest => Some(SenseUpdateIpc::CancelAnswer(request_cancel())),
         _ => None,

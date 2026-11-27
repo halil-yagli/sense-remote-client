@@ -753,6 +753,8 @@ fn sense_service_accepts(data: &Data) -> bool {
             | Data::SenseUpdate(
                 SenseUpdateIpc::Offer { .. }
                     | SenseUpdateIpc::Install { .. }
+                    // Sense Remote (#134): "Kapat ve kur"; the daemon checks it like `Install`.
+                    | SenseUpdateIpc::InstallNow { .. }
                     | SenseUpdateIpc::StatusQuery
                     // Sense Remote (#68): "Vazgeç" on macOS; the answer is the daemon's.
                     | SenseUpdateIpc::CancelRequest
@@ -2794,6 +2796,7 @@ mod test {
                 hint_oid: None,
             },
             SenseUpdateIpc::Install { version: 4 },
+            SenseUpdateIpc::InstallNow { version: 4 },
             SenseUpdateIpc::StatusQuery,
             // Sense Remote (#68): "Vazgeç" on macOS.
             SenseUpdateIpc::CancelRequest,
@@ -2803,6 +2806,8 @@ mod test {
         for rejected in [
             SenseUpdateIpc::Status("{}".to_owned()),
             SenseUpdateIpc::InstallRequest { version: 4 },
+            SenseUpdateIpc::InstallNowRequest { version: 4 },
+            SenseUpdateIpc::CheckNow,
             SenseUpdateIpc::InstallAnswer(String::new()),
             SenseUpdateIpc::DaemonStatus("{}".to_owned()),
             SenseUpdateIpc::CancelAnswer(String::new()),

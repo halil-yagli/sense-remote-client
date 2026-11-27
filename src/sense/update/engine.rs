@@ -12,13 +12,17 @@
 //!   night window and the random delay; the platform side closes open sessions first
 //!   (`update::now`).
 //! - Window: `idle` = as soon as idle; `night` = local hour in
-//!   `NIGHT_START_HOUR..NIGHT_END_HOUR` and idle. "Güncelle" in the app is `idle` only when
-//!   no panel order is held; it keeps a held order's `night` window (the panel's choice is
-//!   not overridden from the computer), it only skips the random delay.
+//!   `NIGHT_START_HOUR..NIGHT_END_HOUR` and idle.
+//! - Sense Remote (#134): "Güncelle" in the app is the person at the computer asking, so a
+//!   local job waits only while a connection is open right now (`Ctx::connected`), not for
+//!   `IDLE_S` without a break and not for a held order's night window. "Kapat ve kur" (the
+//!   user confirmed in the strip, `InstallNowRequested`) waits for nothing, like a `now`
+//!   order: the open sessions are told and closed first (`update::now`).
 //! - A panel order waits a random 0..=`MAX_JITTER_S` before downloading; a local request does
 //!   not.
 //! - At most `MAX_ATTEMPTS` per version in 24 h, waiting `RETRY_AFTER_S` in between, then
-//!   `failed` stays; a new `oid` resets the counter.
+//!   `failed` stays; a new `oid` resets the counter, and so does the user's own "Güncelle" /
+//!   "Tekrar dene" (#134: the automatic retries stay limited, a press always tries again).
 //! - Disk: `DISK_FACTOR × size` free before downloading, otherwise `disk_space`.
 //! - A connection that starts after the download: back to `scheduled`, the file is kept.
 //! - Hint (§3.4): `release == null` in `HINT_NULLS_TO_DROP` successful answers in a row drops
@@ -102,6 +106,9 @@ pub struct State {
     pub from: Option<u32>,
     pub stored_oid: Option<String>,
     pub last_result: Option<LastResult>,
+    /// Sense Remote (#134): the user confirmed "Kapat ve kur": this job waits for nothing and
+    /// closes the open sessions before the installer. Memory only; ends with the job.
+    pub local_now: bool,
 }
 
 impl Default for State {
@@ -126,6 +133,7 @@ impl Default for State {
             from: None,
             stored_oid: None,
             last_result: None,
+            local_now: false,
         }
     }
 }
@@ -140,6 +148,9 @@ pub enum Event {
     Hint(Hint),
     /// "Güncelle" in the app (`InstallRequest` / macOS `Install`).
     InstallRequested { version: u32 },
+    /// Sense Remote (#134): "Kapat ve kur" in the app, after the user confirmed that the open
+    /// connections close (`InstallNowRequest` / macOS `InstallNow`).
+    InstallNowRequested { version: u32 },
     /// "Vazgeç" in the app while downloading (`CancelRequest`, macOS `Cancel`).
     CancelRequested,
     DownloadProgress(u8),
@@ -163,6 +174,9 @@ pub struct Ctx {
     pub installed: u32,
     /// Seconds without any active connection (0 while one is active).
     pub idle_s: u64,
+    /// Sense Remote (#134): a connection (incoming, or this computer's own Controller session)
+    /// is open right now, as far as the runner measured. What a local job waits for.
+    pub connected: bool,
     /// Free bytes on the download volume; `None` when it could not be read.
     pub free_bytes: Option<u64>,
     /// This step's random delay for a panel order, 0..=`MAX_JITTER_S`.
@@ -196,21 +210,15 @@ pub fn next(mut state: State, event: Event, ctx: &Ctx) -> (State, Vec<Action>) {
         Event::Order(Ok(order)) => on_order(s, order, ctx, &mut actions),
         Event::Order(Err(reason)) => refused(s, UpdateError::OrderInvalid, reason),
         Event::Hint(hint) => on_hint(s, hint, &mut actions),
-        Event::InstallRequested { version } => {
-            if check_install(s, version, ctx).is_ok() {
-                s.source = Some(UpdateSource::Local);
-                s.not_before_s = None;
-                s.phase = UpdateState::Scheduled;
-                clear_error(s);
-                try_start(s, ctx, &mut actions);
-            }
-        }
+        Event::InstallRequested { version } => on_install(s, version, false, ctx, &mut actions),
+        Event::InstallNowRequested { version } => on_install(s, version, true, ctx, &mut actions),
         Event::CancelRequested => {
             if check_cancel(s).is_ok() {
                 // Back to "Yeni sürüm hazır": the user's own download, so the cancelled attempt
                 // does not count and nothing waits before "Güncelle" works again.
                 s.phase = UpdateState::Available;
                 s.source = None;
+                s.local_now = false;
                 s.progress_pct = None;
                 s.not_before_s = None;
                 s.attempts = s.attempts.saturating_sub(1);
@@ -260,6 +268,7 @@ pub fn next(mut state: State, event: Event, ctx: &Ctx) -> (State, Vec<Action>) {
                 s.from = None;
                 s.stored_oid = None;
                 s.source = None;
+                s.local_now = false;
                 s.attempts = 0;
                 s.first_attempt_s = None;
             }
@@ -277,6 +286,10 @@ pub fn next(mut state: State, event: Event, ctx: &Ctx) -> (State, Vec<Action>) {
 }
 
 /// Whether "Güncelle" for `version` is taken now; `Err` is the FFI's answer.
+/// Sense Remote (#134): `failed` always takes it: the user's press opens a new attempt period
+/// (as a new `oid` does for the panel). Before, three failures answered `busy` ("Güncelleme
+/// zaten sürüyor") for 24 h while "Tekrar dene" was still shown. `busy` now only means a job
+/// really runs (downloading, verifying, installing) or just ended.
 pub fn check_install(state: &State, version: u32, ctx: &Ctx) -> Result<(), &'static str> {
     let Some(release) = state.release.as_ref().filter(|r| r.version == version) else {
         return Err(NO_RELEASE);
@@ -285,10 +298,54 @@ pub fn check_install(state: &State, version: u32, ctx: &Ctx) -> Result<(), &'sta
         return Err(NOT_NEWER);
     }
     match state.phase {
-        UpdateState::Available | UpdateState::Scheduled | UpdateState::WaitingIdle => Ok(()),
-        UpdateState::Failed if attempts_left(state, ctx.now_s) => Ok(()),
+        UpdateState::Available
+        | UpdateState::Scheduled
+        | UpdateState::WaitingIdle
+        | UpdateState::Failed => Ok(()),
         _ => Err(BUSY),
     }
+}
+
+/// Sense Remote (#134): whether "Kapat ve kur" is taken now. As `check_install`, and also while
+/// the job downloads or verifies (it then installs at once when the file is ready).
+pub fn check_install_now(state: &State, version: u32, ctx: &Ctx) -> Result<(), &'static str> {
+    match check_install(state, version, ctx) {
+        Err(BUSY)
+            if matches!(
+                state.phase,
+                UpdateState::Downloading | UpdateState::Verifying
+            ) =>
+        {
+            Ok(())
+        }
+        other => other,
+    }
+}
+
+/// Sense Remote (#134): the user's own request. A new attempt period, the panel's random delay
+/// and the wait after a failure skipped; `now` = the user confirmed closing the open sessions.
+fn on_install(s: &mut State, version: u32, now: bool, ctx: &Ctx, actions: &mut Vec<Action>) {
+    let checked = if now {
+        check_install_now(s, version, ctx)
+    } else {
+        check_install(s, version, ctx)
+    };
+    if checked.is_err() {
+        return;
+    }
+    if s.started() {
+        // Only "Kapat ve kur" gets here (downloading / verifying): installed once verified.
+        s.local_now = true;
+        return;
+    }
+    s.attempts = 0;
+    s.first_attempt_s = None;
+    s.source = Some(UpdateSource::Local);
+    s.local_now = now;
+    s.not_before_s = None;
+    s.phase = UpdateState::Scheduled;
+    clear_error(s);
+    try_start(s, ctx, actions);
 }
 
 /// Whether "Vazgeç" is taken now; `Err` is the FFI's answer. Only the user's own download
@@ -389,6 +446,18 @@ impl State {
             checked_at,
             mac_permission_warning: false,
             last_result: self.last_result.clone(),
+            attempts: (self.attempts > 0).then_some(self.attempts.min(10)),
+            retry_at: self.retry_at(),
+        }
+    }
+
+    /// Sense Remote (#134): when the next automatic attempt starts, while a failed attempt's
+    /// wait runs (`available` with a job and a start time ahead).
+    fn retry_at(&self) -> Option<i64> {
+        if self.phase == UpdateState::Available && self.source.is_some() {
+            self.not_before_s
+        } else {
+            None
         }
     }
 
@@ -589,6 +658,7 @@ fn on_order(s: &mut State, order: Order, ctx: &Ctx, actions: &mut Vec<Action>) {
         return; // the user's request already runs, without the delay
     }
     s.source = Some(UpdateSource::Panel);
+    s.local_now = false;
     clear_error(s);
     // Sense Remote (`now`): the operator wants it at once, no random delay.
     let jitter = if s.window() == Window::Now {
@@ -651,6 +721,7 @@ fn drop_release(s: &mut State, actions: &mut Vec<Action>) {
     s.release = None;
     s.order = None;
     s.source = None;
+    s.local_now = false;
     s.not_before_s = None;
     s.blocked = None;
     if s.phase != UpdateState::Failed {
@@ -662,15 +733,16 @@ fn due(s: &State, now_s: i64) -> bool {
     s.not_before_s.map_or(true, |t| now_s >= t)
 }
 
-fn attempts_left(s: &State, now_s: i64) -> bool {
-    s.attempts < MAX_ATTEMPTS || s.first_attempt_s.map_or(true, |t| now_s - t >= ATTEMPT_PERIOD_S)
-}
-
 fn blocked_by(s: &State, ctx: &Ctx) -> Option<Blocked> {
     // Sense Remote (`now`): an order signed by the panel for "now" waits for nothing; the
-    // runner closes the open sessions (with a notice) right before the installer.
-    if s.window() == Window::Now {
+    // runner closes the open sessions (with a notice) right before the installer. The same
+    // for the user's confirmed "Kapat ve kur" (#134).
+    if s.window() == Window::Now || s.local_now {
         return None;
+    }
+    // Sense Remote (#134): the person at the computer asked; only an open connection waits.
+    if s.source == Some(UpdateSource::Local) {
+        return ctx.connected.then_some(Blocked::SessionActive);
     }
     if ctx.idle_s < IDLE_S {
         return Some(Blocked::SessionActive);
@@ -759,6 +831,8 @@ fn fail(s: &mut State, error: UpdateError, ctx: &Ctx, actions: &mut Vec<Action>)
     s.error_detail = None;
     s.progress_pct = None;
     s.blocked = None;
+    // A confirmed "Kapat ve kur" was for this attempt only; the automatic retry waits again.
+    s.local_now = false;
     drop_file(s, actions);
     if s.attempts < MAX_ATTEMPTS {
         let index = usize::from(s.attempts.saturating_sub(1)).min(RETRY_AFTER_S.len() - 1);

@@ -867,6 +867,13 @@ jobs:
             MAC_NOTE="ad-hoc imzali"
           fi
           # --draft: herkese acik degil; yayinlamayi ekip elle yapar.
+          # Ayni etiketle yeniden calistirma (B7): taslak zaten varsa dosyalar yerine konur
+          # (--clobber); baslik ve not ellenmez. Yoksa taslak olusturulur.
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" "$DMG" "$FILE.yapi.json" "$DMG.yapi.json" SHA256SUMS.txt \
+              --repo "$REPO" --clobber
+            exit 0
+          fi
           gh release create "$TAG" "$FILE" "$DMG" "$FILE.yapi.json" "$DMG.yapi.json" SHA256SUMS.txt \
             --repo "$REPO" --draft --verify-tag \
             --title "Sense Remote ${VERSION}" \

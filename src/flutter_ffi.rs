@@ -315,6 +315,22 @@ pub fn session_close(session_id: SessionID) {
     }
 }
 
+/// Sense Remote (O2): "Bağlantıyı bitir" closes the connection in every window that shows it
+/// (`flutter::sessions::sense_end_all`); the caller then closes its own window as before.
+pub fn session_sense_end_all(session_id: SessionID) {
+    sessions::sense_end_all(&session_id);
+}
+
+/// Sense Remote (O3): mouse / keyboard input in this window (shared by the connection's windows).
+pub fn session_sense_activity(session_id: SessionID) {
+    sessions::sense_activity(&session_id);
+}
+
+/// Sense Remote (O3): ms since the last input in any window of this connection; -1 = none yet.
+pub fn session_sense_idle_ms(session_id: SessionID) -> SyncReturn<i64> {
+    SyncReturn(sessions::sense_idle_ms(&session_id))
+}
+
 pub fn session_refresh(session_id: SessionID, display: usize) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.refresh_video(display as _);
@@ -2734,6 +2750,18 @@ pub fn main_sense_notify(title: String, body: String) -> String {
 // `not_downloading`, `panel_order`, `ipc_failed` or `unsupported` (macOS for now).
 pub fn main_sense_update_cancel() -> String {
     crate::sense::update::request_cancel()
+}
+
+// Sense Remote (#134): "Kapat ve kur" in the update strip, after the user confirmed that the
+// open connections close. Same answers as `main_sense_update_install`.
+pub fn main_sense_update_install_now(version: i32) -> String {
+    crate::sense::update::request_install_now(version)
+}
+
+// Sense Remote (#134): "Denetle" in About asks the panel at once (the next heartbeat is sent
+// without waiting). "" when asked, otherwise `retry_soon`, `ipc_failed` or `unsupported`.
+pub fn main_sense_update_check() -> String {
+    crate::sense::update::request_check()
 }
 
 pub fn main_account_auth(op: String, remember_me: bool) {

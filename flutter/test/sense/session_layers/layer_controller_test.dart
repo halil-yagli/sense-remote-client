@@ -100,13 +100,43 @@ void main() {
       expect(c.ended, isNull);
     });
 
-    test('no data for 29 s: no card; 32 s: the ended card', () {
+    // Sürüm 11 (O1): a link that was up and went silent (TCP says nothing by itself) is
+    // reconnected for real; the session ends 30 s later only if it does not come back.
+    test('no data: 10 s quiet, then the lost card with real attempts; ended 30 s later', () {
       seconds(1, host.healthy);
-      seconds(29);
+      seconds(11);
+      expect(c.link.layerUp, isFalse);
+      expect(host.calls, isNot(contains('retry')));
+      seconds(2);
+      expect(c.link.phase, SenseLinkPhase.lost);
+      expect(host.calls.where((x) => x == 'retry').length, 1);
+      seconds(28);
+      expect(c.ended, isNull);
+      expect(host.calls.where((x) => x == 'retry').length, 5, reason: '1, 2, 4, 8, 8 s apart');
+      expect(c.link.attempt, 5, reason: 'the card counts the real attempts');
+      seconds(1);
+      expect(c.ended!.reason, SenseEndReason.peerGone);
+    });
+
+    test('an attempt that works: the card goes, the policy is read again, no end', () {
+      var reloads = 0;
+      c.onReconnected = () => reloads++;
+      seconds(1, host.healthy);
+      seconds(14);
+      expect(c.link.phase, SenseLinkPhase.lost);
+      expect(host.calls, contains('retry'));
+      seconds(4, host.healthy);
       expect(c.link.layerUp, isFalse);
       expect(c.ended, isNull);
-      seconds(3);
-      expect(c.ended, isNotNull);
+      expect(reloads, 1);
+      expect(c.recoveredSerial, 1);
+    });
+
+    test('the Host never answered yet (waiting for approval): no attempts', () {
+      host.raw = const SenseLinkRaw();
+      seconds(25);
+      expect(host.calls, isNot(contains('retry')));
+      expect(c.link.layerUp, isFalse);
     });
 
     test('data keeps coming: the layer never closes or reconnects the session', () {
@@ -130,17 +160,25 @@ void main() {
       expect(c.recoveredSerial, before + 1);
     });
 
-    test('30 s frozen: the ended card, reason "Uzak bilgisayar…", popups closed', () {
+    test('frozen and never back: the ended card, reason "Uzak bilgisayar…", popups closed', () {
       seconds(1, host.healthy);
-      seconds(32);
+      seconds(42);
       expect(c.ended, isNotNull);
       expect(c.ended!.reason, SenseEndReason.peerGone);
       expect(host.calls, contains('closePopups'));
     });
 
-    test('"Bağlantıyı bitir" closes the window', () {
+    // Sürüm 11 (O2): every window of the connection closes, not only this one.
+    test('"Bağlantıyı bitir" ends the connection in every window', () {
       c.endByUser();
-      expect(host.calls, ['home']);
+      expect(host.calls, ['end']);
+    });
+
+    test('ended in another window of the connection: this one closes too', () {
+      seconds(3, host.healthy);
+      expect(c.onMessage('error', 'Connection Error', 'sense_ended_here'), isTrue);
+      expect(host.calls, contains('home'));
+      expect(c.ended, isNull, reason: 'no ended card, the window just goes');
     });
   });
 
@@ -217,8 +255,75 @@ void main() {
       expect(c.onMessage('restarting-show', 'Connecting...', 'Connection in progress.'), isTrue);
       expect(c.link.phase, SenseLinkPhase.lost);
       expect(c.ended, isNull);
-      seconds(22);
+      // Sürüm 11 (O1): real attempts during the 30 s; RustDesk's dialogs of the failed rounds
+      // stay away.
+      seconds(2);
+      expect(host.calls, contains('retry'));
+      expect(c.onMessage('error', 'Connection Error', 'Failed to connect via rendezvous server'), isTrue);
+      expect(c.onMessage('restarting-show', 'Connecting...', 'Connection in progress.'), isTrue);
+      seconds(27);
+      expect(c.ended, isNull);
+      seconds(1);
       expect(c.ended!.reason, SenseEndReason.peerGone);
+    });
+
+    test('a reset on a link that was up reconnects instead of ending at once', () {
+      seconds(3, host.healthy);
+      expect(c.onMessage('error', 'Connection Error', 'Reset by the peer'), isTrue);
+      expect(c.ended, isNull);
+      expect(c.link.phase, SenseLinkPhase.lost);
+      seconds(1);
+      expect(host.calls, contains('retry'));
+    });
+
+    // Sürüm 11 (O7): the first login to a busy computer gets the Sense card, in Turkish.
+    test('busy at the first login: Sense card "Meşgul", RustDesk dialog taken', () {
+      expect(c.onMessage('error', 'Login Error', 'sense_busy'), isTrue);
+      expect(c.ended!.reason, SenseEndReason.busy);
+      expect(c.ended!.reasonText, 'Meşgul — şu an başka biri bağlı');
+    });
+
+    test('"Yeniden bağlan" without an answer gives the buttons back after 20 s', () {
+      c.onMessage('error', 'Connection Error', 'Closed manually by the peer');
+      c.reconnectEnded();
+      seconds(19);
+      expect(c.reconnectState, SenseReconnectState.connecting);
+      seconds(1);
+      expect(c.reconnectState, SenseReconnectState.idle);
+      expect(c.reconnectFailed, isTrue);
+      expect(c.backHomeIn, 5);
+    });
+
+    test('"Yeniden bağlan" and a connection error: not stuck on "Bağlanıyor…"', () {
+      c.onMessage('error', 'Connection Error', 'Closed manually by the peer');
+      c.reconnectEnded();
+      expect(c.onMessage('error', 'Connection Error', 'Failed to connect via relay server'), isTrue);
+      expect(c.reconnectState, SenseReconnectState.idle);
+      expect(c.reconnectFailed, isTrue);
+    });
+
+    test('"Yeniden bağlan" that works reads the idle limit again', () {
+      var reloads = 0;
+      c.onReconnected = () => reloads++;
+      c.onMessage('error', 'Connection Error', 'Closed manually by the peer');
+      c.reconnectEnded();
+      clock.advance(const Duration(seconds: 1));
+      host.healthy();
+      c.tick();
+      expect(c.ended, isNull);
+      expect(reloads, 1);
+    });
+
+    // Sürüm 11 (#121): logged in, no picture: "Görüntü bekleniyor" instead of black.
+    test('no picture 3 s after login: the waiting card; it goes with the first picture', () {
+      void waiting() => host.raw = SenseLinkRaw(
+          delay: '20', fps: '0', probeAt: clock.wall, waitingImage: true);
+      seconds(3, waiting); // first seen at 1 s
+      expect(c.waitingImage, isFalse);
+      seconds(1, waiting);
+      expect(c.waitingImage, isTrue);
+      seconds(1, host.healthy);
+      expect(c.waitingImage, isFalse);
     });
 
     test('lost card has no "x": minimize does nothing', () {
@@ -285,7 +390,7 @@ void main() {
       expect(c.link.phase, SenseLinkPhase.normal);
       expect(c.infoOpen, isFalse, reason: 'only a new click opens it');
       c.openCard();
-      expect(c.onMessage('error', 'Connection Error', 'Connection reset by peer'), isTrue);
+      expect(c.onMessage('error', 'Connection Error', 'Closed manually by the peer'), isTrue);
       expect(c.ended, isNotNull);
       expect(c.infoOpen, isFalse);
       c.openCard();
@@ -345,6 +450,27 @@ void main() {
       expect(c.idle.warning, isFalse);
       seconds(60, host.healthy);
       expect(c.ended, isNull);
+    });
+
+    // Sürüm 11 (O3): input in another window of the same connection counts here too.
+    test('input in another window of the connection resets the time', () {
+      seconds(29 * 60 + 10, host.healthy);
+      expect(c.idle.warning, isTrue);
+      host.sharedIdleValue = const Duration(seconds: 2);
+      seconds(1, host.healthy);
+      expect(c.idle.warning, isFalse);
+      host.sharedIdleValue = null;
+      seconds(60, host.healthy);
+      expect(c.ended, isNull);
+    });
+
+    test('input in this window goes to the shared count at most once a second', () {
+      c.activity();
+      c.activity();
+      expect(host.shared, 1);
+      clock.advance(const Duration(seconds: 1));
+      c.activity();
+      expect(host.shared, 2);
     });
 
     test('the limit comes from the panel value', () {

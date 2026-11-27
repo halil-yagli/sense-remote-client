@@ -27,6 +27,12 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTT
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MINOR=${FLUTTER_VERSION_MINOR}")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_PATCH=${FLUTTER_VERSION_PATCH}")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTTER_VERSION_BUILD}")
+# Sense Remote (Surum 11, W19): the Sense version (plain number) for the file details
+# (Runner.rc); only a whole number, otherwise RustDesk's version stays.
+if(DEFINED ENV{SENSE_VERSION} AND "$ENV{SENSE_VERSION}" MATCHES "^[1-9][0-9]*$")
+  target_compile_definitions(${BINARY_NAME} PRIVATE "SENSE_VERSION_NUMBER=$ENV{SENSE_VERSION}")
+  target_compile_definitions(${BINARY_NAME} PRIVATE "SENSE_VERSION_STRING=\"$ENV{SENSE_VERSION}\"")
+endif()
 
 # Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")

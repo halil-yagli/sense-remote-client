@@ -142,6 +142,7 @@ class SenseFileBubble extends StatelessWidget {
     required this.author,
     required this.time,
     this.onReveal,
+    this.onRetry,
   });
 
   final SenseFileJob job;
@@ -150,6 +151,9 @@ class SenseFileBubble extends StatelessWidget {
 
   /// "Klasörde göster"; shown only for a finished received file.
   final VoidCallback? onReveal;
+
+  /// "Yeniden dene" (#122); shown only for a failed file this side sent.
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -181,7 +185,8 @@ class SenseFileBubble extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      job.name,
+                      // #122: the name it was saved under ("a (1).png").
+                      job.finished ? job.savedName : job.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: SenseFontWeight.bold),
@@ -200,6 +205,12 @@ class SenseFileBubble extends StatelessWidget {
                     ),
                     if (job.finished && !mine && onReveal != null)
                       _RevealLink(key: Key('sense-file-reveal-${job.id}'), onTap: onReveal!),
+                    if (failed && mine && onRetry != null)
+                      _RevealLink(
+                        key: Key('sense-file-retry-${job.id}'),
+                        onTap: onRetry!,
+                        label: SenseChatStrings.retry,
+                      ),
                   ],
                 ),
               ),
@@ -213,9 +224,10 @@ class SenseFileBubble extends StatelessWidget {
 }
 
 class _RevealLink extends StatelessWidget {
-  const _RevealLink({super.key, required this.onTap});
+  const _RevealLink({super.key, required this.onTap, this.label = SenseChatStrings.showInFolder});
 
   final VoidCallback onTap;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -223,9 +235,9 @@ class _RevealLink extends StatelessWidget {
       onTap: onTap,
       builder: (context, s) => Opacity(
         opacity: s.hovered || s.focused ? 1 : 0.85,
-        child: const Text(
-          SenseChatStrings.showInFolder,
-          style: TextStyle(
+        child: Text(
+          label,
+          style: const TextStyle(
             fontSize: SenseFontSize.hintSmall,
             decoration: TextDecoration.underline,
           ),

@@ -91,6 +91,22 @@ class SenseRemoteToolbarMap extends StatelessWidget {
   }
 }
 
+/// B7: "Hayalet modla başla" (Controller settings, new-connection default `privacy_mode`).
+/// Karar #95 keeps the default on: only an explicit "N" written by that switch turns the
+/// automatic start off. Tests replace it.
+bool Function() senseGhostStartWanted = _ghostStartFromOption;
+
+bool _ghostStartFromOption() {
+  try {
+    return bind.mainGetUserDefaultOption(key: kSenseGhostStartKey) != 'N';
+  } catch (_) {
+    return true; // native side not ready: the default (on)
+  }
+}
+
+/// The option the switch writes ("Y" on, "N" off, empty = default = on).
+const String kSenseGhostStartKey = 'privacy_mode';
+
 /// Karar #95: ghost mode starts on in every session, once, when the first image
 /// arrives. The choice made inside a session is not carried to the next one (a new
 /// instance starts again). Quietly does nothing where ghost mode cannot be used
@@ -108,6 +124,8 @@ class SenseAutoGhost {
   }) {
     if (_done) return false;
     _done = true;
+    // B7: the Controller setting "Hayalet modla başla" decides; it is on unless turned off.
+    if (!senseGhostStartWanted()) return false;
     if (!ready || on || !available || needsDisplay1 || toggle == null) return false;
     toggle();
     return true;

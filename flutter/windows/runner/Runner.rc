@@ -60,13 +60,19 @@ IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
 // Version
 //
 
-#if defined(FLUTTER_VERSION_MAJOR) && defined(FLUTTER_VERSION_MINOR) && defined(FLUTTER_VERSION_PATCH) && defined(FLUTTER_VERSION_BUILD)
+// Sense Remote (Surum 11, W19): the Sense version (plain number, CMakeLists.txt from
+// SENSE_VERSION) in the file details, as in "Installed apps"; RustDesk's otherwise.
+#if defined(SENSE_VERSION_NUMBER) && defined(SENSE_VERSION_STRING)
+#define VERSION_AS_NUMBER SENSE_VERSION_NUMBER,0,0,0
+#elif defined(FLUTTER_VERSION_MAJOR) && defined(FLUTTER_VERSION_MINOR) && defined(FLUTTER_VERSION_PATCH) && defined(FLUTTER_VERSION_BUILD)
 #define VERSION_AS_NUMBER FLUTTER_VERSION_MAJOR,FLUTTER_VERSION_MINOR,FLUTTER_VERSION_PATCH,FLUTTER_VERSION_BUILD
 #else
 #define VERSION_AS_NUMBER 1,0,0,0
 #endif
 
-#if defined(FLUTTER_VERSION)
+#if defined(SENSE_VERSION_NUMBER) && defined(SENSE_VERSION_STRING)
+#define VERSION_AS_STRING SENSE_VERSION_STRING
+#elif defined(FLUTTER_VERSION)
 #define VERSION_AS_STRING FLUTTER_VERSION
 #else
 #define VERSION_AS_STRING "1.0.0"

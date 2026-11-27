@@ -38,6 +38,13 @@ abstract class SenseUpdateBackend {
 
   /// Stops the running download.
   Future<void> cancel() async {}
+
+  /// #134: "Kapat ve kur": install now, closing the open connections (the
+  /// user confirmed in the strip). Same answers as [install].
+  Future<String> installNow(int version) => install(version);
+
+  /// #134: "Denetle": ask the panel at once; `""` when asked.
+  Future<String> checkNow() async => '';
 }
 
 class SenseUpdateBridge extends SenseUpdateBackend {
@@ -68,6 +75,12 @@ class SenseUpdateBridge extends SenseUpdateBackend {
   Future<void> cancel() async {
     await bind.mainSenseUpdateCancel();
   }
+
+  @override
+  Future<String> installNow(int version) => bind.mainSenseUpdateInstallNow(version: version);
+
+  @override
+  Future<String> checkNow() => bind.mainSenseUpdateCheck();
 }
 
 /// Binds the strip: asks GuiStatus every 5 s and hands the strip (or null)
@@ -102,6 +115,10 @@ class _SenseUpdateWatchState extends State<SenseUpdateWatch> {
   Timer? _timer;
   String? _lastText;
   bool _sending = false;
+
+  /// #134: the macOS step was opened by "Şimdi kur"; its "Yine de güncelle"
+  /// goes on to the connection question instead of a plain request.
+  bool _nowAfterMac = false;
 
   @override
   void initState() {
@@ -149,13 +166,14 @@ class _SenseUpdateWatchState extends State<SenseUpdateWatch> {
     _install();
   }
 
-  Future<void> _install() async {
+  /// [now]: "Kapat ve kur" (#134), after the user confirmed in the strip.
+  Future<void> _install({bool now = false}) async {
     final version = senseUpdateRequestVersion(_status);
     if (version == null || _sending) return;
     _sending = true;
     String answer;
     try {
-      answer = await widget.backend.install(version);
+      answer = now ? await widget.backend.installNow(version) : await widget.backend.install(version);
     } catch (_) {
       answer = 'ipc_failed';
     } finally {
@@ -194,11 +212,34 @@ class _SenseUpdateWatchState extends State<SenseUpdateWatch> {
         _askOrInstall();
         break;
       case SenseUpdateAction.macGo:
+        // After "Şimdi kur" the next step is the connection question (#134).
+        if (_nowAfterMac) {
+          _nowAfterMac = false;
+          setState(() => _ui = _ui.copyWith(askingMac: false, askingNow: true));
+          break;
+        }
         setState(() => _ui = _ui.copyWith(askingMac: false));
         _install();
         break;
       case SenseUpdateAction.macCancel:
+        _nowAfterMac = false;
         setState(() => _ui = _ui.copyWith(askingMac: false));
+        break;
+      case SenseUpdateAction.installNow:
+        // macOS asks about the permissions first, as for Güncelle.
+        if (_status.macPermissionWarning) {
+          _nowAfterMac = true;
+          setState(() => _ui = _ui.copyWith(askingMac: true));
+        } else {
+          setState(() => _ui = _ui.copyWith(askingNow: true));
+        }
+        break;
+      case SenseUpdateAction.nowGo:
+        setState(() => _ui = _ui.copyWith(askingNow: false));
+        _install(now: true);
+        break;
+      case SenseUpdateAction.nowCancel:
+        setState(() => _ui = _ui.copyWith(askingNow: false));
         break;
       case SenseUpdateAction.notes:
         final url = _status.notesUrl;
@@ -258,6 +299,12 @@ class SenseUpdateStripView extends StatelessWidget {
         return senseUpdateText('update');
       case SenseUpdateAction.updateNow:
         return senseUpdateText('update_now');
+      case SenseUpdateAction.installNow:
+        return senseUpdateText('install_now');
+      case SenseUpdateAction.nowGo:
+        return senseUpdateText('now_go');
+      case SenseUpdateAction.nowCancel:
+        return senseUpdateText('cancel');
       case SenseUpdateAction.retry:
         return senseUpdateText('retry');
       case SenseUpdateAction.notes:
@@ -277,13 +324,16 @@ class SenseUpdateStripView extends StatelessWidget {
       case SenseUpdateAction.update:
       case SenseUpdateAction.updateNow:
       case SenseUpdateAction.retry:
+      case SenseUpdateAction.installNow:
         return SenseButtonKind.primary;
       case SenseUpdateAction.macGo:
+      case SenseUpdateAction.nowGo:
         return SenseButtonKind.danger;
       case SenseUpdateAction.notes:
       case SenseUpdateAction.close:
       case SenseUpdateAction.cancel:
       case SenseUpdateAction.macCancel:
+      case SenseUpdateAction.nowCancel:
         return SenseButtonKind.normal;
     }
   }
@@ -325,7 +375,7 @@ class SenseUpdateStripView extends StatelessWidget {
             label: label(a),
             kind: _kind(a),
             size: SenseButtonSize.small,
-            autofocus: a == SenseUpdateAction.macCancel,
+            autofocus: a == SenseUpdateAction.macCancel || a == SenseUpdateAction.nowCancel,
             onPressed: () => onAction(a),
           ),
       ],

@@ -21,6 +21,12 @@
 //! The MAC addresses come only from the panel's inventory of the target; this side cannot tell
 //! which computer they belong to, so the signature is the protection. Nothing is written to disk;
 //! the log names the order and the counts, never a MAC address.
+//!
+//! Sürüm 11 (W16): UDP has no delivery receipt, so every packet goes out [`ROUNDS`] times,
+//! [`ROUND_GAP`] apart (one lost packet must not lose the wake-up). What was sent comes back to
+//! the panel in the next heartbeats (`wol_done`: order id, packets, rounds, time; kept
+//! [`DONE_KEEP_S`]) and in the event record (`wol/sent`). "Sent" is not "woke up": the panel sees
+//! the target come online by itself.
 
 use super::envelope_keys::{self, TrustedKey};
 use hbb_common::{
@@ -32,11 +38,12 @@ use hbb_common::{
         crypto::sign::{verify_detached, PublicKey, Signature},
     },
 };
-use serde_derive::Deserialize;
-use serde_json::Value;
+use serde_derive::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::{
     net::{Ipv4Addr, SocketAddrV4, UdpSocket},
     sync::{Mutex, OnceLock},
+    time::Duration,
 };
 
 /// Domain separation: signed data = this prefix (ASCII) ‖ payload bytes.
@@ -62,6 +69,17 @@ pub const KEY_ANSWER_MORE: &str = "sense_wol_more";
 pub const MAX_ORDERS: usize = 8;
 /// Magic packet ports: 9 (discard, the usual one) and 7 (echo, some network cards listen there).
 pub const PORTS: [u16; 2] = [9, 7];
+/// Sürüm 11 (W16): every packet goes out this many times.
+pub const ROUNDS: usize = 3;
+/// Pause between the rounds.
+pub const ROUND_GAP: Duration = Duration::from_millis(100);
+/// Heartbeat key (outside the signed report, information only) with the orders carried out
+/// lately. The panel's heartbeat schema is a loose object: an older panel ignores it.
+pub const KEY_DONE: &str = "wol_done";
+/// How long a result stays in the heartbeats (the panel keeps the first it sees per `wid`).
+pub const DONE_KEEP_S: i64 = 600;
+/// Most results in one heartbeat.
+pub const DONE_MAX: usize = 8;
 
 const MAX_PAYLOAD_CHARS: usize = 65_536;
 const SIGNATURE_CHARS: usize = 86;
@@ -339,14 +357,15 @@ fn local_addresses() -> Vec<(Ipv4Addr, u8)> {
     Vec::new()
 }
 
-/// Sends every packet; returns how many went out. Blocking (a few UDP sends).
+/// Sends every packet [`ROUNDS`] times; returns how many went out. Blocking (a few UDP sends
+/// and the pauses between the rounds).
 fn send(order: &Order) -> usize {
     let mut targets = broadcast_targets(&local_addresses());
     if targets.is_empty() {
         // No adapter address read: let the system pick the way out.
         targets.push((Ipv4Addr::UNSPECIFIED, Ipv4Addr::BROADCAST));
     }
-    let mut sent = 0;
+    let mut sockets = Vec::new();
     for (bind, dest) in targets {
         let socket = match UdpSocket::bind(SocketAddrV4::new(bind, 0)) {
             Ok(socket) => socket,
@@ -359,16 +378,87 @@ fn send(order: &Order) -> usize {
             log::debug!("Sense Remote: wake-on-LAN broadcast on {bind} refused: {err}");
             continue;
         }
-        for mac in &order.macs {
-            let packet = magic_packet(mac);
-            for port in PORTS {
-                if socket.send_to(&packet, SocketAddrV4::new(dest, port)).is_ok() {
-                    sent += 1;
+        sockets.push((socket, dest));
+    }
+    send_rounds(ROUNDS, ROUND_GAP, |_| {
+        let mut sent = 0;
+        for (socket, dest) in &sockets {
+            for mac in &order.macs {
+                let packet = magic_packet(mac);
+                for port in PORTS {
+                    if socket.send_to(&packet, SocketAddrV4::new(*dest, port)).is_ok() {
+                        sent += 1;
+                    }
                 }
             }
         }
+        sent
+    })
+}
+
+/// Runs `round` `rounds` times with `gap` between them (none after the last) and adds up what
+/// each round sent.
+fn send_rounds(rounds: usize, gap: Duration, mut round: impl FnMut(usize) -> usize) -> usize {
+    let mut sent = 0;
+    for i in 0..rounds {
+        if i > 0 {
+            std::thread::sleep(gap);
+        }
+        sent += round(i);
     }
     sent
+}
+
+/// Sürüm 11 (W16): one carried-out order, as the panel gets it (`wol_done`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Done {
+    pub wid: String,
+    /// Packets that went out (0: none could be sent).
+    pub sent: usize,
+    pub rounds: usize,
+    /// Unix seconds.
+    pub at: i64,
+}
+
+/// Adds `done` (a repeat of a `wid` replaces it), drops results older than [`DONE_KEEP_S`] and
+/// keeps the newest [`DONE_MAX`].
+pub fn remember_done(list: &mut Vec<Done>, done: Done, now_s: i64) {
+    list.retain(|d| d.wid != done.wid);
+    list.push(done);
+    prune_done(list, now_s);
+}
+
+fn prune_done(list: &mut Vec<Done>, now_s: i64) {
+    list.retain(|d| now_s >= d.at && now_s - d.at <= DONE_KEEP_S);
+    if list.len() > DONE_MAX {
+        let extra = list.len() - DONE_MAX;
+        list.drain(..extra);
+    }
+}
+
+fn done_list() -> &'static Mutex<Vec<Done>> {
+    static DONE: OnceLock<Mutex<Vec<Done>>> = OnceLock::new();
+    DONE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Puts the recent results in `heartbeat["sense"]` (after signing, like `update`). Nothing when
+/// there is none.
+pub fn extend_heartbeat(sense: &mut Value) {
+    let list = {
+        let mut list = done_list().lock().unwrap_or_else(|e| e.into_inner());
+        prune_done(&mut list, now_s());
+        list.clone()
+    };
+    insert_done(sense, &list);
+}
+
+fn insert_done(sense: &mut Value, list: &[Done]) {
+    if list.is_empty() {
+        return;
+    }
+    if let Some(object) = sense.as_object_mut() {
+        object.insert(KEY_DONE.to_owned(), json!(list));
+    }
 }
 
 fn seen() -> &'static Mutex<Vec<String>> {
@@ -469,6 +559,16 @@ pub fn on_answer(answer: &str) {
     std::thread::spawn(move || {
         for order in orders {
             let sent = send(&order);
+            remember_done(
+                &mut done_list().lock().unwrap_or_else(|e| e.into_inner()),
+                Done { wid: order.wid.clone(), sent, rounds: ROUNDS, at: now_s() },
+                now_s(),
+            );
+            super::diag::event(
+                "wol",
+                "sent",
+                json!({ "wid": order.wid, "gonderilen": sent, "tur": ROUNDS, "adres": order.macs.len() }),
+            );
             if sent > 0 {
                 log::info!(
                     "Sense Remote: wake-on-LAN order {} carried out: {sent} packets for {} computer address(es)",
@@ -697,5 +797,54 @@ mod tests {
         let orders =
             accept_orders(&answer_envelopes(&mixed), &[key], &expect, &mut fresh, &mut refused);
         assert_eq!((orders.len(), refused.len()), (1, 1));
+    }
+
+    // Sürüm 11 (W16): every packet three times, 100 ms apart, no pause after the last round.
+    #[test]
+    fn packets_go_out_in_rounds() {
+        let mut seen = Vec::new();
+        let start = std::time::Instant::now();
+        let sent = send_rounds(ROUNDS, Duration::from_millis(20), |i| {
+            seen.push(i);
+            4
+        });
+        assert_eq!(sent, 12);
+        assert_eq!(seen, [0, 1, 2]);
+        let took = start.elapsed();
+        assert!(took >= Duration::from_millis(40), "{took:?}");
+        assert_eq!((ROUNDS, ROUND_GAP), (3, Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn done_results_are_kept_ten_minutes_newest_eight() {
+        let done = |wid: &str, at: i64| Done { wid: wid.to_owned(), sent: 12, rounds: 3, at };
+        let mut list = Vec::new();
+        remember_done(&mut list, done("wol_aaaaaaaaaaaaaaaa", 1_000), 1_000);
+        // The same order again replaces its result.
+        remember_done(&mut list, Done { sent: 0, ..done("wol_aaaaaaaaaaaaaaaa", 1_010) }, 1_010);
+        assert_eq!(list, [Done { sent: 0, ..done("wol_aaaaaaaaaaaaaaaa", 1_010) }]);
+        // Older than ten minutes: gone.
+        remember_done(&mut list, done("wol_bbbbbbbbbbbbbbbb", 1_700), 1_700);
+        assert_eq!(list, [done("wol_bbbbbbbbbbbbbbbb", 1_700)]);
+        // At most eight, the newest stay.
+        for i in 0..10 {
+            remember_done(&mut list, done(&format!("wol_{i:016}"), 1_800 + i), 1_800 + i);
+        }
+        assert_eq!(list.len(), DONE_MAX);
+        assert_eq!(list.first().unwrap().wid, "wol_0000000000000002");
+        assert_eq!(list.last().unwrap().wid, "wol_0000000000000009");
+    }
+
+    #[test]
+    fn heartbeat_carries_wol_done_only_when_there_is_one() {
+        let mut sense = json!({ "v": 3 });
+        insert_done(&mut sense, &[]);
+        assert!(sense.get(KEY_DONE).is_none());
+        let list = [Done { wid: "wol_cccccccccccccccc".to_owned(), sent: 12, rounds: 3, at: 5 }];
+        insert_done(&mut sense, &list);
+        assert_eq!(
+            sense[KEY_DONE],
+            json!([{ "wid": "wol_cccccccccccccccc", "sent": 12, "rounds": 3, "at": 5 }])
+        );
     }
 }

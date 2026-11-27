@@ -31,7 +31,11 @@ const TICK: Duration = Duration::from_secs(crate::sense::update::runner::TICK_S)
 
 struct Daemon {
     state: State,
-    limiter: PeerLimiter,
+    /// Sense Remote (#134): separate limits for the user's actions and the periodic calls.
+    limits: CallLimits,
+    /// Sense Remote (#134): the last status answer, given again to a call above the limit
+    /// instead of no answer (the agent waited for its whole timeout).
+    last_status: Option<String>,
     clock: Instant,
     /// Since when no connection is active (Unix s), measured on the timer thread.
     idle_since: Option<i64>,
@@ -118,7 +122,8 @@ pub fn start() {
             let (jobs, receiver) = mpsc::channel();
             *lock() = Some(Daemon {
                 state: State::restore(&store::read(), now_s()),
-                limiter: PeerLimiter::default(),
+                limits: CallLimits::default(),
+                last_status: None,
                 clock: Instant::now(),
                 idle_since: None,
                 checked_at: None,
@@ -179,6 +184,10 @@ impl Daemon {
             local_hour: local_hour(),
             installed: current_version(),
             idle_s: self.idle_since.map_or(0, |t| (now - t).max(0) as u64),
+            // Sense Remote (#134): measured on the timer thread while the engine waits for an
+            // idle computer (`measure_idle`); not measured = treated as connected, so a local
+            // job waits for the next tick (at most `TICK`) instead of installing unmeasured.
+            connected: self.idle_since.is_none(),
             free_bytes,
             jitter_s: hbb_common::rand::random::<u64>() % (MAX_JITTER_S + 1),
         }
@@ -186,7 +195,10 @@ impl Daemon {
 
     /// Disk space is read only when a download may start (as `runner.rs`).
     fn needs_disk(&self, event: &Event) -> bool {
-        matches!(event, Event::InstallRequested { .. } | Event::Order(Ok(_)))
+        matches!(
+            event,
+            Event::InstallRequested { .. } | Event::InstallNowRequested { .. } | Event::Order(Ok(_))
+        )
             || matches!(
                 self.state.phase,
                 UpdateState::Available | UpdateState::Scheduled | UpdateState::WaitingIdle
@@ -196,10 +208,13 @@ impl Daemon {
     fn advance(&mut self, event: Event, ctx: &Ctx) {
         let state = std::mem::take(&mut self.state);
         let before = state.phase;
+        let before_error = state.error;
         let (state, actions) = engine::next(state, event, ctx);
         self.state = state;
         // Sense Remote (S9 P5): phase changes and the reason an update waits, to the log.
         crate::sense::update::wait_log::observe(before, &self.state, ctx.now_s, ctx.idle_s);
+        // Sense Remote (#134): every failed attempt, with its number and the next try.
+        crate::sense::update::wait_log::observe_fail(before_error, &self.state, ctx.now_s);
         for action in actions {
             if let Some(job) = self.job_for(action) {
                 let _ = self.jobs.send(job);
@@ -247,7 +262,8 @@ impl Daemon {
                 size: release.size,
                 source: self.state.source.unwrap_or(UpdateSource::Local),
                 oid: self.state.order.as_ref().map(|o| o.oid.clone()),
-                now: self.state.order.as_ref().is_some_and(|o| o.window == crate::sense::update::order::Window::Now),
+                now: self.state.local_now
+                    || self.state.order.as_ref().is_some_and(|o| o.window == crate::sense::update::order::Window::Now),
             }),
         })
     }
@@ -388,7 +404,16 @@ pub fn on_service_ipc(
     let mut guard = lock();
     let daemon = guard.as_mut()?;
     let now_ms = daemon.clock.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    let allowed = daemon.limiter.allow(peer_pid, peer_uid, now_ms);
+    let allowed = daemon.limits.allow(&message, peer_pid, peer_uid, now_ms);
+    if !allowed {
+        // Sense Remote (#134): an answer rather than silence, so the agent does not wait.
+        crate::sense::diag::event(
+            "update",
+            "limit_drop",
+            serde_json::json!({ "tur": call_kind(&message), "pid": peer_pid.unwrap_or(0) }),
+        );
+        return limited_answer(&message, daemon.last_status.as_deref());
+    }
     let ctx = DaemonCtx {
         panel_keys: keys::panel_keys(),
         build_keys: keys::release_keys(),
@@ -423,14 +448,23 @@ pub fn on_service_ipc(
                 .ok()
                 .map(SenseUpdateIpc::DaemonStatus)
         }
-        Call::Install(version) => {
+        Call::Install(version) | Call::InstallNow(version) => {
+            let now = matches!(message, SenseUpdateIpc::InstallNow { .. });
             let ctx = daemon.ctx(true);
-            let code = match engine::check_install(&daemon.state, version, &ctx) {
+            let (checked, event) = if now {
+                (engine::check_install_now(&daemon.state, version, &ctx), Event::InstallNowRequested { version })
+            } else {
+                (engine::check_install(&daemon.state, version, &ctx), Event::InstallRequested { version })
+            };
+            let code = match checked {
                 Ok(()) => {
-                    daemon.advance(Event::InstallRequested { version }, &ctx);
+                    daemon.advance(event, &ctx);
                     engine::INSTALL_ACCEPTED
                 }
-                Err(code) => code,
+                Err(code) => {
+                    crate::sense::update::log_busy(code, &daemon.state);
+                    code
+                }
             };
             Some(SenseUpdateIpc::InstallAnswer(code.to_owned()))
         }
@@ -452,9 +486,9 @@ pub fn on_service_ipc(
             let status = daemon
                 .state
                 .gui_status(current_version(), daemon.checked_at);
-            serde_json::to_string(&with_warning(status, warning))
-                .ok()
-                .map(SenseUpdateIpc::DaemonStatus)
+            let json = serde_json::to_string(&with_warning(status, warning)).ok();
+            daemon.last_status = json.clone();
+            json.map(SenseUpdateIpc::DaemonStatus)
         }
     }
 }

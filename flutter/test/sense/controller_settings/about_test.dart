@@ -22,6 +22,19 @@ class _FakeUpdate extends SenseUpdateBackend {
   final installs = <int>[];
   String answer = '';
 
+  /// #134: "Denetle" asks the panel; [checkAnswer] is the core's answer and,
+  /// when [panelAnswers], the next status carries a new `checked_at`.
+  int checks = 0;
+  String checkAnswer = '';
+  bool panelAnswers = true;
+
+  @override
+  Future<String> checkNow() async {
+    checks++;
+    if (panelAnswers && checkAnswer.isEmpty) json = {...json, 'checked_at': 1230};
+    return checkAnswer;
+  }
+
   @override
   Future<String> status() async {
     polls++;
@@ -75,7 +88,12 @@ Future<void> _pump(WidgetTester tester, _FakeAbout b, {bool licenses = false, Si
       SizedBox(
         width: size.width,
         height: size.height,
-        child: SenseAboutView(backend: b, year: 2026, now: () => 1240, licensesOpen: licenses),
+        child: SenseAboutView(
+            backend: b,
+            year: 2026,
+            now: () => 1240,
+            licensesOpen: licenses,
+            checkPollInterval: const Duration(milliseconds: 100)),
       ),
       size: size,
       center: false);
@@ -83,20 +101,54 @@ Future<void> _pump(WidgetTester tester, _FakeAbout b, {bool licenses = false, Si
 }
 
 void main() {
-  testWidgets('Güncel + Denetle: Denetle asks the status again', (tester) async {
+  // #134 (D10): Denetle asks the panel and waits for its answer (a new
+  // `checked_at`); before, it only read the last state again.
+  testWidgets('Güncel + Denetle: Denetle asks the panel and waits for its answer', (tester) async {
     final b = _FakeAbout();
     await _pump(tester, b);
     expect(find.text('Güncel'), findsOneWidget);
     expect(find.text('Son denetim 4 dk önce · panelden otomatik'), findsOneWidget);
-    final before = b.update.polls;
     await tester.tap(find.byKey(const Key('sense-about-check')));
     await tester.pump();
+    expect(b.update.checks, 1);
+    expect(find.text(senseUpdateText('checking')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(milliseconds: 400));
-    expect(b.update.polls, before + 1);
     final note = tester.widget<AnimatedOpacity>(
         find.ancestor(of: find.text(senseUpdateText('checked_current')), matching: find.byType(AnimatedOpacity)).first);
     expect(note.opacity, 1);
+    expect(find.text('Son denetim az önce · panelden otomatik'), findsOneWidget);
+    expect(find.text(senseUpdateText('check_no_answer')), findsNothing);
     await tester.pumpAndSettle(const Duration(seconds: 4));
+  });
+
+  testWidgets('Denetle without a panel answer says so and shows the last state', (tester) async {
+    final b = _FakeAbout();
+    b.update.panelAnswers = false;
+    await _pump(tester, b);
+    await tester.tap(find.byKey(const Key('sense-about-check')));
+    for (var i = 0; i <= kSenseCheckPolls; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpAndSettle(const Duration(seconds: 4));
+    expect(find.text(senseUpdateText('check_no_answer')), findsOneWidget);
+    expect(find.text(senseUpdateText('check')), findsOneWidget);
+    // The core could not be reached: said at once, no waiting.
+    b.update.checkAnswer = 'ipc_failed';
+    await tester.tap(find.byKey(const Key('sense-about-check')));
+    await tester.pumpAndSettle(const Duration(seconds: 4));
+    expect(b.update.checks, 2);
+    expect(find.text(senseUpdateText('check_no_answer')), findsOneWidget);
+  });
+
+  // #134: after a failed update About offers Güncelle, which is taken at once now.
+  testWidgets('failed: Güncelle in About tries again', (tester) async {
+    final b = _FakeAbout(update: {'state': 'failed', 'target': 4, 'error': 'download_failed', 'checked_at': 1000});
+    await _pump(tester, b);
+    expect(find.textContaining('indirme tamamlanamadı'), findsWidgets);
+    await tester.tap(find.byKey(const Key('sense-about-update')));
+    await tester.pumpAndSettle();
+    expect(b.update.installs, [4]);
   });
 
   testWidgets('Yeni sürüm hazır + Güncelle installs the target', (tester) async {

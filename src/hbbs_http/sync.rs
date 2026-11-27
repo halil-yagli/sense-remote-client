@@ -268,7 +268,9 @@ async fn start_hbbs_sync_async() {
                         }
                     }
                 }
-                if conns.is_empty() && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
+                // Sense Remote (#134): "Denetle" in the app asks the panel at once.
+                let sense_check_now = crate::sense::update::take_check_now();
+                if conns.is_empty() && !sense_check_now && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
                     continue;
                 }
                 last_sent = Some(Instant::now());
@@ -308,6 +310,9 @@ async fn start_hbbs_sync_async() {
                     // Sense Remote (update plan 2026-11-21, §3.5): `sense.update`, display only
                     // and outside the signed report, so it is added after signing.
                     crate::sense::update::extend_heartbeat(&mut sense);
+                    // Sense Remote (W16): wake orders carried out lately (`wol_done`), also
+                    // outside the signed report.
+                    crate::sense::wol::extend_heartbeat(&mut sense);
                     // Sense Remote (permanent password plan §3.5): `sense.access`, likewise
                     // outside the signed report (the ack signs itself); left out while `None`.
                     crate::sense::password::status::extend_heartbeat(&mut sense);

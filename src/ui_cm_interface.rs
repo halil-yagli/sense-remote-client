@@ -1208,7 +1208,17 @@ async fn handle_fs(
                     send_raw(fs::new_error(id, error, file_num), tx);
                     return;
                 }
-                job.modify_time();
+                // Sense Remote (#122): a chat file that did not get its final name is an error,
+                // not "saved" (RustDesk drops a failed rename).
+                if crate::sense::chat_file::host_is_chat_job(job.conn_id, id) {
+                    if let Err(err) = crate::sense::chat_file::host_finish_write(&job) {
+                        tx_log.map(|tx| tx.send(serialize_transfer_job(&job, false, false, &err)));
+                        send_raw(fs::new_error(id, err, file_num), tx);
+                        return;
+                    }
+                } else {
+                    job.modify_time();
+                }
                 send_raw(fs::new_done(id, file_num), tx);
                 tx_log.map(|tx| tx.send(serialize_transfer_job(&job, true, false, "")));
             }

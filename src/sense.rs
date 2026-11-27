@@ -791,9 +791,11 @@ pub mod install_mac;
 // side only run on macOS, so elsewhere most of the module is used by its tests alone.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod mac_apply;
-#[cfg(target_os = "macos")]
+// Sense Remote (S11 M4, M17): pure parts of these two are tested on every platform.
 #[allow(dead_code)]
 pub mod mac_perm;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub mod mac_service_log;
 #[cfg(target_os = "macos")]
 pub mod mac_state;
 // Sense Remote: our own ID / relay server and its key (2026-11-21).
@@ -834,6 +836,12 @@ pub mod log_upload;
 pub mod wol;
 // Sense Remote (#103): structured event record, panic hook, crash records (log_upload sends them).
 pub mod diag;
+// Sense Remote (Sürüm 11, WN): Windows OS layer (uninstall cleanup, secure desktop, display
+// details at the lock screen, "Installed apps" version).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub mod winos;
+// Sense Remote (#136): the Controller's session recording as the UI and the log see it.
+pub mod recording;
 // Sense Remote (S11, M5): the Mac capture backend choice (`libs/scrap`); CI runs only this crate's
 // tests, so they are compiled here too.
 #[cfg(test)]

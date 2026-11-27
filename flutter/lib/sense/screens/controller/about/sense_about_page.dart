@@ -93,7 +93,13 @@ class SenseAboutPage extends StatelessWidget {
 }
 
 class SenseAboutView extends StatefulWidget {
-  const SenseAboutView({super.key, required this.backend, this.year, this.now, this.licensesOpen = false});
+  const SenseAboutView(
+      {super.key,
+      required this.backend,
+      this.year,
+      this.now,
+      this.licensesOpen = false,
+      this.checkPollInterval = const Duration(seconds: 1)});
 
   final SenseAboutBackend backend;
 
@@ -105,9 +111,17 @@ class SenseAboutView extends StatefulWidget {
 
   final bool licensesOpen;
 
+  /// #134: how often Denetle looks for the panel's answer ([kSenseCheckPolls]
+  /// times at most).
+  final Duration checkPollInterval;
+
   @override
   State<SenseAboutView> createState() => _SenseAboutViewState();
 }
+
+/// #134: Denetle waits this many [SenseAboutView.checkPollInterval]s for the
+/// panel's answer (a heartbeat is sent within 3 s, its answer follows).
+const int kSenseCheckPolls = 12;
 
 class _SenseAboutViewState extends State<SenseAboutView> {
   SenseUpdateStatus _status = SenseUpdateStatus.none;
@@ -160,14 +174,44 @@ class _SenseAboutViewState extends State<SenseAboutView> {
     if (mounted) setState(() => _status = next);
   }
 
+  // #134: Denetle asks the panel (the next heartbeat goes at once) and waits
+  // for its answer (`checked_at` changes); before, it only read the last state
+  // again. No answer in time: the last known state, said so.
   Future<void> _check() async {
-    setState(() => _checking = true);
-    await _poll();
+    setState(() {
+      _checking = true;
+      _answer = null;
+    });
+    final before = _status.checkedAt;
+    String asked;
+    try {
+      asked = await _b.update.checkNow();
+    } catch (_) {
+      asked = 'ipc_failed';
+    }
+    var answered = false;
+    if (asked == 'retry_soon') {
+      // Checked moments ago: that answer is the current one.
+      await _poll();
+      answered = true;
+    } else if (asked.isEmpty) {
+      for (var i = 0; i < kSenseCheckPolls && mounted; i++) {
+        await Future<void>.delayed(widget.checkPollInterval);
+        await _poll();
+        final now = _status.checkedAt;
+        if (now != null && now != before) {
+          answered = true;
+          break;
+        }
+      }
+    } else {
+      await _poll();
+    }
     if (!mounted) return;
     setState(() {
       _checking = false;
-      _answer = null;
-      _checkedTrigger++;
+      _answer = answered ? null : senseUpdateText('check_no_answer');
+      if (answered) _checkedTrigger++;
     });
   }
 
@@ -192,7 +236,7 @@ class _SenseAboutViewState extends State<SenseAboutView> {
         const SizedBox(width: SenseUi.iconGap),
         SenseButton(
           key: const Key('sense-about-check'),
-          label: senseUpdateText('check'),
+          label: senseUpdateText(_checking ? 'checking' : 'check'),
           size: SenseButtonSize.small,
           onPressed: _checking ? null : _check,
         ),

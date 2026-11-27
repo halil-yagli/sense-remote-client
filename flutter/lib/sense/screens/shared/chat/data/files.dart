@@ -4,10 +4,9 @@
 
 import 'dart:convert';
 
-import 'package:url_launcher/url_launcher.dart';
-
 import '../../../../../common.dart' show SessionID;
 import '../../../../../models/platform_model.dart';
+import '../../reveal_file.dart';
 import '../chat_entry.dart';
 
 /// What the chat needs from the file side.
@@ -18,8 +17,8 @@ abstract class SenseChatFiles {
   /// All transfers of this connection, both directions.
   Future<List<SenseFileJob>> jobs();
 
-  /// Opens the folder that holds [path] (never the file itself: O12 "dosya
-  /// kendiliğinden açılmaz").
+  /// Opens the folder that holds [path] with the file selected (never the file
+  /// itself: O12 "dosya kendiliğinden açılmaz"; #122 selected, so it is found).
   Future<void> reveal(String path);
 }
 
@@ -73,8 +72,5 @@ class SenseSessionChatFiles implements SenseChatFiles {
       senseParseFileJobs(await bind.sessionSenseFileJobs(sessionId: sessionId));
 
   @override
-  Future<void> reveal(String path) async {
-    if (path.isEmpty) return;
-    await launchUrl(Uri.file(senseParentFolder(path)));
-  }
+  Future<void> reveal(String path) => senseRevealFile(path);
 }

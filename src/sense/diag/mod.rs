@@ -95,6 +95,28 @@ pub fn session() -> Option<String> {
     SESSION.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+// Sense Remote (O12): a Controller keeps several sessions in one process (tabs, windows), each
+// with its own connection thread and video threads. A thread can name its session; its events
+// carry that one, the process-wide value is only the default.
+thread_local! {
+    static THREAD_SESSION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The session the events of this thread belong to (`None` = the process-wide one).
+pub fn set_thread_session(session: Option<&str>) {
+    let value = session.filter(|s| line::is_session(s)).map(str::to_owned);
+    let _ = THREAD_SESSION.try_with(|t| *t.borrow_mut() = value);
+}
+
+pub fn thread_session() -> Option<String> {
+    THREAD_SESSION.try_with(|t| t.borrow().clone()).ok().flatten()
+}
+
+/// The session an event written now on this thread belongs to.
+pub fn current_session() -> Option<String> {
+    thread_session().or_else(session)
+}
+
 /// For the panic hook: never waits for the lock.
 fn session_nonblocking() -> Option<String> {
     SESSION.try_lock().ok().and_then(|g| g.clone())
@@ -115,11 +137,16 @@ fn allowed_in(window: &mut (i64, u32), now_s: i64) -> bool {
 
 /// Records one event: category `c`, event `k`, `fields` (an object). Invalid names are dropped.
 pub fn event(c: &str, k: &str, fields: Value) {
+    event_in(current_session().as_deref(), c, k, fields);
+}
+
+/// Sense Remote (O12): [`event`] for a named session (`None` = no session).
+pub fn event_in(session: Option<&str>, c: &str, k: &str, fields: Value) {
     let t = now_ms();
     if !allowed(t / 1000) {
         return;
     }
-    let Some(line) = line::build_line(t, c, k, process_name(), session().as_deref(), &fields) else {
+    let Some(line) = line::build_line(t, c, k, process_name(), session, &fields) else {
         return;
     };
     init();
@@ -169,6 +196,25 @@ pub fn parse_fields(fields_json: &str) -> Value {
     match serde_json::from_str::<Value>(trimmed) {
         Ok(value @ Value::Object(_)) => value,
         _ => serde_json::json!({ "gecersiz_json": true }),
+    }
+}
+
+#[cfg(test)]
+mod thread_session_tests {
+    use super::*;
+
+    #[test]
+    fn a_thread_session_wins_over_the_process_one() {
+        let handle = std::thread::spawn(|| {
+            assert_eq!(thread_session(), None);
+            set_thread_session(Some("c1-1"));
+            assert_eq!(current_session().as_deref(), Some("c1-1"));
+            set_thread_session(None);
+            assert_eq!(thread_session(), None);
+        });
+        handle.join().unwrap();
+        // Another thread never sees it.
+        assert_eq!(thread_session(), None);
     }
 }
 

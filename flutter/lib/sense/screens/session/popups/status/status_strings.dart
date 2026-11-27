@@ -8,7 +8,7 @@ abstract final class SenseStatusStrings {
 
   // Live line and header.
   static String live(String? age) => age == null ? 'Canlı' : 'Canlı · $age';
-  static String offline(String? age) => age == null ? 'Çevrimdışı' : 'Çevrimdışı · son veri $age';
+  static String offline(String? age) => age == null ? 'Kapalı' : 'Kapalı · son veri $age';
   static const String loading = 'Bilgiler panelden alınıyor…';
   static const String noPanelInfo = 'Bu bilgisayar için panel bilgisi yok.';
   static const String panelFailed = 'Panel bilgisine ulaşılamadı.';
@@ -76,9 +76,9 @@ abstract final class SenseStatusStrings {
   static const String tagStatic = 'STATİK';
   static const String tagDhcp = 'DHCP';
   static const String ethernet = 'Ethernet';
-  static const String wifi = 'Wi‑Fi';
+  static const String wifi = 'Wi-Fi';
   static const String networkNote =
-      'Sıra: önce kablolu, sonra Wi‑Fi, sonra diğerleri. STATİK = elle verilmiş, DHCP = ağdan otomatik.';
+      'Sıra: önce kablolu, sonra Wi-Fi, sonra diğerleri. STATİK = elle verilmiş, DHCP = ağdan otomatik.';
   static String adapters(int n) => '$n bağdaştırıcı';
   static String displayCount(int n) => '$n ekran';
   static const String primary = 'Ana';
@@ -100,7 +100,7 @@ abstract final class SenseStatusStrings {
   static const String driversGroup = 'Sürücüler';
   static const String driverDisplay = 'Ekran kartı';
   static const String driverNetwork = 'Ağ';
-  static const String driverWifi = 'Wi‑Fi';
+  static const String driverWifi = 'Wi-Fi';
   static const String driverAudio = 'Ses';
   static const String driverChipset = 'Yonga seti';
   static const String senseGroup = 'Sense Remote';
@@ -170,6 +170,6 @@ abstract final class SenseDisplayStrings {
 
   /// Bottom note (prototype, word for word).
   static const String hint =
-      'Uyarı rengi: ekranlar arasında farklı yenileme hızı ya da 4:2:2 renk biçimi; gecikme 80 ms '
-      'üstü turuncu, 150 ms üstü kırmızı.';
+      'Uyarı rengi: ekranlar arasında farklı yenileme hızı ya da 4:2:2 renk biçimi; gecikme 150 ms '
+      'üstü turuncu, 300 ms üstü kırmızı.';
 }
