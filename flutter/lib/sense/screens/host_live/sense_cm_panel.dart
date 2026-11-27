@@ -85,6 +85,8 @@ class SenseHostCard extends StatefulWidget {
     this.from = SensePopupFrom.bottom,
     this.animateIn = true,
     this.endedClosingIn,
+    this.connectionsLine,
+    this.waiting,
   });
 
   /// The one connection (#40: one Controller at a time).
@@ -113,6 +115,14 @@ class SenseHostCard extends StatefulWidget {
   /// #101: seconds until the window closes after every connection ended;
   /// null when it is not closing by itself.
   final int? endedClosingIn;
+
+  /// O6: "2 bağlantı · ekran, terminal" when the Controller holds more than
+  /// one connection; the button then reads "Tümünü bitir". Null for one.
+  final String? connectionsLine;
+
+  /// O6: a second connection waiting for an answer while [client] is live
+  /// (approve mode "click"); shown in its own box above the live one.
+  final Client? waiting;
 
   @override
   State<SenseHostCard> createState() => _SenseHostCardState();
@@ -188,14 +198,16 @@ class _SenseHostCardState extends State<SenseHostCard> {
                           onClose: widget.actions.onCloseEnded,
                           closingIn: widget.endedClosingIn)
                     else if (!client.authorized)
-                      _RequestBox(
-                        name: client.name,
-                        canAccept: widget.canAccept,
-                        onAccept: widget.actions.onAccept,
-                        onReject: widget.actions.onReject,
-                      )
-                    else
-                      _ConnectedBox(whoLine: widget.whoLine, onEnd: widget.actions.onEnd),
+                      _request(client)
+                    else ...[
+                      if (widget.waiting != null && widget.waiting!.id != client.id)
+                        _request(widget.waiting!),
+                      _ConnectedBox(
+                        whoLine: widget.whoLine,
+                        connectionsLine: widget.connectionsLine,
+                        onEnd: widget.actions.onEnd,
+                      ),
+                    ],
                     if (live && c.phase == SenseCallPhase.incoming) ...[
                       SenseIncomingCallBox(
                         text: SenseChatLabels.host.incomingCall,
@@ -238,6 +250,13 @@ class _SenseHostCardState extends State<SenseHostCard> {
     );
   }
 
+  Widget _request(Client who) => _RequestBox(
+        name: who.name,
+        canAccept: widget.canAccept,
+        onAccept: widget.actions.onAccept,
+        onReject: widget.actions.onReject,
+      );
+
   Widget _messages() {
     final rows = <Widget>[
       for (final e in c.entries.reversed) _row(e),
@@ -275,6 +294,7 @@ class _SenseHostCardState extends State<SenseHostCard> {
           author: author,
           time: time,
           onReveal: job.path.isEmpty ? null : () => c.files.reveal(job.path),
+          onRetry: c.canRetry(job.id) ? () => c.retry(job.id) : null, // #122
         );
     }
   }
@@ -386,11 +406,19 @@ class _Box extends StatelessWidget {
 }
 
 class _BoxText extends StatelessWidget {
-  const _BoxText({required this.title, this.titleColor = SenseColors.text, this.meta});
+  const _BoxText({
+    required this.title,
+    this.titleColor = SenseColors.text,
+    this.meta,
+    this.extra,
+  });
 
   final String title;
   final Color titleColor;
   final String? meta;
+
+  /// O6: "2 bağlantı · ekran, terminal" under the who line.
+  final String? extra;
 
   @override
   Widget build(BuildContext context) {
@@ -417,16 +445,28 @@ class _BoxText extends StatelessWidget {
             style: SenseTextStyles.hint,
           ),
         ],
+        if (extra != null && extra!.isNotEmpty) ...[
+          const SizedBox(height: SenseHostCardSize.metaGap),
+          Text(
+            extra!,
+            key: const Key('sense-host-connections'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: SenseTextStyles.hint,
+          ),
+        ],
       ],
     );
   }
 }
 
-/// `.ov.ok.hinfo`: "Sense Department bağlı" + who line + red Bağlantıyı bitir.
+/// `.ov.ok.hinfo`: "Sense Department bağlı" + who line + red Bağlantıyı bitir
+/// (O6: with more than one connection, their count and kinds + Tümünü bitir).
 class _ConnectedBox extends StatelessWidget {
-  const _ConnectedBox({required this.whoLine, required this.onEnd});
+  const _ConnectedBox({required this.whoLine, required this.onEnd, this.connectionsLine});
 
   final String whoLine;
+  final String? connectionsLine;
   final VoidCallback onEnd;
 
   @override
@@ -439,12 +479,15 @@ class _ConnectedBox extends StatelessWidget {
             title: SenseHostLiveStrings.connected,
             titleColor: SenseColors.ok,
             meta: whoLine,
+            extra: connectionsLine,
           ),
         ),
         const SizedBox(width: SenseHostCardSize.boxGap),
         SenseButton(
           key: const Key('sense-host-end'),
-          label: SenseHostLiveStrings.endConnection,
+          label: connectionsLine == null
+              ? SenseHostLiveStrings.endConnection
+              : SenseHostLiveStrings.endAll,
           kind: SenseButtonKind.danger,
           onPressed: onEnd,
         ),
