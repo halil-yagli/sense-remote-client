@@ -139,7 +139,8 @@ class FakeBackend extends SenseSessionBackend {
           useAllMyDisplaysPending = false;
           calls.add('spreadDisplays');
         } else {
-          useAllMyDisplaysPending = true;
+          // K49: only gathering spread windows back waits; a single screen never spreads.
+          useAllMyDisplaysPending = !v;
         }
       });
   @override

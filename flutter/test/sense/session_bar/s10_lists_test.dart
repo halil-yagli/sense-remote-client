@@ -116,14 +116,17 @@ void main() {
       expect(b.calls.where((c) => c == 'spreadDisplays').length, 1, reason: 'already spread');
     });
 
-    test('cannot spread now: the row says "yeni bağlantıda geçerli"', () {
+    test('K49: single screen (cannot spread): stored, but no "yeni bağlantıda geçerli"', () {
       final b = FakeBackend()..canSpread = false;
       allMine(b).onChanged!(true);
+      expect(b.useAllMyDisplays, isTrue, reason: 'the choice is kept');
       expect(b.calls, isNot(contains('spreadDisplays')));
-      expect(b.useAllMyDisplaysPending, isTrue);
-      expect(allMine(b).hint, 'yeni bağlantıda geçerli');
+      expect(b.useAllMyDisplaysPending, isFalse, reason: 'no connection would change it');
+      expect(allMine(b).hint, isNull);
+      expect(allMine(b).toastAfterChange!(), isNull);
       allMine(b).onChanged!(false);
       expect(b.useAllMyDisplaysPending, isFalse, reason: 'back to what this session has');
+      expect(allMine(b).hint, isNull);
     });
 
     test('K20: the switch changes only its own row; separate windows (#97) stay off', () {
