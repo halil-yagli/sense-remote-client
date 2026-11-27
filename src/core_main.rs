@@ -311,6 +311,12 @@ pub fn core_main() -> Option<CoreMainAction> {
                     .show()
                     .ok();
                 return None;
+            } else if args[0] == crate::sense::winos::UNINSTALL_CLEANUP_FLAG {
+                // Sense Remote (W1): elevated step of the uninstall script.
+                #[cfg(windows)]
+                std::process::exit(crate::sense::winos::uninstall_cleanup());
+                #[cfg(not(windows))]
+                return None;
             } else if args[0] == "--uninstall-cert" {
                 #[cfg(windows)]
                 hbb_common::allow_err!(crate::platform::windows::uninstall_cert());

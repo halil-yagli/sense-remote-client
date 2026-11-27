@@ -836,6 +836,10 @@ pub mod log_upload;
 pub mod wol;
 // Sense Remote (#103): structured event record, panic hook, crash records (log_upload sends them).
 pub mod diag;
+// Sense Remote (Sürüm 11, WN): Windows OS layer (uninstall cleanup, secure desktop, display
+// details at the lock screen, "Installed apps" version).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub mod winos;
 // Sense Remote (#136): the Controller's session recording as the UI and the log see it.
 pub mod recording;
 
