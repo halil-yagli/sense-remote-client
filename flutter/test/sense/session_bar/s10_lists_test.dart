@@ -151,7 +151,8 @@ void main() {
 
     testWidgets('on screen: hint in the row and the toast', (tester) async {
       setWindow(tester, const Size(1440, 900));
-      final b = FakeBackend()..canSpread = false;
+      // Spread at connect; turning it off waits for the next connection (K49: the only case).
+      final b = FakeBackend()..useAllMyDisplays = true;
       await tester.pumpWidget(frameApp(b));
       await tester.tap(_menu(SenseBarMenu.screens));
       await tester.pump();
