@@ -71,8 +71,11 @@ class _FakeBackend extends SenseSettingsBackend {
   @override
   String read(String key, SenseOptionStore store) => stores[store]?[key] ?? '';
 
+  bool failWrites = false;
+
   @override
   Future<void> write(String key, SenseOptionStore store, String value) async {
+    if (failWrites) throw StateError('write failed');
     writes.add(_Write(key, store, value));
     stores[store]?[key] = value;
   }
@@ -230,10 +233,23 @@ void main() {
       await _pump(tester, b, open: SenseSettingsCategory.newConnections);
       await _tapRow(tester, 'view_only');
       expect(b.writes.last.toString(), 'view_only/userDefault=Y');
+      // B7: "Hayalet modla başla" is on by default (karar #95); tapping turns it off, written "N".
+      expect(find.text('1:1 · Dengeli · yalnız izleme · Hayalet mod'), findsOneWidget);
+      await _tapRow(tester, 'privacy_mode');
+      expect(b.writes.last.toString(), 'privacy_mode/userDefault=N');
+      await tester.pumpAndSettle(const Duration(seconds: 3));
+      expect(find.text('1:1 · Dengeli · yalnız izleme'), findsOneWidget);
       await _tapRow(tester, 'privacy_mode');
       expect(b.writes.last.toString(), 'privacy_mode/userDefault=Y');
-      await tester.pumpAndSettle(const Duration(seconds: 3));
-      expect(find.text('1:1 · Dengeli · yalnız izleme · Hayalet mod'), findsOneWidget);
+    });
+
+    testWidgets('B9: a write that fails says "Kaydedilemedi" and writes no record', (tester) async {
+      final b = _FakeBackend()..failWrites = true;
+      await _pump(tester, b, open: SenseSettingsCategory.newConnections);
+      await _tapRow(tester, 'view_only');
+      await tester.pump();
+      expect(find.byKey(const Key('sense-settings-failed')), findsOneWidget);
+      expect(find.text(SenseSettingsStrings.saveFailedTitle), findsOneWidget);
     });
   });
 
@@ -303,6 +319,9 @@ void main() {
       expect(find.text('Doğrudan IP erişimi'), findsNothing);
       // The relay-less path stays "açık" while IP access is closed: two different settings.
       expect(SenseSettingsStrings.sumNetwork(true), contains('doğrudan bağlantı açık'));
+      // B8: with no Sense server the summary says "Genel sunucu", not "Sense sunucusu".
+      expect(SenseSettingsStrings.sumNetwork(true, publicServer: true), startsWith('Genel sunucu'));
+      expect(SenseSettingsStrings.sumNetwork(true), startsWith('Sense sunucusu'));
       expect(SenseSettingsStrings.directIp, isNot(contains('Doğrudan')));
     });
 

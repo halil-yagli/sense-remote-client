@@ -354,7 +354,7 @@ void main() {
           'Halil Y. · 14 dk · ekran, fare ve klavye, dosya');
       expect(SenseHostLiveStrings.minutes(const Duration(seconds: 20)), '1 dk');
       expect(SenseHostLiveStrings.minutes(const Duration(minutes: 65)),
-          '1 sa 05 dk');
+          '1 sa 5 dk');
       expect(senseHostWhoLine(client(2, 'Ali', keyboard: false), null),
           'Ali · ekran, pano, ses');
     });

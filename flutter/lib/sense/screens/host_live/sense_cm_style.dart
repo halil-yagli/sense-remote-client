@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../components/sense_select.dart' show senseUpperTr;
 import '../../tokens/sense_tokens.dart';
 
 import '../../../models/server_model.dart';
@@ -136,7 +137,7 @@ bool senseCmNeedsAttention(Client client) =>
 
 String senseCmInitials(String name) {
   final words = name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
-  final letters = words.take(2).map((w) => w.characters.first.toUpperCase());
+  final letters = words.take(2).map((w) => senseUpperTr(w.characters.first));
   final result = letters.join();
   return result.isEmpty ? '?' : result;
 }

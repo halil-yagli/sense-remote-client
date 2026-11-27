@@ -2,6 +2,8 @@
 // Turkish only (T2, #59). The chat inside the card uses SenseChatStrings and
 // SenseChatLabels.host.
 
+import 'format.dart';
+
 abstract final class SenseHostLiveStrings {
   // Card header (H4): "Sense Remote · Sense Department ile · –".
   static const String brand = 'Sense Remote';
@@ -19,14 +21,8 @@ abstract final class SenseHostLiveStrings {
   static String who(String name, String duration, String permissions) =>
       [name, duration, permissions].where((s) => s.isNotEmpty).join(' · ');
 
-  /// Connected time: "1 dk", "14 dk", "1 sa 05 dk".
-  static String minutes(Duration d) {
-    final total = d.isNegative ? 0 : d.inMinutes;
-    if (total < 60) return '${total < 1 ? 1 : total} dk';
-    final h = total ~/ 60;
-    final m = total % 60;
-    return '$h sa ${m.toString().padLeft(2, '0')} dk';
-  }
+  /// Connected time: "1 dk", "14 dk", "1 sa 5 dk" (same format as the Host home screen, TS-10).
+  static String minutes(Duration d) => senseShortDuration(d.isNegative ? 0 : d.inMinutes);
 
   // Permissions in the who line, in a fixed order (only the ones that are on).
   static const String permScreen = 'ekran';

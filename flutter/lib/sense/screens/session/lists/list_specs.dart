@@ -112,6 +112,8 @@ SenseListSpec senseScreensList(SenseSessionBackend b) {
         label: _S.virtualAdd,
         rustdesk: 'Virtual display',
         noRights: !b.grants.allows(SenseGrant.control),
+        // Sürüm 11 (B2): ghost mode is on in every session (#95); the row says it is the reason.
+        why: f.privacyOn ? _S.whyGhost : (b.canAddVirtualDisplay ? null : _S.whyVirtualMax),
         onTap: b.canAddVirtualDisplay && !f.privacyOn ? b.addVirtualDisplay : null,
       ),
       SenseActionEntry(
@@ -119,6 +121,7 @@ SenseListSpec senseScreensList(SenseSessionBackend b) {
         label: _S.virtualRemoveAll,
         rustdesk: 'Plug out all',
         noRights: !b.grants.allows(SenseGrant.control),
+        why: f.privacyOn ? _S.whyGhost : (b.virtualDisplayCount > 0 ? null : _S.whyNoVirtual),
         onTap: b.virtualDisplayCount > 0 && !f.privacyOn ? b.removeAllVirtualDisplays : null,
       ),
     ],
@@ -167,6 +170,9 @@ SenseListSpec senseScreensList(SenseSessionBackend b) {
 // ---------------------------------------------------------------------------
 // O4 Görüntü
 // ---------------------------------------------------------------------------
+
+/// B12: the quality chosen before "Özel kalite" was switched on, per session.
+final Expando<String> _qualityBeforeCustom = Expando<String>('sense-quality-before-custom');
 
 String _qualityLabel(String q) => switch (q) {
       SenseRd.qualityBest => _S.qualityBest,
@@ -278,7 +284,17 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
       label: _S.customQuality,
       rustdesk: 'Custom (image quality)',
       value: custom,
-      onChanged: (on) => b.setImageQuality(on ? SenseRd.qualityCustom : SenseRd.qualityBalanced),
+      // B12: turning it off brings back the quality that was set before, not always "Dengeli".
+      onChanged: (on) {
+        if (on) {
+          if (!custom) _qualityBeforeCustom[b] = b.imageQuality;
+          b.setImageQuality(SenseRd.qualityCustom);
+        } else {
+          final before = _qualityBeforeCustom[b];
+          final known = before == SenseRd.qualityBest || before == SenseRd.qualityBalanced || before == SenseRd.qualityLow;
+          b.setImageQuality(known ? before! : SenseRd.qualityBalanced);
+        }
+      },
     ),
     SenseSliderEntry(
       id: 'display.qualityPct',
@@ -288,6 +304,7 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
       max: SenseRd.qualityMax.toDouble(),
       value: b.customQuality.clamp(SenseRd.qualityMin, SenseRd.qualityMax).toDouble(),
       format: (v) => '%${v.round()}',
+      why: custom ? null : _S.whyCustomQuality,
       onChanged: custom ? (v) => b.setCustomQuality(v.round()) : null,
     ),
     if (b.showCustomFps)
@@ -299,6 +316,7 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
         max: SenseRd.fpsMax.toDouble(),
         value: b.customFps.clamp(SenseRd.fpsMin, SenseRd.fpsMax).toDouble(),
         format: (v) => '${v.round()} fps',
+        why: custom ? null : _S.whyCustomQuality,
         onChanged: custom ? (v) => b.setCustomFps(v.round()) : null,
       ),
     if (SenseRules.trueColor(f))
@@ -433,6 +451,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         ],
         value: mode == SenseRd.modeLegacy ? null : mode,
         noRights: !control,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? b.setKeyboardMode : null,
       ),
     if (f.keyboard)
@@ -443,6 +462,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         rustdesk: 'View Mode',
         value: b.viewOnly,
         onLevel: SenseLevel.warn,
+        why: SenseRules.viewOnlyEnabled(f) ? null : _S.whyOldVersion,
         onChanged: SenseRules.viewOnlyEnabled(f) ? b.setViewOnly : null,
       ),
     if (SenseRules.swapCtrlCmd(f))
@@ -453,6 +473,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         rustdesk: 'Swap control-command key',
         value: b.swapCtrlCmd,
         noRights: !control,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? b.setSwapCtrlCmd : null,
       ),
   ];
@@ -465,6 +486,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         rustdesk: 'Legacy mode',
         value: mode == SenseRd.modeLegacy,
         noRights: !control,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable
             ? (on) => b.setKeyboardMode(on
                 ? SenseRd.modeLegacy
@@ -478,6 +500,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         rustdesk: 'Local keyboard type',
         options: const [SenseChoice(SenseRd.kbIso, _S.kbIso), SenseChoice(SenseRd.kbNotIso, _S.kbNotIso)],
         value: b.localKbLayout.isEmpty ? null : b.localKbLayout,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? b.setLocalKbLayout : null,
       ),
   ];
@@ -500,6 +523,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         label: _S.showRemoteCursor,
         rustdesk: 'Show remote cursor',
         value: b.showRemoteCursor,
+        why: f.viewOnly ? _S.whyViewOnly : (b.showRemoteCursorLocked ? _S.whyPanel : null),
         onChanged: !f.viewOnly && !b.showRemoteCursorLocked ? b.setShowRemoteCursor : null,
       ),
     if (SenseRules.showMyCursor(f))
@@ -551,6 +575,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         rustdesk: 'Reverse mouse wheel',
         value: b.reverseWheel,
         noRights: !control,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? b.setReverseWheel : null,
       ),
       SenseToggleEntry(
@@ -559,6 +584,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         rustdesk: 'swap-left-right-mouse',
         value: b.swapMouseButtons,
         noRights: !control,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? b.setSwapMouseButtons : null,
       ),
       SenseSliderEntry(
@@ -570,6 +596,7 @@ SenseListSpec senseKeyboardList(SenseSessionBackend b) {
         value: b.trackpadSpeed.clamp(SenseRd.trackpadMin, SenseRd.trackpadListMax).toDouble(),
         format: (v) => '%${v.round()}',
         noRights: !control,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? (v) => b.setTrackpadSpeed(v.round()) : null,
       ),
     ],
@@ -608,6 +635,9 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
   final files = g.allows(SenseGrant.fileTransfer);
   final editable = !f.viewOnly;
 
+  /// B5: the state when the list was drawn; the switch asks for the opposite.
+  final recordingWas = b.recordingOn;
+
   final frequent = <SenseListEntry>[
     if (SenseRules.ctrlAltDel(f))
       SenseActionEntry(
@@ -623,7 +653,9 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         id: 'actions.screenshot',
         label: b.screenshotBusy ? _S.screenshotBusy : _S.screenshot,
         hint: f.onAllDisplays ? _S.screenshotAll : null,
+        why: f.onAllDisplays ? _S.screenshotAll : _S.whyScreenshotBusy,
         rustdesk: 'Take screenshot',
+        toast: _S.toastScreenshot,
         onTap: b.screenshotBusy || f.onAllDisplays ? null : b.screenshot,
       ),
     if (SenseRules.lockScreen(f))
@@ -642,6 +674,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         rustdesk: 'Restart remote device',
         noRights: !g.allows(SenseGrant.restartRemote),
         onTap: b.restart,
+        toast: _S.toastRestart,
         confirmQuestion: _S.restartConfirm,
         confirmLabel: _S.restartGo,
       ),
@@ -664,6 +697,8 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         onLevel: SenseLevel.hot,
         noRights: !g.allows(SenseGrant.recordSession),
         onChanged: (_) => b.toggleRecording(),
+        // B5: the notice follows the real state (the red "Kayıt" chip reads the same).
+        toastAfterChange: () => _recordingResult(b, !recordingWas),
       ),
   ];
 
@@ -684,6 +719,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         rustdesk: 'Enable file copy and paste',
         value: b.fileCopyPaste,
         noRights: !files,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? b.setFileCopyPaste : null,
       ),
     if (SenseRules.disableClipboard(f))
@@ -692,6 +728,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         label: _S.disableClipboard,
         rustdesk: 'Disable clipboard',
         value: f.viewOnly || b.clipboardDisabled,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? b.setClipboardDisabled : null,
       ),
     if (SenseRules.remoteFiles(f))
@@ -701,6 +738,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         hint: _S.remoteFilesHint,
         rustdesk: 'Transfer file',
         noRights: !files,
+        toast: _S.toastRemoteFiles,
         onTap: b.openRemoteFiles,
       ),
   ];
@@ -712,6 +750,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         label: _S.elevation,
         rustdesk: 'Request Elevation',
         noRights: !control,
+        toast: _S.toastElevation,
         onTap: b.requestElevation,
       ),
     if (SenseRules.lockAfterEnd(f))
@@ -720,6 +759,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         label: _S.lockAfterEnd,
         rustdesk: 'Lock after session end',
         value: b.lockAfterEnd,
+        why: editable ? null : _S.whyViewOnly,
         onChanged: editable ? b.setLockAfterEnd : null,
       ),
     if (SenseRules.note(f))
@@ -741,6 +781,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         rustdesk: 'Terminal',
         tag: _S.technical,
         noRights: !terminal,
+        toast: _S.toastTerminal,
         onTap: b.openTerminal,
       ),
       if (SenseRules.terminalAdmin(f))
@@ -751,6 +792,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
           rustdesk: 'Terminal (Run as administrator)',
           tag: _S.technical,
           noRights: !terminal,
+          toast: _S.toastTerminal,
           onTap: b.openTerminalAdmin,
         ),
       SenseActionEntry(
@@ -759,6 +801,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         rustdesk: 'TCP tunneling',
         tag: _S.technical,
         noRights: !terminal,
+        toast: _S.toastTunnel,
         onTap: b.openTunnel,
       ),
     ],
@@ -770,6 +813,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         label: _S.camera,
         hint: _S.cameraHint,
         rustdesk: 'View camera',
+        toast: _S.toastCamera,
         onTap: b.openCamera,
       ),
     if (SenseRules.forceRelay(f))
@@ -779,12 +823,14 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         hint: b.forceRelayEverywhere ? _S.forceRelayEverywhere : _S.forceRelayHint,
         rustdesk: 'Always connect via relay',
         value: b.forceRelayEverywhere || b.forceRelay,
+        why: b.forceRelayEverywhere ? _S.forceRelayEverywhere : null,
         onChanged: b.forceRelayEverywhere ? null : b.setForceRelay,
       ),
     SenseActionEntry(
       id: 'actions.fingerprint',
       label: _S.fingerprint,
       rustdesk: 'Copy Fingerprint',
+      why: b.fingerprint.isEmpty ? _S.whyNotTaken : null,
       onTap: b.fingerprint.isEmpty ? null : b.copyFingerprint,
       toast: _S.fingerprintCopied,
     ),
@@ -811,4 +857,15 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
       ),
     ]),
   );
+}
+
+/// B5: RustDesk starts / stops a recording asynchronously (disk, folder, permission). The
+/// notice waits (about two seconds at most) for the real state and says so when it did not
+/// change; the red "Kayıt" chip of the bar reads [SenseSessionBackend.recordingOn] too.
+Future<String?> _recordingResult(SenseSessionBackend b, bool wanted) async {
+  for (var i = 0; i < 14; i++) {
+    if (b.recordingOn == wanted) return wanted ? _S.recordStarted : _S.recordStopped;
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+  }
+  return wanted ? _S.recordStartFailed : _S.recordStopFailed;
 }

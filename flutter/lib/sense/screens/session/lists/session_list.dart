@@ -272,6 +272,18 @@ class SenseListEntryView extends StatelessWidget {
             style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted)),
       ]);
 
+  /// The reason a choice / slider row is grey (rows with a label line carry it inline).
+  bool _showWhy(SenseListEntry e) => e.disabled && !e.noRights && e.why != null;
+
+  Widget _whyLine(String why) => Padding(
+        padding: const EdgeInsets.fromLTRB(12 + _lead + 10, 0, 12, 6),
+        child: Text(why,
+            key: const ValueKey('sense-why'),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textMuted)),
+      );
+
   Widget _action(SenseActionEntry e) {
     Widget line(VoidCallback? tap) {
       final enabled = tap != null && !e.noRights;
@@ -286,7 +298,7 @@ class SenseListEntryView extends StatelessWidget {
                 style: SenseTextStyles.of(size: SenseFontSize.bodySmall, color: SenseColors.textDim)),
           ),
           const SizedBox(width: 10),
-          Expanded(child: _label(e.label, e.hint)),
+          Expanded(child: _label(e.label, e.shownHint)),
           if (e.noRights) _lockTag(),
           if (!e.noRights && e.tag != null) _Tag(label: e.tag!, level: e.tagLevel),
         ]),
@@ -328,7 +340,7 @@ class SenseListEntryView extends StatelessWidget {
       padding: _pad,
       child: Row(children: [
         const SizedBox(width: _lead + 10),
-        Expanded(child: _label(e.label, e.hint)),
+        Expanded(child: _label(e.label, e.shownHint)),
         if (e.noRights) ...[_lockTag(), const SizedBox(width: 8)],
         SenseToggle(
           compact: true,
@@ -339,8 +351,14 @@ class SenseListEntryView extends StatelessWidget {
               : (v) {
                   senseUiSetting(e.id, e.value, v, where: _where);
                   change(v);
-                  notify(e.toastAfterChange?.call() ??
-                      '${e.label} · ${v ? SenseSessionStrings.on : SenseSessionStrings.off}');
+                  final fallback = '${e.label} · ${v ? SenseSessionStrings.on : SenseSessionStrings.off}';
+                  final later = e.toastAfterChange?.call();
+                  if (later is Future<String?>) {
+                    // B5: the toast waits for the real result of the change.
+                    later.then((m) => notify(m ?? fallback)).catchError((Object _) => notify(fallback));
+                  } else {
+                    notify((later as String?) ?? fallback);
+                  }
                 },
         ),
       ]),
@@ -350,7 +368,8 @@ class SenseListEntryView extends StatelessWidget {
 
   Widget _segment(SenseChoiceEntry e) {
     final change = e.onChanged;
-    final row = Padding(
+    final row = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       child: Row(children: [
         ConstrainedBox(
@@ -376,7 +395,9 @@ class SenseListEntryView extends StatelessWidget {
           ),
         ),
       ]),
-    );
+    ),
+      if (_showWhy(e)) _whyLine(e.why!),
+    ]);
     return e.noRights ? _locked(row) : row;
   }
 
@@ -408,6 +429,7 @@ class SenseListEntryView extends StatelessWidget {
               ]),
             ),
           ),
+        if (_showWhy(e)) _whyLine(e.why!),
       ],
     );
     return e.noRights ? _locked(rows) : rows;
@@ -455,6 +477,8 @@ class SenseListEntryView extends StatelessWidget {
                           ? null
                           : () {
                               pick(tiles[i].value);
+                              // B13: the one that is already shown needs no notice.
+                              if (tiles[i].value == e.value) return;
                               notify(tiles[i].value < 0
                                   ? SenseSessionStrings.allScreens
                                   : SenseSessionStrings.screenN(tiles[i].value + 1));
@@ -551,7 +575,7 @@ class _TileButton extends StatelessWidget {
                 style: SenseTextStyles.of(size: SenseFontSize.categoryTitle, weight: SenseFontWeight.bold, color: fg)),
             Text(tile.sub ?? ' ',
                 style: SenseTextStyles.of(
-                    size: SenseFontSize.capsSmall, color: selected ? SenseColors.textDim : SenseColors.textDim)),
+                    size: SenseFontSize.capsSmall, color: selected ? SenseColors.lineStrong : SenseColors.textDim)),
           ]),
         );
       },
@@ -584,9 +608,11 @@ class _SliderRowState extends State<_SliderRow> {
     final change = e.onChanged;
     final enabled = change != null && !e.noRights;
     final v = (_drag ?? e.value).clamp(e.min, e.max).toDouble();
+    final why = e.disabled && !e.noRights ? e.why : null;
     final row = Padding(
       padding: const EdgeInsets.fromLTRB(12 + 24, 2, 12, 8),
-      child: Row(children: [
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
         Text(e.label, style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted)),
         Expanded(
           child: SliderTheme(
@@ -624,6 +650,13 @@ class _SliderRowState extends State<_SliderRow> {
               textAlign: TextAlign.right,
               style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textSecondary)),
         ),
+      ]),
+        if (why != null)
+          Text(why,
+              key: const ValueKey('sense-why'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textMuted)),
       ]),
     );
     if (e.noRights) {
@@ -724,10 +757,10 @@ class _SizeInputRowState extends State<_SizeInputRow> {
         Text.rich(
           TextSpan(children: [
             TextSpan(text: e.label, style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted)),
-            if (e.hint != null)
+            if (e.shownHint != null)
               TextSpan(
-                  text: ' · ${e.hint}',
-                  style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textDim)),
+                  text: ' · ${e.shownHint}',
+                  style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textMuted)),
           ]),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
