@@ -9,8 +9,14 @@
 //! rate, `maximumFramesPerSecond`. The functions are declared here, like `displays_win` does,
 //! so no crate API has to be relied on.
 //!
-//! Not read: the connection type (HDMI / DisplayPort; needs extra privileges on macOS, plan
-//! §1.2), bit depth, color format, HDR and the panel's native resolution. They are not sent.
+//! Not read: the connection type of an external monitor (HDMI / DisplayPort; needs extra
+//! privileges on macOS, plan §1.2) and the color format. They are not sent.
+//!
+//! Sense Remote (Sürüm 11, #119): a built-in panel is sent as connection `internal`
+//! (`CGDisplayIsBuiltin`), the native resolution from the display mode marked native
+//! (`kDisplayModeNativeFlag`), HDR as "can show HDR" (`NSScreen`
+//! `maximumPotentialExtendedDynamicRangeColorComponentValue` above 1) and the bit depth from
+//! `NSScreen.depth`. They go through `DisplayDetails` like the Windows values.
 //!
 //! Order: the list is keyed by display id and merged into `scrap::Display::all()` (the list
 //! the controller sees) in `report::collect_displays`, so index and order are scrap's. Both
@@ -43,12 +49,85 @@ extern "C" {
     fn CGDisplayModeGetPixelWidth(mode: *mut c_void) -> usize;
     fn CGDisplayModeGetWidth(mode: *mut c_void) -> usize;
     fn CGDisplayModeRelease(mode: *mut c_void);
+    // Sense Remote (Sürüm 11): only C types here (the bridge generator copies these lines).
+    fn CGDisplayIsBuiltin(display: u32) -> u32;
+    fn CGDisplayCopyAllDisplayModes(display: u32, options: *const c_void) -> *const c_void;
+    fn CGDisplayModeGetIOFlags(mode: *const c_void) -> u32;
+    fn CGDisplayModeGetPixelHeight(mode: *mut c_void) -> usize;
 }
+
+#[link(name = "AppKit", kind = "framework")]
+extern "C" {
+    fn NSBitsPerSampleFromDepth(depth: i32) -> isize;
+}
+
+/// IOKit `kDisplayModeNativeFlag`.
+const DISPLAY_MODE_NATIVE_FLAG: u32 = 0x0200_0000;
+/// `DisplayDetails::output_technology` for a built-in panel (DISPLAYCONFIG "internal").
+const OUTPUT_INTERNAL: u32 = 0x8000_0000;
+/// `DisplayDetails::advanced_color` flag bit `report::is_hdr` reads as HDR on.
+const ADVANCED_COLOR_HDR: u32 = 0b010;
+/// No color encoding: `report::color_format` sends nothing.
+const NO_COLOR_ENCODING: u32 = u32::MAX;
 
 /// What `NSScreen` knows about one display.
 struct Screen {
     name: Option<String>,
     max_fps: Option<i64>,
+    /// Sürüm 11: the screen can show HDR (EDR headroom above 1).
+    hdr: Option<bool>,
+    /// Sürüm 11: bits per color channel.
+    bits: Option<u32>,
+}
+
+/// HDR / bit depth in the shape `report::apply_details` reads (Windows' advanced color info):
+/// the HDR flag bit, no color encoding (none is sent), bits per channel. Nothing read -> None.
+fn mac_advanced_color(hdr: Option<bool>, bits: Option<u32>) -> Option<(u32, u32, u32)> {
+    if hdr.is_none() && bits.is_none() {
+        return None;
+    }
+    let flags = if hdr == Some(true) { ADVANCED_COLOR_HDR } else { 0 };
+    Some((flags, NO_COLOR_ENCODING, bits.unwrap_or(0)))
+}
+
+/// Native (panel) resolution: the display mode macOS marks native, in pixels.
+fn native_size(display: u32) -> Option<(u32, u32)> {
+    use core_foundation::{
+        array::{CFArrayGetCount, CFArrayGetValueAtIndex},
+        base::{CFRelease, TCFType},
+        boolean::CFBoolean,
+        dictionary::CFDictionary,
+        string::CFString,
+    };
+    // The native mode of a Retina panel is a "duplicate low resolution" mode, hidden without
+    // this option.
+    let options = CFDictionary::from_CFType_pairs(&[(
+        CFString::new("kCGDisplayShowDuplicateLowResolutionModes"),
+        CFBoolean::true_value(),
+    )]);
+    unsafe {
+        let modes = CGDisplayCopyAllDisplayModes(display, options.as_concrete_TypeRef() as *const c_void);
+        if modes.is_null() {
+            return None;
+        }
+        let mut found = None;
+        for i in 0..CFArrayGetCount(modes as _) {
+            let mode = CFArrayGetValueAtIndex(modes as _, i) as *mut c_void;
+            if mode.is_null() || CGDisplayModeGetIOFlags(mode) & DISPLAY_MODE_NATIVE_FLAG == 0 {
+                continue;
+            }
+            let w = u32::try_from(CGDisplayModeGetPixelWidth(mode)).ok();
+            let h = u32::try_from(CGDisplayModeGetPixelHeight(mode)).ok();
+            if let (Some(w), Some(h)) = (w, h) {
+                // The largest native-marked mode (some panels mark the HiDPI copy too).
+                if found.map_or(true, |(fw, fh): (u32, u32)| w as u64 * h as u64 > fw as u64 * fh as u64) {
+                    found = Some((w, h));
+                }
+            }
+        }
+        CFRelease(modes as _);
+        found.filter(|(w, h)| *w > 0 && *h > 0)
+    }
 }
 
 /// Ids of the online displays, in the order `scrap::Display::all()` lists them.
@@ -101,7 +180,24 @@ fn screens() -> HashMap<u32, Screen> {
             let mut entry = Screen {
                 name: None,
                 max_fps: None,
+                hdr: None,
+                bits: None,
             };
+            // Sürüm 11: macOS 10.15+
+            let has_edr: BOOL = msg_send![
+                screen,
+                respondsToSelector: sel!(maximumPotentialExtendedDynamicRangeColorComponentValue)
+            ];
+            if has_edr != NO {
+                let headroom: f64 =
+                    msg_send![screen, maximumPotentialExtendedDynamicRangeColorComponentValue];
+                if headroom.is_finite() && headroom > 0.0 {
+                    entry.hdr = Some(headroom > 1.0);
+                }
+            }
+            let depth: i32 = msg_send![screen, depth];
+            let bits = NSBitsPerSampleFromDepth(depth);
+            entry.bits = u32::try_from(bits).ok().filter(|b| (6..=16).contains(b));
             // macOS 10.15+
             let has_name: BOOL = msg_send![screen, respondsToSelector: sel!(localizedName)];
             if has_name != NO {
@@ -149,6 +245,15 @@ pub fn query() -> HashMap<String, DisplayDetails> {
         }
         details.refresh = report::mac_refresh(mode_hz, screen.and_then(|s| s.max_fps));
         details.pixel_size = report::mac_pixel_size(points, details.scale);
+        // Sense Remote (Sürüm 11, #119): built-in panel, native resolution, HDR, bit depth.
+        if unsafe { CGDisplayIsBuiltin(display) } != 0 {
+            details.output_technology = Some(OUTPUT_INTERNAL);
+        }
+        details.native = native_size(display);
+        details.advanced_color = mac_advanced_color(
+            screen.and_then(|s| s.hdr),
+            screen.and_then(|s| s.bits),
+        );
         out.insert(display.to_string(), details);
     }
     out
@@ -186,7 +291,21 @@ mod tests {
             if let Some((numerator, denominator)) = d.refresh {
                 assert!(numerator > 0 && denominator == 1000);
             }
-            assert!(d.output_technology.is_none() && d.advanced_color.is_none());
+            // Sürüm 11: only "built-in" is known; no color encoding is ever sent.
+            assert!(d.output_technology.is_none() || d.output_technology == Some(OUTPUT_INTERNAL));
+            if let Some((_, encoding, _)) = d.advanced_color {
+                assert_eq!(encoding, NO_COLOR_ENCODING);
+            }
+            if let Some((w, h)) = d.native {
+                assert!(w >= 640 && h >= 480, "{w}x{h}");
+            }
         }
+    }
+
+    #[test]
+    fn hdr_and_bit_depth_shape() {
+        assert_eq!(mac_advanced_color(None, None), None);
+        assert_eq!(mac_advanced_color(Some(true), Some(10)), Some((ADVANCED_COLOR_HDR, NO_COLOR_ENCODING, 10)));
+        assert_eq!(mac_advanced_color(Some(false), Some(8)), Some((0, NO_COLOR_ENCODING, 8)));
     }
 }

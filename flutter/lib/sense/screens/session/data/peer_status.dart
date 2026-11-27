@@ -20,9 +20,13 @@ export 'sense_peer_status.dart';
 
 /// Everything the panel knows about the computer, parsed once.
 class SensePeerStatusFull {
-  const SensePeerStatusFull({required this.status, this.health, this.inventory});
+  const SensePeerStatusFull({required this.status, this.health, this.inventory, this.platform});
 
   final SensePeerStatus status;
+
+  /// Sürüm 11 (#124): the computer's `platform` from its sysinfo ("windows-x64", "macos-arm64")
+  /// when the panel sends it; null from an older panel (the popup then reads the inventory).
+  final String? platform;
 
   /// v1 + v2 values; null when the computer never reported.
   final SenseHealthDetail? health;
@@ -40,6 +44,7 @@ class SensePeerStatusFull {
         status: status,
         health: SenseHealthDetail.fromJson(json['health']),
         inventory: SenseInventory.fromJson(json['inventory']),
+        platform: json['platform'] is String ? json['platform'] as String : null,
       );
     } catch (_) {
       return null;

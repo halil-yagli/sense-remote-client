@@ -45,7 +45,9 @@ const INVENTORY_SCRIPT: &[&str] = &[
     "$o.gpu=@(Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,PNPDeviceID,@{n='DriverDate';e={if($_.DriverDate){$_.DriverDate.ToString('yyyy-MM-dd')}}})",
     "$o.mem=@(Get-CimInstance Win32_PhysicalMemory | Select-Object DeviceLocator,Capacity,SMBIOSMemoryType,Speed,ConfiguredClockSpeed,PartNumber,Manufacturer)",
     "$o.slots=(Get-CimInstance Win32_PhysicalMemoryArray | Measure-Object -Property MemoryDevices -Sum).Sum",
-    "$o.disk=@(Get-PhysicalDisk | ForEach-Object { $r=($_ | Get-StorageReliabilityCounter); [pscustomobject]@{id=[string]$_.DeviceId;model=$_.FriendlyName;bus=[int]$_.BusType;media=[int]$_.MediaType;size=$_.Size;fw=$_.FirmwareVersion;health=[int]$_.HealthStatus;wear=$r.Wear} })",
+    // Sürüm 11 (#119): PowerShell 5.1 gives BusType / MediaType / HealthStatus as text ("NVMe");
+    // `[int]` on it threw and the disk list was always empty. The raw CIM numbers are read.
+    "$o.disk=@(Get-PhysicalDisk | ForEach-Object { $r=($_ | Get-StorageReliabilityCounter); $c=$_.CimInstanceProperties; [pscustomobject]@{id=[string]$_.DeviceId;model=$_.FriendlyName;bus=$c['BusType'].Value;media=$c['MediaType'].Value;size=$_.Size;fw=$_.FirmwareVersion;health=$c['HealthStatus'].Value;wear=$r.Wear} })",
     "$o.part=@(Get-Partition | Where-Object { $_.DriveLetter } | ForEach-Object { [pscustomobject]@{d=[string]$_.DiskNumber;l=[string]$_.DriveLetter} })",
     "$o.nic=@(Get-CimInstance Win32_NetworkAdapter -Filter 'PhysicalAdapter=True' | Where-Object { $_.NetConnectionID } | Select-Object Index,NetConnectionID,Name,MACAddress,Speed,NetConnectionStatus)",
     "$o.cfg=@(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' | Select-Object Index,DHCPEnabled,DefaultIPGateway,DNSServerSearchOrder)",
@@ -58,6 +60,8 @@ const INVENTORY_SCRIPT: &[&str] = &[
     "$o.os=[pscustomobject]@{name=$os.Caption;version=$os.Version;build=$os.BuildNumber;host=$os.CSName;ubr=$cv.UBR;dv=$cv.DisplayVersion}",
     "$o.tz=(Get-TimeZone).Id",
     "$o.hotfix=(Get-HotFix | Where-Object { $_.InstalledOn } | Sort-Object InstalledOn -Descending | Select-Object -First 1 | ForEach-Object { $_.InstalledOn.ToString('yyyy-MM-dd') })",
+    // Sürüm 11 (#119): the errors `SilentlyContinue` hid, for the log (not sent to the panel).
+    "$o.err=@($Error | Select-Object -First 5 | ForEach-Object { [string]$_ })",
     "ConvertTo-Json -InputObject $o -Depth 5 -Compress",
 ];
 
@@ -84,8 +88,8 @@ pub(super) fn run_script(lines: &[&str], timeout: Duration) -> Option<serde_json
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
+            // Sürüm 11 (W2): no `-ExecutionPolicy Bypass`. It only matters for script files, not
+            // for `-Command`, and security tools flag it as a suspicious PowerShell start.
             "-Command",
             &script,
         ],
@@ -111,6 +115,15 @@ pub fn collect() -> Option<Inventory> {
     if drivers.is_none() {
         log::warn!("Sense Remote: driver list script gave no result");
     }
+    // Sürüm 11 (#119): what PowerShell reported as errors goes into the log (one line, short).
+    let errors = health_parse::win_script_errors(&root);
+    if !errors.is_empty() {
+        log::warn!(
+            "Sense Remote: inventory script errors ({}): {}",
+            errors.len(),
+            health_cmd::error_excerpt(&errors.join(" | ")).unwrap_or_default()
+        );
+    }
     let mut inventory = health_parse::win_inventory(&root);
     inventory.drivers = drivers
         .as_ref()
@@ -118,6 +131,22 @@ pub fn collect() -> Option<Inventory> {
     health_parse::attach_driver_versions(&mut inventory);
     attach_vram(&mut inventory, &super::health_win::adapters());
     Some(inventory)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    /// Sürüm 11 (#119): the real script on a real Windows (CI runner, build machine) lists at
+    /// least one physical disk with its bus; v10's script gave an empty list on every computer.
+    #[test]
+    fn real_script_lists_the_disks() {
+        let root = run_script(INVENTORY_SCRIPT, INVENTORY_TIMEOUT).expect("script output");
+        let inventory = health_parse::win_inventory(&root);
+        let disks = inventory.physical_disks.expect("physical disks");
+        assert!(disks.iter().any(|d| d.bus.is_some()), "{disks:?}");
+        assert!(inventory.cpu.is_some() && inventory.os.is_some());
+    }
 }
 
 /// DXGI's dedicated memory for the cards of the same name.

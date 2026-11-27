@@ -720,9 +720,177 @@ fn sort_keys(value: &mut serde_json::Value) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Sense Remote (Sürüm 11, #119): record of a reading, kept values
+// ---------------------------------------------------------------------------------------------
+
+/// Entries per part of a reading, for the log: "cpu=1 gpu=2 mem=2 disk=1 nic=2 ...". Windows'
+/// disk list was empty on every computer from Sürüm 6 to 10 and no record showed it.
+pub fn inventory_part_counts(inv: &Inventory) -> String {
+    let n = |len: Option<usize>| len.unwrap_or(0);
+    [
+        ("cpu", n(inv.cpu.as_ref().map(|_| 1))),
+        ("gpu", n(inv.gpus.as_ref().map(Vec::len))),
+        ("mem", n(inv.memory.as_ref().and_then(|m| m.modules.as_ref()).map(Vec::len))),
+        ("disk", n(inv.physical_disks.as_ref().map(Vec::len))),
+        ("nic", n(inv.network.as_ref().map(Vec::len))),
+        ("board", n(inv.board.as_ref().map(|_| 1))),
+        ("bios", n(inv.bios.as_ref().map(|_| 1))),
+        ("os", n(inv.os.as_ref().map(|_| 1))),
+        ("drivers", n(inv.drivers.as_ref().map(Vec::len))),
+        ("audio", n(inv.audio.as_ref().map(Vec::len))),
+        ("usb", n(inv.usb.as_ref().map(Vec::len))),
+    ]
+    .iter()
+    .map(|(name, count)| format!("{name}={count}"))
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+/// Parts every computer has that a reading left empty (a failed query, not a real gap).
+pub fn inventory_missing_parts(inv: &Inventory) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if inv.cpu.is_none() {
+        out.push("cpu");
+    }
+    if inv.gpus.is_none() {
+        out.push("gpu");
+    }
+    if inv.memory.is_none() {
+        out.push("memory");
+    }
+    if inv.physical_disks.is_none() {
+        out.push("disk");
+    }
+    if inv.os.is_none() {
+        out.push("os");
+    }
+    out
+}
+
+/// Sense Remote (Sürüm 11, #119): a live value that comes and goes (`cpu_mhz`, Wi-Fi: one tool
+/// time-out or a missed counter sample) keeps its last good reading for `max_age`, so the popup
+/// does not flip to "okunamadı" between two readings. Older values are not sent.
+#[derive(Debug, Clone)]
+pub struct Kept<T> {
+    value: Option<(Instant, T)>,
+}
+
+impl<T: Clone> Kept<T> {
+    pub const fn new() -> Self {
+        Self { value: None }
+    }
+
+    /// Stores a new reading; a missing one gives the last good value while it is young enough.
+    pub fn update(&mut self, now: Instant, read: Option<T>, max_age: Duration) -> Option<T> {
+        if let Some(value) = read {
+            self.value = Some((now, value.clone()));
+            return Some(value);
+        }
+        self.get(now, max_age)
+    }
+
+    /// The last good value while it is young enough.
+    pub fn get(&self, now: Instant, max_age: Duration) -> Option<T> {
+        match &self.value {
+            Some((at, value)) if now.saturating_duration_since(*at) <= max_age => Some(value.clone()),
+            _ => None,
+        }
+    }
+
+    /// The value is known to be gone (the tool answered: nothing there).
+    pub fn clear(&mut self) {
+        self.value = None;
+    }
+
+    /// When the last good value was read.
+    pub fn read_at(&self) -> Option<Instant> {
+        self.value.as_ref().map(|(at, _)| *at)
+    }
+}
+
+/// How long a live value that went missing keeps its last reading.
+pub const LIVE_KEEP: Duration = Duration::from_secs(3 * 60);
+
+/// Sense Remote (Sürüm 11, W3): the PDH query / a counter that could not be opened is tried
+/// again after this long (it was never tried again: GPU, disk rates and the current clock stayed
+/// "okunamadı" until the service restarted).
+pub const PDH_RETRY: Duration = Duration::from_secs(5 * 60);
+
+/// Whether to open the PDH query again: never opened, or incomplete (no query or a missing
+/// counter) and the last try is at least `PDH_RETRY` old.
+pub fn pdh_reopen_due(opened_at: Option<Instant>, complete: bool, now: Instant) -> bool {
+    match opened_at {
+        None => true,
+        Some(at) => !complete && now.saturating_duration_since(at) >= PDH_RETRY,
+    }
+}
+
+/// NVMe SMART / Health log page: "Composite Temperature" is bytes 1..3, little-endian, in Kelvin.
+/// 0 is "not reported".
+pub fn nvme_temp_c(log: &[u8]) -> Option<f64> {
+    let raw: [u8; 2] = log.get(1..3)?.try_into().ok()?;
+    let kelvin = u16::from_le_bytes(raw);
+    (kelvin > 0).then(|| temp_c(kelvin as f64 - 273.15)).flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reading_record_counts_and_gaps() {
+        let mut inv = Inventory {
+            cpu: Some(CpuInfo::default()),
+            gpus: Some(vec![GpuInfo::default(), GpuInfo::default()]),
+            os: Some(OsInfo::default()),
+            ..Default::default()
+        };
+        assert_eq!(
+            inventory_part_counts(&inv),
+            "cpu=1 gpu=2 mem=0 disk=0 nic=0 board=0 bios=0 os=1 drivers=0 audio=0 usb=0"
+        );
+        assert_eq!(inventory_missing_parts(&inv), vec!["memory", "disk"]);
+        inv.physical_disks = Some(vec![PhysicalDisk::default()]);
+        inv.memory = Some(MemoryInfo::default());
+        assert!(inventory_missing_parts(&inv).is_empty());
+    }
+
+    #[test]
+    fn live_value_kept_for_a_while() {
+        let t0 = Instant::now();
+        let mut kept: Kept<u32> = Kept::new();
+        assert_eq!(kept.update(t0, None, LIVE_KEEP), None, "nothing read yet");
+        assert_eq!(kept.update(t0, Some(3200), LIVE_KEEP), Some(3200));
+        // One time-out: the last value stays.
+        assert_eq!(kept.update(t0 + Duration::from_secs(8), None, LIVE_KEEP), Some(3200));
+        assert_eq!(kept.update(t0 + Duration::from_secs(16), Some(3400), LIVE_KEEP), Some(3400));
+        // Too old: not sent.
+        assert_eq!(kept.update(t0 + Duration::from_secs(16 + 181), None, LIVE_KEEP), None);
+        assert_eq!(kept.read_at(), Some(t0 + Duration::from_secs(16)));
+        kept.update(t0, Some(1), LIVE_KEEP);
+        kept.clear();
+        assert_eq!(kept.get(t0, LIVE_KEEP), None);
+    }
+
+    #[test]
+    fn pdh_is_opened_again_when_incomplete() {
+        let t0 = Instant::now();
+        assert!(pdh_reopen_due(None, false, t0));
+        assert!(!pdh_reopen_due(Some(t0), true, t0 + Duration::from_secs(3600)), "complete: kept");
+        assert!(!pdh_reopen_due(Some(t0), false, t0 + Duration::from_secs(60)));
+        assert!(pdh_reopen_due(Some(t0), false, t0 + PDH_RETRY));
+    }
+
+    #[test]
+    fn nvme_composite_temperature() {
+        let mut log = vec![0u8; 512];
+        log[1..3].copy_from_slice(&313u16.to_le_bytes()); // 313 K
+        let t = nvme_temp_c(&log).unwrap();
+        assert!((t - 39.85).abs() < 0.06, "{t}");
+        assert_eq!(nvme_temp_c(&[0u8; 512]), None);
+        assert_eq!(nvme_temp_c(&[0u8; 2]), None);
+    }
 
     #[test]
     fn out_of_range_values_are_dropped() {

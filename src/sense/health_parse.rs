@@ -106,8 +106,59 @@ pub fn win_health(code: u64) -> Option<&'static str> {
     }
 }
 
+/// Sense Remote (Sürüm 11, #119): `Get-PhysicalDisk` in Windows PowerShell 5.1 gives BusType,
+/// MediaType and HealthStatus as text ("NVMe", "SSD", "Healthy"); the script reads the raw CIM
+/// numbers, and the text is mapped too so an older script (or another PowerShell) still reads.
+pub fn win_bus_text(raw: &str) -> Option<&'static str> {
+    Some(match raw.trim().to_ascii_lowercase().as_str() {
+        "nvme" => "nvme",
+        "sata" | "ata" => "sata",
+        "usb" => "usb",
+        "sas" => "sas",
+        "raid" => "raid",
+        "" | "unknown" => return None,
+        _ => "other",
+    })
+}
+
+pub fn win_media_text(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "ssd" => Some("ssd"),
+        "hdd" => Some("hdd"),
+        _ => None,
+    }
+}
+
+pub fn win_health_text(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "healthy" => Some("ok"),
+        "warning" => Some("warning"),
+        "unhealthy" => Some("failing"),
+        _ => None,
+    }
+}
+
+/// A Storage enum field: the CIM number, or its PowerShell text.
+fn win_enum(
+    value: &Value,
+    key: &str,
+    by_code: fn(u64) -> Option<&'static str>,
+    by_text: fn(&str) -> Option<&'static str>,
+) -> Option<String> {
+    let mapped = match value.get(key)? {
+        Value::String(t) => match t.trim().parse::<u64>() {
+            Ok(code) => by_code(code),
+            Err(_) => by_text(t),
+        },
+        _ => u(value, key).and_then(by_code),
+    };
+    mapped.map(str::to_owned)
+}
+
 /// Integrated or discrete, only where the PCI vendor says it: Intel cards other than Arc are
-/// integrated, NVIDIA cards are discrete. Anything else is not stated.
+/// integrated, NVIDIA cards are discrete. Sense Remote (Sürüm 11, #119): AMD's processor graphics
+/// ("AMD Radeon(TM) Graphics", "Radeon(TM) 610M" / "780M", "Vega 8") are integrated, Radeon RX /
+/// Pro / FirePro cards discrete. Anything else is not stated.
 pub fn win_gpu_integrated(name: &str, pnp_id: &str) -> Option<bool> {
     let pnp = pnp_id.to_ascii_uppercase();
     let lower = name.to_ascii_lowercase();
@@ -115,9 +166,29 @@ pub fn win_gpu_integrated(name: &str, pnp_id: &str) -> Option<bool> {
         Some(!lower.contains("arc"))
     } else if pnp.contains("VEN_10DE") {
         Some(false)
+    } else if pnp.contains("VEN_1002") {
+        amd_integrated(&lower)
     } else {
         None
     }
+}
+
+fn amd_integrated(lower: &str) -> Option<bool> {
+    let words: Vec<&str> = lower
+        .split(|c: char| c.is_whitespace() || c == '(' || c == ')')
+        .filter(|w| !w.is_empty())
+        .collect();
+    if words
+        .iter()
+        .any(|w| matches!(*w, "rx" | "pro" | "firepro" | "instinct") || (w.starts_with("rx") && w.len() > 2))
+    {
+        return Some(false);
+    }
+    // "610m", "680m", "780m", "890m": three digits and "m" is a processor's graphics.
+    let apu_number =
+        |w: &&str| w.len() == 4 && w.ends_with('m') && w[..3].bytes().all(|b| b.is_ascii_digit());
+    (words.contains(&"graphics") || words.contains(&"vega") || words.iter().any(apu_number))
+        .then_some(true)
 }
 
 /// Inventory from the output of `inventory_win::INVENTORY_SCRIPT`.
@@ -207,11 +278,11 @@ pub fn win_inventory(root: &Value) -> Inventory {
                     .collect();
                 Some(PhysicalDisk {
                     model: s(d, "model")?,
-                    bus: u(d, "bus").and_then(win_bus).map(str::to_owned),
-                    media: u(d, "media").and_then(win_media).map(str::to_owned),
+                    bus: win_enum(d, "bus", win_bus, win_bus_text),
+                    media: win_enum(d, "media", win_media, win_media_text),
                     size_gb: u(d, "size").and_then(bytes_to_gb),
                     firmware: s(d, "fw"),
-                    health: u(d, "health").and_then(win_health).map(str::to_owned),
+                    health: win_enum(d, "health", win_health, win_health_text),
                     life_left_pct: u(d, "wear")
                         .filter(|w| *w <= 100)
                         .and_then(|w| pct(100.0 - w as f64)),
@@ -253,7 +324,7 @@ pub fn win_inventory(root: &Value) -> Inventory {
     inv.power_plan = root
         .get("plan")
         .and_then(Value::as_str)
-        .and_then(powercfg_scheme_name);
+        .and_then(power_plan_name);
     if let Some(os) = root.get("os").filter(|v| v.is_object()) {
         let build = match (s(os, "build"), u(os, "ubr")) {
             (Some(build), Some(ubr)) => Some(format!("{build}.{ubr}")),
@@ -272,6 +343,11 @@ pub fn win_inventory(root: &Value) -> Inventory {
         }
     }
     inv
+}
+
+/// Sense Remote (Sürüm 11, #119): the error messages the inventory script collected (`err`).
+pub fn win_script_errors(root: &Value) -> Vec<String> {
+    strings(root.get("err"))
 }
 
 fn win_network(root: &Value) -> Vec<NetAdapter> {
@@ -363,6 +439,26 @@ pub fn powercfg_scheme_name(output: &str) -> Option<String> {
     let start = line.rfind('(')?;
     let end = line[start..].find(')')? + start;
     text(&line[start + 1..end])
+}
+
+/// Sense Remote (Sürüm 11, W13): the active power plan in Turkish. Windows writes the plan name
+/// in its display language ("Balanced" / "Dengeli"); Windows' own plans are known by GUID and
+/// get their Turkish name, any other plan (the maker's or the user's) keeps its own name.
+pub fn power_plan_name(output: &str) -> Option<String> {
+    let known = output.split_whitespace().find_map(|word| {
+        let guid = word.trim_matches(|c: char| !c.is_ascii_hexdigit() && c != '-');
+        Some(match guid.to_ascii_lowercase().as_str() {
+            "381b4222-f694-41f0-9685-ff5bb260df2e" => "Dengeli",
+            "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c" => "Yüksek performans",
+            "a1841308-3541-4fab-bc81-f71556f20b4a" => "Güç tasarrufu",
+            "e9a42b02-d5df-448d-aa00-03f14749eb61" => "Nihai performans",
+            _ => return None,
+        })
+    });
+    match known {
+        Some(name) => Some(name.to_owned()),
+        None => powercfg_scheme_name(output),
+    }
 }
 
 /// Drivers from the output of `inventory_win::DRIVERS_SCRIPT` (Win32_PnPSignedDriver): graphics,
@@ -462,6 +558,7 @@ pub fn nvidia_smi(output: &str) -> Vec<GpuLive> {
 /// name; SSID / signal / band are recognised by key or by the shape of the value.
 pub fn netsh_wifi(output: &str) -> Option<WifiLive> {
     let mut wifi = WifiLive::default();
+    let mut channel: Option<u32> = None;
     for line in output.lines() {
         let Some((key, value)) = line.split_once(" : ") else { continue };
         let (key, value) = (key.trim(), value.trim());
@@ -471,15 +568,32 @@ pub fn netsh_wifi(output: &str) -> Option<WifiLive> {
         }
         if key == "SSID" && wifi.ssid.is_none() {
             wifi.ssid = text(value);
-        } else if let Some(n) = value.strip_suffix('%') {
+        } else if let Some(n) = value.strip_suffix('%').or_else(|| value.strip_prefix('%')) {
+            // "86%" (English) or "%54" (the Turkish way of writing a percentage, W12).
             if wifi.signal_pct.is_none() {
                 wifi.signal_pct = n.trim().parse::<f64>().ok().and_then(pct);
             }
         } else if value.ends_with("GHz") && wifi.band.is_none() {
             wifi.band = wifi_band(value);
+        } else if matches!(key, "Channel" | "Kanal") && channel.is_none() {
+            channel = value.parse::<u32>().ok();
         }
     }
+    // Sense Remote (Sürüm 11): Windows 10's netsh has no "Band" line; the channel tells it.
+    if wifi.band.is_none() {
+        wifi.band = channel.and_then(channel_band);
+    }
     (wifi.ssid.is_some() || wifi.signal_pct.is_some()).then_some(wifi)
+}
+
+/// Wi-Fi channel -> band. 1–14 is 2.4 GHz, 32–177 is 5 GHz; 6 GHz channels overlap these
+/// numbers, so they are only known from a band text.
+pub fn channel_band(channel: u32) -> Option<String> {
+    match channel {
+        1..=14 => Some("2.4 GHz".to_owned()),
+        32..=177 => Some("5 GHz".to_owned()),
+        _ => None,
+    }
 }
 
 /// "5 GHz" / "2,4 GHz" / "5GHz" -> contract band text.
@@ -827,6 +941,163 @@ pub fn mac_disk_counters(output: &str) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
+// Sense Remote (Sürüm 11, #119): values macOS has but were not collected. The property names
+// come from `system_profiler -json` / the tools' text, not from a documented API; each value
+// that does not parse stays "not read" (checked on a device, plan §8).
+
+/// The connected Wi-Fi interface of `system_profiler SPAirPortDataType -json`.
+fn mac_airport_current(root: &Value) -> Option<(&Value, &Value)> {
+    sp(root, "SPAirPortDataType").into_iter().find_map(|entry| {
+        list(entry.get("spairport_airport_interfaces"))
+            .into_iter()
+            .find_map(|i| Some((i, i.get("spairport_current_network_information")?)))
+    })
+}
+
+/// "-52 dBm / -92 dBm" -> -52.
+fn dbm(raw: &str) -> Option<f64> {
+    let first = raw.split('/').next()?.trim();
+    let number = first.trim_end_matches("dBm").trim();
+    number.parse::<f64>().ok().filter(|v| (-120.0..=0.0).contains(v))
+}
+
+/// Signal strength in dBm -> percentage on the scale Windows' netsh uses (-100 dBm = 0 %,
+/// -50 dBm and stronger = 100 %).
+pub fn dbm_to_pct(dbm: f64) -> Option<f64> {
+    pct((2.0 * (dbm + 100.0)).clamp(0.0, 100.0))
+}
+
+/// "149 (5GHz, 80MHz)" / "6 (2GHz, 20MHz)" / "36,80" -> band.
+fn mac_channel_band(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("6ghz") {
+        return Some("6 GHz".to_owned());
+    }
+    if lower.contains("5ghz") {
+        return Some("5 GHz".to_owned());
+    }
+    if lower.contains("2ghz") || lower.contains("2.4ghz") {
+        return Some("2.4 GHz".to_owned());
+    }
+    let digits: String = lower.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok().and_then(channel_band)
+}
+
+/// Live Wi-Fi from `system_profiler SPAirPortDataType -json`. The network name needs the
+/// location permission on macOS 14+ ("<redacted>" without it), so only band / signal may come.
+pub fn mac_wifi(root: &Value) -> Option<WifiLive> {
+    let (interface, current) = mac_airport_current(root)?;
+    let wifi = WifiLive {
+        name: s(interface, "_name"),
+        ssid: s(current, "_name").filter(|n| !n.starts_with('<')),
+        band: s(current, "spairport_network_channel").and_then(|c| mac_channel_band(&c)),
+        signal_pct: s(current, "spairport_signal_noise")
+            .and_then(|v| dbm(&v))
+            .and_then(dbm_to_pct),
+    };
+    (wifi.ssid.is_some() || wifi.signal_pct.is_some() || wifi.band.is_some()).then_some(wifi)
+}
+
+/// Link rate of the connected Wi-Fi (Mbit/s) and its BSD name.
+pub fn mac_wifi_rate(root: &Value) -> Option<(String, u64)> {
+    let (interface, current) = mac_airport_current(root)?;
+    let rate = u(current, "spairport_network_rate").filter(|r| (1..=100_000).contains(r))?;
+    Some((s(interface, "_name")?, rate))
+}
+
+/// `ifconfig <en>`: link up (`status: active`) and, for Ethernet, the speed from the media line
+/// ("media: autoselect (1000baseT <full-duplex>)", "10GbaseT", "2500Base-T").
+pub fn mac_ifconfig(output: &str) -> (Option<bool>, Option<u64>) {
+    let mut connected = None;
+    let mut speed = None;
+    for line in output.lines().map(str::trim) {
+        if let Some(status) = line.strip_prefix("status:") {
+            connected = match status.trim() {
+                "active" => Some(true),
+                "inactive" => Some(false),
+                _ => None,
+            };
+        } else if let Some(media) = line.strip_prefix("media:") {
+            let inner = media.split('(').nth(1).unwrap_or(media).to_ascii_lowercase();
+            if let Some(at) = inner.find("base") {
+                let head = &inner[..at];
+                let (number, factor) = match head.strip_suffix('g') {
+                    Some(n) => (n, 1000),
+                    None => (head, 1),
+                };
+                speed = number
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+                    .map(|n| n * factor)
+                    .filter(|m| (1..=400_000).contains(m));
+            }
+        }
+    }
+    (connected, speed.filter(|_| connected != Some(false)))
+}
+
+/// One `ifconfig` reading per BSD name: (name, link up, speed Mbit/s).
+pub type MacLink = (String, Option<bool>, Option<u64>);
+
+/// Adds to a macOS inventory what the second `system_profiler` run (Wi-Fi, install history) and
+/// `ifconfig` give: last update, adapter connected / speed (Wi-Fi: the link rate).
+pub fn mac_inventory_extras(inv: &mut Inventory, extra: &Value, links: &[MacLink]) {
+    if let Some(os) = inv.os.as_mut() {
+        os.last_update = mac_last_update(extra);
+    }
+    let wifi_rate = mac_wifi_rate(extra);
+    let Some(network) = inv.network.as_mut() else { return };
+    for adapter in network {
+        let Some(device) = adapter.device.clone() else { continue };
+        if let Some((_, up, speed)) = links.iter().find(|(d, ..)| *d == device) {
+            adapter.connected = *up;
+            adapter.speed_mbps = *speed;
+        }
+        if adapter.kind.as_deref() == Some("wifi") && adapter.connected != Some(false) {
+            if let Some((_, rate)) = wifi_rate.as_ref().filter(|(d, _)| *d == device) {
+                adapter.speed_mbps = Some(*rate);
+            }
+        }
+    }
+}
+
+/// Date of the newest macOS update (`system_profiler SPInstallHistoryDataType -json`): system
+/// versions and security responses installed by Apple, not apps.
+pub fn mac_last_update(root: &Value) -> Option<String> {
+    sp(root, "SPInstallHistoryDataType")
+        .into_iter()
+        .filter(|item| {
+            let name = item.get("_name").and_then(Value::as_str).unwrap_or_default();
+            name.starts_with("macOS") || name.contains("Security Response")
+        })
+        .filter_map(|item| s(item, "install_date").and_then(|d| iso_date(&d)))
+        .max()
+}
+
+/// Memory the system can give to programs without swapping, from `vm_stat`: free, speculative,
+/// inactive and purgeable pages. Sense Remote (Sürüm 11, #119): sysinfo reported 0 on both test
+/// Macs (it subtracts the compressor pages), so the field never reached the popup.
+pub fn vm_stat_available_mb(output: &str) -> Option<u64> {
+    let page: u64 = output
+        .split("page size of ")
+        .nth(1)?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+        .filter(|p| *p >= 4096)?;
+    let pages = |key: &str| -> Option<u64> {
+        let line = output.lines().find(|l| l.trim_start().starts_with(key))?;
+        line.split(':').nth(1)?.trim().trim_end_matches('.').parse().ok()
+    };
+    let total = pages("Pages free")?
+        + pages("Pages speculative").unwrap_or(0)
+        + pages("Pages inactive").unwrap_or(0)
+        + pages("Pages purgeable").unwrap_or(0);
+    Some(bytes_to_mb(total.saturating_mul(page))).filter(|mb| *mb > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -938,7 +1209,8 @@ mod tests {
         assert_eq!(inv.bios.unwrap().date.as_deref(), Some("2023-05-01"));
         assert_eq!(inv.serial, None, "placeholder serial left out");
         assert_eq!(inv.usb, Some(vec!["Logitech USB Receiver".into(), "Elgato Stream Deck".into()]));
-        assert_eq!(inv.power_plan.as_deref(), Some("Balanced"));
+        // Sürüm 11 (W13): Windows' own plan by GUID, in Turkish.
+        assert_eq!(inv.power_plan.as_deref(), Some("Dengeli"));
         let os = inv.os.unwrap();
         assert_eq!(os.version.as_deref(), Some("24H2"));
         assert_eq!(os.build.as_deref(), Some("26100.2314"));
@@ -1117,5 +1389,186 @@ mod tests {
 
         let disk = "+-o IOBlockStorageDriver  <class IOBlockStorageDriver, id 0x1>\n    {\n      \"Statistics\" = {\"Bytes (Read)\"=1000,\"Operations (Write)\"=5,\"Bytes (Write)\"=2000}\n    }\n    +-o APPLE SSD Media  <class IOMedia, id 0x2>\n        {\n          \"BSD Name\" = \"disk0\"\n        }\n+-o IOBlockStorageDriver  <class IOBlockStorageDriver, id 0x3>\n    {\n      \"Statistics\" = {\"Bytes (Read)\"=7,\"Bytes (Write)\"=8}\n    }\n";
         assert_eq!(mac_disk_counters(disk), vec![("disk0".to_owned(), 1000, 2000)]);
+    }
+
+    // ------------------------------------------------------------------ Sürüm 11 (#119, #124)
+
+    /// Real output of this build's scripts on Windows PowerShell 5.1 (`testdata/win-ps51-disk.json`,
+    /// bakış açısı 20: the sample is the tool's own output, not typed by hand).
+    fn ps51() -> Value {
+        serde_json::from_str(include_str!("testdata/win-ps51-disk.json")).unwrap()
+    }
+
+    #[test]
+    fn real_ps51_disk_output_gives_a_disk() {
+        let real = ps51();
+        let root = json!({ "disk": real["script_disk"], "part": real["script_part"], "plan": real["plan"] });
+        let inv = win_inventory(&root);
+        let disks = inv.physical_disks.expect("the disk list is not empty on real output");
+        assert_eq!(disks.len(), 1);
+        assert_eq!(disks[0].id, "0");
+        assert_eq!(disks[0].model, "CT2000P310SSD8");
+        assert_eq!(disks[0].bus.as_deref(), Some("nvme"));
+        assert_eq!(disks[0].media.as_deref(), Some("ssd"));
+        assert_eq!(disks[0].health.as_deref(), Some("ok"));
+        assert_eq!(disks[0].firmware.as_deref(), Some("V8CR001"));
+        assert_eq!(disks[0].mounts, Some(vec!["C:".to_owned()]));
+        assert_eq!(disks[0].life_left_pct, None, "wear is null for a normal user");
+        assert_eq!(inv.power_plan.as_deref(), Some("Dengeli"));
+        assert!(win_script_errors(&root).is_empty());
+        let with_errors = json!({"err": "Cannot convert value \"NVMe\" to type \"System.Int32\"."});
+        assert_eq!(win_script_errors(&with_errors).len(), 1);
+    }
+
+    #[test]
+    fn text_enum_values_of_powershell_are_mapped() {
+        let real = ps51();
+        let t = &real["text_values"];
+        let disk = json!([{ "id": t["DeviceId"], "model": "X", "bus": t["BusType"],
+            "media": t["MediaType"], "health": t["HealthStatus"] }]);
+        let disks = win_inventory(&json!({ "disk": disk })).physical_disks.unwrap();
+        assert_eq!(disks[0].bus.as_deref(), Some("nvme"));
+        assert_eq!(disks[0].media.as_deref(), Some("ssd"));
+        assert_eq!(disks[0].health.as_deref(), Some("ok"));
+        assert_eq!(win_bus_text("SATA"), Some("sata"));
+        assert_eq!(win_bus_text("Unknown"), None);
+        assert_eq!(win_bus_text("Storage Spaces"), Some("other"));
+        assert_eq!(win_media_text("HDD"), Some("hdd"));
+        assert_eq!(win_media_text("Unspecified"), None);
+        assert_eq!(win_health_text("Unhealthy"), Some("failing"));
+        assert_eq!(win_health_text("Warning"), Some("warning"));
+        // Numbers sent as text are still numbers.
+        let disks = win_inventory(&json!({ "disk": [{"id": "1", "model": "Y", "bus": "11", "media": "3"}] }))
+            .physical_disks
+            .unwrap();
+        assert_eq!((disks[0].bus.as_deref(), disks[0].media.as_deref()), (Some("sata"), Some("hdd")));
+    }
+
+    #[test]
+    fn amd_processor_graphics_is_integrated() {
+        let real = ps51();
+        let gpus = win_inventory(&json!({ "gpu": real["gpu"] })).gpus.unwrap();
+        assert_eq!(gpus.len(), 2, "the virtual display adapter is not a card");
+        assert_eq!(gpus[0].name, "NVIDIA GeForce RTX 5070 Ti Laptop GPU");
+        assert_eq!(gpus[0].integrated, Some(false));
+        assert_eq!(gpus[1].name, "AMD Radeon(TM) 610M");
+        assert_eq!(gpus[1].integrated, Some(true));
+        let amd = "PCI\\VEN_1002&DEV_1681";
+        assert_eq!(win_gpu_integrated("AMD Radeon(TM) Graphics", amd), Some(true));
+        assert_eq!(win_gpu_integrated("AMD Radeon 780M", amd), Some(true));
+        assert_eq!(win_gpu_integrated("Radeon RX Vega 11 Graphics", amd), Some(false));
+        assert_eq!(win_gpu_integrated("AMD Radeon RX 7800 XT", amd), Some(false));
+        assert_eq!(win_gpu_integrated("AMD Radeon RX6800M", amd), Some(false));
+        assert_eq!(win_gpu_integrated("AMD Radeon Pro W6600", amd), Some(false));
+        assert_eq!(win_gpu_integrated("AMD Radeon HD 7970", amd), None);
+    }
+
+    #[test]
+    fn power_plan_names_are_turkish() {
+        assert_eq!(
+            power_plan_name("Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)"),
+            Some("Dengeli".into())
+        );
+        assert_eq!(
+            power_plan_name("Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)"),
+            Some("Yüksek performans".into())
+        );
+        assert_eq!(
+            power_plan_name("Power Scheme GUID: a1841308-3541-4fab-bc81-f71556f20b4a  (Power saver)"),
+            Some("Güç tasarrufu".into())
+        );
+        assert_eq!(
+            power_plan_name("Power Scheme GUID: e9a42b02-d5df-448d-aa00-03f14749eb61  (Ultimate Performance)"),
+            Some("Nihai performans".into())
+        );
+        // A maker's own plan keeps its name.
+        assert_eq!(
+            power_plan_name("Power Scheme GUID: 64a64f24-65b9-4b56-befd-5ec1eaced9b3  (ASUS Recommended)"),
+            Some("ASUS Recommended".into())
+        );
+        assert_eq!(power_plan_name("error"), None);
+    }
+
+    #[test]
+    fn netsh_turkish_percent_and_channel_band() {
+        // Real output of a disconnected adapter: no Wi-Fi value.
+        let real = ps51();
+        assert_eq!(netsh_wifi(real["netsh_disconnected"].as_str().unwrap()), None);
+        // Turkish percent sign in front (W12; not seen on a device yet, both forms are read).
+        let tr = "    Ad                     : Wi-Fi\n    SSID                   : Ofis\n    Kanal                  : 6\n    Sinyal                 : %54\n";
+        let wifi = netsh_wifi(tr).unwrap();
+        assert_eq!(wifi.signal_pct, Some(54.0));
+        assert_eq!(wifi.band.as_deref(), Some("2.4 GHz"), "Windows 10: band from the channel");
+        let en10 = "    Name                   : Wi-Fi\n    SSID                   : Museum\n    Channel                : 44\n    Signal                 : 70%\n";
+        assert_eq!(netsh_wifi(en10).unwrap().band.as_deref(), Some("5 GHz"));
+        assert_eq!(channel_band(200), None);
+    }
+
+    #[test]
+    fn mac_wifi_from_system_profiler() {
+        // Shape of `system_profiler SPAirPortDataType -json` (macOS 14); to be checked against a
+        // device's output (plan §8).
+        let root = json!({"SPAirPortDataType": [{"spairport_airport_interfaces": [
+            {"_name": "en0", "spairport_current_network_information": {
+                "_name": "<redacted>", "spairport_network_channel": "149 (5GHz, 80MHz)",
+                "spairport_network_rate": 866, "spairport_signal_noise": "-58 dBm / -94 dBm"}},
+            {"_name": "awdl0"}
+        ]}]});
+        let wifi = mac_wifi(&root).unwrap();
+        assert_eq!(wifi.name.as_deref(), Some("en0"));
+        assert_eq!(wifi.ssid, None, "a hidden name is not a name");
+        assert_eq!(wifi.band.as_deref(), Some("5 GHz"));
+        assert_eq!(wifi.signal_pct, Some(84.0));
+        assert_eq!(mac_wifi_rate(&root), Some(("en0".to_owned(), 866)));
+        assert_eq!(mac_wifi(&json!({"SPAirPortDataType": [{"spairport_airport_interfaces": [{"_name": "en0"}]}]})), None);
+        assert_eq!(mac_channel_band("6 (2GHz, 20MHz)").as_deref(), Some("2.4 GHz"));
+        assert_eq!(mac_channel_band("37 (6GHz, 160MHz)").as_deref(), Some("6 GHz"));
+        assert_eq!(mac_channel_band("36,80").as_deref(), Some("5 GHz"));
+        assert_eq!(dbm_to_pct(-40.0), Some(100.0));
+        assert_eq!(dbm_to_pct(-110.0), Some(0.0));
+    }
+
+    #[test]
+    fn mac_ifconfig_link_and_speed() {
+        let up = "en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n\tether aa:bb:cc:dd:ee:ff\n\tmedia: autoselect (1000baseT <full-duplex>)\n\tstatus: active\n";
+        assert_eq!(mac_ifconfig(up), (Some(true), Some(1000)));
+        let ten = "\tmedia: autoselect (10GbaseT <full-duplex>)\n\tstatus: active\n";
+        assert_eq!(mac_ifconfig(ten), (Some(true), Some(10_000)));
+        let down = "\tmedia: autoselect (none)\n\tstatus: inactive\n";
+        assert_eq!(mac_ifconfig(down), (Some(false), None));
+        let wifi = "\tmedia: autoselect\n\tstatus: active\n";
+        assert_eq!(mac_ifconfig(wifi), (Some(true), None));
+    }
+
+    #[test]
+    fn mac_extras_fill_the_inventory() {
+        let mut inv = mac_inventory(&mac_sample(), None, None);
+        let extra = json!({
+            "SPInstallHistoryDataType": [
+                {"_name": "macOS Sonoma 14.4", "install_date": "2024-03-08T10:00:00Z"},
+                {"_name": "XProtectPlistConfigData", "install_date": "2024-06-01T10:00:00Z"},
+                {"_name": "macOS Sonoma 14.5", "install_date": "2024-05-20T09:12:33Z"}
+            ],
+            "SPAirPortDataType": [{"spairport_airport_interfaces": [{"_name": "en1",
+                "spairport_current_network_information": {"spairport_network_rate": 573}}]}]
+        });
+        let links = vec![
+            ("en0".to_owned(), Some(true), Some(1000)),
+            ("en1".to_owned(), Some(true), None),
+        ];
+        mac_inventory_extras(&mut inv, &extra, &links);
+        assert_eq!(inv.os.unwrap().last_update.as_deref(), Some("2024-05-20"), "apps are not updates");
+        let net = inv.network.unwrap();
+        assert_eq!((net[0].connected, net[0].speed_mbps), (Some(true), Some(1000)));
+        assert_eq!((net[1].connected, net[1].speed_mbps), (Some(true), Some(573)));
+    }
+
+    #[test]
+    fn vm_stat_available_memory() {
+        // Shape of `vm_stat` on Apple Silicon (16 KB pages); to be checked against a device.
+        let out = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                               10000.\nPages active:                            300000.\nPages inactive:                          200000.\nPages speculative:                         5000.\nPages throttled:                              0.\nPages wired down:                        150000.\nPages purgeable:                           1000.\n";
+        // (10000 + 5000 + 200000 + 1000) x 16 KB = 3375 MB
+        assert_eq!(vm_stat_available_mb(out), Some(3375));
+        assert_eq!(vm_stat_available_mb("nonsense"), None);
     }
 }

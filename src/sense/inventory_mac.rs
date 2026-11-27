@@ -5,8 +5,9 @@
 //! The CPU part (model, cores, threads) comes from `sysinfo` like the rest of the health data;
 //! Apple Silicon has no published base clock, so `base_mhz` is not sent. Not read on macOS:
 //! memory slots (soldered unified memory), graphics driver version (part of macOS), disk wear /
-//! temperature (no public interface), Wi-Fi name / signal (location permission), last update,
-//! power plan, drivers.
+//! temperature (no public interface), power plan, drivers. Sense Remote (Sürüm 11, #119): the
+//! last macOS update (install history) and each adapter's link / speed (`ifconfig`, Wi-Fi link
+//! rate) are read too.
 //!
 //! `system_profiler` takes a few seconds; it runs only in the background inventory thread, with
 //! a time limit.
@@ -54,7 +55,38 @@ pub fn collect() -> Option<Inventory> {
         timezone,
     );
     inventory.cpu = cpu();
-    (inventory != Inventory::default()).then_some(inventory)
+    if inventory == Inventory::default() {
+        return None;
+    }
+    // Sürüm 11 (#119): last update, adapter link / speed. Their own run with its own limit, so a
+    // slow install history never costs the rest of the inventory.
+    let extra = health_cmd::run("/usr/sbin/system_profiler", &EXTRA_ARGS, EXTRA_TIMEOUT)
+        .and_then(|out| serde_json::from_str::<serde_json::Value>(&out).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let links: Vec<health_parse::MacLink> = inventory
+        .network
+        .iter()
+        .flatten()
+        .filter_map(|adapter| adapter.device.clone())
+        .filter(|device| is_bsd_name(device))
+        .filter_map(|device| {
+            let out = health_cmd::run("/sbin/ifconfig", &[device.as_str()], TOOL_TIMEOUT)?;
+            let (up, speed) = health_parse::mac_ifconfig(&out);
+            Some((device, up, speed))
+        })
+        .collect();
+    health_parse::mac_inventory_extras(&mut inventory, &extra, &links);
+    Some(inventory)
+}
+
+const EXTRA_ARGS: [&str; 3] = ["-json", "SPAirPortDataType", "SPInstallHistoryDataType"];
+const EXTRA_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// "en0", "en12": only such names go to `ifconfig` as an argument.
+fn is_bsd_name(name: &str) -> bool {
+    name.len() <= 16
+        && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && name.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 fn cpu() -> Option<CpuInfo> {

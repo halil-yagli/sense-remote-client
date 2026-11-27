@@ -137,7 +137,7 @@ class SenseLineRowView extends StatelessWidget {
   Widget build(BuildContext context) {
     final tag = row.tag;
     final labelStyle = SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted);
-    final value = row.value ?? SenseStatusStrings.unreadable;
+    final value = row.shownValue;
     final valueStyle = _valueStyle(row.value, row.valueLevel);
     final line = Padding(
       padding: const EdgeInsets.symmetric(vertical: _kRowPadV),
