@@ -18,13 +18,14 @@ import 'package:flutter_hbb/sense/screens/files/files_view.dart';
 import 'package:flutter_hbb/sense/screens/shared/aux_window/aux_window_frame.dart';
 import 'package:flutter_hbb/sense/strings/files.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get/get.dart' hide Rx;
 import 'package:uuid/uuid.dart';
 
 const String _dir = 'test/goldens/files';
 String _file(String name) => '../../goldens/files/$name.png';
 bool _skip(String name) => !autoUpdateGoldenFiles && !File('$_dir/$name.png').existsSync();
 
-final _sessionId = UuidValue('00000000-0000-0000-0000-000000000002');
+final _sessionId = UuidValue('00000000-0000-0000-0000-000000000000');
 
 class _FakeFFI implements FFI {
   @override
@@ -182,6 +183,8 @@ void main() {
       expect(senseCrumbs('/Users/sense', windows: false), [('Users', '/Users'), ('sense', '/Users/sense')]);
       expect(senseCrumbs('/', windows: true), isEmpty);
       expect(senseBaseName(r'C:\Sergi\kubbe_4k.mov'), 'kubbe_4k.mov');
+      expect(senseUpperTr('Değiştirilme'), 'DEĞİŞTİRİLME');
+      expect(senseUpperTr('Aktarımlar'), 'AKTARIMLAR');
     });
   });
 

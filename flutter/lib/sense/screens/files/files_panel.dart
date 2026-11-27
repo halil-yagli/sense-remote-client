@@ -669,7 +669,7 @@ class SenseFilesPanelState extends State<SenseFilesPanel> {
           mainAxisAlignment: align == TextAlign.right ? MainAxisAlignment.end : MainAxisAlignment.start,
           children: [
             Flexible(
-              child: Text(label.toUpperCase(),
+              child: Text(senseUpperTr(label),
                   maxLines: 1,
                   style: SenseTextStyles.of(
                       size: SenseFontSize.caps,

@@ -18,7 +18,7 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
 
-final _sessionId = UuidValue('00000000-0000-0000-0000-000000000001');
+final _sessionId = UuidValue('00000000-0000-0000-0000-000000000000');
 
 class _FakeFFI implements FFI {
   @override

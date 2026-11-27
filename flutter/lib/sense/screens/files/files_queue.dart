@@ -136,7 +136,7 @@ class SenseFilesQueue extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: SenseColors.line))),
             child: Row(children: [
-              Text(SenseFilesStrings.transfers.toUpperCase(), style: caps),
+              Text(senseUpperTr(SenseFilesStrings.transfers), style: caps),
               const SizedBox(width: 8),
               if (list.isNotEmpty)
                 Text(SenseFilesStrings.transfersSummary(running, done), style: SenseTextStyles.hint),
