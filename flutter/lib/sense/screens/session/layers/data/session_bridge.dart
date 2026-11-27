@@ -31,7 +31,17 @@ class SenseFfiLayerHost implements SenseLayerHost {
       direct: _direct(),
       speed: d.speed,
       waitingImage: _waitingImage(),
+      serverName: _serverName(),
     );
+  }
+
+  /// Sürüm 11 (#144): server name for the connection card line.
+  String? _serverName() {
+    try {
+      return bind.sessionSenseServerName(sessionId: ffi.sessionId);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Sürüm 11 (#121): the Host's peer info came (login done) but no picture yet.

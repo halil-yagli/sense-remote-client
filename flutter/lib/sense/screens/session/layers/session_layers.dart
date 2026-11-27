@@ -171,7 +171,8 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
       layer = (t) => SenseWaitingImageLayer(direct: _c.direct, onEnd: _c.endByUser, appear: t);
     } else if (_c.infoOpen) {
       // Sürüm 10 (#110): the card opened from the logo area while the link is good.
-      layer = (t) => SenseLinkInfoLayer(view: link, direct: _c.direct, onClose: _c.closeInfo, appear: t);
+      layer = (t) => SenseLinkInfoLayer(
+          view: link, direct: _c.direct, serverName: _c.serverName, onClose: _c.closeInfo, appear: t);
     }
     return SenseToastHost(
       controller: _toast,
