@@ -48,6 +48,23 @@ void main() {
       expect(l.level, SenseLevel.ok);
     });
 
+    // Sürüm 12 (#150): "0 fps" in green confused; a still screen says "Durağan".
+    test('still screen on a good link: Durağan instead of the frame rate', () {
+      final l = senseLinkLine(
+          const SenseLinkSample(path: SenseLinkPath.direct, fps: 0, rttMs: 3, lastFrameMs: 9000, wavy: false));
+      expect(l.text, 'Doğrudan · Durağan · 3 ms');
+      expect(l.level, SenseLevel.ok);
+      // A low rate with an old last frame (K44 rule) also reads Durağan.
+      expect(senseLinkLine(const SenseLinkSample(path: SenseLinkPath.relay, fps: 2, rttMs: 20, lastFrameMs: 6000)).text,
+          'Aktarmalı · Durağan · 20 ms');
+      // Moving picture: the frame rate.
+      expect(senseLinkLine(const SenseLinkSample(path: SenseLinkPath.direct, fps: 60, rttMs: 3, lastFrameMs: 10)).text,
+          'Doğrudan · 60 fps · 3 ms');
+      // A low rate while frames come and the layer says Dalgalı stays a number.
+      expect(senseLinkLine(const SenseLinkSample(fps: 3, rttMs: 20, lastFrameMs: 10, wavy: true)).text,
+          'Dalgalı · 3 fps · 20 ms');
+    });
+
     test('parsers', () {
       expect(senseParseFps('60'), 60);
       expect(senseParseFps('60 58 30'), 30);

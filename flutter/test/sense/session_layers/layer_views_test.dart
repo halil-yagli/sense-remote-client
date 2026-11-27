@@ -515,6 +515,73 @@ void main() {
       expect(find.byType(SenseLayerVeil), findsNothing);
     });
 
+    // Sürüm 12 (#150): on the device the logo showed the forbidden cursor. remote_page.dart
+    // rebuilds its body in another wrapper when the first picture comes, so the layer is
+    // mounted anew with the same controller; the old dispose used to drop the registration
+    // and the bar never found the card again.
+    testWidgets('#150: after the layer is remounted the logo still opens the card (good link)', (tester) async {
+      void link() => host.raw = SenseLinkRaw(
+            delay: '3',
+            fps: '60',
+            lossEst: 0,
+            lastFrameMs: 10,
+            lastFrameAt: clock.wall,
+            probeAt: clock.wall,
+            serverName: 'Almanya',
+          );
+      link();
+      final backend = FakeBackend(
+        link: bar.SenseLinkSample(
+          path: bar.SenseLinkPath.direct,
+          fps: 0,
+          rttMs: 3,
+          lastFrameMs: 9000,
+          wavy: false,
+          onRestoreLayer: () => SenseLayerController.find('p1')?.openCard(),
+        ),
+      )..ready = false; // values still being measured: the card opens anyway
+      Widget window({required bool wrapped}) {
+        final layer = SenseSessionLayers(id: 'p1', controller: c, listenToInput: false);
+        return MaterialApp(
+          theme: senseTheme(),
+          home: Scaffold(
+            body: Stack(children: [
+              Positioned.fill(
+                child: SenseSessionFrame(backend: backend, popups: FakePopups(), child: const SizedBox.expand()),
+              ),
+              Positioned.fill(child: wrapped ? Padding(padding: EdgeInsets.zero, child: layer) : layer),
+            ]),
+          ),
+        );
+      }
+
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(window(wrapped: false));
+      await seconds(tester, 3, link);
+      // The first picture arrives: remote_page puts its body in BlockableOverlay.
+      await tester.pumpWidget(window(wrapped: true));
+      expect(SenseLayerController.find('p1'), same(c), reason: 'the remount keeps the registration');
+
+      final area = find.byKey(const ValueKey('sense-bar-link'));
+      final detector = tester.widget<FocusableActionDetector>(
+          find.descendant(of: area, matching: find.byType(FocusableActionDetector)));
+      expect(detector.enabled, isTrue);
+      expect(detector.mouseCursor, SystemMouseCursors.click, reason: 'no forbidden cursor');
+      final line = tester.widget<Text>(find.byKey(const ValueKey('sense-bar-link-text')));
+      expect(line.data, 'Doğrudan · Durağan · 3 ms');
+
+      await tester.tap(area);
+      await tester.pump();
+      expect(c.infoOpen, isTrue);
+      expect(find.text(SenseLayerStrings.goodTitle), findsOneWidget);
+      expect(find.byKey(const Key('sense-layer-info-server')), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      expect(SenseLayerController.find('p1'), isNull, reason: 'gone with the last layer widget');
+    });
+
     testWidgets('lost card keeps showing and has no x', (tester) async {
       await _pump(tester, SenseSessionLayers(id: 'p1', controller: c, listenToInput: false));
       await seconds(tester, 1, host.healthy);

@@ -279,7 +279,6 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
             ? SenseLinkPath.direct
             : SenseLinkPath.relay;
     final at = d.lastFrameAt;
-    final layer = SenseLayerController.find(ffi.id);
     return SenseLinkSample(
       path: path,
       fps: senseParseFps(d.fps),
@@ -292,9 +291,13 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       wavy: SenseLayerController.find(ffi.id)?.wavy.value,
       // Sürüm 10 (#110): the logo area opens the link card (minimized weak card, or the
       // same card with the current values while the link is good) — not Ekran bilgisi.
-      onRestoreLayer: layer?.openCard,
+      // Sürüm 12 (#150): looked up on the click, not when the bar was built, so the area
+      // is never left disabled because the bar was built before the layer was mounted.
+      onRestoreLayer: _openLinkCard,
     );
   }
+
+  void _openLinkCard() => SenseLayerController.find(ffi.id)?.openCard();
 
   @override
   Future<void> refresh() async {

@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../strings/session.dart';
 import '../record_notice.dart';
+import 'screen_still.dart' show senseStillScreen;
 import '../../../tokens/sense_tokens.dart';
 
 /// The four lists of the bar (O3–O6).
@@ -146,9 +147,21 @@ SenseLinkHealth senseLinkHealth(SenseLinkSample s) {
       : s.path == SenseLinkPath.relay
           ? SenseSessionStrings.relay
           : SenseSessionStrings.direct;
+  // Sürüm 12 (#150, K44): on a good link a low rate means the screen is not changing
+  // (RustDesk sends a frame only when the picture changed): say "Durağan", not "0 fps".
+  final fps = s.fps;
+  final still = fps != null &&
+      health == SenseLinkHealth.good &&
+      (fps == 0 ||
+          senseStillScreen(
+            fps: fps.toDouble(),
+            rttMs: s.rttMs?.toDouble(),
+            lossPct: s.lossPct,
+            frameAgeMs: s.lastFrameMs,
+          ));
   final parts = <String>[
     head,
-    if (s.fps != null) SenseSessionStrings.fps(s.fps!),
+    if (fps != null) still ? SenseSessionStrings.still : SenseSessionStrings.fps(fps),
     if (s.rttMs != null) SenseSessionStrings.ms(s.rttMs!),
   ];
   return (

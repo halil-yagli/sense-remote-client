@@ -244,7 +244,8 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
           // layout): the minimized weak card comes back, with a good link the same card
           // shows the current values. Ekran bilgisi opens only from its own button.
           // One popup at a time: open lists and popups close first.
-          onTap: ready && b.link.onRestoreLayer != null
+          // Sürüm 12 (#150): not tied to `ready`: the card opens while values are measured.
+          onTap: b.link.onRestoreLayer != null
               ? () {
                   final open = b.link.onRestoreLayer!;
                   menus.close();

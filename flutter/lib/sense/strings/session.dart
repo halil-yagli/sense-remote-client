@@ -55,6 +55,8 @@ abstract final class SenseSessionStrings {
   static const String connecting = 'Bağlanıyor…';
   static const String linkDetail = 'Bağlantı ayrıntısı';
   static String fps(int v) => '$v fps';
+  /// Sürüm 12 (#150): a still screen sends no new frames; "0 fps" in green confused.
+  static const String still = 'Durağan';
   static String ms(int v) => '$v ms';
 
   // Remote image scale (O1).
