@@ -19,6 +19,6 @@ void main() {
   test('handle takes only its own event', () {
     expect(SenseRecordNotice.handle({'name': 'sense_privacy_note'}), isFalse);
     // No navigator overlay in a unit test: the event is still taken, nothing is shown.
-    expect(SenseRecordNotice.handle({'name': 'sense_record_saved', 'dir': 'C:\x'}), isTrue);
+    expect(SenseRecordNotice.handle({'name': 'sense_record_saved', 'dir': '/tmp/kayit'}), isTrue);
   });
 }
