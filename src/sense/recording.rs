@@ -11,8 +11,8 @@
 //!   `empty` and leaves no empty folder behind.
 //!
 //! UI events (session window): `sense_record_state` {id, state = starting | started | failed |
-//! stopped | empty, display, part, reason} and `sense_record_saved` {dir, file}. Diagnostics (`record/*`) carry
-//! counts, sizes and codec only: no path, file name or computer name.
+//! stopped | empty, display, part, reason} and `sense_record_saved` {dir, file}. Diagnostics
+//! (`record/*`) carry counts, sizes and codec only: no path, file name or computer name.
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -35,7 +35,7 @@ const FINISH_STEP: Duration = Duration::from_millis(100);
 pub fn ui_state(e: &SenseRecordEvent) -> (&'static str, &'static str) {
     match e {
         SenseRecordEvent::Started { .. } => ("started", ""),
-        SenseRecordEvent::Failed { reason } => ("failed", reason),
+        SenseRecordEvent::Failed { reason } => ("failed", *reason),
     }
 }
 
