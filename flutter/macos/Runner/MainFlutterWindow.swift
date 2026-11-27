@@ -318,6 +318,19 @@ class MainFlutterWindow: NSWindow {
                     }
                     result(nil)
 
+                case "senseCmExcludeFromCapture":
+                    // Sense Remote (#109): the Host-side icon and card stay on the
+                    // Host's screen but are left out of screen capture, so the
+                    // Controller does not see them in its picture. Only the
+                    // connection icon window asks; the window is never hidden
+                    // from the Host user.
+                    if let window = registrar.view?.window {
+                        window.sharingType = .none
+                        result(true)
+                    } else {
+                        result(false)
+                    }
+
                 default:
                     result(FlutterMethodNotImplemented)
                 }

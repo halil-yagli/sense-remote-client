@@ -223,3 +223,87 @@ void _refreshChild(int child) {
     calloc.free(rect);
   }
 }
+
+// --- #107: popup window style (true 64 × 64 icon) -------------------------
+
+// GetWindowLongPtrW / SetWindowLongPtrW (64-bit builds); looked up so a
+// missing export only skips the style change.
+typedef _GetLongC = IntPtr Function(IntPtr, Int32);
+typedef _GetLongD = int Function(int, int);
+typedef _SetLongC = IntPtr Function(IntPtr, Int32, IntPtr);
+typedef _SetLongD = int Function(int, int, int);
+final _getWindowLongPtr = DynamicLibrary.open('user32.dll')
+    .lookupFunction<_GetLongC, _GetLongD>('GetWindowLongPtrW');
+final _setWindowLongPtr = DynamicLibrary.open('user32.dll')
+    .lookupFunction<_SetLongC, _SetLongD>('SetWindowLongPtrW');
+
+const int _kGwlStyle = -16;
+const int kSenseWsPopup = 0x80000000;
+const int kSenseWsCaption = 0x00C00000;
+const int kSenseWsThickFrame = 0x00040000;
+const int kSenseWsMaximizeBox = 0x00010000;
+
+/// #107: the CM window's style without caption, sizing border and maximize
+/// box, as a popup window.
+///
+/// Slayer v9: the icon asked for 64 × 64 and got 136 × 64. The runner window is
+/// an overlapped window with a caption (WS_OVERLAPPEDWINDOW); Windows keeps
+/// such windows at least as wide as the system minimum (SM_CXMIN, 136 px) even
+/// though window_manager answers WM_GETMINMAXINFO with 24 × 52, so the right
+/// half of the icon window was an empty clear strip and the logo sat in a
+/// half-region. A popup window is not held to that minimum. Frameless already
+/// (no system border is drawn), so the card looks and drags the same.
+int senseCmPopupStyle(int style) =>
+    ((style & 0xFFFFFFFF) &
+        ~(kSenseWsCaption | kSenseWsThickFrame | kSenseWsMaximizeBox)) |
+    kSenseWsPopup;
+
+/// Makes the CM window a popup window (see [senseCmPopupStyle]). Runs before
+/// every resize; changes nothing when the style is already right. Returns
+/// false when the window or the call is not available.
+bool senseCmPopupFrame() {
+  try {
+    final hwnd = _ownWindow();
+    if (hwnd == 0) return false;
+    final old = _getWindowLongPtr(hwnd, _kGwlStyle) & 0xFFFFFFFF;
+    final want = senseCmPopupStyle(old);
+    if (want == old) return true;
+    _setWindowLongPtr(hwnd, _kGwlStyle, want);
+    // SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
+    const flags = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020;
+    win32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, flags);
+    return true;
+  } catch (e) {
+    debugPrint('Sense CM: popup style failed: $e');
+    return false;
+  }
+}
+
+// --- #109: not in the picture sent to the Controller ----------------------
+
+typedef _AffinityC = Int32 Function(IntPtr, Uint32);
+typedef _AffinityD = int Function(int, int);
+final _setWindowDisplayAffinity = DynamicLibrary.open('user32.dll')
+    .lookupFunction<_AffinityC, _AffinityD>('SetWindowDisplayAffinity');
+
+/// WDA_EXCLUDEFROMCAPTURE (Windows 10 2004 and later).
+const int kSenseWdaExcludeFromCapture = 0x00000011;
+
+/// #109: the Sense card and icon stay on the Host's screen but are left out of
+/// screen capture, so the Controller does not see the Host's chat icon next to
+/// its own. Older Windows rejects the value: nothing changes there (the window
+/// stays in the picture as before). The window is never hidden from the Host
+/// user (workshop CLAUDE.md, Security). Returns (done, Windows error code).
+(bool, int) senseCmExcludeFromCapture() {
+  try {
+    final hwnd = _ownWindow();
+    if (hwnd == 0) return (false, 0);
+    if (_setWindowDisplayAffinity(hwnd, kSenseWdaExcludeFromCapture) != 0) {
+      return (true, 0);
+    }
+    return (false, win32.GetLastError());
+  } catch (e) {
+    debugPrint('Sense CM: capture exclusion failed: $e');
+    return (false, -1);
+  }
+}
