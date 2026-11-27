@@ -390,7 +390,19 @@ impl Client {
         debug_assert!(peer == interface.get_id());
         interface.update_direct(None);
         interface.update_received(false);
-        match Self::_start(peer, key, token, conn_type, interface.clone()).await {
+        // Sense Remote (Sürüm 11, SRV): when the peer is not on the ID server asked, the next
+        // listed ID server is asked (`server_select::try_next_server`; never with one server).
+        crate::sense::server_select::begin_peer(peer);
+        let result = loop {
+            let result = Self::_start(peer, key, token, conn_type, interface.clone()).await;
+            if let Err(err) = &result {
+                if crate::sense::server_select::try_next_server(peer, &err.to_string()).await {
+                    continue;
+                }
+            }
+            break result;
+        };
+        match result {
             Err(err) => {
                 let err_str = err.to_string();
                 if err_str.starts_with("Failed") {
@@ -400,6 +412,8 @@ impl Client {
                 }
             }
             Ok(x) => {
+                // Sense Remote (Sürüm 11, SRV): the server for the connection card, `conn/server`.
+                crate::sense::server_select::connected(peer, !x.0 .1).await;
                 // Set x.2 to true only in the connect() function to indicate that direct_failures needs to be updated; everywhere else it should be set to false.
                 if x.2 {
                     let direct_failures = interface.get_lch().read().unwrap().direct_failures;
@@ -473,7 +487,9 @@ impl Client {
             (peer, "", key, token)
         };
         let (rendezvous_server, servers, contained) = if other_server.is_empty() {
-            crate::get_rendezvous_server(1_000).await
+            // Sense Remote (Sürüm 11, SRV): the listed ID servers in order (the built-in one
+            // without a list), not only the pinned server.
+            crate::sense::server_select::rendezvous_for_peer(peer).await
         } else {
             // Sense Remote: `<id>@public` and `<id>@<our server>` go to our own ID server;
             // every other server is refused (`sense::server::other_server_target`).
@@ -824,6 +840,7 @@ impl Client {
         let mut webrtc_offerer = webrtc_offerer.map(OffererGuard::new);
         let mut start = Instant::now();
         let mut socket = connect_tcp(&*rendezvous_server, CONNECT_TIMEOUT).await;
+        let (first_rendezvous, first_ok) = (rendezvous_server.clone(), socket.is_ok()); // Sense Remote (SRV)
         debug_assert!(!servers.contains(&rendezvous_server));
         let rtt = start.elapsed();
         log::debug!("TCP connection establishment time used: {:?}", rtt);
@@ -842,6 +859,15 @@ impl Client {
             crate::refresh_rendezvous_server();
         }
         log::info!("rendezvous server: {}", rendezvous_server);
+        // Sense Remote (Sürüm 11, SRV): a failed ID server waits at the end of the order a while.
+        crate::sense::server_select::note_rendezvous_connect(
+            &peer,
+            &first_rendezvous,
+            first_ok,
+            &rendezvous_server,
+            socket.is_ok(),
+        )
+        .await;
         let mut socket = socket?;
         let mut my_addr = socket.local_addr();
         let mut signed_id_pk = Vec::new();
@@ -1634,6 +1660,10 @@ impl Client {
         // preferred outcome, not a violation.
         if (interface.is_force_relay() && typ != "WebRTC") || conn.is_err() {
             if !relay_server.is_empty() {
+                // Sense Remote (Sürüm 11, SRV): with several listed relays the lowest
+                // Controller + Host total; otherwise the relay the Host offered.
+                let relay_server =
+                    crate::sense::server_select::relay_to_request(peer_id, relay_server).await;
                 let switch_code = interface.get_switch_code();
                 conn = Self::request_relay(
                     peer_id,

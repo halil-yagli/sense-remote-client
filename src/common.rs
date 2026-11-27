@@ -827,7 +827,18 @@ fn get_rendezvous_server_(_ms_timeout: u64) -> (String, Vec<String>) {
 async fn get_rendezvous_server_(_ms_timeout: u64) -> (String, Vec<String>) {
     // Sense Remote: the fixed ID server (`sense::server`), not whatever the service reports
     // over IPC (upstream: `crate::ipc::get_rendezvous_server`).
-    (crate::sense::server::rendezvous_server_with_port(), Vec::new())
+    // Sense Remote (Sürüm 11, SRV): the signed list's ID servers in order when there is one
+    // (`sense::server_list`); never anything outside the list or the built-in server.
+    let list = crate::sense::server_select::current_list().await;
+    let mut hosts = crate::sense::server_select::rendezvous_order(list.as_ref(), std::time::Instant::now())
+        .into_iter()
+        .map(|s| {
+            crate::sense::server_select::with_port(&s.rendezvous, hbb_common::config::RENDEZVOUS_PORT)
+        });
+    let first = hosts
+        .next()
+        .unwrap_or_else(crate::sense::server::rendezvous_server_with_port);
+    (first, hosts.collect())
 }
 
 #[inline]
@@ -2194,7 +2205,12 @@ pub fn decode64<T: AsRef<[u8]>>(input: T) -> Result<Vec<u8>, base64::DecodeError
 pub async fn get_key(_sync: bool) -> String {
     // Sense Remote: always our hbbs key (`sense::server`), never one from the exe name, the
     // service over IPC or RustDesk's built-in key (upstream read them in that order).
-    crate::sense::server::RS_PUB_KEY.to_owned()
+    // Sense Remote (Sürüm 11, SRV): the signed list's key when there is one (one key for every
+    // listed server, checked in `sense::server_list`).
+    match crate::sense::server_select::current_list().await {
+        Some(list) => list.servers[0].key.clone(),
+        None => crate::sense::server::RS_PUB_KEY.to_owned(),
+    }
 }
 
 pub fn pk_to_fingerprint(pk: Vec<u8>) -> String {

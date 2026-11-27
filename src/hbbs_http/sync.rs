@@ -319,6 +319,11 @@ async fn start_hbbs_sync_async() {
                     // Sense Remote (karar #93): `sense.id_rev`, the panel edit applied here; only
                     // for a panel that announces `name_push`.
                     crate::sense::identity_set::extend_heartbeat_rev(&mut sense);
+                    // Sense Remote (Sürüm 11, SRV): `sense.srv` (the stored server list) and
+                    // `sense.relay_rtt` (relay measurements), likewise unsigned.
+                    crate::sense::server_list::extend_heartbeat(&mut sense);
+                    crate::sense::server_select::extend_heartbeat(&mut sense);
+                    crate::sense::server_select::tick();
                     v["sense"] = sense;
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
@@ -367,6 +372,8 @@ async fn start_hbbs_sync_async() {
                         crate::sense::update::on_answer(answer.update).await;
                         // Sense Remote (Sürüm 9, R1): signed wake order for a computer on this LAN.
                         crate::sense::wol::on_answer(&s);
+                        // Sense Remote (Sürüm 11, SRV): the signed server list, verified there.
+                        crate::sense::server_list::on_answer(&s);
                     }
                 }
             }

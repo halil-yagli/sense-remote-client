@@ -110,6 +110,8 @@ pub fn parse_answer(body: &str) -> Option<HeartbeatAnswer> {
             // Karar #93: read by `identity_set::apply_pushed` (only for a panel announcing
             // `name_push`), not here.
             super::identity_set::KEY_IDENTITY => {}
+            // Sense Remote (Sürüm 11, SRV): read by `server_list::on_answer`, not here.
+            super::server_list::KEY_ANSWER => {}
             _ => answer.ignored.push(key),
         }
     }
