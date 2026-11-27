@@ -37,7 +37,7 @@ class SenseFfiLayerHost implements SenseLayerHost {
   /// Sürüm 11 (#121): the Host's peer info came (login done) but no picture yet.
   bool _waitingImage() {
     try {
-      return ffi.ffiModel.pi.isSet.isTrue && ffi.ffiModel.waitForFirstImage.isTrue;
+      return ffi.ffiModel.pi.isSet.value && ffi.ffiModel.waitForFirstImage.value;
     } catch (_) {
       return false;
     }
