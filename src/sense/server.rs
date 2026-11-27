@@ -40,6 +40,11 @@ pub const RS_PUB_KEY: &str = env_or(
     "4NFLedghh3cvGMgdCyIS5uKWRZVl3WHK7NZEHjxbNrw=",
 );
 
+/// Sense Remote (Sürüm 11, SRV): how the built-in server is shown on the connection card
+/// ("Sunucu: …") when no signed server list (`server_list`) replaces it. Repository variable
+/// `SENSE_SERVER_NAME`; not secret.
+pub const SERVER_NAME: &str = env_or(option_env!("SENSE_SERVER_NAME"), "Sense sunucusu");
+
 /// Lowercase ASCII byte.
 const fn lower(c: u8) -> u8 {
     if c >= b'A' && c <= b'Z' {

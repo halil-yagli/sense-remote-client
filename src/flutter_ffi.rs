@@ -331,6 +331,15 @@ pub fn session_sense_idle_ms(session_id: SessionID) -> SyncReturn<i64> {
     SyncReturn(sessions::sense_idle_ms(&session_id))
 }
 
+/// Sense Remote (Sürüm 11, SRV): the name of the server this connection uses ("Türkiye
+/// (İstanbul)"), for the connection card line `Sunucu: … · yol · ms`.
+pub fn session_sense_server_name(session_id: SessionID) -> SyncReturn<String> {
+    let peer = sessions::get_session_by_session_id(&session_id)
+        .map(|session| session.lc.read().unwrap().get_id().to_owned())
+        .unwrap_or_default();
+    SyncReturn(crate::sense::server_select::session_server_name(&peer))
+}
+
 pub fn session_refresh(session_id: SessionID, display: usize) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.refresh_video(display as _);

@@ -358,26 +358,44 @@ impl RendezvousMediator {
                 && !crate::platform::installing_service()
             {
                 let mut futs = Vec::new();
-                let servers = Config::get_rendezvous_servers();
+                // Sense Remote (Sürüm 11, SRV): register on EVERY listed ID server (the built-in
+                // one without a list), so a Controller finds this Host whichever it asks
+                // (design note §2). Never a server outside the signed list.
+                let servers = crate::sense::server_select::host_rendezvous_servers();
                 SHOULD_EXIT.store(false, Ordering::SeqCst);
                 MANUAL_RESTARTED.store(false, Ordering::SeqCst);
-                for host in servers.clone() {
+                for (index, host) in servers.clone().into_iter().enumerate() {
                     let server = server.clone();
                     let timeout = timeout.clone();
                     futs.push(tokio::spawn(async move {
-                        if let Err(err) = Self::start(server, host).await {
-                            let err = format!("rendezvous mediator error: {err}");
-                            // When user reboot, there might be below error, waiting too long
-                            // (CONNECT_TIMEOUT 18s) will make user think there is bug
-                            if err.contains("10054") || err.contains("11001") {
-                                // No such host is known. (os error 11001)
-                                // An existing connection was forcibly closed by the remote host. (os error 10054): also happens for UDP
-                                *timeout.write().unwrap() = 3000;
+                        loop {
+                            if let Err(err) = Self::start(server.clone(), host.clone()).await {
+                                let err = format!("rendezvous mediator error: {err}");
+                                // When user reboot, there might be below error, waiting too long
+                                // (CONNECT_TIMEOUT 18s) will make user think there is bug
+                                if err.contains("10054") || err.contains("11001") {
+                                    // No such host is known. (os error 11001)
+                                    // An existing connection was forcibly closed by the remote host. (os error 10054): also happens for UDP
+                                    *timeout.write().unwrap() = 3000;
+                                }
+                                log::error!("{err}");
                             }
-                            log::error!("{err}");
+                            // Sense Remote (SRV): a backup ID server that is down retries on
+                            // its own instead of taking the first one's registration down.
+                            if index == 0 || SHOULD_EXIT.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            for _ in 0..30 {
+                                if SHOULD_EXIT.load(Ordering::SeqCst) {
+                                    break;
+                                }
+                                sleep(1.).await;
+                            }
                         }
                         // SHOULD_EXIT here is to ensure once one exits, the others also exit.
-                        SHOULD_EXIT.store(true, Ordering::SeqCst);
+                        if index == 0 {
+                            SHOULD_EXIT.store(true, Ordering::SeqCst);
+                        }
                     }));
                 }
                 join_all(futs).await;
@@ -1409,6 +1427,10 @@ impl RendezvousMediator {
     }
 
     fn get_relay_server(&self, provided_by_rendezvous_server: String) -> String {
+        // Sense Remote (Sürüm 11, SRV): the relay listed with this ID server (signed list).
+        if let Some(relay) = crate::sense::server_select::host_relay_for(&self.host) {
+            return relay;
+        }
         let mut relay_server = Config::get_option("relay-server");
         if relay_server.is_empty() {
             relay_server = provided_by_rendezvous_server;
@@ -1422,6 +1444,8 @@ impl RendezvousMediator {
     fn check_relay_request(&self, rr: &RequestRelay, now: Instant) -> ResultType<()> {
         crate::common::check_relay_uuid(&rr.uuid)?;
         if !is_reported_relay(&rr.relay_server, now)
+            // Sense Remote (Sürüm 11, SRV): a relay of the signed list, chosen by the Controller.
+            && !crate::sense::server_select::host_accepts_relay(&rr.relay_server)
             && check_port(&rr.relay_server, config::RELAY_PORT)
                 != check_port(self.get_relay_server(String::new()), config::RELAY_PORT)
         {

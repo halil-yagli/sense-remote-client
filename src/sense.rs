@@ -800,6 +800,9 @@ pub mod mac_service_log;
 pub mod mac_state;
 // Sense Remote: our own ID / relay server and its key (2026-11-21).
 pub mod server;
+// Sense Remote (Sürüm 11, SRV): the signed server list from the panel and the choice among it.
+pub mod server_list;
+pub mod server_select;
 // Sense Remote: maintenance curtain of ghost mode; privacy mode turns it on (wave 3 I10).
 pub mod curtain;
 // Sense Remote (MAC-SONRA-15): the curtain on macOS (pure parts are tested everywhere).
