@@ -394,9 +394,10 @@ mod tests {
         let a = std::fs::canonicalize(&file).unwrap();
         let upper = file.to_string_lossy().to_uppercase();
         let b = std::fs::canonicalize(&upper).unwrap();
-        assert!(runs_as_installed_exe(&a.to_string_lossy(), &b.to_string_lossy()));
-        assert!(runs_as_installed_exe(&a.to_string_lossy(), &file.to_string_lossy()));
+        // The runner's temp folder has a short 8.3 segment (`RUNNER~1`): the raw path is not the
+        // same text, the resolved ones are — which is why the caller resolves both sides.
         let _ = std::fs::remove_file(&file);
+        assert!(runs_as_installed_exe(&a.to_string_lossy(), &b.to_string_lossy()));
     }
 
     fn env() -> ScriptEnv {
