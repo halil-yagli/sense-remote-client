@@ -73,17 +73,25 @@ void main() {
   testWidgets('Linux placeholder', (t) => shot(t, 'fav_linux', io: FakeFavIo(), os: SenseFavOs.linux),
       skip: goldenSkip('fav_linux'), tags: const ['golden']);
 
-  testWidgets('in-place question and IP card', (t) => shot(t, 'fav_ask_ip',
-          io: FakeFavIo(prefs: {
-            SenseFavOs.win: prefsJson(os: SenseFavOs.win, items: [
-              {'id': 'win.ipinfo', 'key': null},
-              {'id': 'win.logoff', 'key': 3},
-              {'id': 'win.taskmgr', 'key': 1},
-            ], recent: ['win.taskmgr'])
-          }, setAnswer: ''), act: (t, m) async {
-        await tapKey(t, 'sense-fav-run-win.ipinfo');
-        await tapKey(t, 'sense-fav-run-win.logoff');
-      }), skip: goldenSkip('fav_ask_ip'), tags: const ['golden']);
+  FakeFavIo paneIo() => FakeFavIo(prefs: {
+        SenseFavOs.win: prefsJson(os: SenseFavOs.win, items: [
+          {'id': 'win.ipinfo', 'key': null},
+          {'id': 'win.logoff', 'key': 3},
+          {'id': 'win.taskmgr', 'key': 1},
+          {'id': 'win.ping', 'key': null},
+        ], recent: ['win.taskmgr'])
+      }, setAnswer: '');
+
+  testWidgets('IP card under its row', (t) => shot(t, 'fav_ip', io: paneIo(),
+      act: (t, m) => tapKey(t, 'sense-fav-run-win.ipinfo')), skip: goldenSkip('fav_ip'), tags: const ['golden']);
+
+  testWidgets('in-place question (Oturumu kapat)', (t) => shot(t, 'fav_ask', io: paneIo(),
+      act: (t, m) => tapKey(t, 'sense-fav-run-win.logoff')), skip: goldenSkip('fav_ask'), tags: const ['golden']);
+
+  testWidgets('ping pane after Başlat', (t) => shot(t, 'fav_ping', io: paneIo(), act: (t, m) async {
+        await tapKey(t, 'sense-fav-run-win.ping');
+        await tapKey(t, 'sense-fav-ping-start');
+      }), skip: goldenSkip('fav_ping'), tags: const ['golden']);
 
   testWidgets('key slots under a row', (t) => shot(t, 'fav_keys', io: winIo(),
       act: (t, m) => tapKey(t, 'sense-fav-key-win.taskmgr')), skip: goldenSkip('fav_keys'), tags: const ['golden']);
