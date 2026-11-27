@@ -255,6 +255,8 @@ void main() {
     test('initials', () {
       expect(senseCmInitials('Halil Yağlı'), 'HY');
       expect(senseCmInitials('ali'), 'A');
+      // TS-18: Turkish upper case.
+      expect(senseCmInitials('ismail ışık'), 'İI');
       expect(senseCmInitials('  '), '?');
     });
 
@@ -353,8 +355,10 @@ void main() {
       expect(senseHostWhoLine(c, const Duration(minutes: 14)),
           'Halil Y. · 14 dk · ekran, fare ve klavye, dosya');
       expect(SenseHostLiveStrings.minutes(const Duration(seconds: 20)), '1 dk');
+      // TS-10: same form as the Host home screen ("1 sa 5 dk", "2 sa").
       expect(SenseHostLiveStrings.minutes(const Duration(minutes: 65)),
-          '1 sa 05 dk');
+          '1 sa 5 dk');
+      expect(SenseHostLiveStrings.minutes(const Duration(minutes: 120)), '2 sa');
       expect(senseHostWhoLine(client(2, 'Ali', keyboard: false), null),
           'Ali · ekran, pano, ses');
     });
@@ -485,13 +489,88 @@ void main() {
       expect(senseCallLevel(3), 1.0);
     });
 
-    test('the card shows the waiting, then the live connection', () {
+    test('the card shows the live connection; a waiting one beside it (O6)', () {
       final ended = client(1, 'A')..disconnected = true;
       final live = client(2, 'B');
       final waiting = client(3, 'C', authorized: false);
       expect(senseCmPick([ended, live]).id, 2);
-      expect(senseCmPick([live, waiting]).id, 3);
+      // O6: a second login waiting (approve mode "click") no longer hides the
+      // live connection and its "Bitir"; it gets its own box.
+      expect(senseCmPick([live, waiting]).id, 2);
+      expect(senseCmWaiting([live, waiting])?.id, 3);
+      expect(senseCmWaiting([ended, live]), isNull);
+      // Nothing live: the waiting one, then any.
+      expect(senseCmPick([ended, waiting]).id, 3);
       expect(senseCmPick([ended]).id, 1);
+      // An incoming voice call comes first.
+      final calling = client(4, 'B')..incomingVoiceCall = true;
+      expect(senseCmPick([live, calling]).id, 4);
+    });
+
+    test('O6: the screen connection is shown before a terminal or a tunnel', () {
+      final terminal = client(1, 'Halil Y.')..isTerminal = true;
+      final tunnel = client(2, 'Halil Y.')..portForward = '3389';
+      final screen = client(3, 'Halil Y.');
+      expect(senseCmPick([terminal, tunnel, screen]).id, 3);
+      expect(senseCmPick([terminal, tunnel]).id, 1);
+    });
+
+    test('O6: kinds of the connections', () {
+      final file = Client(1, true, true, false, 'H', '1', false, false, false);
+      final camera = Client(2, true, false, true, 'H', '1', false, false, false);
+      expect(senseCmKindText(client(3, 'H')), 'ekran');
+      expect(senseCmKindText(client(4, 'H')..isTerminal = true), 'terminal');
+      expect(senseCmKindText(client(5, 'H')..portForward = '22'), 'TCP tüneli');
+      expect(senseCmKindText(file), 'dosya aktarımı');
+      expect(senseCmKindText(camera), 'kamera');
+    });
+
+    test('O6: count and kinds when more than one connection is on', () {
+      final screen = client(1, 'Halil Y.');
+      final terminal = client(2, 'Halil Y.')..isTerminal = true;
+      final tunnel = client(3, 'Halil Y.')..portForward = '3389';
+      final ended = client(4, 'Halil Y.')..disconnected = true;
+      final waiting = client(5, 'Halil Y.', authorized: false);
+      final live = senseHostLive([terminal, screen, ended, waiting]);
+      expect(live.map((c) => c.id), [2, 1]);
+      // Screen first, whatever the order of the connections.
+      expect(senseHostConnectionsLine(live), '2 bağlantı · ekran, terminal');
+      expect(senseHostConnectionsLine([screen, terminal, tunnel]),
+          '3 bağlantı · ekran, terminal, TCP tüneli');
+      // Two terminals: one kind, two connections.
+      expect(senseHostConnectionsLine([terminal, client(6, 'H')..isTerminal = true]),
+          '2 bağlantı · terminal');
+      // One connection: the who line says enough.
+      expect(senseHostConnectionsLine([screen]), isNull);
+      expect(senseHostConnectionsLine(const []), isNull);
+    });
+
+    test('O6: "Tümünü bitir" closes every live connection', () {
+      final screen = client(1, 'Halil Y.');
+      final terminal = client(2, 'Halil Y.')..isTerminal = true;
+      final closed = <int>[];
+      senseHostEndAll(senseHostLive([screen, terminal]), screen, (c) => closed.add(c.id));
+      expect(closed, [1, 2]);
+      // Nothing live any more: the shown one (as before).
+      closed.clear();
+      final ended = client(3, 'Halil Y.')..disconnected = true;
+      senseHostEndAll(senseHostLive([ended]), ended, (c) => closed.add(c.id));
+      expect(closed, [3]);
+    });
+
+    test('O8: "Mikrofonu kapat" is kept until the call ends', () {
+      SenseHostChatCall.callEnded(7);
+      expect(SenseHostChatCall.mutedFor(7), isFalse);
+      SenseHostChatCall.noteMuted(7, true);
+      // The list reads the devices again when it opens: still muted.
+      expect(SenseHostChatCall.mutedFor(7), isTrue);
+      expect(SenseHostChatCall.mutedFor(8), isFalse, reason: 'per connection');
+      SenseHostChatCall.noteMuted(7, false);
+      expect(SenseHostChatCall.mutedFor(7), isFalse);
+      SenseHostChatCall.noteMuted(7, true);
+      // The call ended (the core opens the microphone again).
+      SenseHostChatCall.callEnded(7);
+      expect(SenseHostChatCall.mutedFor(7), isFalse);
     });
   });
 
@@ -689,6 +768,41 @@ void main() {
       expect(calls, ['accept', 'reject']);
     });
 
+    testWidgets('O6: screen + terminal: count, kinds and "Tümünü bitir"',
+        (tester) async {
+      final calls = <String>[];
+      final screen = client(1, 'Halil Y.');
+      final terminal = client(2, 'Halil Y.')..isTerminal = true;
+      await pumpCard(tester, screen, makeController(), calls,
+          connectionsLine: senseHostConnectionsLine(senseHostLive([screen, terminal])));
+      expect(find.text('Sense Department bağlı'), findsOneWidget);
+      expect(find.text('2 bağlantı · ekran, terminal'), findsOneWidget);
+      expect(find.text('Tümünü bitir'), findsOneWidget);
+      expect(find.text('Bağlantıyı bitir'), findsNothing);
+      await tester.tap(find.byKey(const Key('sense-host-end')));
+      expect(calls, ['end']);
+    });
+
+    testWidgets('O6: one connection keeps "Bağlantıyı bitir" and no count',
+        (tester) async {
+      await pumpCard(tester, client(1, 'Halil Y.'), makeController(), []);
+      expect(find.text('Bağlantıyı bitir'), findsOneWidget);
+      expect(find.byKey(const Key('sense-host-connections')), findsNothing);
+    });
+
+    testWidgets('O6: a second login waits while the first is live: both boxes',
+        (tester) async {
+      final calls = <String>[];
+      await pumpCard(tester, client(1, 'Halil Y.'), makeController(), calls,
+          waiting: client(2, 'Halil Y.', authorized: false));
+      expect(find.text('Halil Y. bağlanmak istiyor'), findsOneWidget);
+      expect(find.text('Sense Department bağlı'), findsOneWidget);
+      expect(find.byType(SenseChatComposer), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sense-host-accept')));
+      await tester.tap(find.byKey(const Key('sense-host-end')));
+      expect(calls, ['accept', 'end']);
+    });
+
     testWidgets('password-only mode offers no "Kabul et"', (tester) async {
       await pumpCard(tester, client(1, 'Halil Y.', authorized: false),
           makeController(), [],
@@ -828,6 +942,8 @@ Future<void> pumpCard(
   bool canAccept = true,
   bool canCall = false,
   int? endedClosingIn,
+  String? connectionsLine,
+  Client? waiting,
 }) async {
   setWindow(tester, kSenseCmPanelSize);
   await tester.pumpWidget(app(
@@ -840,6 +956,8 @@ Future<void> pumpCard(
       canCall: canCall,
       animateIn: false,
       endedClosingIn: endedClosingIn,
+      connectionsLine: connectionsLine,
+      waiting: waiting,
       actions: SenseHostCardActions(
         onMinimize: () => calls.add('minimize'),
         onEnd: () => calls.add('end'),

@@ -3,6 +3,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../components/sense_select.dart' show senseUpperTr;
+import '../../strings/host_live.dart';
 import '../../tokens/sense_tokens.dart';
 
 import '../../../models/server_model.dart';
@@ -16,11 +18,6 @@ const Map<String, String> kSenseCmText = {
   'ended': 'bitti',
   'hide': 'Gizle',
   'icon_tooltip': 'Sense Remote — bağlı',
-  'kind_remote': 'Ekranı görüyor ve yönetiyor',
-  'kind_camera': 'Kamerayı görüyor',
-  'kind_file': 'Dosya aktarımı',
-  'kind_terminal': 'Terminal',
-  'kind_port': 'Bağlantı noktası yönlendirme',
   'perm_keyboard': 'klavye · fare',
   'perm_clipboard': 'pano',
   'perm_audio': 'ses',
@@ -103,18 +100,18 @@ class SenseCmTokens {
           decoration: TextDecoration.none);
 }
 
-/// Label of what the peer is doing on this computer.
+/// What a connection is for (O6): "ekran", "terminal", "TCP tüneli"…
 String senseCmKindText(Client client) {
-  if (client.portForward.isNotEmpty) return senseCmText('kind_port');
+  if (client.portForward.isNotEmpty) return SenseHostLiveStrings.kindTunnel;
   switch (client.type_()) {
     case ClientType.file:
-      return senseCmText('kind_file');
+      return SenseHostLiveStrings.kindFile;
     case ClientType.camera:
-      return senseCmText('kind_camera');
+      return SenseHostLiveStrings.kindCamera;
     case ClientType.terminal:
-      return senseCmText('kind_terminal');
+      return SenseHostLiveStrings.kindTerminal;
     default:
-      return senseCmText('kind_remote');
+      return SenseHostLiveStrings.kindScreen;
   }
 }
 
@@ -136,7 +133,8 @@ bool senseCmNeedsAttention(Client client) =>
 
 String senseCmInitials(String name) {
   final words = name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
-  final letters = words.take(2).map((w) => w.characters.first.toUpperCase());
+  // TS-18: Turkish upper case ("ismail" → "İ", "ışık" → "I").
+  final letters = words.take(2).map((w) => senseUpperTr(w.characters.first));
   final result = letters.join();
   return result.isEmpty ? '?' : result;
 }
