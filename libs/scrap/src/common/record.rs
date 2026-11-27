@@ -16,6 +16,9 @@ use std::{
 };
 use webm::mux::{self, Segment, Track, VideoTrack, Writer};
 
+// Sense Remote (#136): one file per display across Host encoder restarts, real start/finish.
+use crate::record_sense::{self, SenseRecordEvent};
+
 const MIN_SECS: u64 = 1;
 
 // Replace characters that are invalid in Windows filename components so recordings remain portable.
@@ -191,7 +194,9 @@ pub trait RecorderApi {
     fn new(ctx: RecorderContext, ctx2: RecorderContext2) -> ResultType<Self>
     where
         Self: Sized;
-    fn write_video(&mut self, frame: &EncodedVideoFrame) -> bool;
+    // Sense Remote (#136): `pts` is the timestamp to write (the frame's own one, or continued
+    // after a Host encoder restart, `Recorder::check_pts`).
+    fn write_video(&mut self, frame: &EncodedVideoFrame, pts: i64) -> bool;
 }
 
 #[derive(Debug)]
@@ -208,6 +213,13 @@ pub struct Recorder {
     ctx2: Option<RecorderContext2>,
     pts: Option<i64>,
     check_failed: bool,
+    // Sense Remote (#136): Controller-side recording (`ctx.sense_folder` set) only.
+    sense_offset: i64,
+    sense_last_out: Option<(i64, Instant)>,
+    sense_need_key: bool,
+    sense_part: usize,
+    sense_fail_at: &'static str,
+    sense_event: Option<SenseRecordEvent>,
 }
 
 impl Deref for Recorder {
@@ -226,13 +238,28 @@ impl DerefMut for Recorder {
 
 impl Recorder {
     pub fn new(ctx: RecorderContext) -> ResultType<Self> {
+        if let Some(folder) = &ctx.sense_folder {
+            record_sense::opened(folder); // Sense Remote (#136): closed in Drop
+        }
         Ok(Self {
             inner: None,
             ctx,
             ctx2: None,
             pts: None,
             check_failed: false,
+            sense_offset: 0,
+            sense_last_out: None,
+            sense_need_key: false,
+            sense_part: 0,
+            sense_fail_at: "dosya",
+            sense_event: None,
         })
+    }
+
+    /// Sense Remote (#136): what happened since the last ask: the recording's file opened
+    /// (`Started`) or it cannot go on (`Failed`). Controller-side recording only.
+    pub fn sense_take_event(&mut self) -> Option<SenseRecordEvent> {
+        self.sense_event.take()
     }
 
     fn check(&mut self, w: usize, h: usize, format: CodecFormat) -> ResultType<()> {
@@ -245,6 +272,7 @@ impl Recorder {
                         format,
                         filename: Default::default(),
                     };
+                    self.sense_fail_at = "klasor"; // Sense Remote (#136)
                     ctx2.set_filename(&self.ctx)?;
                     self.ctx2 = Some(ctx2);
                     self.inner = None;
@@ -257,6 +285,7 @@ impl Recorder {
                     format,
                     filename: Default::default(),
                 };
+                self.sense_fail_at = "klasor"; // Sense Remote (#136)
                 ctx2.set_filename(&self.ctx)?;
                 self.ctx2 = Some(ctx2);
                 self.inner = None;
@@ -266,6 +295,15 @@ impl Recorder {
             bail!("ctx2 is None");
         };
         if self.inner.is_none() {
+            // Sense Remote (#136): a codec this build cannot put in a file vs. a file that
+            // would not open.
+            self.sense_fail_at = if cfg!(feature = "hwcodec")
+                || matches!(format, CodecFormat::VP8 | CodecFormat::VP9 | CodecFormat::AV1)
+            {
+                "dosya"
+            } else {
+                "kodek"
+            };
             self.inner = match format {
                 CodecFormat::VP8 | CodecFormat::VP9 | CodecFormat::AV1 => Some(Box::new(
                     WebmRecorder::new(self.ctx.clone(), (*ctx2).clone())?,
@@ -281,6 +319,21 @@ impl Recorder {
             // pts is None when new inner is created
             self.pts = None;
             self.send_state(RecordState::NewFile(ctx2.filename.clone()));
+            if self.ctx.sense_folder.is_some() {
+                // Sense Remote (#136): the new file starts its own clock; the UI hears that the
+                // recording really started (or that a new part began).
+                self.sense_offset = 0;
+                self.sense_last_out = None;
+                self.sense_need_key = false;
+                self.sense_part += 1;
+                self.sense_event = Some(SenseRecordEvent::Started {
+                    file: ctx2.filename.clone(),
+                    part: self.sense_part,
+                    codec: format.to_string(),
+                    width: w,
+                    height: h,
+                });
+            }
         }
         Ok(())
     }
@@ -310,39 +363,50 @@ impl Recorder {
         if res.is_err() {
             self.check_failed = true;
             log::error!("check failed: {:?}", res);
+            if self.ctx.sense_folder.is_some() {
+                // Sense Remote (#136): the UI stops the recording and says it could not record.
+                self.sense_event = Some(SenseRecordEvent::Failed {
+                    reason: self.sense_fail_at,
+                });
+            }
             res?;
         }
         match frame {
             video_frame::Union::Vp8s(vp8s) => {
                 for f in vp8s.frames.iter() {
-                    self.check_pts(f.pts, f.key, w, h, format)?;
-                    self.as_mut().map(|x| x.write_video(f));
+                    if let Some(pts) = self.check_pts(f.pts, f.key, w, h, format)? {
+                        self.as_mut().map(|x| x.write_video(f, pts));
+                    }
                 }
             }
             video_frame::Union::Vp9s(vp9s) => {
                 for f in vp9s.frames.iter() {
-                    self.check_pts(f.pts, f.key, w, h, format)?;
-                    self.as_mut().map(|x| x.write_video(f));
+                    if let Some(pts) = self.check_pts(f.pts, f.key, w, h, format)? {
+                        self.as_mut().map(|x| x.write_video(f, pts));
+                    }
                 }
             }
             video_frame::Union::Av1s(av1s) => {
                 for f in av1s.frames.iter() {
-                    self.check_pts(f.pts, f.key, w, h, format)?;
-                    self.as_mut().map(|x| x.write_video(f));
+                    if let Some(pts) = self.check_pts(f.pts, f.key, w, h, format)? {
+                        self.as_mut().map(|x| x.write_video(f, pts));
+                    }
                 }
             }
             #[cfg(feature = "hwcodec")]
             video_frame::Union::H264s(h264s) => {
                 for f in h264s.frames.iter() {
-                    self.check_pts(f.pts, f.key, w, h, format)?;
-                    self.as_mut().map(|x| x.write_video(f));
+                    if let Some(pts) = self.check_pts(f.pts, f.key, w, h, format)? {
+                        self.as_mut().map(|x| x.write_video(f, pts));
+                    }
                 }
             }
             #[cfg(feature = "hwcodec")]
             video_frame::Union::H265s(h265s) => {
                 for f in h265s.frames.iter() {
-                    self.check_pts(f.pts, f.key, w, h, format)?;
-                    self.as_mut().map(|x| x.write_video(f));
+                    if let Some(pts) = self.check_pts(f.pts, f.key, w, h, format)? {
+                        self.as_mut().map(|x| x.write_video(f, pts));
+                    }
                 }
             }
             _ => bail!("unsupported frame type"),
@@ -351,6 +415,7 @@ impl Recorder {
         Ok(())
     }
 
+    /// The timestamp to write the frame with, or None to leave the frame out.
     fn check_pts(
         &mut self,
         pts: i64,
@@ -358,10 +423,13 @@ impl Recorder {
         w: usize,
         h: usize,
         format: CodecFormat,
-    ) -> ResultType<()> {
+    ) -> ResultType<Option<i64>> {
         // https://stackoverflow.com/questions/76379101/how-to-create-one-playable-webm-file-from-two-different-video-tracks-with-same-c
         if self.pts.is_none() && !key {
             bail!("first frame is not key frame");
+        }
+        if self.ctx.sense_folder.is_some() {
+            return Ok(self.sense_check_pts(pts, key));
         }
         let old_pts = self.pts;
         self.pts = Some(pts);
@@ -377,11 +445,52 @@ impl Recorder {
             }
             self.pts = Some(pts);
         }
-        Ok(())
+        Ok(Some(pts))
+    }
+
+    /// Sense Remote (#136): a backwards timestamp means the Host rebuilt its encoder (ghost
+    /// mode, display switch, quality). The same file goes on: same size and codec (a change of
+    /// those is a new part, `check`), timestamps continued by the real time that passed, and
+    /// nothing written until the new encoder's key frame.
+    fn sense_check_pts(&mut self, pts: i64, key: bool) -> Option<i64> {
+        let now = Instant::now();
+        if let Some(old) = self.pts {
+            if pts < old {
+                let (last_out, at) = self.sense_last_out.unwrap_or((old + self.sense_offset, now));
+                let gap = now.saturating_duration_since(at).as_millis() as i64;
+                self.sense_offset = record_sense::continue_offset(last_out, pts, gap);
+                self.sense_need_key = true;
+                log::info!(
+                    "record display #{}: encoder restarted (pts {old} -> {pts}), same file goes on",
+                    self.ctx.display_idx
+                );
+            }
+        }
+        self.pts = Some(pts);
+        if self.sense_need_key {
+            if !key {
+                return None;
+            }
+            self.sense_need_key = false;
+        }
+        let out = pts + self.sense_offset;
+        self.sense_last_out = Some((out, now));
+        Some(out)
     }
 
     fn send_state(&self, state: RecordState) {
         self.ctx.tx.as_ref().map(|tx| tx.send(state));
+    }
+}
+
+// Sense Remote (#136): the file's tail is written first (the inner recorder's Drop), then the
+// recording's open count goes down, so "Kaydedildi" never comes before a file is complete.
+impl Drop for Recorder {
+    fn drop(&mut self) {
+        self.inner = None;
+        if let Some(folder) = &self.ctx.sense_folder {
+            record_sense::closed(folder);
+        }
     }
 }
 
@@ -441,14 +550,14 @@ impl RecorderApi for WebmRecorder {
         })
     }
 
-    fn write_video(&mut self, frame: &EncodedVideoFrame) -> bool {
+    fn write_video(&mut self, frame: &EncodedVideoFrame, pts: i64) -> bool {
         if frame.key {
             self.key = true;
         }
         if self.key {
             let ok = self
                 .vt
-                .add_frame(&frame.data, frame.pts as u64 * 1_000_000, frame.key);
+                .add_frame(&frame.data, pts.max(0) as u64 * 1_000_000, frame.key);
             if ok {
                 self.written = true;
             }
@@ -502,7 +611,8 @@ impl RecorderApi for HwRecorder {
         })
     }
 
-    fn write_video(&mut self, frame: &EncodedVideoFrame) -> bool {
+    // The muxer times frames itself (fixed frame rate); `pts` is not needed.
+    fn write_video(&mut self, frame: &EncodedVideoFrame, _pts: i64) -> bool {
         if frame.key {
             self.key = true;
         }
