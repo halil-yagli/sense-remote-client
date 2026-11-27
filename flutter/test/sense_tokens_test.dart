@@ -4,6 +4,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/painting.dart';
 import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
@@ -127,7 +128,8 @@ void main() {
     expect(SenseColors.line, const Color(0xFF26262F));
     expect(SenseColors.hover, const Color(0xFF1D1D25));
     expect(SenseColors.textMuted, const Color(0xFF8E8E98));
-    expect(SenseColors.textDim, const Color(0xFF5D5D68));
+    // Sürüm 11 (TS-2): AA için açıldı (#5D5D68 kartta 2,8:1 idi).
+    expect(SenseColors.textDim, const Color(0xFF80808A));
     expect(SenseColors.ok, const Color(0xFF00FFB6));
     expect(SenseColors.warn, const Color(0xFFFF9700));
     expect(SenseColors.hot, const Color(0xFFFF2D3D));
@@ -145,6 +147,23 @@ void main() {
     expect(SenseSizes.popupWidth, 440);
     expect(SenseBreakpoints.medium, 1500);
     expect(SenseBreakpoints.narrow, 1300);
+  });
+
+  // Sürüm 11 (TS-2, YH T1): yazı renkleri her yüzeyde AA (4,5:1). textDim en kötü yüzey
+  // olan kartta (raised) da geçer; süs çizgisi olarak kullanımı bundan etkilenmez.
+  test('text colours keep AA contrast on the surfaces', () {
+    double lin(double c) => c <= 0.03928 ? c / 12.92 : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
+    double lum(Color c) => 0.2126 * lin(c.red / 255) + 0.7152 * lin(c.green / 255) + 0.0722 * lin(c.blue / 255);
+    double ratio(Color a, Color b) {
+      final x = lum(a), y = lum(b);
+      return (math.max(x, y) + 0.05) / (math.min(x, y) + 0.05);
+    }
+
+    for (final text in [SenseColors.textMuted, SenseColors.textDim]) {
+      for (final bg in [SenseColors.bg, SenseColors.surface, SenseColors.raised]) {
+        expect(ratio(text, bg), greaterThanOrEqualTo(4.5), reason: '$text on $bg');
+      }
+    }
   });
 
   group('status levels (YH T6)', () {

@@ -11,7 +11,7 @@ const Map<String, String> kSenseHomeTr = {
   'search_hint': 'Proje, bilgisayar, konum ya da kimlik',
   'connect': 'Bağlan',
   'offline': 'Kapalı',
-  'offline_tip': 'Çevrimdışı görünüyor — yine de bağlanmayı dener',
+  'offline_tip': 'Kapalı görünüyor — yine de bağlanmayı dener',
   'connect_id': 'Kimlikle bağlan',
   'connect_id_hint': 'Kimlik — örn. 123 456 789',
   'connect_id_note':

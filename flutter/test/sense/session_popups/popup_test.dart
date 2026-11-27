@@ -152,11 +152,11 @@ void main() {
       expect(find.byKey(const Key('sense-status-retry')), findsNothing);
     });
 
-    testWidgets('offline computer: grey "Çevrimdışı · son veri …"', (tester) async {
+    testWidgets('offline computer: grey "Kapalı · son veri …"', (tester) async {
       setWindow(tester, const Size(400, 840));
       final j = fullJson()..['online'] = false;
       await tester.pumpWidget(statusPopup(feedWith(j)));
-      expect(find.text('Çevrimdışı · son veri 8 sn önce'), findsOneWidget);
+      expect(find.text('Kapalı · son veri 8 sn önce'), findsOneWidget);
     });
 
     test('the feed refreshes while open and stops when closed', () async {
@@ -209,7 +209,7 @@ void main() {
       expect(find.text('60 / 60 fps'), findsOneWidget);
       expect(find.text('Doğrudan · VP9 · Dengeli'), findsOneWidget);
       expect(find.text('Samsung QM55B'), findsOneWidget); // Ekran 1 open
-      expect(find.textContaining('gecikme 80 ms üstü turuncu'), findsOneWidget);
+      expect(find.textContaining('gecikme 150 ms üstü turuncu'), findsOneWidget);
     });
 
     testWidgets('the "Ekran 2" tag opens Ekran 2 with the 4:2:2 note', (tester) async {

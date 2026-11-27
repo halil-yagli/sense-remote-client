@@ -418,6 +418,9 @@ pub fn core_main() -> Option<CoreMainAction> {
             {
                 let handler = std::thread::spawn(move || crate::start_server(true, false));
                 crate::tray::start_tray();
+                // Sense Remote (S11 M7): the tray's event loop never returns; when it could not
+                // start, the curtain (AppKit, main thread) still needs a main loop.
+                crate::sense::curtain_mac::run_main_loop_while(|| !handler.is_finished());
                 // prevent server exit when encountering errors from tray
                 hbb_common::allow_err!(handler.join());
             }

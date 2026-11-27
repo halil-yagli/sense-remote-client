@@ -86,7 +86,7 @@ const Map<String, String> kSenseInstallTr = {
       'Kurulumu sürdürmek için panelde bir proje sahibi ya da yönetici seni bir projeye üye yapmalı. Üye yapılınca bu sayfa kendiliğinden güncellenir.',
   'projects-error': 'Proje listesi alınamadı',
   'projects-error-network':
-      'Panele ulaşılamadı. İnternet bağlantısını kontrol et; liste kendiliğinden yeniden denenir.',
+      'Panele ulaşılamadı. İnternet bağlantısını denetle; liste kendiliğinden yeniden denenir.',
   'projects-error-token_invalid':
       'Giriş geçersiz ya da süresi doldu. Sense hesabınla yeniden gir.',
   'projects-error-retry': 'Panel şu anda yanıt veremedi; liste kendiliğinden yeniden denenir.',

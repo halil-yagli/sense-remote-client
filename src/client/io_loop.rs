@@ -1421,6 +1421,11 @@ impl<T: InvokeUiSession> Remote<T> {
             }
             Data::RecordScreen(start) => {
                 self.handler.lc.write().unwrap().record_state = start;
+                // Sense Remote (#136): the Host does not allow recording; say so instead of
+                // leaving the switch on with nothing written.
+                if start && !self.handler.lc.read().unwrap().record_permission {
+                    crate::sense::recording::refused(&self.handler);
+                }
                 self.update_record_state();
             }
             Data::ElevateDirect => {
@@ -3121,6 +3126,7 @@ impl<T: InvokeUiSession> Remote<T> {
         if start {
             scrap::record::sense_begin_session(&sense_id, &sense_name);
         }
+        crate::sense::recording::requested(&self.handler, start); // Sense Remote (#136)
         // update local
         for (_, v) in self.video_threads.iter_mut() {
             v.video_sender.send(MediaData::RecordScreen(start)).ok();
@@ -3128,12 +3134,9 @@ impl<T: InvokeUiSession> Remote<T> {
         self.handler.update_record_status(start);
         if !start {
             if let Some(folder) = scrap::record::sense_end_session(&sense_id) {
-                let dir = std::path::PathBuf::from(crate::ui_interface::video_save_directory(false))
-                    .join(folder);
-                // Only when frames reached the disk; an empty recording leaves no folder.
-                if dir.is_dir() {
-                    self.handler.sense_record_saved(&dir.to_string_lossy());
-                }
+                // Sense Remote (#136): the note comes once every file got its tail; a recording
+                // that left no file leaves no folder either.
+                crate::sense::recording::finish(self.handler.clone(), folder);
             }
         }
         // update remote

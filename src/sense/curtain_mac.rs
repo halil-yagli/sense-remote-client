@@ -17,6 +17,10 @@
 //! - Local input: not blocked in ghost mode (#108, Halil 2026-11-27: "Kilit hiç olmasın"); the
 //!   person at the Host can use the Sense card. The event tap in `curtain_mac.mm` stays behind
 //!   `GHOST_MODE_BLOCKS_LOCAL_INPUT` and is not called; ghost mode no longer needs it to start.
+//! - Sürüm 11 (tarama-mac M6–M9): the curtain reports on / off / failures to the Rust log and the
+//!   event record (`curtain/state`, [`report_event`]); it comes to the front again every second;
+//!   `NSScreen` for the display details is read on the main thread ([`screens_on_main`]); the
+//!   `--server` keeps a main loop when the tray could not start ([`run_main_loop_while`]).
 
 use super::curtain;
 
@@ -253,6 +257,69 @@ pub(crate) fn sense_mark_ops() -> &'static [f32] {
     OPS.get_or_init(|| mark_ops(MARK_SVG))
 }
 
+/// Report codes of `curtain_mac.mm` (`kReport*`).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const REPORT_ON: i32 = 0;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const REPORT_OFF: i32 = 1;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const REPORT_NO_SCREEN: i32 = 2;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const REPORT_MAIN_TIMEOUT: i32 = 3;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const REPORT_SCREENS_CHANGED: i32 = 4;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const REPORT_TAP_FAILED: i32 = 5;
+
+/// One `curtain/state` event (plan Sürüm 11, event table): `durum` on / off / fail, the reason
+/// of a failure or a change, and whether it is a failure (logged as a warning).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) struct ReportEvent {
+    pub durum: &'static str,
+    pub neden: Option<&'static str>,
+    pub failure: bool,
+}
+
+/// Pure: what a report code of `curtain_mac.mm` means. `None` for an unknown code (a newer
+/// `.mm` than this file: nothing is recorded rather than something wrong).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn report_event(code: i32) -> Option<ReportEvent> {
+    let (durum, neden, failure) = match code {
+        REPORT_ON => ("on", None, false),
+        REPORT_OFF => ("off", None, false),
+        REPORT_NO_SCREEN => ("fail", Some("ekran_yok"), true),
+        REPORT_MAIN_TIMEOUT => ("fail", Some("ana_is_parcacigi_yanit_vermedi"), true),
+        REPORT_SCREENS_CHANGED => ("on", Some("ekranlar_degisti"), false),
+        REPORT_TAP_FAILED => ("fail", Some("olay_musluk_yok"), true),
+        _ => return None,
+    };
+    Some(ReportEvent {
+        durum,
+        neden,
+        failure,
+    })
+}
+
+/// Pure: the `curtain/state` fields of one report (`ekran` = number of screens covered).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn report_fields(event: &ReportEvent, screens: i32) -> serde_json::Value {
+    let mut fields = serde_json::json!({ "durum": event.durum, "ekran": screens.max(0) });
+    if let Some(neden) = event.neden {
+        fields["neden"] = serde_json::Value::from(neden);
+    }
+    fields
+}
+
+/// Pure (M6): a display name from the fixed, NUL-terminated buffer of `SenseScreenInfo`.
+/// `None` when empty; invalid UTF-8 is replaced, never trusted.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn screen_name(buf: &[u8]) -> Option<String> {
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    let name = String::from_utf8_lossy(&buf[..end]).trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
 /// Whether the screens (display id, left, top) are watched: `curtain::watched_flags` with the
 /// macOS display id (`CGDirectDisplayID`, the display name the video service uses) as the name.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -268,7 +335,10 @@ pub(crate) fn watched_for(
 }
 
 #[cfg(target_os = "macos")]
-pub use mac::{hide, show, watched_changed, PrivacyModeImpl};
+pub use mac::{
+    hide, run_main_loop_while, screens_on_main, show, watched_changed, PrivacyModeImpl,
+    ScreenInfo,
+};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -319,6 +389,15 @@ mod mac {
         glow_size: extern "C" fn(i32, i32, *mut i32, *mut i32),
         glow_pixels: extern "C" fn(i32, i32, f32, *mut u32),
         watched: extern "C" fn(*const ScreenC, usize, *mut bool),
+        report: extern "C" fn(i32, i32),
+    }
+
+    /// Must match `SenseScreenInfo` in `curtain_mac.mm`.
+    #[repr(C)]
+    struct ScreenInfoC {
+        display_id: u32,
+        max_fps: i64,
+        name: [u8; 128],
     }
 
     extern "C" {
@@ -326,6 +405,78 @@ mod mac {
         fn SenseCurtainMacHide(timeout_ms: u32);
         fn SenseCurtainMacWatchedChanged();
         fn SenseCurtainMacBlockInput(on: bool, timeout_ms: u32) -> bool;
+        fn SenseScreensOnMain(out: *mut ScreenInfoC, cap: usize, timeout_ms: u32) -> usize;
+        fn SenseMainLoopRunFor(seconds: f64);
+    }
+
+    /// Sense Remote (S11 M8): a curtain event of `curtain_mac.mm`, from any thread, into the
+    /// Rust log and the event record. Never panics (called from Objective-C).
+    extern "C" fn report_cb(code: i32, screens: i32) {
+        let _ = std::panic::catch_unwind(|| {
+            let Some(event) = report_event(code) else {
+                log::warn!("Sense curtain: unknown report {code}");
+                return;
+            };
+            if event.failure {
+                log::warn!(
+                    "Sense curtain (macOS): {} {:?}, screens {screens}",
+                    event.durum,
+                    event.neden
+                );
+            } else {
+                log::info!(
+                    "Sense curtain (macOS): {} {:?}, screens {screens}",
+                    event.durum,
+                    event.neden
+                );
+            }
+            crate::sense::diag::event("curtain", "state", report_fields(&event, screens));
+        });
+    }
+
+    /// What `NSScreen` knows about one display (M6).
+    pub struct ScreenInfo {
+        pub display_id: u32,
+        pub name: Option<String>,
+        pub max_fps: Option<i64>,
+    }
+
+    /// Sense Remote (S11 M6): `NSScreen` belongs to the main thread; read it there, waiting at
+    /// most `timeout_ms`. Empty when the main thread did not answer (the names are then not
+    /// sent, like any value that can not be read).
+    pub fn screens_on_main(timeout_ms: u32) -> Vec<ScreenInfo> {
+        const CAP: usize = 32;
+        let mut buf: Vec<ScreenInfoC> = (0..CAP)
+            .map(|_| ScreenInfoC {
+                display_id: 0,
+                max_fps: -1,
+                name: [0; 128],
+            })
+            .collect();
+        let n = unsafe { SenseScreensOnMain(buf.as_mut_ptr(), CAP, timeout_ms) }.min(CAP);
+        buf.truncate(n);
+        buf.into_iter()
+            .map(|s| ScreenInfo {
+                display_id: s.display_id,
+                name: screen_name(&s.name),
+                max_fps: (s.max_fps >= 0).then_some(s.max_fps),
+            })
+            .collect()
+    }
+
+    /// Sense Remote (S11 M7): the `--server`'s main thread when the tray returned (it could not
+    /// start its event loop): keeps a run loop for the curtain until `keep_running` says stop.
+    /// Main thread only.
+    pub fn run_main_loop_while(keep_running: impl Fn() -> bool) {
+        log::error!("Sense Remote: tray did not start, running a plain main loop for the curtain");
+        crate::sense::diag::event(
+            "curtain",
+            "main_loop",
+            serde_json::json!({ "neden": "tepsi_baslamadi" }),
+        );
+        while keep_running() {
+            unsafe { SenseMainLoopRunFor(1.0) };
+        }
     }
 
     const START_TIMEOUT_MS: u32 = 3000;
@@ -427,6 +578,7 @@ mod mac {
                 glow_size: glow_size_cb,
                 glow_pixels: glow_pixels_cb,
                 watched: watched_cb,
+                report: report_cb,
             };
             // CString data lives on the heap: moving the array keeps the pointers valid.
             Config { _texts: texts, c }
@@ -611,6 +763,55 @@ mod tests {
         assert!(max_x - min_x > 0.85, "{min_x}..{max_x}");
         assert!(((min_y + max_y) / 2.0 - 0.5).abs() < 0.03, "{min_y}..{max_y}");
         assert_eq!(sense_mark_ops(), ops.as_slice());
+    }
+
+    /// S11 M8: every code of `curtain_mac.mm` is one `curtain/state` event; failures carry
+    /// their reason; an unknown code records nothing.
+    #[test]
+    fn report_codes_become_curtain_state_events() {
+        let on = report_event(REPORT_ON).unwrap();
+        assert_eq!((on.durum, on.neden, on.failure), ("on", None, false));
+        let off = report_event(REPORT_OFF).unwrap();
+        assert_eq!((off.durum, off.failure), ("off", false));
+        for code in [REPORT_NO_SCREEN, REPORT_MAIN_TIMEOUT, REPORT_TAP_FAILED] {
+            let e = report_event(code).unwrap();
+            assert_eq!(e.durum, "fail");
+            assert!(e.failure && e.neden.is_some(), "{code}");
+        }
+        let changed = report_event(REPORT_SCREENS_CHANGED).unwrap();
+        assert_eq!((changed.durum, changed.neden), ("on", Some("ekranlar_degisti")));
+        assert_eq!(report_event(99), None);
+        assert_eq!(report_event(-1), None);
+
+        let fields = report_fields(&report_event(REPORT_MAIN_TIMEOUT).unwrap(), 0);
+        assert_eq!(
+            fields,
+            serde_json::json!({"durum": "fail", "ekran": 0, "neden": "ana_is_parcacigi_yanit_vermedi"})
+        );
+        let fields = report_fields(&on, 3);
+        assert_eq!(fields, serde_json::json!({"durum": "on", "ekran": 3}));
+        assert_eq!(report_fields(&on, -4)["ekran"], serde_json::json!(0));
+        // The fields pass the event record's own rules (names, no content).
+        let line = crate::sense::diag::line::build_line(1, "curtain", "state", "server", None, &fields);
+        assert!(line.is_some());
+    }
+
+    /// S11 M6: the display name buffer of `SenseScreenInfo`.
+    #[test]
+    fn screen_names_from_the_fixed_buffer() {
+        let mut buf = [0u8; 128];
+        assert_eq!(screen_name(&buf), None);
+        buf[..9].copy_from_slice(b"DELL U27\0".as_slice());
+        assert_eq!(screen_name(&buf).as_deref(), Some("DELL U27"));
+        let name = "Yerleşik Retina Ekranı";
+        let mut buf = [0u8; 128];
+        buf[..name.len()].copy_from_slice(name.as_bytes());
+        assert_eq!(screen_name(&buf).as_deref(), Some(name));
+        // No terminator (full buffer) and invalid bytes: still a name, never a panic.
+        let full = [b'A'; 128];
+        assert_eq!(screen_name(&full).map(|n| n.len()), Some(128));
+        assert_eq!(screen_name(&[0xff, b'x', 0]).as_deref(), Some("\u{fffd}x"));
+        assert_eq!(screen_name(b"   \0"), None);
     }
 
     #[test]
