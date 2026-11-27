@@ -834,6 +834,10 @@ pub mod log_upload;
 pub mod wol;
 // Sense Remote (#103): structured event record, panic hook, crash records (log_upload sends them).
 pub mod diag;
+// Sense Remote (S11 E1a): camera of the two-way video call; E1b wires it to the connection.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[allow(dead_code)]
+pub mod video_call;
 
 #[cfg(test)]
 mod tests {

@@ -21,6 +21,11 @@ use crate::{Frame, TraitCapturer};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use crate::{PixelBuffer, Pixfmt};
 
+// Sense Remote (S11 E1a): camera access for the two-way video call (`camera/sense.rs`). The
+// "view camera" code below is unchanged.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub mod sense;
+
 pub const PRIMARY_CAMERA_IDX: usize = 0;
 lazy_static::lazy_static! {
     static ref SYNC_CAMERA_DISPLAYS: Arc<Mutex<Vec<DisplayInfo>>> = Arc::new(Mutex::new(Vec::new()));

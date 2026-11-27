@@ -25,9 +25,19 @@ fn build_mac() {
     }
     // Sense Remote (MAC-SONRA-15): the maintenance curtain of ghost mode.
     let sense_curtain = "src/sense/curtain_mac.mm";
-    b.flag("-std=c++17").file(file).file(sense_curtain).compile("macos");
+    // Sense Remote (S11 E1a): camera of the two-way video call (AVFoundation).
+    let sense_camera = "src/sense/video_call/cam_mac.mm";
+    b.flag("-std=c++17")
+        .file(file)
+        .file(sense_curtain)
+        .file(sense_camera)
+        .compile("macos");
     println!("cargo:rerun-if-changed={}", file);
     println!("cargo:rerun-if-changed={}", sense_curtain);
+    println!("cargo:rerun-if-changed={}", sense_camera);
+    for fw in ["AVFoundation", "CoreMedia", "CoreVideo"] {
+        println!("cargo:rustc-link-lib=framework={}", fw);
+    }
 }
 
 #[cfg(all(windows, feature = "inline"))]
