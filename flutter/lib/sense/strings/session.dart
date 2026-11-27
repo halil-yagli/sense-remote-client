@@ -92,7 +92,7 @@ abstract final class SenseSessionStrings {
   static const String useAllMyDisplays = 'Tüm ekranlarımı kullan';
 
   /// Sürüm 10 (#116): the change could not be applied in this session.
-  static const String nextConnection = 'yeni bağlantıda geçerli';
+  static const String appliesNextConnection = 'yeni bağlantıda geçerli';
   static const String singleScreen = 'tek ekran';
   static const String allMine = 'tüm ekranlarım';
   static const String virtualDisplay = 'Sanal ekran';
