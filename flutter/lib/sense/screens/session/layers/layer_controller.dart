@@ -132,6 +132,8 @@ class SenseLayerController extends ChangeNotifier {
   // Sürüm 11 (O7): when "Yeniden bağlan" was pressed.
   Duration? _reconnectAt;
   bool _reconnectFailed = false;
+  // Sürüm 11 (O1): wall time the transport was reported lost (null = not lost).
+  DateTime? _lostWall;
   // Sürüm 11 (O3): last time this window's input was handed to the shared count.
   Duration? _sharedAt;
 
@@ -276,6 +278,9 @@ class SenseLayerController extends ChangeNotifier {
     // Sürüm 11 (O3): input in another window of the connection counts here too.
     final shared = host.sharedIdle();
     if (shared != null) _idle.seen(now - shared);
+    // Sürüm 11 (O1): only a probe newer than the loss brings the transport back.
+    final lostWall = _lostWall;
+    _link.freshData = lostWall == null || (probe != null && probe.isAfter(lostWall));
     final view = _link.tick(
       now,
       senseLinkSample(
@@ -309,15 +314,21 @@ class SenseLayerController extends ChangeNotifier {
   /// Sürüm 11 (O1): while the transport is lost, connect again for real (1, 2, 4, 8 s apart)
   /// until it comes back or the session closes; a link that was up and went silent for
   /// [SenseLinkTiming.lostAfter] (TCP says nothing by itself) counts as lost.
+  void _markLost(Duration now) {
+    _link.transportLost(now);
+    _lostWall ??= _wall();
+  }
+
   void _runRetries(Duration now, SenseLinkView view) {
     if (_everUp && !_link.transportDown && !view.dropped && view.stall >= SenseLinkTiming.lostAfter) {
-      _link.transportLost(now);
+      _markLost(now);
     }
     if (_link.transportDown) {
       _retry.begin(now);
       if (_retry.due(now)) host.retry();
       _link.retries = _retry.attempts;
     } else if (_retry.active) {
+      _lostWall = null;
       final hadAttempts = _retry.attempts > 0;
       _retry.stop();
       _link.retries = 0;
@@ -412,7 +423,7 @@ class SenseLayerController extends ChangeNotifier {
     }
     // A link that was up dropped (reset, timeout): connect again for real instead of ending.
     if (kind == SenseMessageKind.peerGone && _everUp) {
-      _link.transportLost(_clock());
+      _markLost(_clock());
       tick();
       return true;
     }
@@ -421,7 +432,7 @@ class SenseLayerController extends ChangeNotifier {
     // With data still coming (a restart on a working link) RustDesk keeps its way.
     if (type == 'restarting-show' &&
         (_link.view.phase == SenseLinkPhase.lost || _link.view.stall >= SenseLinkTiming.tick)) {
-      _link.transportLost(_clock());
+      _markLost(_clock());
       tick();
       return true;
     }
@@ -462,6 +473,7 @@ class SenseLayerController extends ChangeNotifier {
     _reconnectFailed = false;
     _link.reset();
     _retry.stop();
+    _lostWall = null;
     _dismissed = false;
     _prevPhase = SenseLinkPhase.normal;
     _startedAt = now;

@@ -168,6 +168,11 @@ class SenseLinkMachine {
   /// Sürüm 11 (O1): reconnect attempts made in this outage (the controller sets it).
   int retries = 0;
 
+  /// Sürüm 11 (O1): a delay probe came after the loss (the controller sets it each tick).
+  /// The last values before a reset still look fresh for a second; they do not bring the
+  /// transport back.
+  bool freshData = true;
+
   /// The transport is reported lost and has not come back yet.
   bool get transportDown => _transportLostAt != null;
 
@@ -197,7 +202,7 @@ class SenseLinkMachine {
     var stall = s.stall;
     final lostAt = _transportLostAt;
     if (lostAt != null) {
-      if (stall < SenseLinkTiming.tick && now > lostAt) {
+      if (stall < SenseLinkTiming.tick && now > lostAt && freshData) {
         // Data flows again: the transport is back.
         _transportLostAt = null;
       } else if (now - lostAt > stall) {

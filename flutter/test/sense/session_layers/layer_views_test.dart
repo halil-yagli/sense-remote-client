@@ -142,7 +142,7 @@ void main() {
     });
 
     testWidgets('"Bağlantıyı bitir" asks in place, Vazgeç goes back, Bitir ends', (tester) async {
-
+      var ended = 0;
       await _pump(tester, SenseLinkLayer(view: _weak, onEnd: () => ended++));
       await tester.tap(find.byKey(const Key('sense-layer-end')));
       await tester.pump();
