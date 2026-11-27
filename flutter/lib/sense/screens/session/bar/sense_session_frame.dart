@@ -14,6 +14,7 @@ import '../layers/layer_controller.dart' show SenseLayerController;
 import '../lists/backend.dart';
 import '../lists/list_specs.dart';
 import '../lists/session_list.dart';
+import '../record_notice.dart' show SenseRecordNotice;
 import 'sense_session_bar.dart';
 
 /// Ghost mode line on top of the remote screen (prototype `.ghostline`).
@@ -111,7 +112,12 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
     return SenseToastHost(
       child: Builder(builder: (context) {
         return ListenableBuilder(
-          listenable: Listenable.merge([if (b != null) b, _menus, if (layer != null) layer]),
+          listenable: Listenable.merge([
+            if (b != null) b,
+            if (b != null) SenseRecordNotice.statusOf(b.peerId),
+            _menus,
+            if (layer != null) layer,
+          ]),
           builder: (context, _) {
             final cardOpen = layer?.infoOpen ?? false;
             final hidden = b?.barHidden ?? false;

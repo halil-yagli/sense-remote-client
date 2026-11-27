@@ -25,6 +25,8 @@ import '../../../tokens/theme.dart';
 import '../data/grants.dart' show SenseGrant;
 import '../data/session_state.dart';
 import '../lists/backend.dart';
+import '../lists/list_specs.dart' show senseRecordingShown;
+import '../record_notice.dart' show SenseRecordNotice;
 import '../lists/session_list.dart' show SenseStateChip;
 
 /// The popups the bar opens (Bilgisayar durumu, Ekran bilgisi; drawn by their owner).
@@ -167,9 +169,10 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
     final labels = senseBarLabels(width);
     final compact = width <= SenseBreakpoints.narrow;
     return ListenableBuilder(
-      listenable: Listenable.merge([b, widget.menus, widget.popups]),
+      listenable: Listenable.merge([b, widget.menus, widget.popups, SenseRecordNotice.statusOf(b.peerId)]),
       builder: (context, _) {
         final ready = b.ready;
+        final recording = senseRecordingShown(b);
         final menus = widget.menus;
         Widget menu(SenseBarMenu m, String label, {List<Widget> leading = const [], List<Widget> tags = const []}) {
           final button = _MenuButton(
@@ -217,10 +220,10 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
               SenseStateChip(key: const ValueKey('sense-bar-tag-keyboard'), label: keyboardTag, level: SenseLevel.warn),
           ]),
           menu(SenseBarMenu.actions, labels.actions, leading: [
-            if (b.recordingOn)
+            if (recording)
               const SenseStatusDot(key: ValueKey('sense-bar-rec-dot'), color: SenseColors.hot, blinking: true, glow: true),
           ], tags: [
-            if (b.recordingOn)
+            if (recording)
               const SenseStateChip(
                   key: ValueKey('sense-bar-tag-recording'),
                   label: SenseSessionStrings.tagRecording,

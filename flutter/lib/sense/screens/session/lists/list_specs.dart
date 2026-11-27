@@ -6,6 +6,7 @@ import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart';
 import '../data/grants.dart';
 import '../data/session_state.dart';
+import '../record_notice.dart' show SenseRecordNotice;
 import 'backend.dart';
 import 'list_model.dart';
 import 'rules.dart';
@@ -636,7 +637,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
   final editable = !f.viewOnly;
 
   /// B5: the state when the list was drawn; the switch asks for the opposite.
-  final recordingWas = b.recordingOn;
+  final recording = senseRecordingShown(b);
 
   final frequent = <SenseListEntry>[
     if (SenseRules.ctrlAltDel(f))
@@ -693,12 +694,13 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         id: 'actions.record',
         label: _S.record,
         rustdesk: 'Start session recording',
-        value: b.recordingOn,
+        value: recording,
         onLevel: SenseLevel.hot,
         noRights: !g.allows(SenseGrant.recordSession),
         onChanged: (_) => b.toggleRecording(),
-        // B5: the notice follows the real state (the red "Kayıt" chip reads the same).
-        toastAfterChange: () => _recordingResult(b, !recordingWas),
+        // B5 (#136): no "Kayıt · açık" at the tap; the core's own notes ("Kayıt başlatılamadı ·
+        // neden", "Kaydedildi · Klasörü aç", record_notice.dart) are the one source.
+        toastAfterChange: () => '',
       ),
   ];
 
@@ -838,8 +840,8 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
 
   return SenseListSpec(
     title: _S.actions,
-    chip: b.recordingOn ? _S.tagRecording : null,
-    chipLevel: b.recordingOn ? SenseLevel.hot : null,
+    chip: recording ? _S.tagRecording : null,
+    chipLevel: recording ? SenseLevel.hot : null,
     frequent: frequent,
     sections: _nonEmpty([
       SenseListSection(
@@ -859,13 +861,10 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
   );
 }
 
-/// B5: RustDesk starts / stops a recording asynchronously (disk, folder, permission). The
-/// notice waits (about two seconds at most) for the real state and says so when it did not
-/// change; the red "Kayıt" chip of the bar reads [SenseSessionBackend.recordingOn] too.
-Future<String?> _recordingResult(SenseSessionBackend b, bool wanted) async {
-  for (var i = 0; i < 14; i++) {
-    if (b.recordingOn == wanted) return wanted ? _S.recordStarted : _S.recordStopped;
-    await Future<void>.delayed(const Duration(milliseconds: 150));
-  }
-  return wanted ? _S.recordStartFailed : _S.recordStopFailed;
+/// B5 (#136): "Kayıt" is on only when the core says a recording file really opened
+/// (`sense_record_state` = started). Before any state arrives (no event yet) the session's own
+/// flag decides, as before.
+bool senseRecordingShown(SenseSessionBackend b) {
+  final st = SenseRecordNotice.statusOf(b.peerId).value;
+  return st == null ? b.recordingOn : st.started;
 }

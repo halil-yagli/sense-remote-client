@@ -7,6 +7,7 @@ import 'package:flutter_hbb/sense/screens/session/lists/list_model.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/list_specs.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/rules.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/session_list.dart';
+import 'package:flutter_hbb/sense/screens/session/record_notice.dart';
 import 'package:flutter_hbb/sense/strings/session.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -87,20 +88,33 @@ void main() {
     });
   });
 
-  group('B5: the recording notice waits for the real state', () {
-    test('started: "Kayıt başladı"', () async {
-      final b = FakeBackend();
-      final rec = {for (final x in _all(b)) x.id: x}['actions.record']! as SenseToggleEntry;
-      rec.onChanged!(true);
-      expect(await rec.toastAfterChange!(), SenseSessionStrings.recordStarted);
-      expect(b.recordingOn, isTrue);
+  group('B5 (#136): the recording switch follows the core state', () {
+    tearDown(() => SenseRecordNotice.statusOf('peer-1').value = null);
+
+    test('no state yet: the session flag decides', () {
+      final b = FakeBackend()..recordingOn = true;
+      expect(senseRecordingShown(b), isTrue);
     });
 
-    test('did not start: says so, not "Kayıt · açık"', () async {
-      final b = _StuckRecording();
-      final rec = {for (final x in _all(b)) x.id: x}['actions.record']! as SenseToggleEntry;
-      rec.onChanged!(true);
-      expect(await rec.toastAfterChange!(), SenseSessionStrings.recordStartFailed);
+    test('"on" only when the core says started', () {
+      final b = FakeBackend()..recordingOn = true;
+      final n = SenseRecordNotice.statusOf('peer-1');
+      for (final s in ['starting', 'failed', 'stopped', 'empty']) {
+        n.value = SenseRecordStatus(s);
+        expect(senseRecordingShown(b), isFalse, reason: s);
+      }
+      n.value = const SenseRecordStatus('started');
+      expect(senseRecordingShown(b), isTrue);
+    });
+
+    test('the switch and the chip use it; the tap gives no "Kayıt · açık" toast', () async {
+      final b = FakeBackend()..recordingOn = true;
+      SenseRecordNotice.statusOf('peer-1').value = const SenseRecordStatus('failed', reason: 'klasor');
+      final spec = senseActionsList(b);
+      final rec = {for (final x in spec.allEntries) x.id: x}['actions.record']! as SenseToggleEntry;
+      expect(rec.value, isFalse);
+      expect(spec.chip, isNull);
+      expect(await rec.toastAfterChange!(), '');
     });
   });
 
@@ -154,9 +168,4 @@ void main() {
       await drain(tester);
     });
   });
-}
-
-class _StuckRecording extends FakeBackend {
-  @override
-  void toggleRecording() => calls.add('recording-stuck');
 }

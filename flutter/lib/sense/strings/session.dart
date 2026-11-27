@@ -104,11 +104,6 @@ abstract final class SenseSessionStrings {
   static const String toastRestart = 'Yeniden başlatma isteği gönderildi';
   static const String toastScreenshot = 'Ekran görüntüsü isteniyor';
 
-  /// Sürüm 11 (B5): shown after the recording really started / stopped, or did not.
-  static const String recordStarted = 'Kayıt başladı';
-  static const String recordStopped = 'Kayıt durdu';
-  static const String recordStartFailed = 'Kayıt başlamadı; kayıt klasörünü denetle';
-  static const String recordStopFailed = 'Kayıt durmadı';
   static const String on = 'açık';
   static const String off = 'kapalı';
   static const String none = 'yok';

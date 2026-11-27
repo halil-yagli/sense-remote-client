@@ -357,7 +357,9 @@ class SenseListEntryView extends StatelessWidget {
                     // B5: the toast waits for the real result of the change.
                     later.then((m) => notify(m ?? fallback)).catchError((Object _) => notify(fallback));
                   } else {
-                    notify((later as String?) ?? fallback);
+                    // An empty text means the row's owner shows its own note (recording, #136).
+                    final text = (later as String?) ?? fallback;
+                    if (text.isNotEmpty) notify(text);
                   }
                 },
         ),
