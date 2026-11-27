@@ -801,9 +801,64 @@ fn recent_log_files(dir: &Path, now: SystemTime) -> Vec<(PathBuf, u64)> {
     files.into_iter().map(|(path, _, len)| (path, len)).collect()
 }
 
+/// Sense Remote (Sürüm 11, W11): a file with exactly one name that is no link. A hard link a
+/// standard user puts in their own log folder to a file only SYSTEM may read is not a reparse
+/// point (`is_link` does not see it) but has a second name.
+pub(crate) fn is_single_plain_file(links: u64, reparse_or_dir: bool) -> bool {
+    links == 1 && !reparse_or_dir
+}
+
+/// Opens a log file for reading and checks it on the open handle (so it can not be swapped after
+/// the check): one name, no link. Windows opens the link itself (`FILE_FLAG_OPEN_REPARSE_POINT`),
+/// Unix refuses to follow one (`O_NOFOLLOW`).
+fn open_log_file(path: &Path) -> Option<fs::File> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows::Win32::{
+            Foundation::HANDLE,
+            Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION},
+        };
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        // FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY.
+        const NOT_PLAIN: u32 = 0x400 | 0x10;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .ok()?;
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }.ok()?;
+        if !is_single_plain_file(info.nNumberOfLinks as u64, info.dwFileAttributes & NOT_PLAIN != 0) {
+            log::warn!("Sense Remote: log upload skipped a log file with several names or a link");
+            return None;
+        }
+        Some(file)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(hbb_common::libc::O_NOFOLLOW)
+            .open(path)
+            .ok()?;
+        let meta = file.metadata().ok()?;
+        if !is_single_plain_file(meta.nlink(), !meta.is_file()) {
+            log::warn!("Sense Remote: log upload skipped a log file with several names or a link");
+            return None;
+        }
+        Some(file)
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        fs::File::open(path).ok()
+    }
+}
+
 /// The last `max` bytes of a file.
 fn read_tail(path: &Path, len: u64, max: usize) -> Option<Vec<u8>> {
-    let mut file = fs::File::open(path).ok()?;
+    let mut file = open_log_file(path)?;
     let start = len.saturating_sub(max as u64);
     file.seek(SeekFrom::Start(start)).ok()?;
     let mut bytes = Vec::new();
@@ -2172,6 +2227,26 @@ connected peer 123456789
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    // Sürüm 11 (W11): a hard link in a log folder is not read.
+    #[test]
+    fn hard_linked_log_file_is_not_read() {
+        assert!(is_single_plain_file(1, false));
+        assert!(!is_single_plain_file(2, false));
+        assert!(!is_single_plain_file(1, true));
+        assert!(!is_single_plain_file(0, false));
+        let dir = temp_dir("hardlink");
+        let secret = dir.join("secret.txt");
+        fs::write(&secret, "only SYSTEM may read this\n").unwrap();
+        let logs = dir.join("log");
+        fs::create_dir_all(&logs).unwrap();
+        fs::hard_link(&secret, logs.join("server_rCURRENT.log")).unwrap();
+        assert_eq!(read_recent(&logs, 1000, SystemTime::now(), None), None);
+        // A plain log next to it is read as before.
+        fs::write(logs.join("server_rOTHER.log"), "plain\n").unwrap();
+        assert_eq!(read_recent(&logs, 1000, SystemTime::now(), None).as_deref(), Some("plain\n"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
