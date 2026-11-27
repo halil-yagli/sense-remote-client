@@ -713,9 +713,25 @@ impl InvokeUiSession for FlutterHandler {
         self.push_event("sense_privacy_note", &[("code", code), ("details", details)], &[]);
     }
 
-    // Sense Remote (#114): recording stopped; the session offers "Klasörü aç" for `dir`.
-    fn sense_record_saved(&self, dir: &str) {
-        self.push_event("sense_record_saved", &[("dir", dir)], &[]);
+    // Sense Remote (#114, #136): recording stopped; the session offers "Klasörü aç" for `dir`
+    // with `file` selected.
+    fn sense_record_saved(&self, dir: &str, file: &str) {
+        self.push_event("sense_record_saved", &[("dir", dir), ("file", file)], &[]);
+    }
+
+    // Sense Remote (#136): `sense::recording` states for the session's recording switch / note.
+    fn sense_record_state(&self, id: &str, state: &str, display: usize, part: usize, reason: &str) {
+        self.push_event(
+            "sense_record_state",
+            &[
+                ("id", json!(id)),
+                ("state", json!(state)),
+                ("display", json!(display)),
+                ("part", json!(part)),
+                ("reason", json!(reason)),
+            ],
+            &[],
+        );
     }
 
     fn set_permission(&self, name: &str, value: bool) {

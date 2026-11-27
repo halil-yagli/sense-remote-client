@@ -2,7 +2,7 @@
 // Displays come from the panel (peer-status `displays`, EDID / connection /
 // colour), the geometry and the live numbers from the session (RustDesk).
 // Warning colour: a display whose refresh rate differs from the others, a
-// YCbCr 4:2:2 / 4:2:0 signal, a slow frame rate (T6) and latency (O9: 80 / 150 ms).
+// YCbCr 4:2:2 / 4:2:0 signal, a slow frame rate (T6) and latency (#135: 150 / 300 ms, tokens).
 import '../../../../tokens/sense_tokens.dart';
 import '../../data/peer_status.dart';
 import '../../data/screen_still.dart';
@@ -66,7 +66,7 @@ String? _connectionLong(String? c) => switch (c) {
       'displayport' => 'DisplayPort',
       'dvi' => 'DVI',
       'vga' => 'VGA',
-      'usb_c' => 'USB‑C',
+      'usb_c' => 'USB-C',
       'internal' => 'Dahili',
       'other' => 'Diğer',
       _ => null,
@@ -181,7 +181,7 @@ SenseDisplayView senseBuildDisplayView({
   final still = senseScreenStill(video);
   final fpsLevel = still ? SenseLevel.ok : SenseThresholds.frameRate.levelOf(fps);
   final rtt = video.rttMs;
-  final rttLevel = kSenseSessionLatency.levelOf(rtt);
+  final rttLevel = SenseThresholds.latency.levelOf(rtt); // #135: one limit everywhere (150 / 300)
   final fpsText = fps == null ? null : (still ? '${fps.round()} fps · ${_D.still}' : '${fps.round()} fps');
   final rttText = rtt == null ? null : '${rtt.round()} ms';
   final fpsMeter = SenseStatusMeter(_D.frameRate, fpsPct, fpsText, barLevel: fpsLevel);

@@ -23,6 +23,10 @@ class SenseFileJob {
     required this.total,
     required this.state,
     this.path = '',
+    this.error = '',
+    this.folder = '',
+    this.dirName = '',
+    this.confirm = '',
   });
 
   final String id;
@@ -37,6 +41,28 @@ class SenseFileJob {
 
   /// Where the received file was saved (empty while running or when sending).
   final String path;
+
+  /// Why it failed (#122): `stalled`, `permission`, `refused`, `not_saved`,
+  /// `receiver`, `link_lost_not_resumed`, `failed`; empty otherwise.
+  final String error;
+
+  /// Where the file landed (#122): `downloads`, `chosen` (Ayarlar › Gelen
+  /// dosyalar, named by [dirName]) or empty while unknown.
+  final String folder;
+  final String dirName;
+
+  /// Sending side (#122): `yes` = the receiver said it saved the file, `wait`
+  /// = sent, no answer yet (no folder is claimed), empty = unknown.
+  final String confirm;
+
+  /// The name a received file was saved under ("a (1).png" when "a.png" was
+  /// taken); the sent name otherwise.
+  String get savedName {
+    if (mine || path.isEmpty) return name;
+    final i = path.lastIndexOf(RegExp(r'[\\/]'));
+    final leaf = i < 0 ? path : path.substring(i + 1);
+    return leaf.isEmpty ? name : leaf;
+  }
 
   bool get finished => state == SenseFileState.ok;
   bool get mine => dir == SenseFileDir.out;
@@ -70,6 +96,10 @@ class SenseFileJob {
         _ => SenseFileState.run,
       },
       path: raw['path']?.toString() ?? '',
+      error: raw['error']?.toString() ?? '',
+      folder: raw['folder']?.toString() ?? '',
+      dirName: raw['dir_name']?.toString() ?? '',
+      confirm: raw['confirm']?.toString() ?? '',
     );
   }
 }
@@ -126,10 +156,14 @@ String senseFileLine(SenseFileJob j) {
   final kind = senseFileKindLabel(j.kind);
   switch (j.state) {
     case SenseFileState.ok:
-      final where = j.mine ? SenseChatStrings.sentSaved : senseSavedText(j.path);
+      final where = j.mine
+          ? senseSentText(j)
+          : senseSavedText(j.path, folder: j.folder, dirName: j.dirName);
       return '$kind · ${senseFileSize(j.total)} · $where';
     case SenseFileState.err:
-      return '$kind · ${senseFileSize(j.total)} · ${SenseChatStrings.failed}';
+      final why = SenseChatStrings.failReason(j.error);
+      final tail = why.isEmpty ? '' : ' · $why';
+      return '$kind · ${senseFileSize(j.total)} · ${SenseChatStrings.failed}$tail';
     case SenseFileState.run:
     case SenseFileState.resume:
       final verb = j.state == SenseFileState.resume
@@ -141,13 +175,37 @@ String senseFileLine(SenseFileJob j) {
 }
 
 /// Saved-to text of a received file: İndirilenler unless the file went to the
-/// folder chosen in Ayarlar › Gelen dosyalar.
-String senseSavedText(String path) {
+/// folder chosen in Ayarlar › Gelen dosyalar (by its name when the core gives
+/// it, #122; an older core gives only the path).
+String senseSavedText(String path, {String folder = '', String dirName = ''}) {
+  if (folder == 'downloads') return SenseChatStrings.savedDownloads;
+  if (folder == 'chosen') {
+    return dirName.isEmpty ? SenseChatStrings.savedIncoming : SenseChatStrings.savedIn(dirName);
+  }
   final p = path.replaceAll('\\', '/').toLowerCase();
   if (p.isEmpty || p.contains('/downloads/') || p.contains('/indirilenler/')) {
     return SenseChatStrings.savedDownloads;
   }
   return SenseChatStrings.savedIncoming;
+}
+
+/// Sent text (#122): "kaydedildi" only on the receiver's own answer, with the
+/// folder it really went to; without an answer just "Gönderildi".
+String senseSentText(SenseFileJob j) {
+  switch (j.confirm) {
+    case 'wait':
+      return SenseChatStrings.sent;
+    case 'yes':
+      if (j.folder == 'downloads') return SenseChatStrings.sentSaved;
+      if (j.folder == 'chosen') {
+        return j.dirName.isEmpty
+            ? SenseChatStrings.sentSavedChosen
+            : SenseChatStrings.sentSavedIn(j.dirName);
+      }
+      return SenseChatStrings.sentSavedThere;
+  }
+  // An older core says nothing about it: its old text.
+  return SenseChatStrings.sentSaved;
 }
 
 /// A row of the chat: a text message or a file.

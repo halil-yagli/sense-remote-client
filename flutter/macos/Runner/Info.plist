@@ -45,6 +45,10 @@
 	<string>MainMenu</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Sense Remote, uzak bağlantı sırasında sesli görüşme için mikrofonu kullanır.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Sense Remote, uzak bağlantı sırasında görüntülü görüşme için kamerayı kullanır.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Sense Remote, bağlantı sırasında gönderilen dosyaları İndirilenler klasörüne kaydeder.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
     <key>LSUIElement</key>

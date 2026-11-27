@@ -89,6 +89,9 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
   String _incoming = '';
   final _scroll = ScrollController();
   bool _restarting = false;
+
+  /// B9: a setting that could not be written; shown on top of the page until the next try.
+  String? _failed;
   late final SenseRoleController _role = SenseRoleController(widget.roleBackend,
       onRestart: () {
     if (mounted) setState(() => _restarting = true);
@@ -138,18 +141,38 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
     }
   }
 
+  /// B9: the record "changed" is written after the write worked; a failure is said on the
+  /// page ("Kaydedilemedi") and the switch stays where it was.
+  Future<void> _write(String id, Object before, Object after, Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (_) {
+      if (mounted) setState(() => _failed = id);
+      return;
+    }
+    senseUiSetting(id, before, after, where: _where);
+    if (mounted) setState(() => _failed = null);
+    _mark(id);
+  }
+
   Future<void> _setBool(SenseOptionKey k, bool v) async {
     if (_locked(k.key)) return;
-    senseUiSetting(k.key, _bool(k), v, where: _where);
-    await _b.writeBool(k.key, k.store, v);
-    _mark(k.key);
+    await _write(k.key, _bool(k), v, () => _b.writeBool(k.key, k.store, v));
   }
 
   Future<void> _setChoice(SenseOptionKey k, String v) async {
     if (_locked(k.key)) return;
-    senseUiSetting(k.key, _raw(k), v, where: _where);
-    await _b.write(k.key, k.store, v);
-    _mark(k.key);
+    await _write(k.key, _raw(k), v, () => _b.write(k.key, k.store, v));
+  }
+
+  /// B7: "Hayalet modla başla" is on unless turned off (karar #95); off is written as "N"
+  /// explicitly, because the empty default means on.
+  bool _ghostStart() => _raw(SenseOptionKeys.privacyMode) != 'N';
+
+  Future<void> _setGhostStart(bool v) async {
+    final k = SenseOptionKeys.privacyMode;
+    if (_locked(k.key)) return;
+    await _write(k.key, _ghostStart(), v, () => _b.write(k.key, k.store, v ? 'Y' : 'N'));
   }
 
   Future<void> _changeIncoming() async {
@@ -197,18 +220,19 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
     final controller = role != SenseHomeRole.host;
     var mine = 0, lockedCount = 0;
 
-    Widget toggle(SenseOptionKey k, String label, {String? hint, bool last = false}) {
+    Widget toggle(SenseOptionKey k, String label,
+        {String? hint, bool last = false, bool? value, Future<void> Function(bool)? set}) {
       final locked = _locked(k.key);
       locked ? lockedCount++ : mine++;
       return SenseToggleRow(
         key: Key('sense-set-${k.key}'),
         label: label,
         description: hint,
-        value: _bool(k),
+        value: value ?? _bool(k),
         locked: locked,
         savedTrigger: _t(k.key),
         last: last,
-        onChanged: locked ? null : (v) => _setBool(k, v),
+        onChanged: locked ? null : (v) => (set ?? (x) => _setBool(k, x))(v),
       );
     }
 
@@ -316,7 +340,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
         ]),
         toggle(SenseOptionKeys.viewOnly, SenseSettingsStrings.viewOnly),
         toggle(SenseOptionKeys.privacyMode, SenseSettingsStrings.privacy,
-            hint: SenseSettingsStrings.privacyHint, last: true),
+            hint: SenseSettingsStrings.privacyHint, last: true, value: _ghostStart(), set: _setGhostStart),
       ]);
     }
     final view = _raw(SenseOptionKeys.viewStyle);
@@ -328,7 +352,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
       if (quality == kRemoteImageQualityBalanced) SenseSettingsStrings.qualityBalanced,
       if (quality == kRemoteImageQualityLow) SenseSettingsStrings.qualityFast,
       if (_bool(SenseOptionKeys.viewOnly)) SenseSettingsStrings.sumViewOnly,
-      if (_bool(SenseOptionKeys.privacyMode)) SenseSettingsStrings.sumPrivacy,
+      if (_ghostStart()) SenseSettingsStrings.sumPrivacy,
     ].join(' · ');
 
     // Gelen dosyalar ve kayıt.
@@ -351,6 +375,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
 
     // Güvenlik.
     final connType = _b.read(SenseOptionKeys.connType.key, SenseOptionKeys.connType.store);
+    final approve = _b.read(SenseOptionKeys.approveMode.key, SenseOptionKeys.approveMode.store);
     final idleOn = _bool(SenseOptionKeys.autoDisconnect);
     final idleMin = int.tryParse(_raw(SenseOptionKeys.autoDisconnectTimeout)) ?? 10;
     final directOn = _bool(SenseOptionKeys.directServer);
@@ -364,7 +389,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
             label: SenseSettingsStrings.password,
             description: SenseSettingsStrings.passwordController),
       lockedRow(SenseSettingsStrings.acceptConn,
-          connType == 'outgoing' ? SenseSettingsStrings.acceptConnNone : SenseSettingsStrings.acceptConnHost,
+          connType == 'outgoing' ? SenseSettingsStrings.acceptConnNone : SenseSettingsStrings.acceptConnFor(approve),
           key: const Key('sense-set-conn-type')),
       lockedRow(SenseSettingsStrings.idleDisconnect,
           idleOn ? SenseSettingsStrings.idleMinutes(idleMin) : SenseSettingsStrings.off,
@@ -409,7 +434,9 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
     final network = <Widget>[
       lockedRow(SenseSettingsStrings.server,
           server.isEmpty ? SenseSettingsStrings.serverPublic : SenseSettingsStrings.serverSense,
-          hint: SenseSettingsStrings.serverHint, key: const Key('sense-set-custom-rendezvous-server')),
+          // B8: the "no fallback" note is true only for the Sense server.
+          hint: server.isEmpty ? null : SenseSettingsStrings.serverHint,
+          key: const Key('sense-set-custom-rendezvous-server')),
       lockedRow(SenseSettingsStrings.panelAddress,
           api.isEmpty ? SenseSettingsStrings.panelNone : SenseSettingsStrings.panelSense,
           key: const Key('sense-set-api-server')),
@@ -472,7 +499,7 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
       SenseAccordionItem(
           id: SenseSettingsCategory.network,
           title: SenseSettingsStrings.catNetwork,
-          summary: SenseSettingsStrings.sumNetwork(!relayOnly),
+          summary: SenseSettingsStrings.sumNetwork(!relayOnly, publicServer: server.isEmpty),
           level: SenseLevel.ok,
           builder: (_) => column(network)),
       SenseAccordionItem(
@@ -495,7 +522,15 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SensePageHead(title: SenseSettingsStrings.title, note: SenseSettingsStrings.live),
-              const SizedBox(height: kSensePageGap),
+              if (_failed != null) ...[
+                SenseOverviewBox(
+                  key: const Key('sense-settings-failed'),
+                  level: SenseLevel.warn,
+                  title: SenseSettingsStrings.saveFailedTitle,
+                  body: SenseSettingsStrings.saveFailedBody,
+                ),
+                const SizedBox(height: kSensePageGap),
+              ],
               SenseOverviewBox(
                 key: const Key('sense-settings-overview'),
                 title: SenseSettingsStrings.overviewTitle(senseRoleLabel(role), mine, lockedCount),

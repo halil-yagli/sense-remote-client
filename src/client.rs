@@ -2749,6 +2749,8 @@ pub struct VideoHandler {
     sense_last_key_request: Option<std::time::Instant>,
     // Sense Remote (#121): when the current wait for a key frame began.
     sense_wait_since: Option<std::time::Instant>,
+    // Sense Remote (#136): the recorder's last start / failure, for the video thread to report.
+    sense_record_event: Option<scrap::record_sense::SenseRecordEvent>,
 }
 
 impl VideoHandler {
@@ -2788,7 +2790,13 @@ impl VideoHandler {
             sense_key_request: false,
             sense_last_key_request: None,
             sense_wait_since: Some(std::time::Instant::now()),
+            sense_record_event: None,
         }
+    }
+
+    /// Sense Remote (#136): the recorder's start / failure since the last ask.
+    pub fn sense_take_record_event(&mut self) -> Option<scrap::record_sense::SenseRecordEvent> {
+        self.sense_record_event.take()
     }
 
     /// Sense Remote (#100): whether the frame carries a key frame. Unknown kinds (raw
@@ -2961,6 +2969,10 @@ impl VideoHandler {
                             (self.texture.w, self.texture.h)
                         };
                         r.write_frame(frame, w, h).ok();
+                        // Sense Remote (#136): keep it for the video thread (`sense::recording`).
+                        if let Some(e) = r.sense_take_event() {
+                            self.sense_record_event = Some(e);
+                        }
                     });
                 }
                 res
@@ -4380,6 +4392,10 @@ pub fn start_video_thread<F, T>(
                             // Sense Remote (#100): the decoder waits for a key frame.
                             if handler.take_key_request() {
                                 session.refresh_video(display as _);
+                            }
+                            // Sense Remote (#136): the recording really started / cannot go on.
+                            if let Some(e) = handler.sense_take_record_event() {
+                                crate::sense::recording::on_recorder_event(&session, display, e);
                             }
                         }
 

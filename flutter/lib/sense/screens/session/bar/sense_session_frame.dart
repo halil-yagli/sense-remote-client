@@ -4,14 +4,17 @@
 // on, and the open list hanging under its button. A tap outside the list closes it; a
 // choice keeps it open and shows a short notification.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../components/toast.dart';
 import '../../../tokens/sense_tokens.dart';
 import '../data/session_state.dart';
 import '../island/sense_island.dart';
+import '../layers/layer_controller.dart' show SenseLayerController;
 import '../lists/backend.dart';
 import '../lists/list_specs.dart';
 import '../lists/session_list.dart';
+import '../record_notice.dart' show SenseRecordNotice;
 import 'sense_session_bar.dart';
 
 /// Ghost mode line on top of the remote screen (prototype `.ghostline`).
@@ -104,11 +107,19 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
   Widget build(BuildContext context) {
     final b = widget.backend;
     final popups = widget.popups;
+    // B3: the connection card (opened from the logo) is one of the popups: Esc closes it.
+    final layer = b == null ? null : SenseLayerController.find(b.peerId);
     return SenseToastHost(
       child: Builder(builder: (context) {
         return ListenableBuilder(
-          listenable: Listenable.merge([if (b != null) b, _menus]),
+          listenable: Listenable.merge([
+            if (b != null) b,
+            if (b != null) SenseRecordNotice.statusOf(b.peerId),
+            _menus,
+            if (layer != null) layer,
+          ]),
           builder: (context, _) {
+            final cardOpen = layer?.infoOpen ?? false;
             final hidden = b?.barHidden ?? false;
             final motion = SenseMotion.toolbarHide;
             final open = _menus.openMenu;
@@ -122,7 +133,19 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
                     onDragStart: widget.onDragStart,
                     onDoubleTap: widget.onDoubleTap,
                   );
-            return Stack(key: _area, children: [
+            // Esc is taken only while a list or the card is up, so the remote keeps its Esc.
+            return CallbackShortcuts(
+              bindings: {
+                if (open != null || cardOpen)
+                  const SingleActivator(LogicalKeyboardKey.escape): () {
+                    if (_menus.openMenu != null) {
+                      _menus.close();
+                    } else {
+                      layer?.closeInfo();
+                    }
+                  },
+              },
+              child: Stack(key: _area, children: [
               Column(children: [
                 AnimatedContainer(
                   key: const ValueKey('sense-bar-slot'),
@@ -196,7 +219,8 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
                   ),
                 ),
               ),
-            ]);
+            ]),
+            );
           },
         );
       }),

@@ -3,6 +3,8 @@
 // list widget (session_list.dart) draws them. Every entry names the RustDesk menu item
 // it stands for ([SenseListEntry.rustdesk]), so the correspondence table of O7 is
 // checked by a test ("RustDesk'in her oturum seçeneği bir listede").
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../../tokens/sense_tokens.dart';
@@ -13,6 +15,7 @@ sealed class SenseListEntry {
     required this.label,
     required this.rustdesk,
     this.hint,
+    this.why,
     this.noRights = false,
   });
 
@@ -26,8 +29,20 @@ sealed class SenseListEntry {
   /// Soft text after the label ("· Mac", "· fare ve klavye gitmez").
   final String? hint;
 
+  /// Sürüm 11 (B2/B15): why the row is grey right now ("Hayalet mod açıkken kullanılamaz").
+  /// Shown instead of [hint] while the row cannot be used; every row that is grey for a
+  /// reason other than rights carries one (list_specs test).
+  final String? why;
+
   /// The person may not use it (panel rights, plan §2.1): shown locked, not hidden.
   final bool noRights;
+
+  /// The row cannot be used right now (no action behind it). Rights are separate
+  /// ([noRights]: lock + "Yetkin yok · panelden").
+  bool get disabled;
+
+  /// What the row says after its label: the reason while it is grey, else the hint.
+  String? get shownHint => disabled && why != null ? why : hint;
 }
 
 /// A row that does something once (`.it` + `›`).
@@ -38,6 +53,7 @@ class SenseActionEntry extends SenseListEntry {
     required super.rustdesk,
     required this.onTap,
     super.hint,
+    super.why,
     super.noRights,
     this.tag,
     this.tagLevel,
@@ -48,6 +64,9 @@ class SenseActionEntry extends SenseListEntry {
 
   /// Null = not available right now (faded).
   final VoidCallback? onTap;
+
+  @override
+  bool get disabled => onTap == null;
 
   /// Small tag on the right ("teknik").
   final String? tag;
@@ -70,6 +89,7 @@ class SenseToggleEntry extends SenseListEntry {
     required this.value,
     required this.onChanged,
     super.hint,
+    super.why,
     super.noRights,
     this.onLevel,
     this.toastAfterChange,
@@ -78,9 +98,14 @@ class SenseToggleEntry extends SenseListEntry {
   final bool value;
   final ValueChanged<bool>? onChanged;
 
+  @override
+  bool get disabled => onChanged == null;
+
   /// Sürüm 10 (#116): toast read right after [onChanged] ran; null keeps the default
   /// "label · Açık/Kapalı" (e.g. "yeni bağlantıda geçerli" when the change waits).
-  final String? Function()? toastAfterChange;
+  /// Sürüm 11 (B5): may be a Future — the toast then waits for the real result (a recording
+  /// that did not start says so instead of "Kayıt · açık").
+  final FutureOr<String?> Function()? toastAfterChange;
 
   /// Status colour of the switch when on (O6: Giriş kilitli orange, Kayıt red); the
   /// frequent box takes the colour of the worst one.
@@ -107,6 +132,7 @@ class SenseChoiceEntry extends SenseListEntry {
     required this.onChanged,
     this.style = SenseChoiceStyle.segment,
     super.hint,
+    super.why,
     super.noRights,
   });
 
@@ -114,6 +140,9 @@ class SenseChoiceEntry extends SenseListEntry {
   final String? value;
   final ValueChanged<String>? onChanged;
   final SenseChoiceStyle style;
+
+  @override
+  bool get disabled => onChanged == null;
 
   String? get valueLabel {
     for (final o in options) {
@@ -135,6 +164,7 @@ class SenseSliderEntry extends SenseListEntry {
     required this.format,
     required this.onChanged,
     super.hint,
+    super.why,
     super.noRights,
   });
 
@@ -145,6 +175,9 @@ class SenseSliderEntry extends SenseListEntry {
 
   /// Called when the drag ends (the setting is written once).
   final ValueChanged<double>? onChanged;
+
+  @override
+  bool get disabled => onChanged == null;
 }
 
 /// Read-only row (keyboard shortcuts).
@@ -157,6 +190,9 @@ class SenseInfoEntry extends SenseListEntry {
   });
 
   final String? detail;
+
+  @override
+  bool get disabled => false;
 }
 
 /// Two number fields and "Uygula" (custom resolution of a virtual display, R5). The size
@@ -172,6 +208,7 @@ class SenseSizeInputEntry extends SenseListEntry {
     this.min = kSenseCustomSizeMin,
     this.max = kSenseCustomSizeMax,
     super.hint,
+    super.why,
     super.noRights,
   });
 
@@ -183,6 +220,9 @@ class SenseSizeInputEntry extends SenseListEntry {
 
   /// Null = not available right now (faded).
   final void Function(int width, int height)? onApply;
+
+  @override
+  bool get disabled => onApply == null;
 }
 
 /// Limits of the custom resolution fields (RustDesk allows four digits; a virtual display
@@ -217,6 +257,9 @@ class SenseTilesEntry extends SenseListEntry {
   final List<SenseTile> tiles;
   final int value;
   final ValueChanged<int>? onPick;
+
+  @override
+  bool get disabled => onPick == null;
 }
 
 /// A closable category under the frequent box.

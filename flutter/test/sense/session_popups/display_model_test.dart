@@ -1,6 +1,6 @@
 // Sense Remote (C2, YH O9): "Ekran bilgisi" content — displays from the panel,
 // session numbers from RustDesk; different refresh / 4:2:2 in orange with a
-// note; latency 150 / 300 ms (karar #135); frame rate by T6.
+// note; latency 150 / 300 ms (#135); frame rate by T6.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/display/display_data.dart';
 import 'package:flutter_hbb/sense/screens/session/popups/display/display_model.dart';
@@ -71,8 +71,9 @@ void main() {
     expect(line(rows, 'Kayıp kare').value, '%0,2 (tahmini)');
   });
 
-  test('latency 150 ms orange, 300 ms red (karar #135); frame rate under 15 orange, under 8 red', () {
+  test('latency 150 ms orange, 300 ms red (#135); frame rate under 15 orange, under 8 red', () {
     SenseLevel lat(double ms) => (view(SenseSessionVideo(rttMs: ms, fps: 60)).meters[1] as SenseStatusMeter).barLevel;
+    expect(lat(100), SenseLevel.ok);
     expect(lat(149), SenseLevel.ok);
     expect(lat(150), SenseLevel.warn);
     expect(lat(300), SenseLevel.hot);

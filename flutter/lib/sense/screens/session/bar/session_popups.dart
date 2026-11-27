@@ -9,6 +9,7 @@ import '../../../components/popup_host.dart';
 import '../../../tokens/sense_tokens.dart';
 import '../data/peer_status.dart';
 import '../data/session_state.dart' show SenseBarPopup;
+import '../layers/layer_controller.dart' show SenseLayerController;
 import '../popups/display/display_data.dart';
 import '../popups/display/display_model.dart';
 import '../popups/display/display_popup.dart';
@@ -58,6 +59,9 @@ class SenseSessionPopups extends ChangeNotifier implements SenseBarPopups {
 
   void _onController() {
     final now = controller.openId;
+    // B3: one popup at a time: the connection card (opened from the logo) gives way to
+    // whatever opens here (a list, Bilgisayar durumu, Ekran bilgisi, the chat).
+    if (now != null && now != _last) SenseLayerController.find(peerId)?.closeInfo();
     if (_last == listId && now != listId && !_ours) _kicked = true;
     _last = now;
     notifyListeners();

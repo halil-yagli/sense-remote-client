@@ -519,12 +519,59 @@ fn mask_user_dirs(line: &str) -> String {
     text
 }
 
+/// `<yol>/<dosya>.ext` for a path: the extension only, never a folder or file name.
+fn masked_file(path: &str) -> String {
+    let leaf = path.trim().rsplit(['/', '\\']).next().unwrap_or_default();
+    match leaf.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()) {
+        Some(e) if !e.is_empty() && e.len() <= 8 && e.bytes().all(|b| b.is_ascii_alphanumeric()) => {
+            format!("<yol>/<dosya>.{e}")
+        }
+        _ => "<yol>/<dosya>".to_owned(),
+    }
+}
+
+/// #122 (S12, K68): RustDesk's transfer lines name the file and its folder (`new write File:
+/// C:\Users\…\Desktop\rapor.pdf`, `New job 7, read … to remote sense:incoming/rapor.pdf`), and
+/// the peer info debug line names the other computer's user and machine. None of it leaves the
+/// computer: paths keep only their extension, user / machine names are hidden.
+fn mask_file_paths(line: &str) -> String {
+    for marker in ["new write File: ", "new read File: "] {
+        if let Some(at) = line.find(marker) {
+            let start = at + marker.len();
+            return format!("{}{}", &line[..start], masked_file(&line[start..]));
+        }
+    }
+    if let Some(at) = line.find("New job ") {
+        // "New job <id>, read <path> to remote <path>, <n> files" / "…, write to <path> from
+        // remote <path>": the id stays, the paths go.
+        let rest = &line[at + "New job ".len()..];
+        if let Some(comma) = rest.find(',') {
+            let head = &line[..at + "New job ".len() + comma];
+            return format!("{head}, <yol gizli>");
+        }
+    }
+    let mut text = line.to_owned();
+    for field in ["username: \"", "hostname: \""] {
+        let mut from = 0;
+        while let Some(pos) = text[from..].find(field) {
+            let start = from + pos + field.len();
+            let Some(len) = text[start..].find('"') else {
+                break;
+            };
+            text.replace_range(start..start + len, "<gizli>");
+            from = start + "<gizli>".len();
+        }
+    }
+    text
+}
+
 /// The cleaning every line goes through before it leaves the computer.
 pub fn sanitize_line(line: &str) -> String {
     let line: String = line
         .chars()
         .map(|c| if c.is_control() && c != '\t' { ' ' } else { c })
         .collect();
+    let line = mask_file_paths(&line);
     let line = mask_key_values(&line);
     let line = mask_bearer(&line);
     let line = mask_emails(&line);
@@ -2038,6 +2085,38 @@ mod tests {
         for (input, want) in cases {
             assert_eq!(sanitize_line(input), want, "{input}");
         }
+    }
+
+    // #122 (S12, K68): lines as RustDesk writes them (fs.rs `new write {}`, io_loop.rs `New job`,
+    // ui_session_interface.rs `handle_peer_info :{:?}`).
+    #[test]
+    fn file_names_and_peer_names_do_not_leave() {
+        let cases = [
+            (
+                r"[src\fs.rs:624] new write File: C:\Users\halil\Downloads\Teklif Mart.pdf",
+                r"[src\fs.rs:624] new write File: <yol>/<dosya>.pdf",
+            ),
+            (
+                "new read File: /Users/ayse/Desktop/plan",
+                "new read File: <yol>/<dosya>",
+            ),
+            (
+                r"New job 6160385, read C:\Users\halil\Desktop\x.png to remote sense:incoming/x.png, 1 files",
+                "New job 6160385, <yol gizli>",
+            ),
+            (
+                "New job 6225921, write to /Users/a/Downloads/r.pdf from remote sense:offer/6225921/r.pdf",
+                "New job 6225921, <yol gizli>",
+            ),
+            (
+                r#"handle_peer_info :PeerInfo { username: "ayse", hostname: "MUZE-PC", platform: "Windows" }"#,
+                r#"handle_peer_info :PeerInfo { username: "<gizli>", hostname: "<gizli>", platform: "Windows" }"#,
+            ),
+        ];
+        for (input, want) in cases {
+            assert_eq!(sanitize_line(input), want, "{input}");
+        }
+        assert_eq!(sanitize_line("sense chat file to the incoming folder"), "sense chat file to the incoming folder");
     }
 
     #[test]
