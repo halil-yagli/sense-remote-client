@@ -5,7 +5,7 @@
 //! windows live in `curtain_mac.mm` (AppKit, main thread of the `--server` process, whose main
 //! thread runs the tray's event loop); this module gives it the numbers Windows uses (layout,
 //! glow, texts, colours, the Sense mark) so the two platforms look alike, and turns privacy mode
-//! into curtain + local input blocked, as RustDesk's own macOS privacy mode blocks input.
+//! into the curtain. Local input stays free (#108, `curtain::GHOST_MODE_BLOCKS_LOCAL_INPUT`).
 //!
 //! - Every screen, every Space, above full-screen apps, Dock and menu bar; input goes through to
 //!   the windows below (remote input), the curtain never takes focus.
@@ -14,9 +14,9 @@
 //!   decides.
 //! - The connection stays visible (workshop CLAUDE.md, Security): the curtain asks the Sense icon
 //!   (connection manager, `--cm`) to stay above it (`AppDelegate.swift`, `SenseCurtainIcon`).
-//! - Local input: physical keyboard and mouse are blocked with an event tap (the same rule as
-//!   RustDesk's macOS privacy mode); remote input (enigo) passes. If the tap can not be made,
-//!   ghost mode does not turn on.
+//! - Local input: not blocked in ghost mode (#108, Halil 2026-11-27: "Kilit hiç olmasın"); the
+//!   person at the Host can use the Sense card. The event tap in `curtain_mac.mm` stays behind
+//!   `GHOST_MODE_BLOCKS_LOCAL_INPUT` and is not called; ghost mode no longer needs it to start.
 
 use super::curtain;
 
@@ -458,8 +458,8 @@ mod mac {
         unsafe { SenseCurtainMacBlockInput(on, START_TIMEOUT_MS) }
     }
 
-    /// Sense Remote: privacy mode on macOS = maintenance curtain + local input blocked (the
-    /// Windows mode, `win_exclude_from_capture`). Registered under RustDesk's macOS key
+    /// Sense Remote: privacy mode on macOS = maintenance curtain only, local input free (#108;
+    /// the Windows mode, `win_exclude_from_capture`). Registered under RustDesk's macOS key
     /// (`privacy_mode_impl_macos`), so Controllers of any version know it.
     pub struct PrivacyModeImpl {
         impl_key: String,
@@ -494,7 +494,8 @@ mod mac {
                 return Ok(true);
             }
             curtain::show()?;
-            if !block_input(true) {
+            // Sense Remote (#108): no local input lock, so its failure can not stop ghost mode.
+            if curtain::GHOST_MODE_BLOCKS_LOCAL_INPUT && !block_input(true) {
                 curtain::hide();
                 bail!("Sense curtain: local input could not be blocked (Accessibility)");
             }
@@ -510,7 +511,7 @@ mod mac {
             // As in RustDesk's macOS mode, `_state` is not sent to the connection manager
             // (there is no local key that turns the mode off on macOS).
             self.check_off_conn_id(conn_id)?;
-            let unblocked = block_input(false);
+            let unblocked = !curtain::GHOST_MODE_BLOCKS_LOCAL_INPUT || block_input(false);
             curtain::hide();
             self.conn_id = INVALID_PRIVACY_MODE_CONN_ID;
             if !unblocked {

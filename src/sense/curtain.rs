@@ -20,6 +20,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static SHOWN: AtomicBool = AtomicBool::new(false);
 
+/// Sense Remote (#108, Sürüm 10): ghost mode is the maintenance curtain only; the Host's own
+/// mouse and keyboard keep working, so the person there can use the Sense card (chat, call,
+/// end the connection). Halil (2026-11-27): "Kilit hiç olmasın". Both privacy mode
+/// implementations (`privacy_mode::win_exclude_from_capture`, `curtain_mac`) read this.
+/// The Controller's separate "Sahadaki fare ve klavyeyi kilitle" (BlockInput permission, O6)
+/// is not ghost mode and is not affected.
+pub const GHOST_MODE_BLOCKS_LOCAL_INPUT: bool = false;
+
 /// True while the curtain is on (heartbeat `maintenance_curtain`, `report::heartbeat_base`).
 pub fn is_shown() -> bool {
     SHOWN.load(Ordering::SeqCst)
@@ -1683,5 +1691,51 @@ mod tests {
         }
         hide();
         assert!(!is_shown());
+    }
+
+    /// #108: ghost mode never blocks the Host's own mouse and keyboard.
+    #[test]
+    fn ghost_mode_does_not_block_local_input() {
+        assert!(!GHOST_MODE_BLOCKS_LOCAL_INPUT);
+    }
+
+    /// #108: in both ghost mode implementations every local input lock call (Windows low-level
+    /// hook, macOS event tap) sits behind `GHOST_MODE_BLOCKS_LOCAL_INPUT`, so turning ghost mode
+    /// on or off never calls it. The sources are read as text, so this runs on every platform.
+    #[test]
+    fn ghost_mode_impls_gate_every_input_lock_call() {
+        let sources = [
+            (
+                "win_exclude_from_capture.rs",
+                include_str!("../privacy_mode/win_exclude_from_capture.rs"),
+                &["win_input::hook()", "win_input::unhook()"][..],
+            ),
+            (
+                "curtain_mac.rs",
+                include_str!("curtain_mac.rs"),
+                &["block_input(true)", "block_input(false)"][..],
+            ),
+        ];
+        let guard = concat!("GHOST_MODE_", "BLOCKS_LOCAL_INPUT");
+        for (name, src, calls) in sources {
+            let lines: Vec<&str> = src.lines().collect();
+            for call in calls {
+                let mut found = 0;
+                for (i, line) in lines.iter().enumerate() {
+                    let code = line.split("//").next().unwrap_or("");
+                    if !code.contains(call) {
+                        continue;
+                    }
+                    found += 1;
+                    let prev = if i > 0 { lines[i - 1] } else { "" };
+                    assert!(
+                        code.contains(guard) || prev.contains(guard),
+                        "{name}:{}: `{call}` is not behind {guard}",
+                        i + 1
+                    );
+                }
+                assert!(found > 0, "{name}: `{call}` not found (test out of date)");
+            }
+        }
     }
 }
