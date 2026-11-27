@@ -72,10 +72,15 @@ class SenseToggleEntry extends SenseListEntry {
     super.hint,
     super.noRights,
     this.onLevel,
+    this.toastAfterChange,
   });
 
   final bool value;
   final ValueChanged<bool>? onChanged;
+
+  /// Sürüm 10 (#116): toast read right after [onChanged] ran; null keeps the default
+  /// "label · Açık/Kapalı" (e.g. "yeni bağlantıda geçerli" when the change waits).
+  final String? Function()? toastAfterChange;
 
   /// Status colour of the switch when on (O6: Giriş kilitli orange, Kayıt red); the
   /// frequent box takes the colour of the worst one.

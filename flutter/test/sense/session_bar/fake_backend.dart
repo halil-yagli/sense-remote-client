@@ -121,8 +121,27 @@ class FakeBackend extends SenseSessionBackend {
       });
   @override
   bool useAllMyDisplays = false;
+
+  /// Sürüm 10 (#116): like the FFI backend — spreading applies at once when [canSpread],
+  /// gathering the windows back waits for the next connection.
+  bool canSpread = true;
+  bool? spread;
   @override
-  void setUseAllMyDisplays(bool v) => set(() => useAllMyDisplays = v);
+  bool useAllMyDisplaysPending = false;
+  @override
+  void setUseAllMyDisplays(bool v) => set(() {
+        final was = spread ??= useAllMyDisplays && canSpread;
+        useAllMyDisplays = v;
+        if (v == was) {
+          useAllMyDisplaysPending = false;
+        } else if (v && canSpread) {
+          spread = true;
+          useAllMyDisplaysPending = false;
+          calls.add('spreadDisplays');
+        } else {
+          useAllMyDisplaysPending = true;
+        }
+      });
   @override
   int virtualDisplayCount = 0;
   @override

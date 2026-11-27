@@ -73,8 +73,9 @@ class SenseLinkSample {
   /// null where no layer runs (then the T6 limits decide here).
   final bool? wavy;
 
-  /// Set while the weak card sits minimized in the logo area (karar #94): a click on
-  /// the logo / status area opens it again instead of opening Ekran bilgisi.
+  /// Click on the logo / status area (karar #94, Sürüm 10 #110): opens the connection
+  /// card — the minimized weak card again, or with a good link the same card with the
+  /// current values. Null where no connection layer runs (the area takes no click).
   final VoidCallback? onRestoreLayer;
 
   SenseLinkSample copyWith({

@@ -31,6 +31,14 @@ abstract final class SenseLayerStrings {
   static const String endQuestion = 'Bağlantı bitirilsin mi?';
   static const String endConfirm = 'Bitir';
 
+  // Sürüm 10 (#110): the same card opened from the logo area while the link is good.
+  static const String goodTitle = 'Bağlantı iyi';
+  static const String wavyTitle = 'Bağlantı dalgalı';
+  static const String pathDirect = 'Doğrudan bağlantı (aktarma yok)';
+  static const String pathRelay = 'Aktarma sunucusu üzerinden';
+  static const String pathUnknown = 'Bağlantı türü ölçülüyor';
+  static const String closeCard = 'Kapat';
+
   /// Small word in the top bar while values shake but the layer is not up.
   static const String wavy = 'Dalgalı';
 

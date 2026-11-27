@@ -206,17 +206,43 @@ void main() {
     await drain(tester);
   });
 
-  testWidgets('connection line colours and the detail popup', (tester) async {
+  // Sürüm 10 (#110): the logo / connection area opens the connection card, never Ekran
+  // bilgisi; open popups close first (one popup at a time).
+  testWidgets('connection line colours; the area opens the connection card', (tester) async {
     setWindow(tester, const Size(1600, 900));
     final popups = FakePopups();
-    final b = FakeBackend(link: const SenseLinkSample(fps: 60, rttMs: 200));
+    var cards = 0;
+    final b = FakeBackend(link: SenseLinkSample(fps: 60, rttMs: 200, onRestoreLayer: () => cards++));
     await tester.pumpWidget(frameApp(b, popups: popups));
     final text = tester.widget<Text>(find.byKey(const ValueKey('sense-bar-link-text')));
     expect(text.data, startsWith('Dalgalı'));
     expect(text.style?.color, SenseColors.warn);
+    await tester.tap(find.byKey(const ValueKey('sense-bar-popup-status')));
+    await tester.pump();
+    expect(popups.isOpen(SenseBarPopup.status), isTrue);
     await tester.tap(find.byKey(const ValueKey('sense-bar-link')));
     await tester.pump();
-    expect(popups.isOpen(SenseBarPopup.info), isTrue);
+    expect(cards, 1);
+    expect(popups.open, isEmpty, reason: 'the card takes the one popup place');
+    expect(popups.isOpen(SenseBarPopup.info), isFalse, reason: 'Ekran bilgisi only from its own button');
+    // An open list closes too.
+    await tester.tap(menu(SenseBarMenu.screens));
+    await tester.pump();
+    expect(list(SenseBarMenu.screens), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('sense-bar-link')));
+    await tester.pump();
+    expect(cards, 2);
+    expect(list(SenseBarMenu.screens), findsNothing);
+    await drain(tester);
+  });
+
+  testWidgets('without a connection layer the area does nothing (no Ekran bilgisi)', (tester) async {
+    setWindow(tester, const Size(1600, 900));
+    final popups = FakePopups();
+    await tester.pumpWidget(frameApp(FakeBackend(), popups: popups));
+    await tester.tap(find.byKey(const ValueKey('sense-bar-link')));
+    await tester.pump();
+    expect(popups.open, isEmpty);
     await drain(tester);
   });
 

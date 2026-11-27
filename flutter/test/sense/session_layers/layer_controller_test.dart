@@ -240,6 +240,52 @@ void main() {
       expect(c.minimized, isFalse, reason: '5 min passed: the card opens');
     });
 
+    // Sürüm 10 (#110): the logo area opens the connection card.
+    test('logo area: minimized weak card comes back; good link opens the info card', () {
+      seconds(16, host.weakFps);
+      c.minimize();
+      expect(c.minimized, isTrue);
+      c.openCard();
+      expect(c.minimized, isFalse);
+      expect(c.infoOpen, isFalse, reason: 'the weak card itself, not the info card');
+      seconds(4, host.healthy);
+      expect(c.link.phase, SenseLinkPhase.normal);
+      c.openCard();
+      expect(c.infoOpen, isTrue);
+      seconds(5, host.healthy);
+      expect(c.infoOpen, isTrue, reason: 'stays open and follows the values');
+      c.closeInfo();
+      expect(c.infoOpen, isFalse);
+    });
+
+    test('info card gives way to the weak card and to the ended card; no reopen by itself', () {
+      seconds(2, host.healthy);
+      c.openCard();
+      expect(c.infoOpen, isTrue);
+      seconds(16, host.weakFps);
+      expect(c.link.phase, SenseLinkPhase.weak);
+      expect(c.infoOpen, isFalse);
+      seconds(4, host.healthy);
+      expect(c.link.phase, SenseLinkPhase.normal);
+      expect(c.infoOpen, isFalse, reason: 'only a new click opens it');
+      c.openCard();
+      expect(c.onMessage('error', 'Connection Error', 'Connection reset by peer'), isTrue);
+      expect(c.ended, isNotNull);
+      expect(c.infoOpen, isFalse);
+      c.openCard();
+      expect(c.infoOpen, isFalse, reason: 'nothing opens over the ended card');
+    });
+
+    test('connection type of the last reading', () {
+      expect(c.direct, isNull);
+      host.raw = SenseLinkRaw(delay: '20', fps: '60', lastFrameMs: 10, lastFrameAt: clock.wall, probeAt: clock.wall, direct: false);
+      seconds(1);
+      expect(c.direct, isFalse);
+      host.healthy();
+      seconds(1);
+      expect(c.direct, isFalse, reason: 'an unknown reading keeps the last type');
+    });
+
     test('a restart on a working link is left to RustDesk', () {
       seconds(3, host.healthy);
       expect(c.onMessage('restarting-show', 'Connecting...', 'Connection in progress.'), isFalse);

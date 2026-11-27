@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart';
+import 'package:flutter_hbb/sense/screens/session/lists/backend.dart' show SenseDisplayRef;
 import 'package:flutter_hbb/sense/screens/session/lists/rules.dart';
 
 import 'fake_backend.dart';
@@ -68,4 +69,12 @@ void main() {
           open: SenseBarMenu.screens,
           taps: ['Uzak çözünürlük']),
       skip: goldenSkip('list_screens_custom_res'), tags: const ['golden']);
+  // Sürüm 10 (#111): 4 screens + "Tümü birlikte" = 5 tiles; the 5th wraps to a second row.
+  testWidgets('Ekranlar, 4 screens: Tümü on the second row', (t) {
+    final b = FakeBackend(
+        facts: const SensePeerFacts(
+            displaysCount: 4, localMultiScreens: true, rustDeskIdd: true, resolutionsCount: 3, codecFormat: 'VP9'));
+    b.displays = [for (var i = 0; i < 4; i++) SenseDisplayRef(i, primary: i == 0, width: 1920, height: 1080)];
+    return shot(t, 'list_screens_4_tumu', b, open: SenseBarMenu.screens);
+  }, skip: goldenSkip('list_screens_4_tumu'), tags: const ['golden']);
 }

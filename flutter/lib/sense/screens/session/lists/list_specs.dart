@@ -147,6 +147,10 @@ SenseListSpec senseScreensList(SenseSessionBackend b) {
               rustdesk: 'Use all my displays for the remote session',
               value: b.useAllMyDisplays,
               onChanged: b.setUseAllMyDisplays,
+              // Sürüm 10 (#116): a change that waits for the next connection says so.
+              hint: b.useAllMyDisplaysPending ? _S.appliesNextConnection : null,
+              toastAfterChange: () =>
+                  b.useAllMyDisplaysPending ? '${_S.useAllMyDisplays} · ${_S.appliesNextConnection}' : null,
             ),
         ],
       ),

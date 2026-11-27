@@ -92,7 +92,14 @@ abstract class SenseSessionBackend extends ChangeNotifier {
   /// Size the custom resolution fields start with (the current one).
   SenseResolution? get customResolutionStart => currentResolution;
   bool get useAllMyDisplays;
+
+  /// Sürüm 10 (#116): applied at once where it can be — on: remote displays spread over the
+  /// local monitors (RustDesk's own layout path); otherwise [useAllMyDisplaysPending].
   void setUseAllMyDisplays(bool v);
+
+  /// The stored value could not be applied in this session; it takes effect on the next
+  /// connection (row hint + toast "yeni bağlantıda geçerli").
+  bool get useAllMyDisplaysPending => false;
   int get virtualDisplayCount;
   bool get canAddVirtualDisplay;
   void addVirtualDisplay();
