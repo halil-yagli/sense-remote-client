@@ -25,6 +25,7 @@ class SenseLinkRaw {
     this.direct,
     this.speed,
     this.waitingImage = false,
+    this.serverName,
   });
 
   final String? delay;
@@ -43,6 +44,9 @@ class SenseLinkRaw {
 
   /// Sürüm 11 (#121): logged in (peer info came) but no picture yet.
   final bool waitingImage;
+
+  /// Sürüm 11 (#144): name of the ID server this connection uses (null/empty = unknown).
+  final String? serverName;
 }
 
 /// What the layers need from the RustDesk session.
@@ -165,6 +169,10 @@ class SenseLayerController extends ChangeNotifier {
   /// Connection type of the last reading (null = not known yet).
   bool? get direct => _direct;
 
+  /// Sürüm 11 (#144): server name of the last reading (null/empty = unknown).
+  String? get serverName => _serverName;
+  String? _serverName;
+
   /// The good-link card (O13 layout, current values) is up. It gives way to the weak /
   /// lost card when trouble starts and to the ended card.
   bool get infoOpen => _infoOpen && _ended == null && _link.view.phase == SenseLinkPhase.normal;
@@ -267,6 +275,7 @@ class SenseLayerController extends ChangeNotifier {
     }
     final raw = host.readLink();
     _direct = raw.direct ?? _direct;
+    _serverName = raw.serverName ?? _serverName;
     final probe = raw.probeAt;
     if (probe != null && probe.isAfter(_watchingSince)) _everUp = true;
     // Sürüm 11 (#121): logged in, no picture yet.

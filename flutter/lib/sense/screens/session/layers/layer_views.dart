@@ -6,6 +6,7 @@ import 'dart:ui' show FontFeature;
 import 'package:flutter/widgets.dart';
 
 import '../../../sense.dart';
+import '../../../strings/session.dart';
 import 'layer_controller.dart';
 import 'layer_spec.dart';
 import 'layer_strings.dart';
@@ -331,6 +332,7 @@ class SenseLinkInfoLayer extends StatelessWidget {
     required this.view,
     required this.direct,
     required this.onClose,
+    this.serverName,
     this.appear = 1,
   });
 
@@ -339,6 +341,9 @@ class SenseLinkInfoLayer extends StatelessWidget {
   /// true = direct, false = relay, null = not known yet.
   final bool? direct;
   final VoidCallback onClose;
+
+  /// Sürüm 11 (#144): ID server name for the `Sunucu:` line (null/empty = `Sunucu: —`).
+  final String? serverName;
   final double appear;
 
   @override
@@ -397,6 +402,12 @@ class SenseLinkInfoLayer extends StatelessWidget {
               _logo(breathe: false),
               _title(view.wavy ? SenseLayerStrings.wavyTitle : SenseLayerStrings.goodTitle,
                   view.wavy ? SenseColors.warn : SenseColors.ok),
+              Text(
+                SenseSessionStrings.serverLine(serverName, direct, s.rttMs?.round()),
+                key: const Key('sense-layer-info-server'),
+                textAlign: TextAlign.center,
+                style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted),
+              ),
               _sub(path),
               _tiles(tiles),
               Text(

@@ -227,6 +227,21 @@ void main() {
       expect(find.byType(SenseBreathe), findsNothing);
     });
 
+    testWidgets('server line (#144): name, path, ms; empty name gives a dash', (tester) async {
+      await _pump(
+          tester, SenseLinkInfoLayer(view: good, direct: true, serverName: 'Türkiye (İstanbul)', onClose: () {}),
+          popupOpen: false);
+      expect(find.text('Sunucu: Türkiye (İstanbul) · doğrudan · 18 ms'), findsOneWidget);
+      await _pump(tester, SenseLinkInfoLayer(view: good, direct: false, serverName: 'Almanya', onClose: () {}),
+          popupOpen: false);
+      expect(find.text('Sunucu: Almanya · aktarma · 18 ms'), findsOneWidget);
+      await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, serverName: '', onClose: () {}),
+          popupOpen: false);
+      expect(find.text('Sunucu: —'), findsOneWidget);
+      await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, onClose: () {}), popupOpen: false);
+      expect(find.text('Sunucu: —'), findsOneWidget);
+    });
+
     testWidgets('relay, unknown type and "Dalgalı" wording', (tester) async {
       await _pump(tester, SenseLinkInfoLayer(view: good, direct: false, onClose: () {}), popupOpen: false);
       expect(find.text('Aktarma sunucusu üzerinden'), findsOneWidget);
@@ -256,8 +271,11 @@ void main() {
     });
 
     testWidgets('golden: good-link card', (tester) async {
-      await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, onClose: () {}),
-          link: const bar.SenseLinkSample(path: bar.SenseLinkPath.direct, fps: 60, rttMs: 18), popupOpen: false);
+      await _pump(
+          tester,
+          SenseLinkInfoLayer(view: good, direct: true, serverName: 'Türkiye (İstanbul)', onClose: () {}),
+          link: const bar.SenseLinkSample(path: bar.SenseLinkPath.direct, fps: 60, rttMs: 18),
+          popupOpen: false);
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(_golden('o13_good_card')));
     }, skip: _skip('o13_good_card'), tags: ['golden']);
   });

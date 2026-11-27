@@ -3,6 +3,24 @@
 // Turkish only (T2, #59). "RustDesk" never appears here.
 
 abstract final class SenseSessionStrings {
+  // ---- Connection card server line (Sürüm 11, #144) ----
+  static const String serverNone = 'Sunucu: —';
+  static const String serverDirect = 'doğrudan';
+  static const String serverRelay = 'aktarma';
+  static const String serverPathUnknown = 'yol ölçülüyor';
+
+  /// `Sunucu: Türkiye (İstanbul) · doğrudan · 4 ms`; an empty name gives `Sunucu: —`.
+  static String serverLine(String? name, bool? direct, int? ms) {
+    final n = (name ?? '').trim();
+    if (n.isEmpty) return serverNone;
+    final path = switch (direct) {
+      true => serverDirect,
+      false => serverRelay,
+      null => serverPathUnknown,
+    };
+    return 'Sunucu: $n · $path · ${ms == null ? '—' : '$ms'} ms';
+  }
+
   // ---- Bar (O1) ----
   static const String screens = 'Ekranlar';
   static const String display = 'Görüntü';
