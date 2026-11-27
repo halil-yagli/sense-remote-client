@@ -443,6 +443,7 @@ impl State {
                 None
             },
             notes_url: self.release.as_ref().and_then(|r| r.notes_url.clone()),
+            notes_summary: self.release.as_ref().and_then(|r| r.notes_summary.clone()),
             checked_at,
             mac_permission_warning: false,
             last_result: self.last_result.clone(),

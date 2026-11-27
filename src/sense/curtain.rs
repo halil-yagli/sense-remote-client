@@ -61,7 +61,7 @@ pub fn is_supported() -> bool {
 // Curtain texts (Turkish UI first; the curtain is for visitors on site).
 pub const TITLE_BOLD: &str = "Bakım";
 pub const TITLE_LIGHT: &str = " yapılıyor";
-pub const SUBTITLE: &str = "Kısa süre içinde yeniden hizmetinizde.";
+pub const SUBTITLE: &str = "Kısa süre içinde yeniden hizmetinizdeyiz.";
 
 /// Prototype `--muted` (#8e8e98) and the mark box border (#2a2a33).
 #[cfg_attr(not(windows), allow(dead_code))]

@@ -133,6 +133,8 @@ pub struct Release {
     pub sha256: String,
     pub size: u64,
     pub notes_url: Option<String>,
+    /// Sense Remote (Sürüm 12, #166): one-line "what is new" for the update strip.
+    pub notes_summary: Option<String>,
     pub published_at: i64,
     pub iat: i64,
     pub exp: i64,
@@ -219,6 +221,7 @@ pub fn verify(
         sha256: w.sha256,
         size: w.size as u64,
         notes_url: w.notes_url,
+        notes_summary: w.notes_summary,
         published_at: w.published_at,
         iat: w.iat,
         exp: w.exp,
@@ -401,6 +404,13 @@ where
     T::deserialize(d).map(Some)
 }
 
+/// `MAX_NOTES_SUMMARY`: the panel's `notes_summary` limit, counted in UTF-16 units like zod.
+pub const MAX_NOTES_SUMMARY: usize = 120;
+
+pub(super) fn is_notes_summary(value: &str) -> bool {
+    value.encode_utf16().count() <= MAX_NOTES_SUMMARY
+}
+
 pub(super) fn is_version(value: i64) -> bool {
     (1..=i64::from(super::MAX_VERSION)).contains(&value)
 }
@@ -500,6 +510,10 @@ struct ReleaseWire {
     build: Value,
     #[serde(default, deserialize_with = "present")]
     notes_url: Option<String>,
+    // Sense Remote (Sürüm 12): the panel's `release.notes_summary` (`z.string().max(120)`).
+    // Old panels do not send it; `deny_unknown_fields` would refuse it without this field.
+    #[serde(default, deserialize_with = "present")]
+    notes_summary: Option<String>,
     published_at: i64,
     iat: i64,
     exp: i64,
@@ -518,6 +532,7 @@ impl ReleaseWire {
             && is_size(self.size)
             && envelope_shape(&self.build).is_some()
             && self.notes_url.as_deref().map_or(true, is_release_url)
+            && self.notes_summary.as_deref().map_or(true, is_notes_summary)
             && [self.published_at, self.iat, self.exp]
                 .into_iter()
                 .all(is_unix_seconds)
