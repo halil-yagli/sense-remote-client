@@ -194,7 +194,7 @@ void main() {
       await m.run('win.cad');
       expect(io.keys, [SenseFavKeys.ctrlAltDel]);
       expect(io.sent, isEmpty);
-      expect(notes.single, 'Ctrl+Alt+Del açıldı · Giriş Salonu PC‑2');
+      expect(notes.single, 'Ctrl+Alt+Del açıldı · Giriş Salonu PC-2');
     });
 
     test('the core may say exec for a keys-capable entry: then the Host runs it', () async {
@@ -212,7 +212,7 @@ void main() {
       final m = await loadedModel(io, notices: notes);
       await m.run('win.taskmgr');
       SenseFavoritesEvents.handle('p1', {'name': 'sense_shortcut_result', 'req': 1, 'ok': true, 'err': null});
-      expect(notes.single, 'Görev Yöneticisi açıldı · Giriş Salonu PC‑2');
+      expect(notes.single, 'Görev Yöneticisi açıldı · Giriş Salonu PC-2');
       // A late or repeated answer is ignored.
       SenseFavoritesEvents.handle('p1', {'name': 'sense_shortcut_result', 'req': 1, 'ok': true});
       expect(notes, hasLength(1));

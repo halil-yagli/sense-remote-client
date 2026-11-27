@@ -25,7 +25,7 @@ Future<void> shot(
     io: io,
     os: os,
     peerId: 'golden',
-    computerName: 'Giriş Salonu PC‑2',
+    computerName: 'Giriş Salonu PC-2',
     inputAllowed: input,
     ipInfo: () => const SenseFavIpInfo(ip: '192.168.10.42', gateway: ['192.168.10.1'], dns: ['192.168.10.1', '8.8.8.8']),
   );

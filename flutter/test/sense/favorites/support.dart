@@ -118,7 +118,7 @@ Future<SenseFavoritesModel> loadedModel(FakeFavIo io,
     io: io,
     os: os,
     peerId: peerId,
-    computerName: 'Giriş Salonu PC‑2',
+    computerName: 'Giriş Salonu PC-2',
     inputAllowed: input,
     onNotice: notices?.add,
   );

@@ -231,7 +231,7 @@ class SenseFavoritesModel extends ChangeNotifier {
   final SenseFavoritesIo io;
   final String peerId;
 
-  /// Shown in "Görev Yöneticisi açıldı · Giriş Salonu PC‑2".
+  /// Shown in "Görev Yöneticisi açıldı · Giriş Salonu PC-2".
   String computerName;
 
   /// This (Controller) computer is a Mac: key labels say Cmd+Option+Shift (K4).

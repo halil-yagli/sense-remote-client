@@ -497,7 +497,8 @@ abstract final class SenseFavoritesHotkeys {
     if (identical(SenseFavoritesHotkeysRegistry.active, m)) SenseFavoritesHotkeysRegistry.active = null;
   }
 
-  static const Map<PhysicalKeyboardKey, int> _digits = {
+  // Not const: PhysicalKeyboardKey has no primitive equality.
+  static final Map<PhysicalKeyboardKey, int> _digits = {
     PhysicalKeyboardKey.digit1: 1,
     PhysicalKeyboardKey.digit2: 2,
     PhysicalKeyboardKey.digit3: 3,

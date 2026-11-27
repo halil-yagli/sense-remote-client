@@ -170,7 +170,7 @@ abstract final class SenseFavoritesStrings {
     'win.programs': ('Programlar ve Özellikler', 'Kurulu uygulamalar, kaldır'),
     // Windows · Ağ ve sorun giderme
     'win.netadapt': ('Ağ bağdaştırıcıları', 'Denetim Masası › Ağ Bağlantıları'),
-    'win.netset': ('Ağ ve İnternet ayarları', 'Wi‑Fi, Ethernet, proxy'),
+    'win.netset': ('Ağ ve İnternet ayarları', 'Wi-Fi, Ethernet, proxy'),
     'win.ipinfo': ('IP bilgisi', 'IP, ağ geçidi, DNS kartı'),
     'win.flushdns': ('DNS önbelleğini temizle', 'ipconfig /flushdns'),
     'win.resetnic': ('Ağ bağdaştırıcısını sıfırla', 'Kapatıp açar; bağlantı kısa süre kopar'),

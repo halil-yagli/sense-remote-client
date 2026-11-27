@@ -17,7 +17,7 @@ Future<SenseFavoritesModel> pumpList(WidgetTester t, FakeFavIo io,
     {SenseFavOs? os = SenseFavOs.win, bool input = true, List<String>? notes, VoidCallback? onClose}) async {
   setWindow(t, const Size(500, 1400));
   final m = SenseFavoritesModel(
-      io: io, os: os, peerId: 'p1', computerName: 'Giriş Salonu PC‑2', inputAllowed: input, onNotice: notes?.add);
+      io: io, os: os, peerId: 'p1', computerName: 'Giriş Salonu PC-2', inputAllowed: input, onNotice: notes?.add);
   if (os != null) await m.load();
   await t.pumpWidget(listApp(SenseFavoritesList(model: m, onNotify: notes?.add, onClose: onClose)));
   await t.pump();
