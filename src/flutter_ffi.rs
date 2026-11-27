@@ -340,6 +340,47 @@ pub fn session_sense_server_name(session_id: SessionID) -> SyncReturn<String> {
     SyncReturn(crate::sense::server_select::session_server_name(&peer))
 }
 
+// Sense Remote (Sürüm 12, plan 2026-11-28 §2.4, ÇK-0): session functions of the Sense peer
+// messages. Bodies not filled in yet answer `unsupported` (ÇK fills them).
+
+/// Sends a Sense message to the Host over this session. Only `sense.host-chat-visible` and
+/// `sense.shortcut-run` with a valid body; "" when sent, otherwise `not_allowed`, `invalid` or
+/// `no_session`.
+pub fn session_sense_send_msg(session_id: SessionID, name: String, json: String) -> String {
+    let msg = match crate::sense::peer_msg::outgoing(&name, &json) {
+        Ok(msg) => msg,
+        Err(code) => return code.to_owned(),
+    };
+    match sessions::get_session_by_session_id(&session_id) {
+        Some(session) => {
+            crate::client::Interface::send(&*session, crate::client::Data::Message(msg));
+            String::new()
+        }
+        None => "no_session".to_owned(),
+    }
+}
+
+/// The Host's idle disconnect as it sent it (`sense.idle`): `{"min": n | null}`, or
+/// `{"error":"unsupported"}` while it has not (older Host).
+pub fn session_sense_idle_policy(session_id: SessionID) -> SyncReturn<String> {
+    let sid = sessions::get_session_by_session_id(&session_id)
+        .map(|session| session.lc.read().unwrap().session_id);
+    SyncReturn(crate::sense::peer_msg::ffi_idle_policy(sid))
+}
+
+/// `{attempt, max}` of the automatic reconnect; `{"error":"unsupported"}` for now (ÇK).
+pub fn session_sense_reconnect_info(session_id: SessionID) -> SyncReturn<String> {
+    let _ = session_id;
+    SyncReturn(crate::sense::peer_msg::UNSUPPORTED_JSON.to_owned())
+}
+
+/// Admin terminal: asks the panel for a ticket and sends it (the answer comes as the event
+/// `sense_term_admin_result`). "" when sent; `unsupported` for now (ÇK).
+pub fn session_sense_term_admin_begin(session_id: SessionID) -> String {
+    let _ = session_id;
+    crate::sense::term_admin::ffi_begin()
+}
+
 pub fn session_refresh(session_id: SessionID, display: usize) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.refresh_video(display as _);
@@ -2771,6 +2812,30 @@ pub fn main_sense_update_install_now(version: i32) -> String {
 // without waiting). "" when asked, otherwise `retry_soon`, `ipc_failed` or `unsupported`.
 pub fn main_sense_update_check() -> String {
     crate::sense::update::request_check()
+}
+
+// Sense Remote (Sürüm 12, plan 2026-11-28 §2.4, ÇK-0): favourites and the employee's own
+// settings (#169). Skeletons until FAV-Ç fills them; event `sense_prefs_changed`.
+
+/// `[{id, cat, kind, admin, available}]` for `os` (`win` | `mac` | `linux`); `[]` for now.
+pub fn main_sense_shortcut_catalog(os: String) -> String {
+    crate::sense::shortcuts::ffi_catalog(&os)
+}
+
+/// `{entries, custom}` from the local cache at once (synced in the background);
+/// `{"error":"unsupported"}` for now.
+pub fn main_sense_prefs_get(os: String) -> String {
+    crate::sense::prefs_sync::ffi_get(&os)
+}
+
+/// Stores preferences (`{entries: [{os, key, value}]}`); "" when stored, `unsupported` for now.
+pub fn main_sense_prefs_set(json: String) -> String {
+    crate::sense::prefs_sync::ffi_set(&json)
+}
+
+/// Asks the panel to approve a custom shortcut; `{"error":"unsupported"}` for now.
+pub fn main_sense_custom_shortcut_request(json: String) -> String {
+    crate::sense::prefs_sync::ffi_custom_shortcut_request(&json)
 }
 
 pub fn main_account_auth(op: String, remember_me: bool) {

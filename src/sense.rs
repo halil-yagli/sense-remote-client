@@ -845,6 +845,15 @@ pub mod diag;
 pub mod winos;
 // Sense Remote (#136): the Controller's session recording as the UI and the log see it.
 pub mod recording;
+// Sense Remote (Sürüm 12, plan 2026-11-28 §2.1–§2.4, ÇK-0): Sense messages between the peers and
+// the modules behind the new bridge functions (skeletons until FAV-Ç / ÇK fill them).
+pub mod peer_msg;
+#[allow(dead_code)]
+pub mod prefs_sync;
+#[allow(dead_code)]
+pub mod shortcuts;
+#[allow(dead_code)]
+pub mod term_admin;
 // Sense Remote (S11, M5): the Mac capture backend choice (`libs/scrap`); CI runs only this crate's
 // tests, so they are compiled here too.
 #[cfg(test)]
