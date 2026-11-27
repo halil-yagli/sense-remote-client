@@ -1,0 +1,346 @@
+{
+  "v": 1,
+  "description": "Sense Remote yonetici terminali bileti ortak test vektoru (panel packages/shared ve istemci src/sense/testdata). Bilet dizesi: k.p.s (k 16 hex anahtar kimligi; p kanonik JSON (JCS) yuk baytlari base64url dolgusuz; s 64 bayt Ed25519 imza base64url dolgusuz, 86 karakter). Anahtar panelin zarf anahtariyla ayni, imza alani ayri: imzalanan veri = prefix (ASCII) || base64url_decode(p). Dogrulama sirasi: bicim (tam 3 parca; k 16 kucuk hex; p ve s base64url alfabesi; s 86 karakter; uzunluk <= 2048) -> k listede -> p/s kanonik cozum (s 64 bayt) -> imza (term-admin oneki) -> UTF-8 JSON + sema (bilinmeyen alan yok; v 1; purpose term-admin; host 1-64; uid 1-64; email 3-254; nonce 16 bayt base64url (22 karakter); 0 < exp - iat <= max_lifetime_s) -> host == Host'un kendi kimligi -> iat - clock_skew_s <= now_s <= exp + clock_skew_s -> nonce seen icinde degil. Gecerli bilette Host nonce'u en az nonce_memory_s saniye hatirlar. Her vakada tek kusur vardir. Gizli anahtar hicbir yerde yok.",
+  "prefix": "sense-remote/term-admin/v1\n",
+  "clock_skew_s": 300,
+  "max_lifetime_s": 60,
+  "nonce_memory_s": 660,
+  "keys": [
+    {
+      "k": "4e548b8ad40c0f20",
+      "public_key": "SxgeStZ__iPGZB1zTnMVHIdPJGbEyYzLbLAakx-vTLw"
+    },
+    {
+      "k": "378d107dd4d358d0",
+      "public_key": "q16ASYybyLCWxAE2P7F0Gp_90QOZlQ4WitqLYmOv3Bg"
+    }
+  ],
+  "cases": [
+    {
+      "name": "ok",
+      "description": "Gecerli bilet, ilk kez",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "ok",
+      "uid": "usr_0123456789abcdef",
+      "email": "calisan@example.test",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_other_nonce_seen",
+      "description": "Baska bir nonce daha once kullanilmis; bu nonce yeni",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": ["BBBBBBBBBBBBBBBBBBBBBA"]
+      },
+      "result": "ok",
+      "uid": "usr_0123456789abcdef",
+      "email": "calisan@example.test",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_second_key",
+      "description": "Listedeki ikinci anahtarla imzali (anahtar dondurme)",
+      "ticket": "378d107dd4d358d0.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.osk8gNLxrDTqqRn2SIaMtu5elCjh9ePia2L6EOkh1IuhFAx1qTPEQuzJ5J17nI93Fhtu8IYvcWHqVxG19FFaDQ",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "ok",
+      "uid": "usr_0123456789abcdef",
+      "email": "calisan@example.test",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_iat_boundary",
+      "description": "now_s = iat - clock_skew_s (sinir dahil)",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1799999700,
+        "seen": []
+      },
+      "result": "ok",
+      "uid": "usr_0123456789abcdef",
+      "email": "calisan@example.test",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_exp_boundary",
+      "description": "now_s = exp + clock_skew_s (sinir dahil)",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000360,
+        "seen": []
+      },
+      "result": "ok",
+      "uid": "usr_0123456789abcdef",
+      "email": "calisan@example.test",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "ok_short_lifetime",
+      "description": "exp - iat = 1 (sema alt siniri)",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDAxLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.ha8QY2E4y-aeTs8-brW7oSWfNMSdezJKjMJy2Z2zUAkPcnqDUlZnkNWluP68Z8xRc1w835V9hRPxI2sTroAcBQ",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "ok",
+      "uid": "usr_0123456789abcdef",
+      "email": "calisan@example.test",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "malformed_two_parts",
+      "description": "Iki parca (s yok)",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "malformed_four_parts",
+      "description": "Dort parca",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw.x",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "malformed_upper_key_id",
+      "description": "k buyuk harfli hex",
+      "ticket": "4E548B8AD40C0F20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "malformed_padded_s",
+      "description": "s dolgulu base64url",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw==",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "malformed_std_base64_p",
+      "description": "p standart base64 alfabesinde (+ ya da /)",
+      "ticket": "4e548b8ad40c0f20.+yJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "malformed_noncanonical_s",
+      "description": "s son karakteri kanonik degil (kullanilmayan bitler sifir degil)",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECB",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "malformed"
+    },
+    {
+      "name": "unknown_key",
+      "description": "Listede olmayan anahtarla imzali",
+      "ticket": "a1c41970a06b7bed.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.W4R3kpPk_Q6IUKyqU22MTHW2_ZZtfnQV7dOK5jltVFqNz8uhSPPzqean7FlSWuF1xscRpKqJT8pXKt3rOTuvDQ",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "unknown_key"
+    },
+    {
+      "name": "bad_signature_payload_bit",
+      "description": "p'nin ilk baytinda bir bit degisti",
+      "ticket": "4e548b8ad40c0f20.eiJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_envelope_prefix",
+      "description": "Gecerli bilet yuku ama strategy zarfi onekiyle imzali (imza alani ayrimi)",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.M5w8JzZ6Zxbopiya-MsGah-MIkORopAHb6pHS7v8JuvJgkkj56wgAhrw_WF2mXCQLeUNzqFQkPfk0qd_zko7Cg",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_signature_wol_prefix",
+      "description": "Gecerli bilet yuku ama wol onekiyle imzali",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.KGoz_XLZiNVjn73kW_w4gvS5xvk_1zv72lGIYMtIUbUSRUQViAbUs_LTbqoFA1ElmpvmigREDWRk29SelKccDg",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_signature"
+    },
+    {
+      "name": "bad_payload_wrong_purpose",
+      "description": "purpose terminal",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybWluYWwiLCJ1aWQiOiJ1c3JfMDEyMzQ1Njc4OWFiY2RlZiIsInYiOjF9.RiVtSZHbmX1KJdmIw6cExiBRRzuNRItJiUR2QBJ3Fy0pjji86bMdL0zxJVCjmX3rICYGriCZ4U-X-wwsAbEABA",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_wrong_v",
+      "description": "v 2",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6Mn0.mGcN3B7WyslyQlA4Y1ZwWgC-9VM6b5O9yeTgFysdau10w0kgGWoRyRXRcl3XkoF8fuvXPT_bt0DrpEsLxEmnBA",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_unknown_field",
+      "description": "Yukte bilinmeyen ust duzey alan",
+      "ticket": "4e548b8ad40c0f20.eyJjbWQiOiJ3aG9hbWkiLCJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.r00eJq1iZTYxLwGVxn_JWAH9xp1vWubLmZ7U8y2HRdP9pSUWV75ikcTEQ2DickpPQBghp8eJiB2jQtqOUTUrCg",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_missing_uid",
+      "description": "uid yok",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInYiOjF9.nmpjf3Dso-TeLRtlwlWfJVPZ24AegJGdBg7ocq981WYeBYOD2bFBfVpQwhhXCqplg4o720Ri8wj-JZMQMc2CCQ",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_short_nonce",
+      "description": "nonce 15 bayt",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBIiwicHVycG9zZSI6InRlcm0tYWRtaW4iLCJ1aWQiOiJ1c3JfMDEyMzQ1Njc4OWFiY2RlZiIsInYiOjF9.Bms-nAcFcw5Pc3OoMQgS13RclgeV-uP7jzFCMKvQr80Zc6lzEofWLH3YieRVECtVugLNvDjFW_wS7yA4r8X-Dw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_lifetime_too_long",
+      "description": "exp - iat = max_lifetime_s + 1",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYxLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.BG8swpTKygh4a4eDP-s_X67d4o5mXgkgjqTPsXukxg0KIf1unAfcgg82Qh-K6-xLsAHZ8lAPDAlWkg5IUofNAA",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_exp_equals_iat",
+      "description": "exp = iat",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDAwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.F_MW3RVv-HL50piO-Qaunpt8LX7svqWoorsvA4lXjLJahcEXuTksVD4lsjuHedcRp5W-KoLxfz8BM_sRKoXZAg",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "bad_payload_not_json",
+      "description": "p gecerli imzali ama JSON degil",
+      "ticket": "4e548b8ad40c0f20.dGVybS1hZG1pbg.JaffKQ_NYhtx8fFGX6_AnYxTI5RJCF5pv8h6997W3inEDSIB-1t8eumnQsMvkffc2q7XyqeCK4MLDkCYHdl6Dg",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "bad_payload"
+    },
+    {
+      "name": "wrong_host",
+      "description": "Bilet baska Host icin",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiOTg3NjU0MzIxIiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.ktGFTsg0auYjBFPVgNzaC2nC5M0qQbUeXutMiAbKSkrbqUPI84lMJC0xcIF6E3rK5SIKGyMo_SpMrOpSzTJhDA",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": []
+      },
+      "result": "wrong_host"
+    },
+    {
+      "name": "not_yet_valid",
+      "description": "now_s = iat - clock_skew_s - 1",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1799999699,
+        "seen": []
+      },
+      "result": "not_yet_valid"
+    },
+    {
+      "name": "expired",
+      "description": "now_s = exp + clock_skew_s + 1",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000361,
+        "seen": []
+      },
+      "result": "expired"
+    },
+    {
+      "name": "replayed_same_nonce",
+      "description": "Ayni nonce daha once kullanildi",
+      "ticket": "4e548b8ad40c0f20.eyJlbWFpbCI6ImNhbGlzYW5AZXhhbXBsZS50ZXN0IiwiZXhwIjoxODAwMDAwMDYwLCJob3N0IjoiMTIzNDU2Nzg5IiwiaWF0IjoxODAwMDAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJwdXJwb3NlIjoidGVybS1hZG1pbiIsInVpZCI6InVzcl8wMTIzNDU2Nzg5YWJjZGVmIiwidiI6MX0.7luhYrrcU2XkchvxQ47_3QrfhJuARLxd-lZwSkm7IWyD9p47xokoLXKcJ_OY4PZpX8Hv3VxSfAH1Ft7ftXZECw",
+      "expect": {
+        "host": "123456789",
+        "now_s": 1800000005,
+        "seen": ["AAAAAAAAAAAAAAAAAAAAAA"]
+      },
+      "result": "replayed"
+    }
+  ]
+}

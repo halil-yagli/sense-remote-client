@@ -311,6 +311,8 @@ pub fn session_close(session_id: SessionID) {
         #[cfg(any(target_os = "android", target_os = "ios"))]
         crate::keyboard::release_remote_keys("map");
         session.close_event_stream(session_id);
+        // Sense Remote (Sürüm 12): what the peer messages kept for this session.
+        crate::sense::peer_msg::forget(session.lc.read().unwrap().session_id);
         session.close();
     }
 }
@@ -340,8 +342,7 @@ pub fn session_sense_server_name(session_id: SessionID) -> SyncReturn<String> {
     SyncReturn(crate::sense::server_select::session_server_name(&peer))
 }
 
-// Sense Remote (Sürüm 12, plan 2026-11-28 §2.4, ÇK-0): session functions of the Sense peer
-// messages. Bodies not filled in yet answer `unsupported` (ÇK fills them).
+// Sense Remote (Sürüm 12, plan 2026-11-28 §2.4): session functions of the Sense peer messages.
 
 /// Sends a Sense message to the Host over this session. Only `sense.host-chat-visible` and
 /// `sense.shortcut-run` with a valid body; "" when sent, otherwise `not_allowed`, `invalid` or
@@ -368,17 +369,53 @@ pub fn session_sense_idle_policy(session_id: SessionID) -> SyncReturn<String> {
     SyncReturn(crate::sense::peer_msg::ffi_idle_policy(sid))
 }
 
-/// `{attempt, max}` of the automatic reconnect; `{"error":"unsupported"}` for now (ÇK).
+/// `{attempt, max}`: reconnects since the session last logged in (`max` null: no limit);
+/// `{"error":"unsupported"}` without a session.
 pub fn session_sense_reconnect_info(session_id: SessionID) -> SyncReturn<String> {
-    let _ = session_id;
-    SyncReturn(crate::sense::peer_msg::UNSUPPORTED_JSON.to_owned())
+    let found = sessions::get_session_by_session_id(&session_id).map(|session| {
+        (
+            session.lc.read().unwrap().session_id,
+            session.reconnect_count.load(std::sync::atomic::Ordering::SeqCst),
+        )
+    });
+    SyncReturn(match found {
+        Some((sid, count)) => crate::sense::peer_msg::ffi_reconnect_info(Some(sid), count),
+        None => crate::sense::peer_msg::ffi_reconnect_info(None, 0),
+    })
 }
 
-/// Admin terminal: asks the panel for a ticket and sends it (the answer comes as the event
-/// `sense_term_admin_result`). "" when sent; `unsupported` for now (ÇK).
+/// Admin terminal (#157): asks the panel for a ticket and sends it to the Host over this terminal
+/// session, before the terminal is opened. "" when started (the answer comes as the event
+/// `sense_term_admin_result {ok, err}`: a Host code, a panel code or `unsupported` from an older
+/// Host after 10 s), otherwise `not_terminal` | `no_session` | `signed_out` | `busy`. The ticket
+/// never comes to Dart.
 pub fn session_sense_term_admin_begin(session_id: SessionID) -> String {
-    let _ = session_id;
-    crate::sense::term_admin::ffi_begin()
+    let Some(session) = sessions::get_session_by_session_id(&session_id) else {
+        return "no_session".to_owned();
+    };
+    let (sid, peer_id, is_terminal) = {
+        let lc = session.lc.read().unwrap();
+        (
+            lc.session_id,
+            lc.get_id().to_owned(),
+            lc.conn_type == ConnType::TERMINAL,
+        )
+    };
+    let token = Some(LocalConfig::get_option("access_token")).filter(|t| !t.is_empty());
+    let sender = session.clone();
+    crate::sense::term_admin::begin(
+        crate::sense::term_admin::Session {
+            sid,
+            peer_id: &peer_id,
+            is_terminal,
+            token,
+        },
+        move |msg| {
+            crate::client::Interface::send(&*sender, crate::client::Data::Message(msg));
+            true
+        },
+        move |ev| crate::sense::peer_msg::push_to_ui(sid, &ev),
+    )
 }
 
 pub fn session_refresh(session_id: SessionID, display: usize) {
@@ -2749,6 +2786,22 @@ fn sense_chat_forget_closed() {
         sessions::get_session_by_peer_id(peer.to_owned(), ConnType::DEFAULT_CONN)
             .map_or(false, |s| s.lc.read().unwrap().session_id == sid)
     });
+}
+
+/// Sense Remote (Sürüm 12, #151, #157): the Host card's state from the connections
+/// (`{"chat_visible": [conn_id], "admin_terminals": [{conn_id, by}]}`): connections whose
+/// Controller asked to see the card, and connections whose terminal runs as admin (shown as
+/// "Yönetici terminali açık · by").
+pub fn main_sense_host_peer_state() -> String {
+    let live: Vec<i32> = serde_json::from_str::<Vec<serde_json::Value>>(
+        &crate::ui_cm_interface::get_clients_state(),
+    )
+    .unwrap_or_default()
+    .iter()
+    .filter_map(|c| c.get("id").and_then(|id| id.as_i64()))
+    .filter_map(|id| i32::try_from(id).ok())
+    .collect();
+    crate::sense::peer_msg::ffi_host_peer_state(&live)
 }
 
 // S5 / O11 (D3d2): Host side of chat files and the voice call; call controls (Ek).

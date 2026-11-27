@@ -14,8 +14,11 @@
 //! ticket passes through here but never goes to the record or to Dart.
 //!
 //! Handlers are pure (context in, actions out) so they are tested here; the two RustDesk files
-//! only apply the actions. Bodies still owned by later packages answer "not supported":
-//! shortcuts (FAV-Ç, `shortcuts`), admin terminal (ÇK, `term_admin`), chat card capture (ÇK).
+//! only apply the actions. Shortcuts answer "not supported" until FAV-Ç fills `shortcuts`.
+//!
+//! Also here (ÇK): the Host's idle value sent to the Controller (`sense.idle`, [`idle_minutes`]),
+//! the Host card's share of these messages on the CM side ([`cm_from_conn`]: card capture #151,
+//! admin terminal #157) and the reconnect attempt the session bar shows ([`ffi_reconnect_info`]).
 
 use base::message_proto::{Message, Misc, PluginRequest};
 use hbb_common::log;
@@ -52,6 +55,11 @@ pub const EV_IDLE_POLICY: &str = "sense_idle_policy";
 
 /// Bridge answer while a body is not filled in yet (or the peer is older).
 pub const UNSUPPORTED_JSON: &str = r#"{"error":"unsupported"}"#;
+
+/// CM channel key (`ipc::Data::Config`), value `Y`/`N`: `Y` = the Controller asked to see the Host
+/// card (#151), so the card leaves its capture exclusion for that connection. The connection
+/// always sends `N` when it ends.
+pub const CM_CAPTURE: &str = "sense-cm-capture";
 
 /// Largest body taken or sent (the ticket is at most 2048 characters).
 pub const MAX_BODY: usize = 4096;
@@ -251,13 +259,24 @@ pub struct HostCtx {
     pub terminal: bool,
     /// The connection may type (keyboard permission on, not "only watch").
     pub keyboard: bool,
+    /// The admin terminal can run here: Windows, installed service, no terminal opened yet on
+    /// this connection.
+    pub term_admin_capable: bool,
+    /// Local `enable-terminal` is on.
+    pub terminal_enabled: bool,
 }
 
-/// What the Host connection does with a message.
+/// What the Host connection does with a message, in order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HostAction {
     /// Answer the Controller over the same connection.
     Reply(PeerMsg),
+    /// Tell the CM `sense-cm-capture` Y (true) / N (false) for this connection.
+    CmCapture(bool),
+    /// The ticket was accepted: the connection's terminal runs with the service's rights and the
+    /// CM shows "Yönetici terminali açık · `by`". Comes before the reply, so the terminal the
+    /// Controller opens after the answer is already the admin one.
+    TermAdminGranted { by: String },
 }
 
 /// Host dispatcher (pure apart from the event record).
@@ -274,8 +293,9 @@ pub fn on_host(ctx: &HostCtx, p: &PluginRequest) -> Vec<HostAction> {
 
 fn host_msg(ctx: &HostCtx, m: PeerMsg) -> Vec<HostAction> {
     match m {
-        // ÇK: tell the CM (`sense-cm-capture` Y/N) and always set it back to N when the
-        // connection ends; until both exist the card keeps its capture setting.
+        // #151: only a screen connection can see the card; the connection sets it back to N
+        // when it ends.
+        PeerMsg::HostChatVisible { on } if ctx.remote => vec![HostAction::CmCapture(on)],
         PeerMsg::HostChatVisible { .. } => Vec::new(),
         PeerMsg::ShortcutRun { req, id } => {
             let result = if !ctx.remote || !ctx.keyboard {
@@ -293,22 +313,128 @@ fn host_msg(ctx: &HostCtx, m: PeerMsg) -> Vec<HostAction> {
         }
         PeerMsg::TermAdmin { ticket } => {
             let result = if ctx.terminal {
-                super::term_admin::check_ticket(&ticket)
+                super::term_admin::check_ticket(
+                    &ticket,
+                    ctx.term_admin_capable,
+                    ctx.terminal_enabled,
+                )
             } else {
                 Err(super::term_admin::Refusal::Unsupported)
             };
-            let err = result.err().map(|e| e.code().to_owned());
-            super::diag::kinds::term_admin(err.is_none(), err.as_deref());
-            vec![HostAction::Reply(PeerMsg::TermAdminResult {
-                ok: err.is_none(),
-                err,
-            })]
+            term_admin_actions(result)
         }
         // Messages for the Controller arriving at a Host: ignored.
         PeerMsg::Idle { .. } | PeerMsg::ShortcutResult { .. } | PeerMsg::TermAdminResult { .. } => {
             Vec::new()
         }
     }
+}
+
+/// The Host's actions for a checked ticket (the record gets only the code, never the ticket).
+fn term_admin_actions(
+    result: Result<super::term_admin::Grant, super::term_admin::Refusal>,
+) -> Vec<HostAction> {
+    match result {
+        Ok(grant) => {
+            super::diag::kinds::term_admin(true, None);
+            log::info!("Sense Remote: admin terminal ticket accepted");
+            vec![
+                HostAction::TermAdminGranted {
+                    by: super::term_admin::card_name(&grant.email),
+                },
+                HostAction::Reply(PeerMsg::TermAdminResult { ok: true, err: None }),
+            ]
+        }
+        Err(refusal) => {
+            super::diag::kinds::term_admin(false, Some(refusal.code()));
+            vec![HostAction::Reply(PeerMsg::TermAdminResult {
+                ok: false,
+                err: Some(refusal.code().to_owned()),
+            })]
+        }
+    }
+}
+
+/// The Host's idle disconnect as `connection.rs` applies it (`get_auto_disconenct_timer`):
+/// minutes when `allow-auto-disconnect` is `Y` (0 or unreadable = 10), otherwise none.
+pub fn idle_minutes(allow: &str, timeout: &str) -> Option<u32> {
+    if allow != "Y" {
+        return None;
+    }
+    match timeout.trim().parse::<u64>() {
+        Ok(0) | Err(_) => Some(10),
+        Ok(m) => Some(m.min(u32::MAX as u64) as u32),
+    }
+}
+
+/// Host connection: what to send to the Controller now. `last` is what was sent (outer `None` =
+/// nothing yet); the first call sends, later calls only on a change.
+pub fn idle_update(last: &mut Option<Option<u32>>, now: Option<u32>) -> Option<PeerMsg> {
+    if *last == Some(now) {
+        return None;
+    }
+    *last = Some(now);
+    Some(PeerMsg::Idle { min: now })
+}
+
+// ---------------------------------------------------------------------------------------------
+// CM side of the Host (`src/ui_cm_interface.rs`, the Host card's process)
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Default)]
+struct CmState {
+    /// Connections whose Controller asked to see the card.
+    capture: Vec<i32>,
+    /// Connections whose terminal runs as admin, with the employee's e-mail.
+    admin: Vec<(i32, String)>,
+}
+
+fn cm_state() -> &'static Mutex<CmState> {
+    static STATE: OnceLock<Mutex<CmState>> = OnceLock::new();
+    STATE.get_or_init(Default::default)
+}
+
+/// Connections remembered at most per list (a CM has a handful).
+const CM_KEEP: usize = 64;
+
+/// A message of connection `conn_id` on the CM channel. True when it was one of ours.
+pub fn cm_from_conn(conn_id: i32, name: &str, value: Option<&str>) -> bool {
+    let mut state = cm_state().lock().unwrap_or_else(|e| e.into_inner());
+    match name {
+        CM_CAPTURE => {
+            state.capture.retain(|id| *id != conn_id);
+            if value == Some("Y") && state.capture.len() < CM_KEEP {
+                state.capture.push(conn_id);
+            }
+            true
+        }
+        super::term_admin::CM_KEY => {
+            state.admin.retain(|(id, _)| *id != conn_id);
+            if let Some(by) = value.filter(|v| !v.is_empty()) {
+                if state.admin.len() < CM_KEEP {
+                    state
+                        .admin
+                        .push((conn_id, super::term_admin::card_name(by)));
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// `main_sense_host_peer_state`: `{"chat_visible": [conn_id], "admin_terminals": [{conn_id, by}]}`
+/// for the connections in `live` (one that went away without its `N` drops out).
+pub fn ffi_host_peer_state(live: &[i32]) -> String {
+    let mut state = cm_state().lock().unwrap_or_else(|e| e.into_inner());
+    state.capture.retain(|id| live.contains(id));
+    state.admin.retain(|(id, _)| live.contains(id));
+    let admin: Vec<Value> = state
+        .admin
+        .iter()
+        .map(|(id, by)| json!({ "conn_id": id, "by": by }))
+        .collect();
+    json!({ "chat_visible": state.capture, "admin_terminals": admin }).to_string()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -349,13 +475,53 @@ pub fn idle_policy(sid: u64) -> Option<Option<u32>> {
         .copied()
 }
 
-/// The session ended: forget what it was told (ÇK calls it when the session closes).
-#[allow(dead_code)]
+/// The session ended: forget what it was told (`session_close`).
 pub fn forget(sid: u64) {
     idle_policies()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&sid);
+    reconnect_marks()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&sid);
+    super::term_admin::forget(sid);
+}
+
+/// Per session: the session's reconnect counter when it last logged in.
+fn reconnect_marks() -> &'static Mutex<HashMap<u64, usize>> {
+    static MARKS: OnceLock<Mutex<HashMap<u64, usize>>> = OnceLock::new();
+    MARKS.get_or_init(Default::default)
+}
+
+/// The session logged in (`io_loop`, PeerInfo): attempts count from here.
+pub fn mark_connected(sid: u64, reconnect_count: usize) {
+    let mut map = reconnect_marks().lock().unwrap_or_else(|e| e.into_inner());
+    if map.len() >= MAX_SESSIONS && !map.contains_key(&sid) {
+        map.clear();
+    }
+    map.insert(sid, reconnect_count);
+}
+
+/// Reconnect attempts since the last login (pure): every reconnect, automatic or from the UI,
+/// goes through `Session::reconnect`, which counts. `max` is `null`: the retries have no limit
+/// (the UI decides when to stop).
+pub fn reconnect_info(mark: Option<usize>, reconnect_count: usize) -> Value {
+    let attempt = reconnect_count.saturating_sub(mark.unwrap_or(0));
+    json!({ "attempt": attempt, "max": null })
+}
+
+/// `session_sense_reconnect_info`: `{attempt, max}`, or `unsupported` without a session.
+pub fn ffi_reconnect_info(sid: Option<u64>, reconnect_count: usize) -> String {
+    let Some(sid) = sid else {
+        return UNSUPPORTED_JSON.to_owned();
+    };
+    let mark = reconnect_marks()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&sid)
+        .copied();
+    reconnect_info(mark, reconnect_count).to_string()
 }
 
 /// `session_sense_idle_policy`: `{"min": n | null}`, or [`UNSUPPORTED_JSON`] while the Host has
@@ -392,10 +558,14 @@ fn controller_msg(sid: u64, m: PeerMsg) -> Option<UiEvent> {
             name: EV_SHORTCUT_RESULT,
             fields: vec![("req", json!(req)), ("ok", json!(ok)), ("err", json!(err))],
         }),
-        PeerMsg::TermAdminResult { ok, err } => Some(UiEvent {
-            name: EV_TERM_ADMIN_RESULT,
-            fields: vec![("ok", json!(ok)), ("err", json!(err))],
-        }),
+        // Only an answer this session waits for (a late one, after the timeout, is dropped).
+        PeerMsg::TermAdminResult { ok, err } if super::term_admin::take_pending(sid) => {
+            Some(UiEvent {
+                name: EV_TERM_ADMIN_RESULT,
+                fields: vec![("ok", json!(ok)), ("err", json!(err))],
+            })
+        }
+        PeerMsg::TermAdminResult { .. } => None,
         // Messages for the Host arriving at a Controller: ignored.
         PeerMsg::HostChatVisible { .. } | PeerMsg::ShortcutRun { .. } | PeerMsg::TermAdmin { .. } => None,
     }
@@ -427,12 +597,23 @@ mod tests {
         remote: true,
         terminal: false,
         keyboard: true,
+        term_admin_capable: false,
+        terminal_enabled: false,
+    };
+
+    const TERM: HostCtx = HostCtx {
+        remote: false,
+        terminal: true,
+        keyboard: false,
+        term_admin_capable: true,
+        terminal_enabled: true,
     };
 
     fn reply(actions: Vec<HostAction>) -> PeerMsg {
         assert_eq!(actions.len(), 1, "{actions:?}");
         match actions.into_iter().next().unwrap() {
             HostAction::Reply(m) => m,
+            other => panic!("not a reply: {other:?}"),
         }
     }
 
@@ -564,9 +745,8 @@ mod tests {
                 ..SCREEN
             },
             HostCtx {
-                remote: false,
-                terminal: true,
                 keyboard: true,
+                ..TERM
             },
         ] {
             assert_eq!(
@@ -593,12 +773,12 @@ mod tests {
     fn term_admin_answers_and_records_no_ticket() {
         crate::sense::diag::sink::take();
         let ticket = req(TERM_ADMIN, r#"{"ticket":"aaa.bbb.ccc"}"#);
-        let term = HostCtx {
-            remote: false,
-            terminal: true,
-            keyboard: false,
+        let not_here = HostCtx {
+            term_admin_capable: false,
+            ..TERM
         };
-        for ctx in [term, SCREEN] {
+        // A screen connection, or a Host where it cannot run (Mac, portable, terminal open).
+        for ctx in [not_here, SCREEN] {
             assert_eq!(
                 reply(on_host(&ctx, &ticket)),
                 PeerMsg::TermAdminResult {
@@ -607,21 +787,114 @@ mod tests {
                 }
             );
         }
+        let policy = HostCtx {
+            terminal_enabled: false,
+            ..TERM
+        };
+        assert_eq!(
+            reply(on_host(&policy, &ticket)),
+            PeerMsg::TermAdminResult {
+                ok: false,
+                err: Some("policy_off".to_owned())
+            }
+        );
+        // The signature checks themselves: `term_admin` tests (shared vector).
         let got = crate::sense::diag::sink::take();
-        assert_eq!(got.len(), 2);
+        assert_eq!(got.len(), 3);
         assert!(got.iter().all(|(c, k)| c == "term" && k == "admin"));
     }
 
     #[test]
-    fn host_ignores_controller_messages_and_chat_visible_waits_for_ck() {
+    fn an_accepted_ticket_switches_the_terminal_before_the_answer() {
+        let grant = crate::sense::term_admin::Grant {
+            uid: "usr_1".to_owned(),
+            email: "calisan@example.test\n".to_owned(),
+            nonce: "AAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+        };
+        assert_eq!(
+            term_admin_actions(Ok(grant)),
+            vec![
+                HostAction::TermAdminGranted {
+                    by: "calisan@example.test".to_owned()
+                },
+                HostAction::Reply(PeerMsg::TermAdminResult { ok: true, err: None }),
+            ]
+        );
+    }
+
+    #[test]
+    fn host_ignores_controller_messages() {
         for (id, body) in [
             (IDLE, r#"{"min":30}"#),
             (SHORTCUT_RESULT, r#"{"req":1,"ok":true}"#),
             (TERM_ADMIN_RESULT, r#"{"ok":true}"#),
-            (HOST_CHAT_VISIBLE, r#"{"on":true}"#),
         ] {
             assert!(on_host(&SCREEN, &req(id, body)).is_empty(), "{id}");
         }
+    }
+
+    #[test]
+    fn chat_visible_tells_the_cm_only_for_a_screen_connection() {
+        assert_eq!(
+            on_host(&SCREEN, &req(HOST_CHAT_VISIBLE, r#"{"on":true}"#)),
+            vec![HostAction::CmCapture(true)]
+        );
+        assert_eq!(
+            on_host(&SCREEN, &req(HOST_CHAT_VISIBLE, r#"{"on":false}"#)),
+            vec![HostAction::CmCapture(false)]
+        );
+        assert!(on_host(&TERM, &req(HOST_CHAT_VISIBLE, r#"{"on":true}"#)).is_empty());
+    }
+
+    #[test]
+    fn cm_keeps_the_card_state_per_live_connection() {
+        let (a, b) = (9_101, 9_102);
+        assert!(cm_from_conn(a, CM_CAPTURE, Some("Y")));
+        assert!(cm_from_conn(b, CM_CAPTURE, Some("Y")));
+        assert!(cm_from_conn(b, crate::sense::term_admin::CM_KEY, Some("ben@example.test")));
+        assert!(!cm_from_conn(a, "audio-input", Some("x")));
+        let v: Value = serde_json::from_str(&ffi_host_peer_state(&[a, b])).unwrap();
+        assert_eq!(v["chat_visible"], json!([a, b]));
+        assert_eq!(v["admin_terminals"], json!([{ "conn_id": b, "by": "ben@example.test" }]));
+        // One connection ended with its N; the other went away without a word.
+        cm_from_conn(a, CM_CAPTURE, Some("N"));
+        let v: Value = serde_json::from_str(&ffi_host_peer_state(&[a])).unwrap();
+        assert_eq!(v["chat_visible"], json!([]));
+        assert_eq!(v["admin_terminals"], json!([]));
+    }
+
+    #[test]
+    fn idle_value_follows_the_host_setting_and_is_sent_on_change() {
+        assert_eq!(idle_minutes("N", "30"), None);
+        assert_eq!(idle_minutes("", "30"), None);
+        assert_eq!(idle_minutes("Y", "30"), Some(30));
+        assert_eq!(idle_minutes("Y", "0"), Some(10));
+        assert_eq!(idle_minutes("Y", ""), Some(10));
+        assert_eq!(idle_minutes("Y", "abc"), Some(10));
+        let mut last = None;
+        assert_eq!(idle_update(&mut last, Some(30)), Some(PeerMsg::Idle { min: Some(30) }));
+        assert_eq!(idle_update(&mut last, Some(30)), None);
+        assert_eq!(idle_update(&mut last, None), Some(PeerMsg::Idle { min: None }));
+        assert_eq!(idle_update(&mut last, None), None);
+        // The first value is sent even when it is "no limit".
+        let mut fresh = None;
+        assert_eq!(idle_update(&mut fresh, None), Some(PeerMsg::Idle { min: None }));
+    }
+
+    #[test]
+    fn reconnect_attempts_count_from_the_last_login() {
+        assert_eq!(reconnect_info(None, 0), json!({"attempt": 0, "max": null}));
+        assert_eq!(reconnect_info(Some(2), 5), json!({"attempt": 3, "max": null}));
+        assert_eq!(reconnect_info(Some(5), 5), json!({"attempt": 0, "max": null}));
+        let sid = 0xC0FFEE_u64;
+        forget(sid);
+        assert_eq!(ffi_reconnect_info(None, 3), UNSUPPORTED_JSON);
+        assert_eq!(ffi_reconnect_info(Some(sid), 2), r#"{"attempt":2,"max":null}"#);
+        mark_connected(sid, 2);
+        assert_eq!(ffi_reconnect_info(Some(sid), 2), r#"{"attempt":0,"max":null}"#);
+        assert_eq!(ffi_reconnect_info(Some(sid), 4), r#"{"attempt":2,"max":null}"#);
+        forget(sid);
+        assert_eq!(ffi_reconnect_info(Some(sid), 4), r#"{"attempt":4,"max":null}"#);
     }
 
     #[test]
@@ -632,9 +905,13 @@ mod tests {
             ev.fields,
             vec![("req", json!(2)), ("ok", json!(false)), ("err", json!("failed"))]
         );
+        // The admin result reaches the UI only when the session asked for it, once.
+        assert!(on_controller(11, &req(TERM_ADMIN_RESULT, r#"{"ok":true}"#)).is_none());
+        crate::sense::term_admin::mark_pending_for_test(11);
         let ev = on_controller(11, &req(TERM_ADMIN_RESULT, r#"{"ok":true}"#)).unwrap();
         assert_eq!(ev.name, EV_TERM_ADMIN_RESULT);
         assert_eq!(ev.fields, vec![("ok", json!(true)), ("err", Value::Null)]);
+        assert!(on_controller(11, &req(TERM_ADMIN_RESULT, r#"{"ok":true}"#)).is_none());
         for (id, body) in [
             (HOST_CHAT_VISIBLE, r#"{"on":true}"#),
             (SHORTCUT_RUN, r#"{"req":1,"id":"win.taskmgr"}"#),
