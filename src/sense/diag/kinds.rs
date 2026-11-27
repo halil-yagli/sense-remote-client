@@ -106,6 +106,21 @@ pub fn video_capture(yontem: &str, ekran: usize, genislik: usize, yukseklik: usi
     );
 }
 
+/// `video/first_frame` (#112): a frame reached a UI session's texture for the first time since
+/// the texture was (re)bound to the display (session start, display switch, new size). `doku` =
+/// `piksel` (RGBA buffer) | `gpu`; the size is unknown for a GPU texture.
+pub fn first_frame(ekran: usize, size: Option<(usize, usize)>, doku: &str) {
+    super::event(
+        "video",
+        "first_frame",
+        json!({
+            "ekran": ekran,
+            "cozunurluk": size.map(|(w, h)| format!("{w}x{h}")),
+            "doku": doku,
+        }),
+    );
+}
+
 /// `video/keyframe_req` with its reason (`kuyruk_dolu`, `gecikme`, `cozucu_hatasi` …).
 pub fn keyframe_req(neden: &str, ekran: usize) {
     super::event("video", "keyframe_req", json!({ "neden": neden, "ekran": ekran }));
@@ -374,6 +389,26 @@ mod tests {
         for ((c, k), (wc, wk)) in got.iter().zip(want) {
             assert_eq!((c.as_str(), k.as_str()), (wc, wk));
         }
+    }
+
+    #[test]
+    fn first_frame_is_a_video_event_with_display_and_size() {
+        taken();
+        first_frame(0, Some((2560, 1440)), "piksel");
+        first_frame(1, None, "gpu");
+        let got = taken();
+        assert_eq!(got.len(), 2);
+        assert!(got.iter().all(|(c, k)| c == "video" && k == "first_frame"));
+        let line = crate::sense::diag::line::build_line(
+            1,
+            "video",
+            "first_frame",
+            "client",
+            Some("c1-0"),
+            &json!({ "ekran": 0, "cozunurluk": "2560x1440", "doku": "piksel" }),
+        )
+        .unwrap();
+        assert!(crate::sense::diag::line::clean_event_line(&line).is_some(), "{line}");
     }
 
     #[test]
