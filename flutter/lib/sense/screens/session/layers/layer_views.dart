@@ -420,6 +420,57 @@ class SenseLinkInfoLayer extends StatelessWidget {
   }
 }
 
+/// Sürüm 11 (#121): logged in, no picture yet — the O13 card's look with the connection type
+/// and "Bağlantıyı bitir", instead of a black screen.
+class SenseWaitingImageLayer extends StatelessWidget {
+  const SenseWaitingImageLayer({
+    super.key,
+    required this.direct,
+    required this.onEnd,
+    this.appear = 1,
+  });
+
+  /// true = direct, false = relay, null = not known yet.
+  final bool? direct;
+  final VoidCallback onEnd;
+  final double appear;
+
+  @override
+  Widget build(BuildContext context) {
+    final path = switch (direct) {
+      true => SenseLayerStrings.waitingDirect,
+      false => SenseLayerStrings.waitingRelay,
+      null => SenseLayerStrings.waitingUnknown,
+    };
+    return SenseLayerVeil(
+      key: const Key('sense-layer-waiting'),
+      blur: SenseLayerLook.weakBlur,
+      brightness: SenseLayerLook.weakBrightness,
+      appear: appear,
+      child: SenseLayerCard(children: [
+        _logo(breathe: true),
+        _title(SenseLayerStrings.waitingTitle, SenseColors.text),
+        _sub(path),
+        _statusLine(SenseLayerStrings.waitingStatus),
+        Padding(
+          padding: const EdgeInsets.only(top: SenseLayerLook.buttonsTop - SenseLayerLook.cardGap),
+          child: SenseInlineConfirm(
+            question: SenseLayerStrings.endQuestion,
+            confirmLabel: SenseLayerStrings.endConfirm,
+            onConfirm: onEnd,
+            builder: (context, ask) => SenseButton(
+              key: const Key('sense-waiting-end'),
+              label: SenseLayerStrings.endConnection,
+              kind: SenseButtonKind.danger,
+              onPressed: ask,
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
 /// O14 — "Bağlantı sona erdi".
 class SenseEndedLayer extends StatelessWidget {
   const SenseEndedLayer({
@@ -430,9 +481,13 @@ class SenseEndedLayer extends StatelessWidget {
     required this.onClose,
     required this.onReconnect,
     this.appear = 1,
+    this.failed = false,
   });
 
   final double appear;
+
+  /// Sürüm 11 (O7): the last "Yeniden bağlan" got no answer.
+  final bool failed;
 
   final SenseSessionSummary summary;
   final int backHomeIn;
@@ -449,8 +504,10 @@ class SenseEndedLayer extends StatelessWidget {
           '${SenseLayerStrings.busy} · ${SenseLayerStrings.backHome(backHomeIn)}',
           spinner: false,
           color: SenseColors.warn),
-      SenseReconnectState.idle =>
-        _statusLine(SenseLayerStrings.backHome(backHomeIn), spinner: false),
+      SenseReconnectState.idle => failed
+          ? _statusLine('${SenseLayerStrings.reconnectFailed} · ${SenseLayerStrings.backHome(backHomeIn)}',
+              spinner: false, color: SenseColors.warn)
+          : _statusLine(SenseLayerStrings.backHome(backHomeIn), spinner: false),
     };
     return SenseLayerVeil(
       key: const Key('sense-layer-ended'),

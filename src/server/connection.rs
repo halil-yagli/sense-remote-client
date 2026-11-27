@@ -1225,11 +1225,15 @@ impl Connection {
                     // Sense Remote (S5): an offer whose read ended leaves the white list.
                     if !conn.sense_offers_reading.is_empty() {
                         let (read_jobs, cm_ids) = (&conn.read_jobs, &conn.cm_read_job_ids);
-                        crate::sense::chat_file::prune_offers(
+                        let ended = crate::sense::chat_file::prune_offers(
                             &mut conn.sense_offers,
                             &mut conn.sense_offers_reading,
                             |id| read_jobs.iter().any(|j| j.id() == id) || cm_ids.contains(&id),
                         );
+                        // #122: the Host card says "kaydedildi" only on the Controller's answer.
+                        for id in ended {
+                            conn.send(crate::sense::chat_file::ask_message(id)).await;
+                        }
                     }
                     // Sense Remote (O11): microphone level for the Host card during a call.
                     if conn.voice_calling {
@@ -4268,6 +4272,20 @@ impl Connection {
                             }
                         }
                     }
+                    // Sense Remote (#122): the Controller's answer about a file the Host card
+                    // offered (saved where, or why not); only the Host card's row moves.
+                    Some(misc::Union::PluginRequest(p))
+                        if p.id == crate::sense::chat_file::OFFER_REQUEST =>
+                    {
+                        if self.is_remote() {
+                            if let Some(v) = crate::sense::chat_file::conn_reply(&p.content) {
+                                self.send_to_cm(ipc::Data::Config((
+                                    crate::sense::chat_file::CM_OFFER_END.to_owned(),
+                                    Some(v),
+                                )));
+                            }
+                        }
+                    }
                     _ => {}
                 },
                 Some(message::Union::AudioFrame(frame)) => {
@@ -5191,6 +5209,17 @@ impl Connection {
                         self.sense_offer_failed(id as i32);
                     }
                 }
+            }
+            return;
+        }
+        // #122: a chat file from the Controller was saved; the Controller hears the real folder.
+        if name == crate::sense::chat_file::CM_SAVED {
+            if let Some(content) = value
+                .as_deref()
+                .and_then(crate::sense::chat_file::conn_saved)
+                .filter(|_| self.authorized && self.is_remote())
+            {
+                self.send(crate::sense::chat_file::offer_message(content)).await;
             }
             return;
         }

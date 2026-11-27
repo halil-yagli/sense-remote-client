@@ -808,6 +808,12 @@ fn run(vs: VideoService) -> ResultType<()> {
         if vs.source.is_monitor() {
             check_privacy_mode_changed(&sp, display_idx, &c)?;
         }
+        // Sense Remote (W5): tell the Controller when the Host is on the secure desktop (lock
+        // screen, sign-in, UAC), where the curtain and the Sense icon can not be shown.
+        #[cfg(windows)]
+        if let Some(msg) = crate::sense::winos::secure_desktop_tick() {
+            sp.send(msg);
+        }
         #[cfg(windows)]
         {
             if crate::platform::windows::desktop_changed()

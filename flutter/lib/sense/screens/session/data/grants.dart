@@ -100,7 +100,12 @@ abstract final class _SenseSessionGrantsCache {
     try {
       _value = SenseSessionGrants.parse(await bind.mainSenseGrants());
     } catch (_) {
-      _value = const SenseSessionGrants(SenseGrantsState.invalid, {});
+      // B11: one failed read does not lock the whole session for five seconds; the last
+      // good answer stays (like the Controller list's watch). Only a first read can fail
+      // into "invalid".
+      if (_value.state == SenseGrantsState.missing) {
+        _value = const SenseSessionGrants(SenseGrantsState.invalid, {});
+      }
     } finally {
       _asking = false;
     }

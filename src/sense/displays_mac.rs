@@ -14,27 +14,23 @@
 //!
 //! Sense Remote (Sürüm 11, #119): a built-in panel is sent as connection `internal`
 //! (`CGDisplayIsBuiltin`), the native resolution from the display mode marked native
-//! (`kDisplayModeNativeFlag`), HDR as "can show HDR" (`NSScreen`
-//! `maximumPotentialExtendedDynamicRangeColorComponentValue` above 1) and the bit depth from
-//! `NSScreen.depth`. They go through `DisplayDetails` like the Windows values.
+//! (`kDisplayModeNativeFlag`). HDR and bit depth have their place (`Screen::hdr` / `bits`,
+//! `mac_advanced_color`) but need `NSScreen` on the main thread (`curtain_mac::ScreenInfo`,
+//! not there yet), so they are not sent.
+//!
+//! Sürüm 11 (tarama-mac M6): `NSScreen` belongs to AppKit's main thread; the heartbeat thread
+//! reads it through `curtain_mac::screens_on_main` (main thread, short timeout) and not itself.
 //!
 //! Order: the list is keyed by display id and merged into `scrap::Display::all()` (the list
 //! the controller sees) in `report::collect_displays`, so index and order are scrap's. Both
 //! use `CGGetOnlineDisplayList`.
 
 use super::report::{self, DisplayDetails};
-use cocoa::{
-    base::{id, nil, BOOL, NO},
-    foundation::NSString,
-};
-use objc::{class, msg_send, rc::autoreleasepool, sel, sel_impl};
-use std::{
-    collections::HashMap,
-    ffi::{c_void, CStr},
-    os::raw::c_char,
-};
+use std::{collections::HashMap, ffi::c_void};
 
 const MAX_DISPLAYS: usize = 32;
+/// How long the heartbeat waits for the main thread to read `NSScreen` (M6).
+const SCREENS_TIMEOUT_MS: u32 = 500;
 /// kCGErrorSuccess
 const CG_SUCCESS: i32 = 0;
 
@@ -54,11 +50,6 @@ extern "C" {
     fn CGDisplayCopyAllDisplayModes(display: u32, options: *const c_void) -> *const c_void;
     fn CGDisplayModeGetIOFlags(mode: *const c_void) -> u32;
     fn CGDisplayModeGetPixelHeight(mode: *mut c_void) -> usize;
-}
-
-#[link(name = "AppKit", kind = "framework")]
-extern "C" {
-    fn NSBitsPerSampleFromDepth(depth: i32) -> isize;
 }
 
 /// IOKit `kDisplayModeNativeFlag`.
@@ -142,80 +133,25 @@ fn online_ids() -> Vec<u32> {
     ids[..(count as usize).min(MAX_DISPLAYS)].to_vec()
 }
 
-unsafe fn ns_string(value: id) -> Option<String> {
-    if value == nil {
-        return None;
-    }
-    let utf8: *const c_char = msg_send![value, UTF8String];
-    if utf8.is_null() {
-        return None;
-    }
-    Some(CStr::from_ptr(utf8).to_string_lossy().into_owned())
-}
-
-/// `NSScreen` values by display id. Empty where there is no window server session.
+/// `NSScreen` values by display id, read on the main thread. Empty where there is no window
+/// server session or the main thread did not answer in time.
 fn screens() -> HashMap<u32, Screen> {
-    autoreleasepool(|| unsafe {
-        let mut out = HashMap::new();
-        let screens: id = msg_send![class!(NSScreen), screens];
-        if screens == nil {
-            return out;
-        }
-        let count: usize = msg_send![screens, count];
-        let key: id = NSString::alloc(nil).init_str("NSScreenNumber");
-        for i in 0..count.min(MAX_DISPLAYS) {
-            let screen: id = msg_send![screens, objectAtIndex: i];
-            if screen == nil {
-                continue;
-            }
-            let description: id = msg_send![screen, deviceDescription];
-            if description == nil {
-                continue;
-            }
-            let number: id = msg_send![description, objectForKey: key];
-            if number == nil {
-                continue;
-            }
-            let display_id: u32 = msg_send![number, unsignedIntValue];
-            let mut entry = Screen {
-                name: None,
-                max_fps: None,
-                hdr: None,
-                bits: None,
-            };
-            // Sürüm 11: macOS 10.15+
-            let has_edr: BOOL = msg_send![
-                screen,
-                respondsToSelector: sel!(maximumPotentialExtendedDynamicRangeColorComponentValue)
-            ];
-            if has_edr != NO {
-                let headroom: f64 =
-                    msg_send![screen, maximumPotentialExtendedDynamicRangeColorComponentValue];
-                if headroom.is_finite() && headroom > 0.0 {
-                    entry.hdr = Some(headroom > 1.0);
-                }
-            }
-            let depth: i32 = msg_send![screen, depth];
-            let bits = NSBitsPerSampleFromDepth(depth);
-            entry.bits = u32::try_from(bits).ok().filter(|b| (6..=16).contains(b));
-            // macOS 10.15+
-            let has_name: BOOL = msg_send![screen, respondsToSelector: sel!(localizedName)];
-            if has_name != NO {
-                let name: id = msg_send![screen, localizedName];
-                entry.name = ns_string(name);
-            }
-            // macOS 12+
-            let has_fps: BOOL =
-                msg_send![screen, respondsToSelector: sel!(maximumFramesPerSecond)];
-            if has_fps != NO {
-                let fps: isize = msg_send![screen, maximumFramesPerSecond];
-                entry.max_fps = Some(fps as i64);
-            }
-            out.insert(display_id, entry);
-        }
-        let _: () = msg_send![key, release];
-        out
-    })
+    super::curtain_mac::screens_on_main(SCREENS_TIMEOUT_MS)
+        .into_iter()
+        .take(MAX_DISPLAYS)
+        .map(|s| {
+            (
+                s.display_id,
+                Screen {
+                    name: s.name,
+                    max_fps: s.max_fps,
+                    // Sürüm 11 DR: not read on the main thread yet (`ScreenInfo` has no field).
+                    hdr: None,
+                    bits: None,
+                },
+            )
+        })
+        .collect()
 }
 
 /// Details of every online display, keyed by the name `scrap::Display::name()` returns on

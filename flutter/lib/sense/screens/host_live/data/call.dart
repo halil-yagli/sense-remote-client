@@ -24,15 +24,43 @@ class SenseHostChatCall implements SenseChatCall {
   /// "Ara" works on the Host (D3d2).
   static const bool canStart = true;
 
+  /// O8: "Mikrofonu kapat" per connection, as the core was told. The core has
+  /// no reader for it (`chat_file.rs` MUTED), and the Mikrofon list reads the
+  /// devices again each time it opens: without this it showed the microphone
+  /// as on while the core still sent silence. Forgotten when the call ends
+  /// (the core opens the microphone again then: `set_call_mic(false)`).
+  static final Set<int> _muted = {};
+
+  /// Whether "Mikrofonu kapat" is on for [connId] (O8).
+  static bool mutedFor(int connId) => _muted.contains(connId);
+
+  /// The core took "Mikrofonu kapat" / an open microphone for [connId].
+  static void noteMuted(int connId, bool muted) {
+    if (muted) {
+      _muted.add(connId);
+    } else {
+      _muted.remove(connId);
+    }
+  }
+
+  /// The call of [connId] is over (ended here, by the Controller, or the
+  /// connection is gone): the next call starts with the microphone on.
+  static void callEnded(int connId) => _muted.remove(connId);
+
   @override
   Future<void> start() => bind.mainSenseHostStartCall(connId: connId);
 
   /// "Kabul et" / "Reddet" of an incoming call.
-  Future<void> answer(bool accept) =>
-      bind.cmHandleIncomingVoiceCall(id: connId, accept: accept);
+  Future<void> answer(bool accept) {
+    callEnded(connId);
+    return bind.cmHandleIncomingVoiceCall(id: connId, accept: accept);
+  }
 
   @override
-  Future<void> end() => bind.cmCloseVoiceCall(id: connId);
+  Future<void> end() {
+    callEnded(connId);
+    return bind.cmCloseVoiceCall(id: connId);
+  }
 
   @override
   Future<SenseAudioDevices> devices() async {
@@ -40,7 +68,11 @@ class SenseHostChatCall implements SenseChatCall {
     final input = await bind.getVoiceCallInputDevice(isCm: true);
     final out = senseParseSoundOutputs(await bind.mainSenseSoundOutputs());
     return SenseAudioDevices(
-        inputs: inputs, input: input, outputs: out.outputs, output: out.output);
+        inputs: inputs,
+        input: input,
+        outputs: out.outputs,
+        output: out.output,
+        muted: mutedFor(connId));
   }
 
   @override
@@ -52,8 +84,11 @@ class SenseHostChatCall implements SenseChatCall {
       bind.mainSenseSetCallOutput(device: device);
 
   @override
-  Future<bool> setMuted(bool muted) =>
-      bind.sessionSenseCallSetMuted(sessionId: _noSession, muted: muted);
+  Future<bool> setMuted(bool muted) async {
+    final ok = await bind.sessionSenseCallSetMuted(sessionId: _noSession, muted: muted);
+    if (ok) noteMuted(connId, muted);
+    return ok;
+  }
 
   @override
   Future<double?> level() async =>

@@ -15,17 +15,35 @@ abstract final class SenseHostLiveStrings {
   static const String connected = 'Sense Department bağlı';
   static const String endConnection = 'Bağlantıyı bitir';
 
+  // O6: the same Controller also opened a terminal, a file transfer or a TCP
+  // tunnel. The card says how many connections are open and of which kind;
+  // the button ends all of them.
+  static const String endAll = 'Tümünü bitir';
+
+  /// "2 bağlantı · ekran, terminal".
+  static String connections(int count, List<String> kinds) =>
+      '$count bağlantı · ${kinds.join(', ')}';
+
+  // Kinds (the names of the Controller's menu: Dosya aktarımı, Terminal,
+  // TCP tüneli), lower case inside the line.
+  static const String kindScreen = 'ekran';
+  static const String kindCamera = 'kamera';
+  static const String kindFile = 'dosya aktarımı';
+  static const String kindTerminal = 'terminal';
+  static const String kindTunnel = 'TCP tüneli';
+
   /// "Halil Y. · 14 dk · ekran, fare ve klavye, dosya".
   static String who(String name, String duration, String permissions) =>
       [name, duration, permissions].where((s) => s.isNotEmpty).join(' · ');
 
-  /// Connected time: "1 dk", "14 dk", "1 sa 05 dk".
+  /// Connected time: "1 dk", "14 dk", "1 sa 5 dk", "2 sa" (TS-10: the same
+  /// form as the Host home screen, SenseHostStrings.duration).
   static String minutes(Duration d) {
     final total = d.isNegative ? 0 : d.inMinutes;
     if (total < 60) return '${total < 1 ? 1 : total} dk';
     final h = total ~/ 60;
     final m = total % 60;
-    return '$h sa ${m.toString().padLeft(2, '0')} dk';
+    return m == 0 ? '$h sa' : '$h sa $m dk';
   }
 
   // Permissions in the who line, in a fixed order (only the ones that are on).

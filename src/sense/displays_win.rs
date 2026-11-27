@@ -17,8 +17,13 @@
 //! Session 0: the CCD API describes the displays of the calling process's session. The sync
 //! loop runs in the `--server` process in the console session, so it sees the user's displays.
 //! Called from the Windows service itself (Session 0) it returns no paths or only a virtual
-//! adapter; at the lock screen / during a user switch the list can be empty. Then nothing is
-//! sent and the panel keeps the last known values.
+//! adapter; at the lock screen / during a user switch the list can be empty.
+//!
+//! Sense Remote (Sürüm 11, W4): at the lock screen / UAC the `--server` thread is on the
+//! `Default` desktop and `QueryDisplayConfig` answers `ERROR_ACCESS_DENIED` (Microsoft: a caller
+//! without access to the current desktop). Then the last good details are sent again
+//! (`winos::display_details_kept`), so the panel does not lose name, refresh rate, HDR and scale
+//! while the Host is locked; the error code is logged once per stretch.
 
 // Sense Remote: the FFI structs mirror the SDK layout; not every field is read.
 #![allow(dead_code)]
@@ -291,11 +296,19 @@ fn monitor_dpis() -> HashMap<String, u32> {
 }
 
 /// Details of every active display, keyed by GDI source name (`\\.\DISPLAY1`), the name
-/// `scrap::Display::name()` returns. Empty when the API fails (e.g. Session 0).
+/// `scrap::Display::name()` returns. When the API fails (lock screen, UAC) the last good
+/// details; empty when nothing was ever read (e.g. Session 0).
 pub fn query() -> HashMap<String, DisplayDetails> {
+    let (fresh, error) = query_now();
+    super::winos::display_details_kept(fresh, error)
+}
+
+/// One reading; the second value is the API's error code when the paths could not be read.
+fn query_now() -> (HashMap<String, DisplayDetails>, Option<i32>) {
     let mut out = HashMap::new();
-    let Some(paths) = active_paths() else {
-        return out;
+    let paths = match active_paths() {
+        Ok(paths) => paths,
+        Err(code) => return (out, Some(code)),
     };
     for path in &paths {
         let source = &path.source_info;
@@ -328,10 +341,11 @@ pub fn query() -> HashMap<String, DisplayDetails> {
             }
         }
     }
-    out
+    (out, None)
 }
 
-fn active_paths() -> Option<Vec<PathInfo>> {
+/// The active paths, or the API's error code (0 when it reported no path).
+fn active_paths() -> Result<Vec<PathInfo>, i32> {
     // The configuration can change between the two calls; retry a few times.
     for _ in 0..3 {
         let (mut num_paths, mut num_modes) = (0u32, 0u32);
@@ -339,8 +353,11 @@ fn active_paths() -> Option<Vec<PathInfo>> {
         let rc = unsafe {
             GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut num_paths, &mut num_modes)
         };
-        if rc != ERROR_SUCCESS || num_paths == 0 {
-            return None;
+        if rc != ERROR_SUCCESS {
+            return Err(rc);
+        }
+        if num_paths == 0 {
+            return Err(0);
         }
         // SAFETY: plain C structs; all-zero is a valid value.
         let mut paths = vec![unsafe { mem::zeroed::<PathInfo>() }; num_paths as usize];
@@ -358,13 +375,13 @@ fn active_paths() -> Option<Vec<PathInfo>> {
         };
         if rc == ERROR_SUCCESS {
             paths.truncate(num_paths as usize);
-            return Some(paths);
+            return Ok(paths);
         }
         if rc != ERROR_INSUFFICIENT_BUFFER {
-            return None;
+            return Err(rc);
         }
     }
-    None
+    Err(ERROR_INSUFFICIENT_BUFFER)
 }
 
 /// Sends one `DisplayConfigGetDeviceInfo` request. `T` must be one of the packet structs above,

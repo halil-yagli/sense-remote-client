@@ -7,11 +7,10 @@
 // function, so the same values always lead to the same verdict. Pure Dart.
 import '../../../tokens/sense_tokens.dart';
 
-/// O9 latency colours: 80 ms orange, 150 ms red. YH O9 and the prototype note
-/// say 80 / 150; YH T6 (tokens `latency`) says 150 / 300 for the connection in
-/// general. The popup follows O9; see the C2 report (tokens have no 80 / 150 yet).
-const SenseThreshold kSenseSessionLatency =
-    SenseThreshold(warn: 80, hot: 150, direction: SenseThresholdDirection.above, unit: 'ms');
+/// Session latency colours (karar #135: 150 ms orange, 300 ms red everywhere). The one
+/// source is the tokens' `latency` limit (YH T6); this name stays for the places that
+/// read it (Ekran bilgisi, the still-screen rule).
+const SenseThreshold kSenseSessionLatency = SenseThresholds.latency;
 
 /// Under this much picture data (Mbit/s) the screen is hardly changing.
 const double kSenseStillMaxMbit = 1.0;

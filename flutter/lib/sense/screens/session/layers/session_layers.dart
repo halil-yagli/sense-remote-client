@@ -2,6 +2,7 @@
 // remote_page.dart (the top bar and popups included, YH O13 "her şeyin üstüne").
 // While nothing is up the widget takes no clicks.
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart' show RenderBox;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -84,18 +85,32 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
     super.dispose();
   }
 
+  // Sürüm 11 (O4): the routes are global to the window, so with connections in tabs every
+  // tab heard every input. Only input on this tab's area (the one on screen) counts.
   void _onPointer(PointerEvent e) {
     if (e is PointerMoveEvent ||
         e is PointerHoverEvent ||
         e is PointerDownEvent ||
         e is PointerScrollEvent) {
-      _c.activity();
+      if (_onScreen(at: e.position)) _c.activity();
     }
   }
 
   bool _onKey(KeyEvent e) {
-    _c.activity();
+    if (_onScreen()) _c.activity();
     return false;
+  }
+
+  /// This connection's area is laid out on screen (a tab in the background is not), and
+  /// [at] (window coordinates) is inside it when given.
+  bool _onScreen({Offset? at}) {
+    if (!mounted) return false;
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return false;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    if (at != null) return rect.contains(at);
+    final window = MediaQuery.maybeSizeOf(context);
+    return window == null || rect.overlaps(Offset.zero & window);
   }
 
   void _repaint() {
@@ -136,6 +151,7 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
             summary: ended,
             backHomeIn: _c.backHomeIn,
             reconnect: _c.reconnectState,
+            failed: _c.reconnectFailed,
             onClose: _c.closeEnded,
             onReconnect: _c.reconnectEnded,
             appear: t,
@@ -150,6 +166,9 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
             shrink: lost ? 0 : _shrinkCurve.value,
             shrinkTo: widget.shrinkTo ?? Offset(40, widget.stripTop / 2),
           );
+    } else if (_c.waitingImage) {
+      // Sürüm 11 (#121): logged in, no picture yet: say so instead of a black screen.
+      layer = (t) => SenseWaitingImageLayer(direct: _c.direct, onEnd: _c.endByUser, appear: t);
     } else if (_c.infoOpen) {
       // Sürüm 10 (#110): the card opened from the logo area while the link is good.
       layer = (t) => SenseLinkInfoLayer(view: link, direct: _c.direct, onClose: _c.closeInfo, appear: t);
@@ -168,7 +187,11 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
           if (layer != null)
             Positioned.fill(
               // Weak → lost keeps the layer (no second fade); ended fades in anew.
-              child: _FadeIn(key: ValueKey(ended != null ? 'ended' : (_c.infoOpen ? 'info' : 'link')), builder: layer),
+              child: _FadeIn(
+                  key: ValueKey(ended != null
+                      ? 'ended'
+                      : (link.layerUp ? 'link' : (_c.waitingImage ? 'waiting' : (_c.infoOpen ? 'info' : 'link')))),
+                  builder: layer),
             ),
         ],
       ),

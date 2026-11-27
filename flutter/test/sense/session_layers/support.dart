@@ -10,6 +10,10 @@ class FakeHost implements SenseLayerHost {
   int files = 1;
   final calls = <String>[];
 
+  /// Sürüm 11 (O3): inputs handed to the shared count, and what the other windows say.
+  int shared = 0;
+  Duration? sharedIdleValue;
+
   /// A healthy link right now.
   void healthy() => raw = SenseLinkRaw(
         delay: '20',
@@ -64,6 +68,14 @@ class FakeHost implements SenseLayerHost {
   void keepAlive() => calls.add('keepAlive');
   @override
   void closePopups() => calls.add('closePopups');
+  @override
+  void retry() => calls.add('retry');
+  @override
+  void endConnection() => calls.add('end');
+  @override
+  void shareActivity() => shared++;
+  @override
+  Duration? sharedIdle() => sharedIdleValue;
 }
 
 class FakeClock {

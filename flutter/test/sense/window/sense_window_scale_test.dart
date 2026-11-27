@@ -153,12 +153,14 @@ void main() {
     Future<(bool, int)> run({
       required bool mac,
       required String? peer,
+      bool win = false,
       bool decided = false,
       bool on = false,
     }) async {
       var turned = 0;
       final did = await senseApplySwapKeyDefault(
         controllerIsMac: mac,
+        controllerIsWindows: win,
         peerPlatform: peer,
         readDecided: () async => decided,
         isOn: () => on,
@@ -176,7 +178,16 @@ void main() {
     test('already on: nothing to do', () async {
       expect(await run(mac: true, peer: kPeerPlatformWindows, on: true), (false, 0));
     });
-    test('Windows Controller, or Mac peer, or Linux peer: untouched', () async {
+    test('Windows Controller to a Mac peer (#135): turned on, a choice is kept', () async {
+      expect(await run(mac: false, win: true, peer: kPeerPlatformMacOS), (true, 1));
+      expect(await run(mac: false, win: true, peer: kPeerPlatformMacOS, decided: true), (false, 0));
+      expect(await run(mac: false, win: true, peer: kPeerPlatformMacOS, on: true), (false, 0));
+    });
+    test('Windows to Windows, Mac to Mac, Linux: untouched', () async {
+      expect(await run(mac: false, win: true, peer: kPeerPlatformWindows), (false, 0));
+      expect(await run(mac: false, win: true, peer: kPeerPlatformLinux), (false, 0));
+    });
+    test('Windows Controller (not told), or Mac peer, or Linux peer: untouched', () async {
       expect(await run(mac: false, peer: kPeerPlatformWindows), (false, 0));
       expect(await run(mac: true, peer: kPeerPlatformMacOS), (false, 0));
       expect(await run(mac: true, peer: kPeerPlatformLinux), (false, 0));

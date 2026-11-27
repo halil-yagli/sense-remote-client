@@ -97,6 +97,11 @@ pub struct Remote<T: InvokeUiSession> {
     sense_sid: Mutex<Option<String>>,
     sense_logged_in: bool,
     sense_got_frame: bool,
+    // Sense Remote (#121): when the peer info came and on which display, and the "no picture"
+    // watch of this round (`link_quality::NoFrameWatch`).
+    sense_login_at: Option<Instant>,
+    sense_login_display: i32,
+    sense_no_frame: crate::sense::link_quality::NoFrameWatch,
     #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
     client_conn_id: i32, // used for file clipboard
     data_count: Arc<AtomicUsize>,
@@ -159,6 +164,9 @@ impl<T: InvokeUiSession> Remote<T> {
             sense_sid: Mutex::new(None),
             sense_logged_in: false,
             sense_got_frame: false,
+            sense_login_at: None,
+            sense_login_display: 0,
+            sense_no_frame: Default::default(),
             #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
             client_conn_id: 0,
             data_count: Arc::new(AtomicUsize::new(0)),
@@ -217,6 +225,8 @@ impl<T: InvokeUiSession> Remote<T> {
         // Sense Remote (karar #86): a new connection round starts its diagnostic record.
         self.sense_logged_in = false;
         self.sense_got_frame = false;
+        self.sense_login_at = None;
+        self.sense_no_frame = Default::default();
         if self.handler.is_default() {
             let sid = crate::sense::log_upload::controller_started(&self.handler.get_id());
             *self.sense_sid.lock().unwrap_or_else(|e| e.into_inner()) = sid;
@@ -420,6 +430,10 @@ impl<T: InvokeUiSession> Remote<T> {
                                 self.handler.msgbox("error", "Connection Error", "Timeout", "");
                                 break;
                             }
+                            // Sense Remote (#121): logged in but no picture.
+                            if self.sense_no_frame_watch(direct) {
+                                break;
+                            }
                             let elapsed = fps_instant.elapsed().as_millis();
                             if elapsed < 1000 {
                                 continue;
@@ -455,6 +469,11 @@ impl<T: InvokeUiSession> Remote<T> {
                             // Sense Remote (karar #86): a connection measurement line every ten
                             // seconds, for the session record (fps, speed, codec, path, loss).
                             sense_metric_ticks = sense_metric_ticks.wrapping_add(1);
+                            // Sense Remote (O10): the `--server` closes a Controller record whose
+                            // window stopped saying it is alive.
+                            if crate::sense::log_upload::alive_tick(sense_metric_ticks) {
+                                self.sense_alive();
+                            }
                             if sense_metric_ticks % 10 == 0 {
                                 log::info!(
                                     target: "sense-metrics",
@@ -559,6 +578,69 @@ impl<T: InvokeUiSession> Remote<T> {
             Reason::Session
         };
         crate::sense::log_upload::controller_ended(&sid, reason, &self.handler.get_id());
+    }
+
+    /// Sense Remote (#121): logged in, no video frame yet. At 3 s ask for a key frame, at 8 s
+    /// connect again (once per computer in two minutes, `link_quality`). True = this round ends
+    /// here (the reconnect started a new one).
+    fn sense_no_frame_watch(&mut self, direct: bool) -> bool {
+        use crate::sense::link_quality::NoFrameStep;
+        if !self.handler.is_default() || self.sense_got_frame {
+            return false;
+        }
+        let Some(at) = self.sense_login_at else {
+            return false;
+        };
+        let since = at.elapsed().as_millis() as u64;
+        let id = self.handler.get_id();
+        match self
+            .sense_no_frame
+            .step(since, || crate::sense::link_quality::no_frame_reconnect_allowed(&id))
+        {
+            NoFrameStep::Wait => false,
+            NoFrameStep::RequestKey => {
+                log::info!("Sense Remote: no picture {since} ms after login, asking for a key frame");
+                crate::sense::diag::event(
+                    "video",
+                    "no_frame",
+                    serde_json::json!({
+                        "sn": since / 1000,
+                        "yol": if direct { "direct" } else { "relay" },
+                        "adim": "anahtar_kare",
+                    }),
+                );
+                let display = self.sense_login_display.max(0);
+                self.handler.refresh_video(display);
+                false
+            }
+            NoFrameStep::Reconnect => {
+                log::info!("Sense Remote: no picture {since} ms after login, connecting again");
+                crate::sense::diag::event(
+                    "video",
+                    "no_frame",
+                    serde_json::json!({
+                        "sn": since / 1000,
+                        "yol": if direct { "direct" } else { "relay" },
+                        "adim": "yeniden_baglan",
+                    }),
+                );
+                crate::sense::diag::kinds::conn_reconnect("goruntu_gelmedi");
+                self.handler.reconnect(false);
+                true
+            }
+        }
+    }
+
+    /// Sense Remote (O10): tells the `--server` this Controller record is still alive.
+    fn sense_alive(&self) {
+        let sid = self
+            .sense_sid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(sid) = sid {
+            crate::sense::log_upload::controller_alive(&sid, &self.handler.get_id());
+        }
     }
 
     fn handle_disconnected(&self, round: u32) {
@@ -1421,6 +1503,11 @@ impl<T: InvokeUiSession> Remote<T> {
             }
             Data::RecordScreen(start) => {
                 self.handler.lc.write().unwrap().record_state = start;
+                // Sense Remote (#136): the Host does not allow recording; say so instead of
+                // leaving the switch on with nothing written.
+                if start && !self.handler.lc.read().unwrap().record_permission {
+                    crate::sense::recording::refused(&self.handler);
+                }
                 self.update_record_state();
             }
             Data::ElevateDirect => {
@@ -1842,6 +1929,22 @@ impl<T: InvokeUiSession> Remote<T> {
         if let Ok(msg_in) = Message::parse_from_bytes(&data) {
             match msg_in.union {
                 Some(message::Union::VideoFrame(vf)) => {
+                    // Sense Remote (#121): the frame timeline of the round: first frame after
+                    // the login (a key frame or not, its size).
+                    if !self.sense_got_frame && self.handler.is_default() {
+                        crate::sense::diag::event(
+                            "video",
+                            "ilk_kare_geldi",
+                            serde_json::json!({
+                                "ekran": vf.display,
+                                "giris_sonrasi_ms": self
+                                    .sense_login_at
+                                    .map(|t| t.elapsed().as_millis() as u64),
+                                "anahtar": Self::contains_key_frame(&vf),
+                                "bayt": vf.compute_size(),
+                            }),
+                        );
+                    }
                     self.sense_got_frame = true;
                     if !self.first_frame {
                         self.first_frame = true;
@@ -1903,6 +2006,8 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                     Some(login_response::Union::PeerInfo(pi)) => {
                         self.sense_logged_in = true;
+                        self.sense_login_at = Some(Instant::now()); // Sense Remote (#121)
+                        self.sense_login_display = pi.current_display;
                         // Sense Remote (#103): the Host's platform, version and display sizes.
                         crate::sense::diag::kinds::peer_info(&pi);
                         let peer_version = pi.version.clone();
@@ -3121,6 +3226,7 @@ impl<T: InvokeUiSession> Remote<T> {
         if start {
             scrap::record::sense_begin_session(&sense_id, &sense_name);
         }
+        crate::sense::recording::requested(&self.handler, start); // Sense Remote (#136)
         // update local
         for (_, v) in self.video_threads.iter_mut() {
             v.video_sender.send(MediaData::RecordScreen(start)).ok();
@@ -3128,12 +3234,9 @@ impl<T: InvokeUiSession> Remote<T> {
         self.handler.update_record_status(start);
         if !start {
             if let Some(folder) = scrap::record::sense_end_session(&sense_id) {
-                let dir = std::path::PathBuf::from(crate::ui_interface::video_save_directory(false))
-                    .join(folder);
-                // Only when frames reached the disk; an empty recording leaves no folder.
-                if dir.is_dir() {
-                    self.handler.sense_record_saved(&dir.to_string_lossy());
-                }
+                // Sense Remote (#136): the note comes once every file got its tail; a recording
+                // that left no file leaves no folder either.
+                crate::sense::recording::finish(self.handler.clone(), folder);
             }
         }
         // update remote

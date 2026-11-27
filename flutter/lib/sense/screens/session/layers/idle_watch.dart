@@ -41,6 +41,13 @@ class SenseIdleWatch {
     return _view;
   }
 
+  /// Sürüm 11 (O3): input seen at [at] in another window of the same connection; counts
+  /// only when it is newer than this window's own last input.
+  void seen(Duration at) {
+    if (_view.expired || at <= _lastActivity) return;
+    _lastActivity = at;
+  }
+
   SenseIdleView tick(Duration now) {
     final l = limit;
     if (l == null || _view.expired) return _view;

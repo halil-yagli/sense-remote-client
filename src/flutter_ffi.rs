@@ -315,6 +315,22 @@ pub fn session_close(session_id: SessionID) {
     }
 }
 
+/// Sense Remote (O2): "Bağlantıyı bitir" closes the connection in every window that shows it
+/// (`flutter::sessions::sense_end_all`); the caller then closes its own window as before.
+pub fn session_sense_end_all(session_id: SessionID) {
+    sessions::sense_end_all(&session_id);
+}
+
+/// Sense Remote (O3): mouse / keyboard input in this window (shared by the connection's windows).
+pub fn session_sense_activity(session_id: SessionID) {
+    sessions::sense_activity(&session_id);
+}
+
+/// Sense Remote (O3): ms since the last input in any window of this connection; -1 = none yet.
+pub fn session_sense_idle_ms(session_id: SessionID) -> SyncReturn<i64> {
+    SyncReturn(sessions::sense_idle_ms(&session_id))
+}
+
 pub fn session_refresh(session_id: SessionID, display: usize) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.refresh_video(display as _);

@@ -4,6 +4,8 @@
 # Burada yalnız Linux koşucuları ve yalnız değişen alan:
 #   flutter/** (ya da src/flutter_ffi.rs)          -> Dart testleri (+ değişen dosyalarda analyze)
 #   src/**, libs/**, Cargo.*, build.rs, vcpkg.json -> Rust birim testleri (Windows'taki komut)
+#                                                  + macOS derleme denetimi (cargo check, aarch64-apple-darwin)
+#   flutter/lib/sense/**, design/**, yazi tipleri   -> metin kapilari (karakter kapsami, karsitlik)
 #   .github/workflows/sense-*.yml                  -> actionlint (iş akışı sözdizimi)
 #   .github/scripts/sense-*, tools/sense-keys/**   -> imza betikleri: shellcheck + test.sh (sırsız)
 #   bu dosya, bridge.yml ya da .github/patches/**  -> hepsi (iş akışının kendisi sınanır)
@@ -37,6 +39,9 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   ACTIONLINT_VERSION: "v1.7.12"
+  # macOS derleme denetimi (sense-build.yml'deki Mac işiyle aynı sürümler ve önbellek anahtarı).
+  MAC_RUST_VERSION: "1.81"
+  NASM_MACOS_SHA256: "0d29bcd8a5fc617333f4549c7c1f93d1866a4a0915c40359e0a8585bb1a5aa75"
 
 jobs:
   changes:
@@ -50,6 +55,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       workflows: ${{ steps.filter.outputs.workflows }}
       scripts: ${{ steps.filter.outputs.scripts }}
+      text: ${{ steps.filter.outputs.text }}
     steps:
       # Üçüncü taraf eylem yok: değişen dosyalar GitHub API'sinden okunur. Dosya adları yalnız
       # dosyaya yazılıp grep ile okunur (komut satırına ya da ifadeye girmez).
@@ -73,20 +79,24 @@ jobs:
           rust=$(has '^(src|libs)/|^Cargo\.(toml|lock)$|^build\.rs$|^vcpkg\.json$')
           workflows=$(has '^\.github/workflows/sense-[^/]*\.yml$')
           scripts=$(has '^\.github/scripts/sense-|^tools/sense-keys/')
-          if [ "$all" = true ]; then dart=true; rust=true; scripts=true; fi
+          text=$(has '^flutter/lib/sense/|^flutter/assets/fonts/|^design/|^\.github/scripts/sense-text-gates')
+          if [ "$all" = true ]; then dart=true; rust=true; scripts=true; text=true; fi
           {
             echo "dart=$dart"
             echo "rust=$rust"
             echo "workflows=$workflows"
             echo "scripts=$scripts"
+            echo "text=$text"
           } >> "$GITHUB_OUTPUT"
           {
             echo "| Alan | Koşar mı |"
             echo "| --- | --- |"
             echo "| Dart testleri | $dart |"
-            echo "| Rust testleri | $rust |"
+            echo "| Rust testleri (Linux) | $rust |"
+            echo "| macOS derleme denetimi | $rust |"
             echo "| İş akışı denetimi | $workflows |"
             echo "| İmza betikleri | $scripts |"
+            echo "| Metin kapıları (karakter, karşıtlık) | $text |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   generate-bridge:
@@ -243,6 +253,101 @@ jobs:
           # master'daki Windows derlemesinde koşmaya devam eder.
           cargo test --locked --lib --features "$FEATURES" --             --skip keyboard::shortcuts::tests::alt_only_shortcut_neutralizes_windows_menu
 
+  # Mac koduna (cfg(target_os = "macos")) PR'da derleme denetimi: Linux işi bunu derlemez, Mac
+  # derlemesi ise yalnız master'da koşardı (Mac'e özgü kırık sürüm gününe kalıyordu). Yalnız
+  # `cargo check` (bağlama ve Flutter paketi yok); vcpkg ikilileri master'daki Mac işinin
+  # önbelleğinden gelir (ABI aynı: macos-26 + aynı vcpkg sürümü).
+  macos:
+    name: rust check (macos)
+    needs: [changes, generate-bridge]
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build runtime
+        run: |
+          brew install llvm
+          command -v pkg-config &>/dev/null || brew install pkg-config
+
+      - name: Install NASM
+        run: |
+          wget --tries=6 --waitretry=20 --retry-connrefused https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/macosx/nasm-2.16.03-macosx.zip
+          echo "${NASM_MACOS_SHA256}  nasm-2.16.03-macosx.zip" | shasum -a 256 -c -
+          unzip nasm-2.16.03-macosx.zip
+          sudo cp nasm-2.16.03/nasm /usr/local/bin/nasm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.MAC_RUST_VERSION }}
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: sense-pr-macos-26
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact-flutter-3.44
+          path: ./
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        run: |
+          if ! $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do echo "$_1:"; cat "$_1"; done
+            exit 1
+          fi
+
+      # Özellik listesi sense-build.yml'deki Mac testiyle aynı; --tests Mac'e özgü test kodunu
+      # da derler. Dağıtım hedefi Mac işindeki ile aynı (12.3).
+      - name: Cargo check (aarch64-apple-darwin)
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "12.3"
+        run: |
+          FEATURES=$(python3 ./build.py --flutter --hwcodec --unix-file-copy-paste --screencapturekit --print-features)
+          echo "features: $FEATURES"
+          cargo check --locked --lib --tests --target aarch64-apple-darwin --features "$FEATURES"
+
+  text-gates:
+    name: text gates (characters, contrast)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.text == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # Poppins'te olmayan karakter ve yazı rengi karşıtlığı; ayrıntı betiğin başında.
+      - name: Run the text gates
+        shell: bash
+        run: |
+          node --test .github/scripts/sense-text-gates.test.mjs
+          node .github/scripts/sense-text-gates.mjs
+
   workflows:
     name: workflow lint
     needs: [changes]
@@ -291,7 +396,7 @@ jobs:
   # Tek zorunlu kontrol: koşan her iş başarılı (ya da alanı değişmediği için atlanmış) olmalı.
   pr-check:
     name: PR kontrolu
-    needs: [changes, generate-bridge, dart, rust, workflows, scripts]
+    needs: [changes, generate-bridge, dart, rust, macos, text-gates, workflows, scripts]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -303,12 +408,14 @@ jobs:
           BRIDGE: ${{ needs.generate-bridge.result }}
           DART: ${{ needs.dart.result }}
           RUST: ${{ needs.rust.result }}
+          MACOS: ${{ needs.macos.result }}
+          TEXT: ${{ needs.text-gates.result }}
           WORKFLOWS: ${{ needs.workflows.result }}
           SCRIPTS: ${{ needs.scripts.result }}
         run: |
-          echo "changes=$CHANGES bridge=$BRIDGE dart=$DART rust=$RUST workflows=$WORKFLOWS scripts=$SCRIPTS"
+          echo "changes=$CHANGES bridge=$BRIDGE dart=$DART rust=$RUST macos=$MACOS text=$TEXT workflows=$WORKFLOWS scripts=$SCRIPTS"
           [ "$CHANGES" = success ] || { echo "::error::Değişen alanlar belirlenemedi."; exit 1; }
-          for r in "$BRIDGE" "$DART" "$RUST" "$WORKFLOWS" "$SCRIPTS"; do
+          for r in "$BRIDGE" "$DART" "$RUST" "$MACOS" "$TEXT" "$WORKFLOWS" "$SCRIPTS"; do
             case "$r" in
               success|skipped) ;;
               *) echo "::error::Bir kontrol başarısız ya da iptal: $r"; exit 1 ;;

@@ -55,6 +55,7 @@ pub mod aom;
 #[cfg(not(any(target_os = "ios")))]
 pub mod camera;
 pub mod record;
+pub mod record_sense; // Sense Remote (#136): one file per display, real start/finish
 mod vpx;
 
 #[repr(usize)]

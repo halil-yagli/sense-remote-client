@@ -41,7 +41,7 @@ abstract final class SenseControllerStrings {
   static String panelOnline(int online, int total) => 'Panel bağlı · $online/$total çevrimiçi';
   static const String searchHint = 'Bilgisayar, proje, konum ya da kimlik';
   static const String connectById = 'Kimlikle bağlan';
-  static const String idHint = '9 haneli kimlik, örn. 482 913 207';
+  static const String idHint = 'Kimlik, örn. 482 913 207';
   static const String idHelp =
       'Sense kurulu olmayan ya da listende bulunmayan bir bilgisayar için. Şifre ekibin şifre yöneticisinden girilir.';
   static const String idInvalid = 'Kimlik 6–12 rakam olmalı.';
@@ -62,7 +62,11 @@ abstract final class SenseControllerStrings {
   static const String dragToSort = 'Sürükleyerek sırala';
   static const String orderSaved = 'Sıra kaydedildi';
   static const String orderFailed = 'Sıra kaydedilemedi; panele ulaşılamadı.';
-  static const String connectFailed = 'Bağlantı penceresi açılamadı; tekrar dene.';
+  static const String connectFailed = 'Bağlantı penceresi açılamadı; yeniden dene.';
+
+  /// B16: a click that cannot connect says why.
+  static const String busyNow = 'Bilgisayar meşgul; aynı anda tek kişi bağlanır.';
+  static const String rightRevoked = 'Bağlanma yetkin kaldırıldı.';
   static const String crossProject = 'Projeler arası taşıma panelde yapılır';
 
   // Tile.

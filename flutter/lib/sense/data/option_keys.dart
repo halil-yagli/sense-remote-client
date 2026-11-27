@@ -100,6 +100,9 @@ abstract final class SenseOptionKeys {
   // Güvenlik
   static const permanentPassword = SenseOptionKey('sense:permanent-password', // Sense bridge, not a config key
       group: SenseOptionGroup.security, store: SenseOptionStore.sense, lock: SenseOptionLock.sense);
+  /// How a connection to this computer is accepted (`approve-mode`: password / click / both).
+  static const approveMode = SenseOptionKey('approve-mode',
+      group: SenseOptionGroup.security, store: SenseOptionStore.main, lock: SenseOptionLock.panel);
   static const connType = SenseOptionKey('conn-type',
       group: SenseOptionGroup.security, store: SenseOptionStore.main, lock: SenseOptionLock.hard);
   static const autoDisconnect = SenseOptionKey('allow-auto-disconnect',
@@ -145,7 +148,7 @@ abstract final class SenseOptionKeys {
     openInTabs, confirmClosingTabs, keepAwakeOutgoing, syncClipboard, askNote, keyboardShortcuts,
     viewStyle, imageQuality, viewOnly, privacyMode,
     incomingFilesDir, autoRecordOutgoing, videoSaveDirectory,
-    permanentPassword, connType, autoDisconnect, autoDisconnectTimeout,
+    permanentPassword, approveMode, connType, autoDisconnect, autoDisconnectTimeout,
     lanDiscovery, directServer, directAccessPort, proxyUrl,
     hwcodec, directxCapture, removeWallpaper, codecPreference,
     rendezvousServer, apiServer, relayServer, serverKey,

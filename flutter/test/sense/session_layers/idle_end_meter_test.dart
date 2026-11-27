@@ -71,9 +71,25 @@ void main() {
       }
     });
 
-    test('busy (D1 login error) is only for reconnecting', () {
+    // Sürüm 11 (O7): the first login to a busy computer gets the Sense card, in Turkish.
+    test('busy (D1 login error) ends with the Turkish "Meşgul" reason', () {
       expect(senseClassifyMessage('error', 'Login Error', 'sense_busy'), SenseMessageKind.busy);
-      expect(senseEndReasonOf(SenseMessageKind.busy), isNull);
+      expect(senseEndReasonOf(SenseMessageKind.busy), SenseEndReason.busy);
+      final s = SenseSessionSummary(
+          reason: SenseEndReason.busy,
+          duration: Duration.zero,
+          messages: 0,
+          files: 0,
+          idleLimit: const Duration(minutes: 30));
+      expect(s.reasonText, 'Meşgul — şu an başka biri bağlı');
+      expect(s.reasonText, isNot(contains('sense_busy')));
+    });
+
+    // Sürüm 11 (O2): the other windows of a connection ended in one of them.
+    test('ended in another window', () {
+      expect(senseClassifyMessage('error', 'Connection Error', 'sense_ended_here'),
+          SenseMessageKind.endedHere);
+      expect(senseEndReasonOf(SenseMessageKind.endedHere), isNull);
     });
 
     test('other dialogs are left to RustDesk', () {

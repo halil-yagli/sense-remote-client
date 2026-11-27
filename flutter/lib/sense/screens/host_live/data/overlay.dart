@@ -8,6 +8,7 @@ import 'dart:convert';
 import '../../../../models/platform_model.dart';
 import '../../../../models/server_model.dart';
 import '../../../strings/host_live.dart';
+import '../sense_cm_style.dart' show senseCmKindText;
 
 /// `sense_recording` of every connection in a `cm_get_clients_state` JSON.
 /// Broken input gives an empty map, never an exception.
@@ -47,6 +48,36 @@ String senseHostWhoLine(Client c, Duration? connected) => SenseHostLiveStrings.w
       connected == null ? '' : SenseHostLiveStrings.minutes(connected),
       senseHostPermissions(c).join(', '),
     );
+
+/// O6: the connections that are on now (accepted, not ended). The same
+/// Controller may hold several: the screen, then a terminal or a TCP tunnel
+/// (S8 lets the same Controller in again).
+List<Client> senseHostLive(Iterable<Client> clients) =>
+    clients.where((c) => c.authorized && !c.disconnected).toList();
+
+/// O6: "2 bağlantı · ekran, terminal" when more than one connection is on;
+/// null for one (the who line says enough). Kinds once each, screen first.
+String? senseHostConnectionsLine(List<Client> live) {
+  if (live.length < 2) return null;
+  const order = [
+    SenseHostLiveStrings.kindScreen,
+    SenseHostLiveStrings.kindCamera,
+    SenseHostLiveStrings.kindFile,
+    SenseHostLiveStrings.kindTerminal,
+    SenseHostLiveStrings.kindTunnel,
+  ];
+  final kinds = live.map(senseCmKindText).toSet().toList()
+    ..sort((a, b) => order.indexOf(a).compareTo(order.indexOf(b)));
+  return SenseHostLiveStrings.connections(live.length, kinds);
+}
+
+/// O6: "Bağlantıyı bitir" / "Tümünü bitir" ends every connection that is on,
+/// not only the one the card shows; [shown] when none is on (still closing).
+void senseHostEndAll(List<Client> live, Client shown, void Function(Client c) close) {
+  for (final c in live.isEmpty ? [shown] : live) {
+    close(c);
+  }
+}
 
 /// When each connection was first seen authorized and when its recording
 /// started (the event gives only on/off; the strip counts from the first "on").

@@ -25,6 +25,7 @@
 //! same paths at start (`bundle_file_trusted`).
 
 use super::super::{SenseRole, SetupInfo, MAX_SETUP_JSON_BYTES};
+use crate::sense::update::apply_mac::GUARD_LABEL;
 use std::time::Duration;
 
 /// `service` flag that stores role and setup info as root (same value as
@@ -153,6 +154,10 @@ pub struct ScriptEnv {
     pub daemon_plist: String,
     pub agent_plist: String,
     pub state_dir: String,
+    /// Sense Remote (M13): launchd job of the update guard (`update::apply_mac::GUARD_LABEL`)
+    /// and its plist; the uninstall script stops and removes it too.
+    pub guard_label: String,
+    pub guard_plist: String,
     /// uid of the user who runs the wizard (GUI domain of the agent).
     pub uid: u32,
 }
@@ -186,6 +191,8 @@ impl ScriptEnv {
             daemon_plist: format!("/Library/LaunchDaemons/{full_name}_service.plist"),
             agent_plist: format!("/Library/LaunchAgents/{full_name}_server.plist"),
             state_dir: STATE_DIR.to_owned(),
+            guard_label: GUARD_LABEL.to_owned(),
+            guard_plist: format!("/Library/LaunchDaemons/{GUARD_LABEL}.plist"),
             uid,
         };
         env.check()?;
@@ -201,10 +208,16 @@ impl ScriptEnv {
             &self.daemon_plist,
             &self.agent_plist,
             &self.state_dir,
+            &self.guard_plist,
         ];
         let safe = paths.iter().all(|path| is_safe_path(path))
             && self.path.split(':').all(is_safe_path)
-            && [&self.app_name, &self.daemon_label, &self.agent_label]
+            && [
+                &self.app_name,
+                &self.daemon_label,
+                &self.agent_label,
+                &self.guard_label,
+            ]
                 .iter()
                 .all(|token| is_safe_token(token))
             // `rm -rf` target of the uninstall script: only ever the Sense state directory.
@@ -224,6 +237,11 @@ impl ScriptEnv {
 
     pub fn daemon_target(&self) -> String {
         format!("system/{}", self.daemon_label)
+    }
+
+    /// `system/<label>`: launchd target of the update guard (M13).
+    pub fn guard_target(&self) -> String {
+        format!("system/{}", self.guard_label)
     }
 }
 
@@ -345,7 +363,8 @@ step=done
     ))
 }
 
-/// Shell script run as root by `uninstall.scpt`: stops both jobs, removes the plists and the
+/// Shell script run as root by `uninstall.scpt`: stops both jobs (and the update guard, M13:
+/// left behind it would start a removed binary every minute), removes the plists and the
 /// Sense state directory (role, setup info, envelope seq: a reinstall starts at seq 0, like
 /// the deleted registry key on Windows). Root's config (ID + key pair) stays, so a reinstall
 /// keeps the identity the panel knows.
@@ -356,18 +375,21 @@ pub fn uninstall_script(env: &ScriptEnv) -> Result<String, &'static str> {
         daemon_plist,
         agent_plist,
         state_dir,
+        guard_plist,
         ..
     } = env;
     let daemon = env.daemon_target();
     let agent = env.agent_target();
+    let guard = env.guard_target();
     Ok(format!(
         r#"set -u
 PATH="{path}"; export PATH
+launchctl bootout "{guard}" 2>/dev/null || true
 launchctl bootout "{daemon}" 2>/dev/null || launchctl unload "{daemon_plist}" 2>/dev/null || true
 launchctl bootout "{agent}" 2>/dev/null || true
-rm -f "{daemon_plist}" "{agent_plist}"
+rm -f "{daemon_plist}" "{agent_plist}" "{guard_plist}"
 rm -rf "{state_dir}"
-if [ -e "{daemon_plist}" ] || [ -e "{agent_plist}" ] || [ -e "{state_dir}" ]; then
+if [ -e "{daemon_plist}" ] || [ -e "{agent_plist}" ] || [ -e "{guard_plist}" ] || [ -e "{state_dir}" ]; then
   echo "{FAILED_MARKER}remove" >&2
   exit 1
 fi
@@ -745,7 +767,12 @@ mod tests {
         assert!(uninstall.contains("rm -rf \"/Library/Application Support/SenseRemote\"\n"));
         assert!(uninstall.contains(
             "rm -f \"/Library/LaunchDaemons/com.carriez.SenseRemote_service.plist\" \
-             \"/Library/LaunchAgents/com.carriez.SenseRemote_server.plist\"\n"
+             \"/Library/LaunchAgents/com.carriez.SenseRemote_server.plist\" \
+             \"/Library/LaunchDaemons/com.sensedepartment.remote.update-guard.plist\"\n"
+        ));
+        // M13: the update guard is stopped first.
+        assert!(uninstall.contains(
+            "launchctl bootout \"system/com.sensedepartment.remote.update-guard\" 2>/dev/null || true\n"
         ));
     }
 
@@ -919,6 +946,8 @@ mod tests {
                     daemon_plist: dir("Library/LaunchDaemons/com.carriez.SenseRemote_service.plist"),
                     agent_plist: dir("Library/LaunchAgents/com.carriez.SenseRemote_server.plist"),
                     state_dir: dir("Library/Application Support/SenseRemote"),
+                    guard_label: GUARD_LABEL.to_owned(),
+                    guard_plist: dir(&format!("Library/LaunchDaemons/{GUARD_LABEL}.plist")),
                     uid: 501,
                 };
                 stub(
@@ -1191,7 +1220,11 @@ mod tests {
             let sandbox = Sandbox::new("uninstall", "");
             let (ok, stderr) = sandbox.install(Some((SenseRole::Host, &setup_hex())));
             assert!(ok, "{stderr}");
-            for plist in [&sandbox.env.daemon_plist, &sandbox.env.agent_plist] {
+            for plist in [
+                &sandbox.env.daemon_plist,
+                &sandbox.env.agent_plist,
+                &sandbox.env.guard_plist,
+            ] {
                 fs::create_dir_all(Path::new(plist).parent().unwrap()).unwrap();
                 fs::write(plist, "<plist/>").unwrap();
             }
@@ -1204,6 +1237,9 @@ mod tests {
             assert!(ok, "{stderr}");
             assert!(!Path::new(&sandbox.env.daemon_plist).exists());
             assert!(!Path::new(&sandbox.env.agent_plist).exists());
+            // M13: the update guard's job is stopped and its plist removed.
+            assert!(!Path::new(&sandbox.env.guard_plist).exists());
+            assert!(sandbox.calls().contains(&format!("launchctl bootout system/{GUARD_LABEL}")));
             assert!(!Path::new(&sandbox.env.state_dir).exists());
             assert!(other.exists());
             assert!(sandbox.root_file("SenseRemote.toml").exists());
