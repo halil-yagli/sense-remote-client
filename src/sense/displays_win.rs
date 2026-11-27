@@ -9,6 +9,11 @@
 //! is checked at compile time (size asserts below) and no crate feature has to be added; the
 //! same API is used with hand-written declarations in `libs/scrap/src/dxgi/hdr.rs`.
 //!
+//! Sense Remote (Sürüm 10, #118): the scale ("Ölçek", 100 / 125 / 150 %) of each display from its
+//! effective DPI (`GetDpiForMonitor`, read with this thread switched to per-monitor DPI awareness
+//! so Windows does not answer 96 for every monitor). Where the switch is not available (Windows
+//! before 10 1607) no scale is sent.
+//!
 //! Session 0: the CCD API describes the displays of the calling process's session. The sync
 //! loop runs in the `--server` process in the console session, so it sees the user's displays.
 //! Called from the Windows service itself (Session 0) it returns no paths or only a virtual
@@ -166,6 +171,125 @@ extern "system" {
     fn DisplayConfigGetDeviceInfo(request_packet: *mut Header) -> i32;
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+/// MONITORINFOEXW
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct MonitorInfoEx {
+    size: u32,
+    monitor: Rect,
+    work: Rect,
+    flags: u32,
+    device: [u16; 32],
+}
+
+const _: () = assert!(mem::size_of::<MonitorInfoEx>() == 104);
+
+type MonitorEnumProc = unsafe extern "system" fn(isize, isize, *mut Rect, isize) -> i32;
+
+#[link(name = "user32")]
+extern "system" {
+    fn EnumDisplayMonitors(hdc: isize, clip: *const Rect, callback: MonitorEnumProc, data: isize) -> i32;
+    fn GetMonitorInfoW(monitor: isize, info: *mut MonitorInfoEx) -> i32;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetModuleHandleW(name: *const u16) -> isize;
+    fn GetProcAddress(module: isize, name: *const u8) -> *const std::ffi::c_void;
+}
+
+/// DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 / _PER_MONITOR_AWARE
+const DPI_CONTEXT_PER_MONITOR_V2: isize = -4;
+const DPI_CONTEXT_PER_MONITOR: isize = -3;
+const MDT_EFFECTIVE_DPI: u32 = 0;
+
+/// This thread in per-monitor DPI awareness while it lives; the previous context comes back on
+/// drop. `SetThreadDpiAwarenessContext` is looked up at run time (Windows 10 1607+), so the
+/// program still starts where it is missing.
+struct PerMonitorDpi(Option<(unsafe extern "system" fn(isize) -> isize, isize)>);
+
+impl PerMonitorDpi {
+    fn enter() -> Self {
+        let user32: Vec<u16> = "user32.dll\0".encode_utf16().collect();
+        // SAFETY: plain lookups; the pointer is only called with the documented signature.
+        unsafe {
+            let module = GetModuleHandleW(user32.as_ptr());
+            if module == 0 {
+                return Self(None);
+            }
+            let proc = GetProcAddress(module, b"SetThreadDpiAwarenessContext\0".as_ptr());
+            if proc.is_null() {
+                return Self(None);
+            }
+            let set: unsafe extern "system" fn(isize) -> isize = mem::transmute(proc);
+            let mut old = set(DPI_CONTEXT_PER_MONITOR_V2);
+            if old == 0 {
+                old = set(DPI_CONTEXT_PER_MONITOR);
+            }
+            Self((old != 0).then_some((set, old)))
+        }
+    }
+
+    fn active(&self) -> bool {
+        self.0.is_some()
+    }
+}
+
+impl Drop for PerMonitorDpi {
+    fn drop(&mut self) {
+        if let Some((set, old)) = self.0 {
+            // SAFETY: restores the context this thread had.
+            unsafe {
+                set(old);
+            }
+        }
+    }
+}
+
+/// Effective DPI of every monitor, keyed by GDI device name (`\.\DISPLAY1`). Empty when the
+/// thread cannot be made per-monitor aware (the value would be 96 everywhere: not a reading).
+fn monitor_dpis() -> HashMap<String, u32> {
+    unsafe extern "system" fn each(monitor: isize, _hdc: isize, _rect: *mut Rect, data: isize) -> i32 {
+        // SAFETY: `data` is the map passed below, alive for the whole enumeration.
+        let out = &mut *(data as *mut HashMap<String, u32>);
+        let mut info: MonitorInfoEx = mem::zeroed();
+        info.size = mem::size_of::<MonitorInfoEx>() as u32;
+        if GetMonitorInfoW(monitor, &mut info) != 0 {
+            let (mut x, mut y) = (0u32, 0u32);
+            let hr = winapi::um::shellscalingapi::GetDpiForMonitor(
+                monitor as winapi::shared::windef::HMONITOR,
+                MDT_EFFECTIVE_DPI,
+                &mut x,
+                &mut y,
+            );
+            if hr == 0 {
+                out.insert(wide_to_string(&info.device), x);
+            }
+        }
+        1
+    }
+    let mut out: HashMap<String, u32> = HashMap::new();
+    let dpi = PerMonitorDpi::enter();
+    if !dpi.active() {
+        return out;
+    }
+    // SAFETY: the callback only writes into `out`, which outlives the call.
+    unsafe {
+        EnumDisplayMonitors(0, ptr::null(), each, &mut out as *mut HashMap<String, u32> as isize);
+    }
+    drop(dpi);
+    out
+}
+
 /// Details of every active display, keyed by GDI source name (`\\.\DISPLAY1`), the name
 /// `scrap::Display::name()` returns. Empty when the API fails (e.g. Session 0).
 pub fn query() -> HashMap<String, DisplayDetails> {
@@ -195,6 +319,14 @@ pub fn query() -> HashMap<String, DisplayDetails> {
         details.advanced_color = advanced_color(target.adapter_id, target.id);
         details.native = preferred_mode(target.adapter_id, target.id);
         out.insert(gdi_name, details);
+    }
+    // Sürüm 10 (#118): the scale by the same GDI name.
+    if !out.is_empty() {
+        for (name, dpi) in monitor_dpis() {
+            if let Some(details) = out.get_mut(&name) {
+                details.scale = super::report::scale_from_dpi(dpi);
+            }
+        }
     }
     out
 }
@@ -309,7 +441,11 @@ mod tests {
     /// have one virtual display or none).
     #[test]
     fn query_does_not_crash() {
+        let _ = monitor_dpis();
         for (name, d) in query() {
+            if let Some(scale) = d.scale {
+                assert!((1.0..=5.0).contains(&scale), "{scale}");
+            }
             assert!(name.starts_with("\\\\.\\"), "{name}");
             if let Some((num, den)) = d.refresh {
                 assert!(den == 0 || num / den.max(1) < 100_000);

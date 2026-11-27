@@ -14,13 +14,25 @@
 //!
 //! The graphics memory size comes from DXGI (`health_win::adapters`): WMI's `AdapterRAM` stops
 //! at 4 GB.
+//!
+//! Sense Remote (Sürüm 10, #117): our scripts run one at a time in a process (`SCRIPT_LOCK`): the
+//! inventory, the driver list and the disk temperature script all query the Storage / WMI
+//! providers, and run side by side (the event record read the inventory a second time, the disk
+//! temperatures every five minutes) they slowed each other past the time limit. A reading whose
+//! main script failed is a failed reading (`None`): the driver list alone is not an inventory and
+//! must not replace the one the panel has.
 
 use super::{health_cmd, health_model::*, health_parse};
 use hbb_common::log;
 use std::time::Duration;
 
-const INVENTORY_TIMEOUT: Duration = Duration::from_secs(20);
-const DRIVERS_TIMEOUT: Duration = Duration::from_secs(25);
+// Sense Remote (Sürüm 10, #117): the reading runs in the background; a busy computer (just
+// started, updating) needs more than the former 20 / 25 s for the CIM and Storage queries.
+const INVENTORY_TIMEOUT: Duration = Duration::from_secs(45);
+const DRIVERS_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// One of our PowerShell scripts at a time (see the module notes).
+static SCRIPT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `powercfg` runs before the output encoding is switched (its text is read in the console code
 /// page); after that everything is written as UTF-8.
@@ -65,6 +77,7 @@ fn powershell_path() -> String {
 /// Runs one of our fixed scripts and parses its JSON output.
 pub(super) fn run_script(lines: &[&str], timeout: Duration) -> Option<serde_json::Value> {
     let script = lines.join("; ");
+    let _one_at_a_time = SCRIPT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let out = health_cmd::run(
         &powershell_path(),
         &[
@@ -87,17 +100,18 @@ pub(super) fn run_script(lines: &[&str], timeout: Duration) -> Option<serde_json
     }
 }
 
-/// The whole inventory; blocking (seconds). `None` when nothing at all could be read.
+/// The whole inventory; blocking (seconds). `None` when the main script could not be read
+/// (Sürüm 10, #117: then the previous inventory stays and the reading is tried again soon).
 pub fn collect() -> Option<Inventory> {
-    let root = run_script(INVENTORY_SCRIPT, INVENTORY_TIMEOUT);
-    let drivers = run_script(DRIVERS_SCRIPT, DRIVERS_TIMEOUT);
-    if root.is_none() && drivers.is_none() {
+    let Some(root) = run_script(INVENTORY_SCRIPT, INVENTORY_TIMEOUT) else {
+        log::warn!("Sense Remote: inventory script gave no result");
         return None;
+    };
+    let drivers = run_script(DRIVERS_SCRIPT, DRIVERS_TIMEOUT);
+    if drivers.is_none() {
+        log::warn!("Sense Remote: driver list script gave no result");
     }
-    let mut inventory = root
-        .as_ref()
-        .map(health_parse::win_inventory)
-        .unwrap_or_default();
+    let mut inventory = health_parse::win_inventory(&root);
     inventory.drivers = drivers
         .as_ref()
         .and_then(|d| non_empty(health_parse::win_drivers(d)));

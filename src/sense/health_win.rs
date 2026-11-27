@@ -474,10 +474,14 @@ pub fn extend(health: &mut super::report::SenseHealth, base_mhz: Option<u32>) {
     if adapters.iter().any(|a| a.vendor == VENDOR_NVIDIA) {
         for smi in nvidia_smi() {
             let Some(name) = smi.name.as_deref() else { continue };
-            if let Some(gpu) = gpus
-                .iter_mut()
-                .find(|g| g.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name)))
-            {
+            let same = |g: &GpuLive| g.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name));
+            // Sürüm 10 (#117): of two adapters with this name, the one with counters gets the
+            // driver's values (the other is a duplicate `dedupe_gpus` drops).
+            let at = gpus
+                .iter()
+                .position(|g| same(g) && (g.util_pct.is_some() || g.vram_used_mb.is_some()))
+                .or_else(|| gpus.iter().position(|g| same(g)));
+            if let Some(gpu) = at.and_then(|i| gpus.get_mut(i)) {
                 gpu.temp_c = smi.temp_c;
                 gpu.fan_pct = smi.fan_pct;
                 gpu.power_w = smi.power_w;
@@ -487,6 +491,8 @@ pub fn extend(health: &mut super::report::SenseHealth, base_mhz: Option<u32>) {
             }
         }
     }
+    // Sürüm 10 (#117): a card DXGI lists twice is sent once.
+    let mut gpus = dedupe_gpus(gpus);
     let (gpu_pct, gpu_temp) = gpu_summary(&gpus);
     health.gpu_pct = gpu_pct;
     health.gpu_temp_c = gpu_temp;

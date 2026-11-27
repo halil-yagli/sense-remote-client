@@ -194,6 +194,54 @@ void main() {
     });
   });
 
+  // Sürüm 10 (#117): the RTX 4090 of a Host with an AMD iGPU was listed twice, one card with values
+  // and one entirely "okunamadı" (a second DXGI entry of the same card, or a name spelled with a
+  // different case / spacing in the inventory). One card per GPU.
+  group('one card per graphics card (#117)', () {
+    Map<String, Object?> withGpus(List<Map<String, Object?>> live, List<Map<String, Object?>>? inv) {
+      final json = fullJson();
+      (json['health'] as Map<String, Object?>)['gpus'] = live;
+      if (inv == null) {
+        json.remove('inventory');
+      } else {
+        (json['inventory'] as Map<String, Object?>)['gpus'] = inv;
+      }
+      return json;
+    }
+
+    const rtx = {'name': 'NVIDIA GeForce RTX 4090', 'util_pct': 12, 'vram_used_mb': 2100, 'vram_total_mb': 24564,
+      'temp_c': 41, 'fan_pct': 30, 'power_w': 60};
+    const ghost = {'name': 'NVIDIA GeForce RTX 4090', 'vram_total_mb': 24564};
+    const amd = {'name': 'AMD Radeon(TM) Graphics', 'util_pct': 1, 'vram_total_mb': 512};
+
+    List<SenseStatusCard> cards(Map<String, Object?> json) =>
+        cat(senseBuildStatusView(parseFull(json)), 'gpu').rows.whereType<SenseStatusCard>().toList();
+
+    test('a value-less twin of a live card is dropped (no inventory)', () {
+      final c = cards(withGpus([ghost, rtx, amd], null));
+      expect(c.map((x) => x.title), ['NVIDIA GeForce RTX 4090', 'AMD Radeon(TM) Graphics']);
+      expect(line(c[0].rows, 'Sıcaklık').value, '41 °C');
+    });
+
+    test('the inventory card takes the live entry with values, whatever the case / spacing', () {
+      final c = cards(withGpus([ghost, rtx, amd], [
+        {'name': 'NVIDIA  GeForce RTX 4090 ', 'integrated': false, 'driver_version': '32.0.15.9144',
+          'driver_date': '2025-12-02'},
+        {'name': 'amd radeon(tm) graphics', 'driver_version': '32.0.13034.7001'},
+      ]));
+      expect(c, hasLength(2));
+      expect(line(c[0].rows, 'Sürücü sürümü').value, '32.0.15.9144');
+      expect(line(c[0].rows, 'Sıcaklık').value, '41 °C');
+      expect(meter(c[1].rows, 'Kullanım').text, '%1');
+      expect(line(c[1].rows, 'Sürücü sürümü').value, '32.0.13034.7001');
+    });
+
+    test('two real cards of one model (both with values) stay two', () {
+      final second = Map<String, Object?>.of(rtx)..['util_pct'] = 80;
+      expect(cards(withGpus([rtx, second], null)), hasLength(2));
+    });
+  });
+
   group('every field is real data or "okunamadı" (O8 acceptance)', () {
     test('an older computer without inventory shows "okunamadı", nothing invented', () {
       final v = senseBuildStatusView(parseFull(v1Json()));

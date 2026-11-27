@@ -132,6 +132,8 @@ abstract final class SenseDisplayStrings {
   static const String allDisplays = 'tüm ekranlar';
 
   static const String frameRate = 'Kare hızı';
+  /// Sürüm 10 (#118): low frame rate because the screen is not changing (no warning).
+  static const String still = 'durağan';
   static const String latency = 'Gecikme';
   static const String connection = 'Bağlantı';
   static const String session = 'Oturum görüntüsü';

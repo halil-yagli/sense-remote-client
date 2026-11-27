@@ -84,6 +84,28 @@ String? _join(Iterable<String?> parts, [String sep = ' · ']) {
   return p.isEmpty ? null : p.join(sep);
 }
 
+/// Sürüm 10 (#118): RustDesk sends a frame only when the picture changed, so a low frame rate on
+/// a screen that is not changing is normal, not a problem. The frame-rate warning is meant for a
+/// changing screen whose frames do not get through. The screen counts as still when the rate is
+/// under the warning line, the link itself is fine (latency under the O9 orange line, loss
+/// estimate under [kSenseStillMaxLossPct]) and either hardly any picture data comes (under
+/// [kSenseStillMaxMbit]) or the last frame is older than [kSenseStillFrameAgeMs].
+const double kSenseStillMaxMbit = 1.0;
+const int kSenseStillFrameAgeMs = 1000;
+const double kSenseStillMaxLossPct = 2.0;
+
+bool senseScreenStill(SenseSessionVideo video) {
+  final fps = video.fps;
+  if (fps == null || SenseThresholds.frameRate.levelOf(fps) == SenseLevel.ok) return false;
+  final rtt = video.rttMs;
+  if (rtt != null && kSenseSessionLatency.levelOf(rtt) != SenseLevel.ok) return false;
+  final loss = video.lossEstPct;
+  if (loss != null && loss >= kSenseStillMaxLossPct) return false;
+  final mbit = video.bandwidthMbit;
+  final age = video.frameAgeMs;
+  return (mbit != null && mbit < kSenseStillMaxMbit) || (age != null && age >= kSenseStillFrameAgeMs);
+}
+
 /// The refresh rate most displays use (ties: the primary display's).
 double? _commonHz(List<SensePeerDisplay> ds) {
   final counts = <double, int>{};
@@ -166,10 +188,12 @@ SenseDisplayView senseBuildDisplayView({
   final watchedHz = video.watchingAll ? null : p(video.watched)?.refreshHz;
   final target = watchedHz?.round();
   final fpsPct = fps == null ? null : (target == null ? 100.0 : (fps * 100 / target).clamp(0, 100).toDouble());
-  final fpsLevel = SenseThresholds.frameRate.levelOf(fps);
+  // #118: a still screen sends few frames on purpose: no warning, "durağan" next to the rate.
+  final still = senseScreenStill(video);
+  final fpsLevel = still ? SenseLevel.ok : SenseThresholds.frameRate.levelOf(fps);
   final rtt = video.rttMs;
   final rttLevel = kSenseSessionLatency.levelOf(rtt);
-  final fpsText = fps == null ? null : '${fps.round()} fps';
+  final fpsText = fps == null ? null : (still ? '${fps.round()} fps · ${_D.still}' : '${fps.round()} fps');
   final rttText = rtt == null ? null : '${rtt.round()} ms';
   final fpsMeter = SenseStatusMeter(_D.frameRate, fpsPct, fpsText, barLevel: fpsLevel);
   final rttMeter = SenseStatusMeter(_D.latency, rtt == null ? null : rtt.clamp(0, 100).toDouble(), rttText,
@@ -202,7 +226,9 @@ SenseDisplayView senseBuildDisplayView({
     subtitle: video.watchingAll ? _D.allDisplays : _D.display(video.watched + 1),
     meters: [
       SenseStatusMeter(_D.frameRate, fpsPct,
-          fps == null ? null : (target == null ? fpsText : '${fps.round()} / $target fps'),
+          fps == null
+              ? null
+              : (target == null ? fpsText : '${fps.round()} / $target fps${still ? ' · ${_D.still}' : ''}'),
           barLevel: fpsLevel),
       rttMeter,
       SenseStatusLine(_D.connection, _join([path, codec, quality])),
