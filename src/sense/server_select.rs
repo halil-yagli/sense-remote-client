@@ -818,12 +818,17 @@ mod tests {
         assert_eq!(book.best("tr1"), Some(40));
         assert_eq!(book.best("b"), Some(70));
         book.add_round(&[("tr1".into(), Some(90)), ("b".into(), None)], 4);
+        assert_eq!(book.best("tr1"), Some(40), "40, 60, 90 kept");
+        book.add_round(&[("tr1".into(), Some(95)), ("b".into(), None)], 5);
         assert_eq!(book.best("tr1"), Some(60), "only the last three count");
-        assert_eq!(book.report(&servers), vec![("tr1".into(), Some(60)), ("b".into(), Some(70))]);
+        assert_eq!(
+            book.report(&servers),
+            vec![("tr1".to_owned(), Some(60)), ("b".to_owned(), Some(70))]
+        );
         // A relay that left the list is forgotten.
-        book.add_round(&[("tr1".into(), Some(10))], 5);
-        assert_eq!(book.report(&servers), vec![("tr1".into(), Some(10))]);
-        assert_eq!(book.at, 5);
+        book.add_round(&[("tr1".into(), Some(10))], 6);
+        assert_eq!(book.report(&servers), vec![("tr1".to_owned(), Some(10))]);
+        assert_eq!(book.at, 6);
     }
 
     #[test]
