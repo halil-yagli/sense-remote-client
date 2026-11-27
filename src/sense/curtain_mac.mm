@@ -14,6 +14,12 @@
 // Local input: the same event tap rule as RustDesk's macOS privacy mode (`macos.mm`): physical
 // keyboard and mouse events are dropped, remote input (enigo, user data 100) passes.
 //
+// Sense Remote (S11 M8): what happens to the curtain goes to the Rust log and the event record
+// (`curtain/state`) through `SenseCurtainConfig.report`, not only to the unified system log.
+// (S11 M9): the windows are brought to the front again every second. (S11 M6): `NSScreen` is
+// read on the main thread for the Rust side too (`SenseScreensOnMain`). (S11 M7): a main loop
+// for the `--server` process when the tray could not start one (`SenseMainLoopRunFor`).
+//
 // Manual reference counting, like `src/platform/macos.mm` (built in the same `cc::Build`).
 
 #if __has_feature(objc_arc)
@@ -58,8 +64,22 @@ typedef struct {
     void (*glow_size)(int32_t, int32_t, int32_t *, int32_t *);
     void (*glow_pixels)(int32_t, int32_t, float, uint32_t *);
     void (*watched)(const SenseCurtainScreen *, size_t, bool *);
+    // Sense Remote (S11 M8): `kReport*` code and the number of screens; any thread.
+    void (*report)(int32_t, int32_t);
 } SenseCurtainConfig;
+
+// Sense Remote (S11 M6): what `NSScreen` knows about one display (`ScreenInfoC` in
+// curtain_mac.rs). `name` is UTF-8, cut to fit and always terminated; `max_fps` -1 = unknown.
+typedef struct {
+    uint32_t display_id;
+    int64_t max_fps;
+    char name[128];
+} SenseScreenInfo;
 }
+
+// Report codes (`REPORT_*` in curtain_mac.rs).
+static const int32_t kReportOn = 0, kReportOff = 1, kReportNoScreen = 2, kReportMainTimeout = 3,
+                     kReportScreensChanged = 4, kReportTapFailed = 5;
 
 // Path operations (`OP_*` in curtain_mac.rs).
 static const float kOpMove = 0, kOpLine = 1, kOpCubic = 2, kOpClose = 3;
@@ -80,6 +100,10 @@ static CFRunLoopSourceRef g_tap_source = NULL;
 // ---- any thread ----
 static std::atomic<uint64_t> g_curtain_gen{0};
 static std::atomic<uint64_t> g_input_gen{0};
+
+static void SenseReport(const SenseCurtainConfig &cfg, int32_t code, NSUInteger screens) {
+    if (cfg.report) cfg.report(code, (int32_t)screens);
+}
 
 static NSColor *SenseRGB(const uint8_t c[3], CGFloat alpha) {
     return [NSColor colorWithSRGBRed:c[0] / 255.0 green:c[1] / 255.0 blue:c[2] / 255.0 alpha:alpha];
@@ -339,7 +363,14 @@ static void SenseUpdateWatched(bool animate);
     for (NSUInteger i = 0; same && i < screens.count; i++) {
         same = NSEqualRects(screens[i].frame, [g_windows[i] frame]);
     }
-    if (!same) [self screensChanged:nil];
+    if (!same) {
+        [self screensChanged:nil];
+        return;
+    }
+    // Sense Remote (S11 M9): a window opened later at the same level (a full-screen app, a
+    // notification) must not stay above the curtain; the Sense icon is one level higher and
+    // stays on top (AppDelegate.swift). Never takes focus (`orderFrontRegardless`).
+    SenseOrderFront(g_windows);
 }
 - (void)screensChanged:(NSNotification *)note {
     if (!g_windows) return;
@@ -354,7 +385,7 @@ static void SenseUpdateWatched(bool animate);
     SenseOrderFront(g_windows);
     SenseCloseWindows(old);
     [old release];
-    NSLog(@"Sense curtain: screens changed (%lu)", (unsigned long)g_windows.count);
+    SenseReport(g_cfg, kReportScreensChanged, g_windows.count);
 }
 - (void)animate:(NSTimer *)timer {
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
@@ -439,6 +470,7 @@ static NSBezierPath *SenseMarkPath(const float *ops, size_t n) {
 
 static void SenseClose() {
     if (!g_windows) return;
+    NSUInteger count = g_windows.count;
     SenseStopAnimation();
     [g_refresh_timer invalidate];
     [g_refresh_timer release];
@@ -456,14 +488,14 @@ static void SenseClose() {
     [g_subtitle release];
     g_title_bold = g_title_light = g_subtitle = nil;
     SensePostIcon(false);
-    NSLog(@"Sense curtain off");
+    SenseReport(g_cfg, kReportOff, count);
 }
 
 static bool SenseOpen() {
     if (g_windows) return true;
     NSArray<NSScreen *> *screens = [NSScreen screens];
     if (screens.count == 0) {
-        NSLog(@"Sense curtain: no screen found");
+        SenseReport(g_cfg, kReportNoScreen, 0);
         return false;
     }
     g_mark = SenseMarkPath(g_cfg.mark_ops, g_cfg.mark_ops_len);
@@ -486,7 +518,7 @@ static bool SenseOpen() {
                                              userInfo:nil
                                               repeats:YES] retain];
     [[NSRunLoop mainRunLoop] addTimer:g_refresh_timer forMode:NSRunLoopCommonModes];
-    NSLog(@"Sense curtain on (%lu screens)", (unsigned long)g_windows.count);
+    SenseReport(g_cfg, kReportOn, g_windows.count);
     return true;
 }
 
@@ -522,7 +554,7 @@ static bool SenseTapOn() {
     g_tap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, mask,
                              SenseTapCallback, NULL);
     if (!g_tap) {
-        NSLog(@"Sense curtain: event tap could not be created (Accessibility)");
+        SenseReport(g_cfg, kReportTapFailed, g_windows ? g_windows.count : 0);
         return false;
     }
     g_tap_source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, g_tap, 0);
@@ -592,7 +624,7 @@ extern "C" bool SenseCurtainMacShow(const SenseCurtainConfig *cfg, uint32_t time
         dispatch_async(dispatch_get_main_queue(), ^{
           if (g_curtain_gen.load() == cancel) SenseClose();
         });
-        NSLog(@"Sense curtain: main thread did not answer in time");
+        SenseReport(c, kReportMainTimeout, 0);
     }
     return ok;
 }
@@ -628,4 +660,100 @@ extern "C" bool SenseCurtainMacBlockInput(bool on, uint32_t timeout_ms) {
         });
     }
     return ok;
+}
+
+// ---- Sense Remote (S11 M6): NSScreen for the Rust side, on the main thread ----
+
+namespace {
+struct SenseScreensWait {
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+    std::vector<SenseScreenInfo> screens;
+};
+std::atomic<bool> g_screens_pending{false};
+}  // namespace
+
+static void SenseCopyName(NSString *name, char *out, size_t cap) {
+    out[0] = 0;
+    if (!name || cap < 2) return;
+    NSUInteger used = 0;
+    // Cut on a character boundary when the name is longer than the buffer.
+    [name getBytes:out
+             maxLength:cap - 1
+            usedLength:&used
+              encoding:NSUTF8StringEncoding
+               options:0
+                 range:NSMakeRange(0, name.length)
+        remainingRange:NULL];
+    out[used < cap ? used : cap - 1] = 0;
+}
+
+static std::vector<SenseScreenInfo> SenseReadScreens() {
+    std::vector<SenseScreenInfo> out;
+    @autoreleasepool {
+        for (NSScreen *screen in [NSScreen screens]) {
+            NSNumber *number = [screen.deviceDescription objectForKey:@"NSScreenNumber"];
+            if (!number) continue;
+            SenseScreenInfo info;
+            memset(&info, 0, sizeof(info));
+            info.display_id = [number unsignedIntValue];
+            info.max_fps = -1;
+            if (@available(macOS 10.15, *)) {
+                SenseCopyName(screen.localizedName, info.name, sizeof(info.name));
+            }
+            if (@available(macOS 12.0, *)) {
+                info.max_fps = (int64_t)screen.maximumFramesPerSecond;
+            }
+            out.push_back(info);
+        }
+    }
+    return out;
+}
+
+// Fills up to `cap` entries and returns how many; 0 when the main thread did not answer within
+// `timeout_ms` (the caller then sends no name: an unread value stays empty). At most one request
+// waits on the main queue at a time, so a process whose main thread runs no loop does not pile
+// them up.
+extern "C" size_t SenseScreensOnMain(SenseScreenInfo *out, size_t cap, uint32_t timeout_ms) {
+    if (!out || cap == 0) return 0;
+    std::vector<SenseScreenInfo> screens;
+    if ([NSThread isMainThread]) {
+        screens = SenseReadScreens();
+    } else {
+        bool expected = false;
+        if (!g_screens_pending.compare_exchange_strong(expected, true)) return 0;
+        std::shared_ptr<SenseScreensWait> wait = std::make_shared<SenseScreensWait>();
+        dispatch_async(dispatch_get_main_queue(), ^{
+          std::vector<SenseScreenInfo> read = SenseReadScreens();
+          {
+              std::lock_guard<std::mutex> lock(wait->m);
+              wait->screens.swap(read);
+              wait->done = true;
+          }
+          g_screens_pending.store(false);
+          wait->cv.notify_all();
+        });
+        std::unique_lock<std::mutex> lock(wait->m);
+        if (!wait->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                               [&] { return wait->done; })) {
+            return 0;
+        }
+        screens.swap(wait->screens);
+    }
+    size_t n = screens.size() < cap ? screens.size() : cap;
+    for (size_t i = 0; i < n; i++) out[i] = screens[i];
+    return n;
+}
+
+// ---- Sense Remote (S11 M7): main loop when the tray could not start one ----
+
+// Runs the main thread's run loop for up to `seconds` (dispatch main queue, timers, drawing), so
+// the curtain still works in a `--server` process without a tray. Main thread only.
+extern "C" void SenseMainLoopRunFor(double seconds) {
+    if (![NSThread isMainThread]) return;
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
+    }
 }

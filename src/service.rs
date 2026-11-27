@@ -20,6 +20,10 @@ fn main() {
     if let Some(code) = librustdesk::platform::sense_install_state_exit_code(&args) {
         std::process::exit(code);
     }
+    // Sense Remote (S11 M4): a fresh process's Screen Recording answer for the setup wizard.
+    if let Some(code) = librustdesk::platform::sense_screen_capture_exit_code(&args) {
+        std::process::exit(code);
+    }
     hbb_common::init_log(false, "service");
     // Sense Remote (update plan 2026-11-21, §5.2): `service --sense-update-guard` is the old
     // version's copy watching a new installation; it never becomes the daemon.
@@ -28,6 +32,8 @@ fn main() {
     }
     // Sense Remote (security review G4-1): report when this daemon's own bundle is not root's.
     librustdesk::platform::sense_log_bundle_ownership();
+    // Sense Remote (S11 M17): launchd's stdout / stderr files of this daemon do not grow forever.
+    librustdesk::platform::sense_trim_service_logs();
     // Sense Remote (update plan 2026-11-21, §2.1-5): on macOS the root daemon is the updater
     // (U0: nothing starts yet).
     librustdesk::platform::sense_update_daemon_start();

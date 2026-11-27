@@ -44,14 +44,24 @@ class AppDelegate: FlutterAppDelegate {
 // `SenseRemoteCurtain` "on" every second, and "off" at the end. The connection manager (`--cm`)
 // then lifts its always-on-top windows (the Sense icon and its card) above the curtain, and puts
 // them back when the curtain is gone, or when no "on" came for 3 seconds (server stopped).
+//
+// Sürüm 11 (tarama-mac M10): every window of the connection manager goes above the curtain,
+// whatever its level (a card window_manager put back to "normal" stayed under it), and gets its
+// own level back afterwards. An "off" note is only a hint: any process of the session can post
+// it, so it puts the windows back only when no "on" came for `offAfter` (the curtain sends "on"
+// every second while it is up); otherwise the 3-second rule decides.
 final class SenseCurtainIcon {
     static let shared = SenseCurtainIcon()
     private static let noteName = Notification.Name("SenseRemoteCurtain")
     /// The curtain's level (`kCGPopUpMenuWindowLevelKey`) + 1.
     private static let aboveCurtain = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
+    /// An "off" counts only after this long without an "on" (the curtain sends one per second).
+    private static let offAfter: TimeInterval = 1.5
     private var lastOn = Date.distantPast
     private var timer: Timer?
     private var started = false
+    /// Level of each lifted window before it was lifted (by window number).
+    private var levels: [Int: NSWindow.Level] = [:]
 
     func start() {
         guard !started, CommandLine.arguments.dropFirst().first == "--cm" else { return }
@@ -65,7 +75,9 @@ final class SenseCurtainIcon {
 
     private func update(on: Bool) {
         guard on else {
-            restore()
+            if Date().timeIntervalSince(lastOn) > SenseCurtainIcon.offAfter {
+                restore()
+            }
             return
         }
         lastOn = Date()
@@ -87,7 +99,10 @@ final class SenseCurtainIcon {
     }
 
     private func lift() {
-        for window in NSApplication.shared.windows where window.level == .floating {
+        for window in NSApplication.shared.windows where window.level != SenseCurtainIcon.aboveCurtain {
+            if levels[window.windowNumber] == nil {
+                levels[window.windowNumber] = window.level
+            }
             window.level = SenseCurtainIcon.aboveCurtain
         }
     }
@@ -96,7 +111,8 @@ final class SenseCurtainIcon {
         timer?.invalidate()
         timer = nil
         for window in NSApplication.shared.windows where window.level == SenseCurtainIcon.aboveCurtain {
-            window.level = .floating
+            window.level = levels[window.windowNumber] ?? .floating
         }
+        levels.removeAll()
     }
 }

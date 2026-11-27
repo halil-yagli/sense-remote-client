@@ -150,7 +150,36 @@ pub fn is_can_input_monitoring(prompt: bool) -> bool {
 }
 
 pub fn is_can_screen_recording(prompt: bool) -> bool {
-    autoreleasepool(|| unsafe_is_can_screen_recording(prompt))
+    let own = autoreleasepool(|| unsafe_is_can_screen_recording(prompt));
+    // Sense Remote (S11 M4): outside the capturing `--server`, a "no" may be the old answer of
+    // a process that started before the permission was given (the setup wizard); the last
+    // answer of a fresh process is given instead. Never blocks, never prompts.
+    if own || prompt || crate::is_server() {
+        return own;
+    }
+    crate::sense::mac_perm::fresh_screen_recording(own)
+}
+
+/// Sense Remote (S11 M4): `service --sense-screen-capture` prints this fresh process's Screen
+/// Recording answer (`1` / `0`, no prompt). `None` = another call; otherwise the exit code.
+pub fn sense_screen_capture_exit_code(args: &[String]) -> Option<i32> {
+    if args.get(1).map(String::as_str) != Some(crate::sense::mac_perm::SERVICE_ARG_SCREEN_CAPTURE)
+    {
+        return None;
+    }
+    let granted = autoreleasepool(|| unsafe_is_can_screen_recording(false));
+    println!("{}", if granted { 1 } else { 0 });
+    Some(0)
+}
+
+/// Sense Remote (S11 M17): the root daemon cuts its launchd stdout / stderr files under
+/// `/var/log` (`daemon.plist`) when they grow too large; now and once a day.
+pub fn sense_trim_service_logs() {
+    let paths = ["/var/log/rustdesk_service.err", "/var/log/rustdesk_service.out"]
+        .iter()
+        .map(|path| correct_app_name(path))
+        .collect();
+    crate::sense::mac_service_log::start(paths);
 }
 
 // macOS >= 10.15
