@@ -1785,7 +1785,7 @@ md \"{path}\"
 reg add {subkey} /f
 reg add {subkey} /f /v DisplayIcon /t REG_SZ /d \"{display_icon}\"
 reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{display_name}\"
-reg add {subkey} /f /v DisplayVersion /t REG_SZ /d \"{version}\"
+reg add {subkey} /f /v DisplayVersion /t REG_SZ /d \"{display_version}\"
 reg add {subkey} /f /v Version /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v BuildDate /t REG_SZ /d \"{build_date}\"
 reg add {subkey} /f /v InstallLocation /t REG_SZ /d \"{path}\"
@@ -1815,6 +1815,8 @@ copy /Y \"{tmp_path}\\{uninstall_shortcut_name}.lnk\" \"{path}\\\"
         sense_setup = crate::sense::pending_install_commands(),
         nested_exe = escape_nested_cmd_ampersands(&exe),
         version = crate::VERSION.replace("-", "."),
+        // Sense Remote (W19): "Installed apps" shows the Sense version.
+        display_version = crate::sense::winos::this_display_version(),
         build_date = crate::BUILD_DATE,
         sleep = if debug { "timeout 300" } else { "" },
         dels = if debug { "" } else { &dels },
@@ -1942,15 +1944,31 @@ pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
     }
     // Sense Remote: a real uninstall also removes the installed role and setup info. The
     // cleanup `install_me` runs first (`get_uninstall`) keeps them for reinstalls.
+    // Sense Remote (W1): and, before anything else, the update guard task and the update copies
+    // in ProgramData (`sense::winos`); an update (`install_me` / `update_me`) keeps them.
     run_cmds(
         format!(
-            "{}\r\n{}",
+            "{}\r\n{}\r\n{}",
+            crate::sense::winos::uninstall_pre_commands(sense_uninstall_cleanup_exe().as_deref()),
             get_uninstall(kill_self, true)?,
             crate::sense::uninstall_commands()
         ),
         true,
         "uninstall",
     )
+}
+
+/// Sense Remote (W1): this program, for the elevated cleanup step of the uninstall script; `None`
+/// when its path is not safe in the elevated cmd (the guard task is removed anyway).
+fn sense_uninstall_cleanup_exe() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    match installer_shell::path_for_cmd_environment(&exe) {
+        Ok(path) => Some(path.to_owned()),
+        Err(err) => {
+            log::warn!("Sense Remote: uninstall cleanup step left out: {err}");
+            None
+        }
+    }
 }
 
 fn write_vbs(cmds: String, tip: &str) -> ResultType<PathBuf> {
@@ -3594,6 +3612,8 @@ pub fn update_me(debug: bool) -> ResultType<()> {
         version_build: &str,
         size: u64,
     ) -> String {
+        // Sense Remote (W19): "Installed apps" shows the Sense version.
+        let display_version = crate::sense::winos::this_display_version();
         let reg_display_icon = if is_msi.unwrap_or(false) {
             "".to_string()
         } else {
@@ -3605,7 +3625,7 @@ pub fn update_me(debug: bool) -> ResultType<()> {
         format!(
             "
 {reg_display_icon}
-reg add {subkey} /f /v DisplayVersion /t REG_SZ /d \"{version}\"
+reg add {subkey} /f /v DisplayVersion /t REG_SZ /d \"{display_version}\"
 reg add {subkey} /f /v Version /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v BuildDate /t REG_SZ /d \"{build_date}\"
 reg add {subkey} /f /v VersionMajor /t REG_DWORD /d {version_major}
@@ -3631,7 +3651,11 @@ reg add {subkey} /f /v EstimatedSize /t REG_DWORD /d {size}
         let reg_cmd_msi = if let Some(reg_msi_key) = &reg_msi_key {
             // This is best-effort: failure may leave a stale version in the Windows app list,
             // but should not interrupt the update.
-            format!("reg add {reg_msi_key} /f /v DisplayVersion /t REG_SZ /d \"{version}\"")
+            // Sense Remote (W19): the Sense version, as in the main entry.
+            format!(
+                "reg add {reg_msi_key} /f /v DisplayVersion /t REG_SZ /d \"{}\"",
+                crate::sense::winos::this_display_version()
+            )
         } else {
             "".to_owned()
         };

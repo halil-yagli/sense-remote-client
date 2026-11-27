@@ -56,7 +56,9 @@ Widget desk(List<Widget> children) => app(
 /// Stands in for the system file chooser, so the card shows its ataç (h02).
 Future<List<String>> _noFiles() async => const <String>[];
 
-Widget card(Client c, SenseChatController chat, {Duration? recording, bool attach = true}) => Positioned(
+Widget card(Client c, SenseChatController chat,
+        {Duration? recording, bool attach = true, String? connectionsLine}) =>
+    Positioned(
       right: kSenseCmMargin,
       bottom: kSenseCmMargin,
       width: kSenseCmPanelSize.width,
@@ -65,6 +67,7 @@ Widget card(Client c, SenseChatController chat, {Duration? recording, bool attac
         client: c,
         chat: chat,
         whoLine: senseHostWhoLine(c, const Duration(minutes: 14)),
+        connectionsLine: connectionsLine,
         recording: recording,
         pickFiles: attach ? _noFiles : null,
         animateIn: false,
@@ -139,4 +142,17 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('h05_call')));
   }, skip: goldenSkip('h05_call'), tags: const ['golden']);
+
+  testWidgets('h06: same Controller on the screen and a terminal (O6)', (tester) async {
+    setWindow(tester, stage);
+    final screen = halil();
+    final terminal = Client(2, true, false, false, 'Halil Y.', '123456789', false, false, false)
+      ..isTerminal = true;
+    await tester.pumpWidget(desk([
+      card(screen, c08Controller(),
+          connectionsLine: senseHostConnectionsLine(senseHostLive([screen, terminal]))),
+    ]));
+    await tester.pump(const Duration(milliseconds: 400));
+    await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('h06_two')));
+  }, skip: goldenSkip('h06_two'), tags: const ['golden']);
 }

@@ -363,8 +363,16 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   void toggleFullscreen() => stateGlobal.setFullscreen(!fullscreen);
 
   /// Decision 4: no note window; the note is in Eylemler › Oturuma not ekle.
+  /// Sürüm 11 (O2): the connection ends in every window that shows it (a display in its own
+  /// window, "Tüm ekranlarımı kullan"), not only in this one.
   @override
-  void end() => closeConnection(id: ffi.id);
+  void end() {
+    // The other windows are found through this window's session: close it only afterwards.
+    bind
+        .sessionSenseEndAll(sessionId: ffi.sessionId)
+        .catchError((_) {})
+        .whenComplete(() => closeConnection(id: ffi.id));
+  }
 
   RxString? get _privacy => _try<RxString?>(() => PrivacyModeState.find(ffi.id), null);
 

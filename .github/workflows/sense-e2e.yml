@@ -35,6 +35,9 @@ jobs:
   gate:
     name: panel access
     runs-on: ubuntu-24.04
+    # G7: jeton depo duzeyinde degil, korumali ortamda (Settings > Environments > panel-okuma:
+    # yalniz master dali, sir burada). Ortam bossa panel kipi atlanir.
+    environment: panel-okuma
     outputs:
       panel: ${{ steps.check.outputs.panel }}
     steps:
@@ -63,6 +66,7 @@ jobs:
     name: windows e2e (${{ needs.gate.outputs.panel == 'true' && 'panel' || 'panelsiz' }})
     needs: [gate, generate-bridge]
     runs-on: windows-2022
+    environment: panel-okuma
     timeout-minutes: 150
     env:
       SENSE_E2E_PORT: "3110"

@@ -126,10 +126,19 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
     final found = senseUnique(projects).where((c) => c.id == id).toList();
     final c = found.isEmpty ? null : found.first;
     // A busy computer cannot be connected to (kabul C2): one person at a time.
-    if (c != null && c.busy) return;
-    if (!widget.grants.grants.can(SensePerm.connect) && widget.grants.loaded) return;
+    if (c != null && c.busy) {
+      SenseToast.show(context, SenseControllerStrings.busyNow); // B16
+      return;
+    }
+    if (!widget.grants.grants.can(SensePerm.connect) && widget.grants.loaded) {
+      SenseToast.show(context, SenseControllerStrings.rightRevoked);
+      return;
+    }
     // R6: the other ways need their own grant, also checked here (not only hidden).
-    if (!senseKindAllowed(kind, widget.grants.grants)) return;
+    if (!senseKindAllowed(kind, widget.grants.grants)) {
+      SenseToast.show(context, SenseControllerStrings.rightRevoked);
+      return;
+    }
     // P3 (B7): the "Bağlanıyor" state ends when the window call returns (or fails, with a
     // note); the timer is only a safety net. A second click meanwhile is ignored.
     if (_connecting == id) return;

@@ -311,6 +311,12 @@ pub fn core_main() -> Option<CoreMainAction> {
                     .show()
                     .ok();
                 return None;
+            } else if args[0] == crate::sense::winos::UNINSTALL_CLEANUP_FLAG {
+                // Sense Remote (W1): elevated step of the uninstall script.
+                #[cfg(windows)]
+                std::process::exit(crate::sense::winos::uninstall_cleanup());
+                #[cfg(not(windows))]
+                return None;
             } else if args[0] == "--uninstall-cert" {
                 #[cfg(windows)]
                 hbb_common::allow_err!(crate::platform::windows::uninstall_cert());
@@ -412,6 +418,9 @@ pub fn core_main() -> Option<CoreMainAction> {
             {
                 let handler = std::thread::spawn(move || crate::start_server(true, false));
                 crate::tray::start_tray();
+                // Sense Remote (S11 M7): the tray's event loop never returns; when it could not
+                // start, the curtain (AppKit, main thread) still needs a main loop.
+                crate::sense::curtain_mac::run_main_loop_while(|| !handler.is_finished());
                 // prevent server exit when encountering errors from tray
                 hbb_common::allow_err!(handler.join());
             }

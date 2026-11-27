@@ -51,6 +51,14 @@ abstract final class SenseSessionStrings {
   // ---- Ghost mode notes (S9-b; core event `sense_privacy_note`) ----
   static const String ghostDisplay1 = 'Hayalet mod için önce Ekran 1’e geç';
   static const String ghostUnavailable = 'Hayalet mod bu bağlantıda kullanılamıyor';
+
+  /// Sürüm 11 (B1): the reason is said, not only "kullanılamıyor".
+  static const String ghostUnavailableViewOnly =
+      'Yalnız izle açıkken hayalet mod açılamaz; Klavye ve fare › Yalnız izle’yi kapat';
+  static const String ghostUnavailableRights = 'Hayalet mod yetkin panelde kapalı';
+
+  /// Bar note: "Yalnız izleyerek başla" is on, so the automatic ghost mode did not start.
+  static const String ghostSkippedViewOnly = 'Yalnız izleyerek başladığın için hayalet mod açılmadı';
   static String ghostNote(String code) {
     switch (code) {
       case 'unsupported':
@@ -69,10 +77,33 @@ abstract final class SenseSessionStrings {
     return 'Hayalet mod durumu değişti';
   }
 
+  // ---- Why a row is grey (Sürüm 11, B2/B15: the reason is always written) ----
+  static const String whyViewOnly = 'Yalnız izle açıkken değişmez';
+  static const String whyGhost = 'Hayalet mod açıkken kullanılamaz';
+  static const String whyNoVirtual = 'sanal ekran yok';
+  static const String whyVirtualMax = 'en çok sanal ekran açık';
+  static const String whyNotTaken = 'henüz alınmadı';
+  static const String whyCustomQuality = 'Özel kalite açıkken';
+  static const String whyPanel = 'panelden yönetilir';
+  static const String whyOldVersion = 'bu bilgisayarın sürümü desteklemiyor';
+  static const String whyNotReady = 'bağlantı hazır olunca';
+  static const String whyScreenshotBusy = 'bitince yeniden açılır';
+
   // ---- Lists, shared (O7) ----
   static const String frequent = 'Sık kullanılan';
   static const String noRights = 'Yetkin yok · panelden';
   static const String saved = 'Uygulandı';
+
+  /// Sürüm 11 (B4): an action that only asks something of the other side says so; the
+  /// result (a window, a refusal) shows where it happens.
+  static const String toastRemoteFiles = 'Dosya aktarımı isteniyor';
+  static const String toastTerminal = 'Terminal isteniyor';
+  static const String toastTunnel = 'TCP tüneli isteniyor';
+  static const String toastCamera = 'Kamera isteniyor';
+  static const String toastElevation = 'Yönetici yetkisi istendi';
+  static const String toastRestart = 'Yeniden başlatma isteği gönderildi';
+  static const String toastScreenshot = 'Ekran görüntüsü isteniyor';
+
   static const String on = 'açık';
   static const String off = 'kapalı';
   static const String none = 'yok';
@@ -150,7 +181,7 @@ abstract final class SenseSessionStrings {
   static const String modeTranslate = 'Çeviri';
   static const String modeLegacy = 'Eski klavye modu';
   static const String viewOnly = 'Yalnız izle';
-  static const String viewOnlyHint = 'fare ve klavye gitmez';
+  static const String viewOnlyHint = 'fare ve klavye gitmez · hayalet mod açılmaz';
   static const String swapCtrlCmd = 'Ctrl ile Cmd yer değiştirsin';
   static const String swapCtrlCmdHint = 'Mac';
   static const String keyboardSection = 'Klavye';

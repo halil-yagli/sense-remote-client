@@ -10,10 +10,13 @@ enum SenseEndReason {
 
   /// The Host shut down or left the network (link stalled 30 s, or a connection error).
   peerGone,
+
+  /// Sürüm 11 (O7): someone else is connected to the computer (S8 `sense_busy`).
+  busy,
 }
 
 /// What a session-ending message from RustDesk means for Sense.
-enum SenseMessageKind { hostEnded, idle, peerGone, busy }
+enum SenseMessageKind { hostEnded, idle, peerGone, busy, endedHere }
 
 /// Reads a RustDesk message box (`msgbox` event: type, title, text) that arrives
 /// while the session is up. Null = not an ending Sense shows its own card for.
@@ -21,6 +24,8 @@ enum SenseMessageKind { hostEnded, idle, peerGone, busy }
 /// `io_loop.rs` timeouts, D1 `sense_busy` login error.
 SenseMessageKind? senseClassifyMessage(String type, String title, String text) {
   final t = text.toLowerCase();
+  // Sürüm 11 (O2): the user ended this connection in another of its windows.
+  if (t.contains('sense_ended_here')) return SenseMessageKind.endedHere;
   if (t.contains('sense_busy')) return SenseMessageKind.busy;
   if (t.contains('closed manually by the peer')) return SenseMessageKind.hostEnded;
   if (t.contains('inactivity')) return SenseMessageKind.idle;
@@ -48,6 +53,8 @@ SenseEndReason? senseEndReasonOf(SenseMessageKind kind) {
     case SenseMessageKind.peerGone:
       return SenseEndReason.peerGone;
     case SenseMessageKind.busy:
+      return SenseEndReason.busy;
+    case SenseMessageKind.endedHere:
       return null;
   }
 }
@@ -78,6 +85,8 @@ class SenseSessionSummary {
         return SenseLayerStrings.reasonIdle(idleLimit.inMinutes);
       case SenseEndReason.peerGone:
         return SenseLayerStrings.reasonGone;
+      case SenseEndReason.busy:
+        return SenseLayerStrings.reasonBusy;
     }
   }
 }
