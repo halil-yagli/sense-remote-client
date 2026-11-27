@@ -170,7 +170,14 @@ class SenseConnectController extends ChangeNotifier {
   /// Seconds until RustDesk's automatic retry (null = none planned).
   int? get retryIn => _retryIn;
 
+  /// Stops the one-second tick (the layer widget left the tree; it starts again when mounted).
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
   void start() {
+    if (_disposed) return;
     _timer ??= Timer.periodic(SenseLinkTiming.tick, (_) => tick());
     host.remembered().then((v) {
       if (_disposed) return;
@@ -311,7 +318,8 @@ abstract final class SenseConnectCards {
 
   static SenseConnectController controllerFor(String id,
           {required SenseConnectKind kind, required SenseConnectHost host}) =>
-      _byId.putIfAbsent(id, () => SenseConnectController(host: host, kind: kind)..showConnecting());
+      // The layer widget runs the tick while it is mounted (no timer outlives the page).
+      _byId.putIfAbsent(id, () => SenseConnectController(host: host, kind: kind, autoStart: false)..showConnecting());
 
   static SenseConnectController? find(String id) => _byId[id];
 
@@ -343,6 +351,7 @@ class _SenseConnectLayerState extends State<SenseConnectLayer> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    _c.start();
     SenseSessionHub.registerConnect(widget.id, _c.onMessage, onConnecting: _c.showConnecting);
   }
 
@@ -351,8 +360,10 @@ class _SenseConnectLayerState extends State<SenseConnectLayer> {
     super.didUpdateWidget(old);
     if (!identical(old.controller, widget.controller)) {
       old.controller.removeListener(_changed);
+      old.controller.stop();
       SenseSessionHub.unregisterConnect(old.id, old.controller.onMessage);
       _c.addListener(_changed);
+      _c.start();
       SenseSessionHub.registerConnect(widget.id, _c.onMessage, onConnecting: _c.showConnecting);
     }
   }
@@ -360,6 +371,7 @@ class _SenseConnectLayerState extends State<SenseConnectLayer> {
   @override
   void dispose() {
     _c.removeListener(_changed);
+    _c.stop();
     SenseSessionHub.unregisterConnect(widget.id, _c.onMessage);
     super.dispose();
   }

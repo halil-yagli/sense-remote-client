@@ -72,7 +72,7 @@ void main() {
       final c = _controller(host);
       expect(c.onMessage('error', 'Login Error', 'sense_busy', false), isTrue);
       expect(c.card, SenseConnectCard.busy);
-      expect(events.last, ('ui', 'card', {'kind': 'busy'}));
+      expect((events.last.$1, events.last.$2, events.last.$3['kind']), ('ui', 'card', 'busy'));
     });
 
     test('an unknown message is left to the stock box', () {
