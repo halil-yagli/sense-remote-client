@@ -105,9 +105,28 @@ pub const PERIODIC_S: i64 = 300;
 /// Chunks per computer and hour (12 per connection; a Host and a Controller session at once).
 pub const PERIODIC_PER_HOUR: usize = 24;
 pub const CRASH_PER_HOUR: usize = 3;
-/// A connection record open longer than this is closed without a send (its end never came,
-/// e.g. the window process died); its marker goes too.
+/// A connection record open longer than this without a sign of life is closed (its end never
+/// came). Sense Remote (O13): it is closed with its record and a `conn/end neden=sinir_24sa`
+/// event, never silently; a Host connection that is still open starts a new record.
 const MAX_SESSION_S: i64 = 24 * 3600;
+/// Sense Remote (O10): the window process tells the `--server` that a Controller record is
+/// alive at this status tick and every [`CONTROLLER_ALIVE_EVERY`] ticks after it (seconds).
+pub const CONTROLLER_ALIVE_FIRST: u32 = 5;
+pub const CONTROLLER_ALIVE_EVERY: u32 = 60;
+/// No word from the window for this long: it is gone (crashed, killed); the record is closed
+/// with `conn/end neden=ui_gitti` instead of sending chunks of a dead session for 24 hours.
+const CONTROLLER_ALIVE_TIMEOUT_S: i64 = 180;
+/// Sense Remote (O14): failed connection records have their own budget, so a flapping network
+/// does not use up the session records of the hour.
+pub const FAILED_PER_HOUR: usize = 10;
+const OPTION_FAILED: &str = "sense-log-failed";
+/// A failed round to the same computer this soon after the last failed record joins the next
+/// record of that computer instead of sending its own.
+const FAILED_MERGE_S: i64 = 120;
+/// A joined failed round older than this is dropped (its lines stay in the local logs).
+const FAILED_CARRY_MAX_S: i64 = 600;
+/// Sense Remote (O11): version and role of the last `--server` run (`ver|role`).
+const OPTION_RUN: &str = "sense-log-run";
 /// Events of a crash record: this long before the panic.
 const CRASH_BEFORE_MS: i64 = 15 * 60 * 1000;
 /// Events of a panel request or an error-triggered send: the last hour.
@@ -189,6 +208,8 @@ impl Reason {
 pub enum SenseLogIpc {
     ControllerStart { sid: String, peer: String },
     ControllerEnd { sid: String, peer: String, reason: String },
+    /// Sense Remote (O10, O11): the window's Controller session is alive (once a minute).
+    ControllerAlive { sid: String, peer: String },
 }
 
 /// Contract `conn_peer_id`: 1–64 characters; here only the characters an id can have.
@@ -1083,6 +1104,9 @@ struct Session {
     /// When the last chunk was tried (Unix s); the start at first.
     last_chunk_s: i64,
     chunk_in_flight: bool,
+    /// Sense Remote (O10): last "alive" word of the window (Controller records; `None` = the
+    /// window never sent one, the 24-hour rule applies).
+    alive_s: Option<i64>,
 }
 
 static SESSIONS: Mutex<Option<HashMap<String, Session>>> = Mutex::new(None);
@@ -1178,6 +1202,7 @@ fn session_started(key: String, sid: String, peer: Option<String>) {
         cut_ms: super::diag::now_ms() - SESSION_LEAD_MS,
         last_chunk_s: started_s,
         chunk_in_flight: false,
+        alive_s: None,
     };
     let dir = super::diag::writer::events_dir();
     super::diag::crash::write_open(&dir, &open_marker(&session));
@@ -1219,23 +1244,177 @@ fn session_ended(key: &str, reason: Reason, peer: Option<String>) {
     if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) {
         return;
     }
-    let meta = session_meta(&session, peer, now_s());
-    let from = session.cut_ms;
-    let offsets = session.offsets;
+    let now = now_s();
+    let mut meta = session_meta(&session, peer, now);
+    let mut from = session.cut_ms;
+    let mut offsets = session.offsets;
+    // Sense Remote (O14): failed rounds to one computer in a row go in one record.
+    if let Some(peer) = meta.peer.clone() {
+        let mut guard = FAILED.lock().unwrap_or_else(|e| e.into_inner());
+        let map = guard.get_or_insert_with(HashMap::new);
+        let state = map.entry(peer).or_default();
+        if reason == Reason::ConnFailed {
+            if failed_round_joins(state.last_sent_s, now) {
+                if state.carry.is_none() {
+                    state.carry = Some(Carry {
+                        cut_ms: from,
+                        offsets,
+                        started_s: meta.started.unwrap_or(now),
+                        at_s: now,
+                    });
+                }
+                log::info!("Sense Remote: failed round joins the next record of this computer");
+                return;
+            }
+            state.last_sent_s = Some(now);
+        }
+        if let Some(carry) = state.carry.take().filter(|c| now - c.at_s < FAILED_CARRY_MAX_S) {
+            if carry.cut_ms < from {
+                from = carry.cut_ms;
+                offsets = carry.offsets;
+            }
+            meta.started = Some(meta.started.unwrap_or(now).min(carry.started_s));
+        }
+        if map.len() > MAX_SESSIONS {
+            map.retain(|_, s| s.last_sent_s.is_some_and(|t| now - t < FAILED_CARRY_MAX_S));
+        }
+    }
+    let (budget_option, per_hour) = if reason == Reason::ConnFailed {
+        (OPTION_FAILED, FAILED_PER_HOUR)
+    } else {
+        (OPTION_SESSIONS, SESSION_PER_HOUR)
+    };
     let spawned = std::thread::Builder::new()
         .name("sense-log-upload".to_owned())
         .spawn(move || {
-            if take_slot(OPTION_SESSIONS, SESSION_PER_HOUR, now_s()) {
+            if take_slot(budget_option, per_hour, now_s()) {
                 // The last lines of the other processes (the window's own end event) reach
                 // their files first.
                 std::thread::sleep(Duration::from_secs(2));
                 send_blocking(reason, meta, Some(&offsets), Some((from, super::diag::now_ms())));
             } else {
-                log::info!("Sense Remote: session log skipped, {SESSION_PER_HOUR} an hour is the limit");
+                log::info!("Sense Remote: session log skipped, {per_hour} an hour is the limit");
             }
         });
     if let Err(err) = spawned {
         log::warn!("Sense Remote: session log not started: {err}");
+    }
+}
+
+/// Sense Remote (O14): failed rounds of one computer: when the last failed record went, and a
+/// round that joins the next record.
+#[derive(Default)]
+struct FailedState {
+    last_sent_s: Option<i64>,
+    carry: Option<Carry>,
+}
+
+struct Carry {
+    cut_ms: i64,
+    offsets: Offsets,
+    started_s: i64,
+    at_s: i64,
+}
+
+static FAILED: Mutex<Option<HashMap<String, FailedState>>> = Mutex::new(None);
+
+/// Pure: a failed round this soon after the last failed record of the computer sends nothing
+/// of its own; it joins the next record.
+pub fn failed_round_joins(last_sent_s: Option<i64>, now: i64) -> bool {
+    last_sent_s.is_some_and(|t| now - t < FAILED_MERGE_S)
+}
+
+/// Sense Remote (O10, O13): what happens to an open record at `now`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expiry {
+    Keep,
+    /// The window stopped saying it is alive.
+    UiGone,
+    /// Open 24 hours without an end.
+    Limit,
+}
+
+/// Pure: `alive_s` = the window's last "alive" word (Controller), `started_s` = the record's start.
+pub fn session_expiry(alive_s: Option<i64>, started_s: i64, now: i64) -> Expiry {
+    match alive_s {
+        Some(alive) if now - alive >= CONTROLLER_ALIVE_TIMEOUT_S => Expiry::UiGone,
+        Some(_) => Expiry::Keep,
+        None if now - started_s >= MAX_SESSION_S => Expiry::Limit,
+        None => Expiry::Keep,
+    }
+}
+
+/// Pure (O11): the previous `--server` run had another version or role, so it was stopped by an
+/// update or a role change, not by a crash. Unknown (first run) = no change.
+pub fn run_changed(previous: &str, current: &str) -> bool {
+    !previous.trim().is_empty() && previous.trim() != current
+}
+
+/// `ver|role` of this run.
+fn run_stamp() -> String {
+    format!("{}|{}", super::update::current_version(), own_role().unwrap_or_default())
+}
+
+/// Closes the records that expired (O10, O13) with a `conn/end` event in their own session, and
+/// starts a new record for a Host connection that passed 24 hours (it is still open).
+fn expire_sessions(now: i64) {
+    let expired: Vec<(String, String, Option<String>, Expiry)> = {
+        let guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .as_ref()
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(key, s)| match session_expiry(s.alive_s, s.started_s, now) {
+                        Expiry::Keep => None,
+                        e => Some((key.clone(), s.sid.clone(), s.peer.clone(), e)),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for (key, sid, peer, expiry) in expired {
+        let host = key.starts_with('h');
+        let neden = if expiry == Expiry::UiGone { "ui_gitti" } else { "sinir_24sa" };
+        log::info!("Sense Remote: connection record closed ({neden})");
+        super::diag::event_in(
+            Some(&sid),
+            "conn",
+            "end",
+            json!({ "taraf": if host { "host" } else { "controller" }, "neden": neden }),
+        );
+        session_ended(&key, Reason::Session, None);
+        if host && expiry == Expiry::Limit {
+            if let Ok(conn_id) = key[1..].parse::<i32>() {
+                let new_sid = host_sid(conn_id, now);
+                if super::diag::session().as_deref() == Some(sid.as_str()) {
+                    super::diag::set_session(Some(&new_sid));
+                }
+                session_started(key, new_sid, peer);
+            }
+        }
+    }
+}
+
+/// Sense Remote (O11): a Controller record the previous `--server` run left open goes back into
+/// the table: the window may still be alive (only the service restarted). Its next "alive"
+/// word keeps it; without one it closes as `ui_gitti` after [`CONTROLLER_ALIVE_TIMEOUT_S`].
+fn restore_controller(open: super::diag::crash::OpenSession, now: i64) {
+    let session = Session {
+        sid: open.sid.clone(),
+        peer: open.peer,
+        started_s: open.started_s,
+        role: open.role,
+        offsets: offsets_from_strings(open.offsets),
+        cut_ms: open.cut_ms,
+        last_chunk_s: now,
+        chunk_in_flight: false,
+        alive_s: Some(now),
+    };
+    super::diag::crash::write_open(&super::diag::writer::events_dir(), &open_marker(&session));
+    let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(HashMap::new);
+    if map.len() < MAX_SESSIONS {
+        map.insert(open.sid, session);
     }
 }
 
@@ -1255,20 +1434,9 @@ pub fn chunks_due(sessions: &[(String, i64, bool)], now: i64) -> Vec<String> {
 /// once the panel took it; a refused chunk is sent again with the next one or with the end.
 fn periodic_tick() {
     let now = now_s();
-    let dir = super::diag::writer::events_dir();
-    // Records whose end never came (the window process died) are closed quietly.
-    {
-        let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(map) = guard.as_mut() {
-            map.retain(|_, s| {
-                let keep = now - s.started_s < MAX_SESSION_S;
-                if !keep {
-                    super::diag::crash::remove_open(&dir, &s.sid);
-                }
-                keep
-            });
-        }
-    }
+    // Records whose end never came (the window process died, 24 hours passed) are closed with
+    // their record (O10, O13).
+    expire_sessions(now);
     if !SUPPORTED || !PANEL_LOGS.load(Ordering::Relaxed) || NEW_REASONS_REFUSED.load(Ordering::Relaxed) {
         return;
     }
@@ -1345,7 +1513,45 @@ fn crash_check_once() {
         .name("sense-log-crash".to_owned())
         .spawn(|| {
             let dir = super::diag::writer::events_dir();
+            // Sense Remote (O11): the previous run ended with an update or a role change.
+            let stopped_on_purpose = {
+                let _lock = OPTIONS.lock().unwrap_or_else(|e| e.into_inner());
+                let previous = config::LocalConfig::get_option(OPTION_RUN);
+                let current = run_stamp();
+                config::LocalConfig::set_option(OPTION_RUN.to_owned(), current.clone());
+                run_changed(&previous, &current)
+            };
             for open in super::diag::crash::take_open(&dir) {
+                // A Controller window may have outlived the service: its record goes on.
+                if open.sid.starts_with('c') {
+                    restore_controller(open, now_s());
+                    continue;
+                }
+                if stopped_on_purpose {
+                    if NEW_REASONS_REFUSED.load(Ordering::Relaxed)
+                        || !take_slot(OPTION_SESSIONS, SESSION_PER_HOUR, now_s())
+                    {
+                        continue;
+                    }
+                    super::diag::event_in(
+                        Some(&open.sid),
+                        "conn",
+                        "end",
+                        json!({ "taraf": "host", "neden": "servis_yeniden_basladi" }),
+                    );
+                    let meta = Meta {
+                        peer: open.peer,
+                        session_id: Some(open.sid),
+                        started: Some(open.started_s),
+                        ended: Some(now_s().max(open.started_s)),
+                        app_version: Some(super::update::current_version()),
+                        platform: Some(platform_name().to_owned()),
+                        role: open.role,
+                    };
+                    let offsets = offsets_from_strings(open.offsets);
+                    send_blocking(Reason::Session, meta, Some(&offsets), Some((open.cut_ms, super::diag::now_ms())));
+                    continue;
+                }
                 if NEW_REASONS_REFUSED.load(Ordering::Relaxed)
                     || !take_slot(OPTION_CRASH, CRASH_PER_HOUR, now_s())
                 {
@@ -1738,8 +1944,10 @@ pub fn controller_started(peer_id: &str) -> Option<String> {
     let peer = clean_peer(peer_id)?;
     static COUNTER: AtomicI64 = AtomicI64::new(0);
     let sid = format!("{}-{}", now_s(), COUNTER.fetch_add(1, Ordering::Relaxed));
-    // Sense Remote (#103): this process's events belong to the session from now on.
+    // Sense Remote (#103): this process's events belong to the session from now on; O12: this
+    // connection thread's (and its video threads') events to this session whatever the others do.
     super::diag::set_session(Some(&controller_key(&sid)));
+    super::diag::set_thread_session(Some(&controller_key(&sid)));
     super::diag::event("conn", "start", json!({ "taraf": "controller", "karsi": peer }));
     let message = SenseLogIpc::ControllerStart {
         sid: sid.clone(),
@@ -1757,6 +1965,9 @@ pub fn controller_ended(sid: &str, reason: Reason, peer_id: &str) {
     }
     super::diag::event("conn", "end", json!({ "taraf": "controller", "neden": reason.as_str() }));
     super::diag::end_session(&controller_key(sid));
+    if super::diag::thread_session().as_deref() == Some(controller_key(sid).as_str()) {
+        super::diag::set_thread_session(None);
+    }
     let Some(peer) = clean_peer(peer_id) else {
         return;
     };
@@ -1765,6 +1976,27 @@ pub fn controller_ended(sid: &str, reason: Reason, peer_id: &str) {
         peer,
         reason: reason.as_str().to_owned(),
     });
+}
+
+/// Sense Remote (O10): UI process, once a minute while a Controller session is open
+/// (`io_loop`): the `--server` keeps the record open only while these come.
+pub fn controller_alive(sid: &str, peer_id: &str) {
+    if !SUPPORTED {
+        return;
+    }
+    let Some(peer) = clean_peer(peer_id) else {
+        return;
+    };
+    send_in_thread(SenseLogIpc::ControllerAlive {
+        sid: sid.to_owned(),
+        peer,
+    });
+}
+
+/// Sense Remote (O10): status tick `n` of a Controller connection sends the alive word.
+pub fn alive_tick(n: u32) -> bool {
+    n == CONTROLLER_ALIVE_FIRST
+        || (n > CONTROLLER_ALIVE_FIRST && (n - CONTROLLER_ALIVE_FIRST) % CONTROLLER_ALIVE_EVERY == 0)
 }
 
 fn send_in_thread(message: SenseLogIpc) {
@@ -1813,6 +2045,28 @@ pub fn on_main_ipc(message: SenseLogIpc) {
                 return;
             };
             session_ended(&controller_key(&sid), reason, Some(peer));
+        }
+        SenseLogIpc::ControllerAlive { sid, peer } => {
+            let (Some(sid), Some(peer)) = (clean_peer(&sid), clean_peer(&peer)) else {
+                return;
+            };
+            let key = controller_key(&sid);
+            let now = now_s();
+            let mark = |now: i64| -> bool {
+                let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+                match guard.as_mut().and_then(|map| map.get_mut(&key)) {
+                    Some(s) => {
+                        s.alive_s = Some(now);
+                        true
+                    }
+                    None => false,
+                }
+            };
+            // O11: the service restarted while the window lived on: the record starts again.
+            if !mark(now) {
+                session_started(key.clone(), key.clone(), Some(peer));
+                mark(now);
+            }
         }
     }
 }
@@ -2223,6 +2477,67 @@ connected peer 123456789
             assert_eq!(serde_json::from_str::<SenseLogIpc>(&json).unwrap(), message);
             assert!(!json.contains('\\') && !json.contains('/'));
         }
+    }
+
+    // Sense Remote (O10): a Controller record whose window stopped saying it is alive closes in
+    // minutes, not after 24 hours of chunks.
+    #[test]
+    fn a_dead_window_closes_its_record_in_minutes() {
+        let start = 1_000_000;
+        // The window said it is alive a minute ago: kept.
+        assert_eq!(session_expiry(Some(start + 60), start, start + 120), Expiry::Keep);
+        // Three minutes without a word: gone, long before the 24-hour limit.
+        assert_eq!(
+            session_expiry(Some(start), start, start + CONTROLLER_ALIVE_TIMEOUT_S),
+            Expiry::UiGone
+        );
+        // Three chunks (15 min) of a dead session would have gone before; now none after 3 min.
+        assert!(CONTROLLER_ALIVE_TIMEOUT_S < PERIODIC_S);
+        // A window that never sent the word (older one) keeps the 24-hour rule.
+        assert_eq!(session_expiry(None, start, start + MAX_SESSION_S - 1), Expiry::Keep);
+        assert_eq!(session_expiry(None, start, start + MAX_SESSION_S), Expiry::Limit);
+        // An alive window outlives 24 hours (a long museum session).
+        assert_eq!(
+            session_expiry(Some(start + MAX_SESSION_S + 10), start, start + MAX_SESSION_S + 20),
+            Expiry::Keep
+        );
+    }
+
+    #[test]
+    fn alive_word_goes_soon_and_then_every_minute() {
+        let ticks: Vec<u32> = (0..200).filter(|n| alive_tick(*n)).collect();
+        assert_eq!(ticks, vec![5, 65, 125, 185]);
+        assert!((CONTROLLER_ALIVE_EVERY as i64) * 2 < CONTROLLER_ALIVE_TIMEOUT_S);
+    }
+
+    // Sense Remote (O11): a service stopped for an update or a role change is not a crash.
+    #[test]
+    fn update_or_role_change_is_not_a_crash() {
+        assert!(!run_changed("", "11|incoming"), "first run: no claim");
+        assert!(!run_changed("11|incoming", "11|incoming"), "same run stamp: a real crash");
+        assert!(run_changed("10|incoming", "11|incoming"), "update");
+        assert!(run_changed("11|incoming", "11|both"), "role change");
+    }
+
+    // Sense Remote (O14): failed rounds in a row do not use up the hour.
+    #[test]
+    fn failed_rounds_in_a_row_join_one_record() {
+        assert!(!failed_round_joins(None, 1000));
+        assert!(failed_round_joins(Some(1000), 1000 + FAILED_MERGE_S - 1));
+        assert!(!failed_round_joins(Some(1000), 1000 + FAILED_MERGE_S));
+        assert!(FAILED_PER_HOUR < SESSION_PER_HOUR);
+        assert_ne!(OPTION_FAILED, OPTION_SESSIONS, "own budget");
+    }
+
+    #[test]
+    fn alive_message_round_trips() {
+        let message = SenseLogIpc::ControllerAlive {
+            sid: "1795000000-0".to_owned(),
+            peer: "987654321".to_owned(),
+        };
+        let json = serde_json::to_string(&message).unwrap();
+        assert_eq!(serde_json::from_str::<SenseLogIpc>(&json).unwrap(), message);
+        assert!(!json.contains('\\') && !json.contains('/'));
     }
 
     #[test]

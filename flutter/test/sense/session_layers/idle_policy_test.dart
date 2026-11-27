@@ -47,6 +47,43 @@ void main() {
     expect(c.ended, isNotNull);
   });
 
+  // Sürüm 11 (O5): a panel that does not answer at the start is asked again.
+  test('a failed read is tried again every 30 s', () async {
+    var n = 0;
+    final waits = <Duration>[];
+    await SenseIdlePolicy.load('1', c,
+        fetch: (_) async => ++n < 3
+            ? senseParsePeerStatusResponse(503, '')
+            : _answer('{"online":true,"idle_disconnect_min":10}'),
+        wait: (d) async => waits.add(d));
+    expect(n, 3);
+    expect(waits, [SenseIdlePolicy.retryEvery, SenseIdlePolicy.retryEvery]);
+    expect(c.idleLimit, const Duration(minutes: 10));
+  });
+
+  test('no panel info for the computer: asked once', () async {
+    var n = 0;
+    await SenseIdlePolicy.load('1', c,
+        fetch: (_) async {
+          n++;
+          return senseParsePeerStatusResponse(404, '');
+        },
+        wait: (_) async {});
+    expect(n, 1);
+    expect(c.idleLimit, isNull);
+  });
+
+  test('a panel that never answers: at most 1 + retries reads', () async {
+    var n = 0;
+    await SenseIdlePolicy.load('1', c,
+        fetch: (_) async {
+          n++;
+          return senseParsePeerStatusResponse(500, '');
+        },
+        wait: (_) async {});
+    expect(n, SenseIdlePolicy.retries + 1);
+  });
+
   test('null: never triggers', () async {
     await SenseIdlePolicy.load('1', c,
         fetch: (_) async => _answer('{"online":true,"idle_disconnect_min":null}'));

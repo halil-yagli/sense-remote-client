@@ -2157,6 +2157,72 @@ pub mod sessions {
         SESSIONS.read().unwrap().get(&(peer_id, conn_type)).cloned()
     }
 
+    /// Sense Remote (O3): last mouse / keyboard input in any window of a connection (peer id).
+    /// Every window of the connection counts the idle time from it, so a display window that
+    /// gets no input is not cut while the other one is used.
+    static SENSE_ACTIVITY: std::sync::Mutex<Option<HashMap<String, std::time::Instant>>> =
+        std::sync::Mutex::new(None);
+
+    /// Sense Remote (O3): input in the window `id`.
+    pub fn sense_activity(id: &SessionID) {
+        let Some(session) = get_session_by_session_id(id) else {
+            return;
+        };
+        let peer = session.get_id();
+        let mut guard = SENSE_ACTIVITY.lock().unwrap_or_else(|e| e.into_inner());
+        let map = guard.get_or_insert_with(HashMap::new);
+        if map.len() > 64 {
+            map.retain(|_, t| t.elapsed() < std::time::Duration::from_secs(24 * 3600));
+        }
+        map.insert(peer, std::time::Instant::now());
+    }
+
+    /// Sense Remote (O3): ms since the last input in any window of the connection; -1 = none yet.
+    pub fn sense_idle_ms(id: &SessionID) -> i64 {
+        let Some(session) = get_session_by_session_id(id) else {
+            return -1;
+        };
+        let guard = SENSE_ACTIVITY.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .as_ref()
+            .and_then(|map| map.get(&session.get_id()))
+            .map(|t| t.elapsed().as_millis() as i64)
+            .unwrap_or(-1)
+    }
+
+    /// Sense Remote (O2): the end of the session in the window `id` ("Bağlantıyı bitir") ends the
+    /// connection in every window that shows it ("Tüm ekranlarımı kullan", a display in its own
+    /// window). The other windows get `sense_ended_here` and close themselves; the connection
+    /// is closed at once, not when the last window goes. The window `id` closes as before.
+    pub fn sense_end_all(id: &SessionID) {
+        let Some(session) = get_session_by_session_id(id) else {
+            return;
+        };
+        let others = session
+            .ui_handler
+            .session_handlers
+            .read()
+            .unwrap()
+            .keys()
+            .filter(|sid| *sid != id)
+            .count();
+        log::info!("Sense Remote: connection ended by the user, {others} other window(s) close");
+        if others > 0 {
+            session.ui_handler.push_event(
+                "msgbox",
+                &[
+                    ("type", "error"),
+                    ("title", "Connection Error"),
+                    ("text", crate::sense::link_quality::ENDED_HERE),
+                    ("link", ""),
+                    ("hasRetry", ""),
+                ],
+                &[id],
+            );
+        }
+        session.close();
+    }
+
     #[inline]
     pub fn remove_session_by_session_id(id: &SessionID) -> Option<FlutterSession> {
         let mut remove_peer_key = None;

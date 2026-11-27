@@ -1063,12 +1063,14 @@ impl Client {
                                 }
                             }
                             log::info!("{} Hole Punched {} = {}", punch_type, peer, peer_addr);
-                            // Sense Remote (#103): the punch worked (`lan` when the peer is local).
+                            // Sense Remote (#103, #121): the ID server answered with the peer's
+                            // address (`lan` when the peer is local). Not yet a connection: the
+                            // direct attempt's outcome is the `conn/direct` event (`connect`).
                             crate::sense::diag::kinds::conn_punch(
                                 i as u32,
                                 &punch_type.to_lowercase(),
                                 if is_local { "lan" } else { "wan" },
-                                "basarili",
+                                "adres_alindi",
                                 start.elapsed().as_millis() as u64,
                             );
                             break 'punch_attempts;
@@ -1480,7 +1482,9 @@ impl Client {
         let mut connect_timeout = 0;
         const MIN: u64 = 1000;
         if is_local || peer_nat_type == NatType::SYMMETRIC {
-            connect_timeout = MIN;
+            // Sense Remote (#121): at least 3 s toward a computer on the same network (and a
+            // second TCP try below) before the relay.
+            connect_timeout = crate::sense::link_quality::direct_timeout_ms(is_local, MIN);
         } else {
             if relay_server.is_empty() {
                 connect_timeout = CONNECT_TIMEOUT;
@@ -1515,11 +1519,26 @@ impl Client {
         // always direct; WebRTC is direct only when ICE nominated a non-TURN pair.
         let mut direct_futures = Vec::new();
         if allow_tcp_punch {
-            let fut = connect_tcp_local(peer, Some(local_addr), connect_timeout);
+            // Sense Remote (#121): a peer on the same network gets a second try after a short
+            // pause (`link_quality::direct_tcp_attempts`); any other peer the stock single try.
+            let attempts = crate::sense::link_quality::direct_tcp_attempts(is_local, connect_timeout);
             direct_futures.push(
                 async move {
-                    let conn = fut.await?;
-                    Ok((conn, None, "TCP", true))
+                    let mut last_err = None;
+                    for (n, ms) in attempts.into_iter().enumerate() {
+                        if n > 0 {
+                            tokio::time::sleep(Duration::from_millis(
+                                crate::sense::link_quality::LAN_DIRECT_PAUSE_MS,
+                            ))
+                            .await;
+                            log::info!("Sense Remote: second direct try to the local peer");
+                        }
+                        match connect_tcp_local(peer, Some(local_addr), ms).await {
+                            Ok(conn) => return Ok((conn, None, "TCP", true)),
+                            Err(e) => last_err = Some(e),
+                        }
+                    }
+                    Err(last_err.unwrap_or_else(|| anyhow!("no direct try")))
                 }
                 .boxed(),
             );
@@ -1583,6 +1602,22 @@ impl Client {
             (None, false) => select_ok(direct_futures).await.map(|c| c.0),
             (None, true) => Err(anyhow!("No direct transport available")),
         };
+        // Sense Remote (#121): the direct attempt's outcome for the record (`conn/punch` only
+        // says the address came).
+        {
+            let err = direct_result.as_ref().err().map(|e| e.to_string());
+            crate::sense::diag::event(
+                "conn",
+                "direct",
+                serde_json::json!({
+                    "hedef": if is_local { "lan" } else { "wan" },
+                    "sure_ms": connect_timeout,
+                    "ms": start.elapsed().as_millis() as u64,
+                    "sonuc": crate::sense::link_quality::direct_result_name(err.as_deref()),
+                    "hata": err,
+                }),
+            );
+        }
         let (mut conn, kcp, mut typ, mut direct) = match direct_result {
             Ok((conn, kcp, typ, direct)) => (Ok(conn), kcp, typ, direct),
             Err(e) => (Err(e), None, "", false),
@@ -2712,6 +2747,8 @@ pub struct VideoHandler {
     sense_skipped: u32,
     sense_key_request: bool,
     sense_last_key_request: Option<std::time::Instant>,
+    // Sense Remote (#121): when the current wait for a key frame began.
+    sense_wait_since: Option<std::time::Instant>,
     // Sense Remote (#136): the recorder's last start / failure, for the video thread to report.
     sense_record_event: Option<scrap::record_sense::SenseRecordEvent>,
 }
@@ -2752,6 +2789,7 @@ impl VideoHandler {
             sense_skipped: 0,
             sense_key_request: false,
             sense_last_key_request: None,
+            sense_wait_since: Some(std::time::Instant::now()),
             sense_record_event: None,
         }
     }
@@ -2787,6 +2825,31 @@ impl VideoHandler {
         }
     }
 
+    /// Sense Remote (#121): no frame came for [`VIDEO_TICK_MS`]; a decoder still waiting for a
+    /// key frame asks again without waiting for the next delta frame (a new display on a still
+    /// screen stayed frozen for ~30 s). True = send the request now.
+    ///
+    /// [`VIDEO_TICK_MS`]: crate::sense::link_quality::VIDEO_TICK_MS
+    pub fn sense_idle_tick(&mut self) -> bool {
+        if !self.sense_wait_key {
+            return false;
+        }
+        let Some(since) = self.sense_wait_since else {
+            return false;
+        };
+        let waited = since.elapsed().as_millis() as u64;
+        let since_last = self
+            .sense_last_key_request
+            .map(|t| t.elapsed().as_millis() as u64);
+        if !crate::sense::link_quality::key_wait_tick_due(waited, since_last) {
+            return false;
+        }
+        self.sense_last_key_request = Some(std::time::Instant::now());
+        self.sense_key_request = false;
+        crate::sense::diag::kinds::keyframe_req("bekleme_suresi", self._display);
+        true
+    }
+
     /// Sense Remote (#100): a pending key frame request, cleared on read.
     pub fn take_key_request(&mut self) -> bool {
         std::mem::take(&mut self.sense_key_request)
@@ -2815,8 +2878,12 @@ impl VideoHandler {
         // Sense Remote (#100): a fresh decoder starts at a key frame; delta frames of the old
         // stream would fail and get the codec marked unsupported (see `key_gate`).
         {
-            use crate::sense::link_quality::{key_gate, KeyGate};
-            match key_gate(self.sense_wait_key, Self::sense_is_key(&vf), self.sense_skipped) {
+            use crate::sense::link_quality::{key_gate_timed, KeyGate};
+            // Sense Remote (#121): the wait is bounded by time too.
+            let waited = self
+                .sense_wait_since
+                .map(|t| t.elapsed().as_millis() as u64);
+            match key_gate_timed(self.sense_wait_key, Self::sense_is_key(&vf), self.sense_skipped, waited) {
                 KeyGate::Skip => {
                     self.sense_skipped += 1;
                     // Still waiting after the first request: ask again (throttled).
@@ -2845,6 +2912,7 @@ impl VideoHandler {
                     }
                     self.sense_wait_key = false;
                     self.sense_skipped = 0;
+                    self.sense_wait_since = None;
                 }
             }
         }
@@ -2889,6 +2957,7 @@ impl VideoHandler {
                         }
                         self.sense_wait_key = true;
                         self.sense_skipped = 0;
+                        self.sense_wait_since = Some(std::time::Instant::now());
                     }
                 }
                 self.first_frame = false;
@@ -2929,6 +2998,7 @@ impl VideoHandler {
         // Sense Remote (#100): the new decoder starts at a key frame.
         self.sense_wait_key = true;
         self.sense_skipped = 0;
+        self.sense_wait_since = Some(std::time::Instant::now()); // Sense Remote (#121)
     }
 
     /// Start or stop screen record.
@@ -4205,17 +4275,35 @@ pub fn start_video_thread<F, T>(
     let mut video_callback = video_callback;
     let mut last_chroma = None;
     let is_view_camera = session.is_view_camera();
+    // Sense Remote (O12): the decoder's events belong to the session of the connection thread.
+    let sense_session = crate::sense::diag::thread_session();
 
     std::thread::spawn(move || {
+        crate::sense::diag::set_thread_session(sense_session.as_deref());
         #[cfg(windows)]
         sync_cpu_usage();
         get_hwcodec_config();
-        let mut video_handler = None;
+        let mut video_handler: Option<VideoHandler> = None;
         let mut count = 0;
         let mut duration = std::time::Duration::ZERO;
         let mut skip_beginning = 0;
         loop {
-            if let Ok(data) = video_receiver.recv() {
+            // Sense Remote (#121): wake up while no frame comes, so a decoder waiting for a key
+            // frame asks again (`VideoHandler::sense_idle_tick`).
+            let received = match video_receiver.recv_timeout(Duration::from_millis(
+                crate::sense::link_quality::VIDEO_TICK_MS,
+            )) {
+                Err(RecvTimeoutError::Timeout) => {
+                    if let Some(handler) = video_handler.as_mut() {
+                        if handler.sense_idle_tick() {
+                            session.refresh_video(display as _);
+                        }
+                    }
+                    continue;
+                }
+                other => other,
+            };
+            if let Ok(data) = received {
                 match data {
                     MediaData::VideoFrame(_) | MediaData::VideoQueue => {
                         let vf = match data {

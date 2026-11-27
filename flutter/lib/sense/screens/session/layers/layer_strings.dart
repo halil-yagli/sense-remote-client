@@ -23,8 +23,10 @@ abstract final class SenseLayerStrings {
   static String percent(double v) => sensePctDecimal(v);
   static String fps(int v) => '$v fps';
   static const String betterPath = 'Daha iyi yol aranıyor (doğrudan / aktarma)…';
-  static String reconnecting(int attempt, int closeIn) =>
-      'Yeniden bağlanılıyor · $attempt. deneme · $closeIn sn sonra oturum kapanır';
+  /// Sürüm 11 (O1): [attempt] is a real reconnect attempt (0 = the first one is on its way).
+  static String reconnecting(int attempt, int closeIn) => attempt < 1
+      ? 'Yeniden bağlanılıyor · $closeIn sn sonra oturum kapanır'
+      : 'Yeniden bağlanılıyor · $attempt. deneme · $closeIn sn sonra oturum kapanır';
   static String recovering(int seconds) => 'Bağlantı toparlandı · $seconds sn iyi kalırsa kapanır';
   static const String recovered = 'Bağlantı düzeldi';
   static const String endConnection = 'Bağlantıyı bitir';
@@ -47,6 +49,8 @@ abstract final class SenseLayerStrings {
   static const String reasonHost = 'Sahadaki kişi bağlantıyı bitirdi';
   static String reasonIdle(int minutes) => '$minutes dk hareketsiz kaldığı için kapandı';
   static const String reasonGone = 'Uzak bilgisayar kapandı ya da ağdan çıktı';
+  /// Sürüm 11 (O7): instead of RustDesk's "Login Error · sense_busy".
+  static const String reasonBusy = 'Meşgul — şu an başka biri bağlı';
   static const String duration = 'süre';
   static String durationValue(Duration d) {
     final m = d.inMinutes;
@@ -66,6 +70,15 @@ abstract final class SenseLayerStrings {
   static const String reconnect = 'Yeniden bağlan';
   static const String reconnecting2 = 'Bağlanıyor…';
   static const String busy = 'Meşgul';
+  /// Sürüm 11 (O7): "Yeniden bağlan" got no answer in time.
+  static const String reconnectFailed = 'Bağlanılamadı';
+
+  // Sürüm 11 (#121): logged in, no picture yet (instead of a black screen).
+  static const String waitingTitle = 'Görüntü bekleniyor';
+  static const String waitingRelay = 'Aktarma sunucusu üzerinden; yavaş olabilir';
+  static const String waitingDirect = 'Doğrudan bağlantı';
+  static const String waitingUnknown = 'Bağlantı türü ölçülüyor';
+  static const String waitingStatus = 'Uzak bilgisayardan ilk görüntü isteniyor…';
 
   // O15 — idle warning.
   static const String idlePrefix = 'Bağlantı hareketsiz · ';

@@ -38,13 +38,27 @@ abstract final class SenseLinkTiming {
   /// A stall shorter than this is ordinary jitter (D1 `PROBE_SLACK_MS`).
   static const Duration probeSlack = Duration(milliseconds: 300);
 
-  /// Prototype: one reconnect attempt is counted every 4 s of the outage.
-  static const Duration attemptEvery = Duration(seconds: 4);
+  /// Sürüm 11 (O1): the first real reconnect attempt this long after the transport was lost;
+  /// then 2, 4, 8 s apart, never more than [retryMaxGap] ([SenseRetryPlan]).
+  static const Duration retryFirst = Duration(seconds: 1);
+  static const Duration retryMaxGap = Duration(seconds: 8);
+
+  /// Sürüm 11 (O1): neither frame nor delay measurement this long on a link that was up: the
+  /// transport is lost (a TCP connection reports nothing by itself; KCP says so at 8 s).
+  static const Duration lostAfter = Duration(seconds: 10);
+
+  /// Sürüm 11 (#121): logged in and no picture this long: "Görüntü bekleniyor" instead of a
+  /// black screen (the core asks for a key frame at 3 s and connects again at 8 s).
+  static const Duration noImageAfter = Duration(seconds: 3);
 }
 
 /// O14 timing (YH O14 "5 sn sonra kendiliğinden ana ekrana").
 abstract final class SenseEndTiming {
   static const Duration backHome = Duration(seconds: 5);
+
+  /// Sürüm 11 (O7): "Yeniden bağlan" that brought no answer in this long gives the buttons
+  /// back ("Bağlanılamadı") instead of spinning forever.
+  static const Duration reconnectTimeout = Duration(seconds: 20);
 }
 
 /// O15 timing (YH O15 "Kesilmeden 1 dk önce").
