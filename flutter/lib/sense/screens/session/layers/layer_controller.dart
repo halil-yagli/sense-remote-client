@@ -23,6 +23,7 @@ class SenseLinkRaw {
     this.lastFrameAt,
     this.probeAt,
     this.direct,
+    this.speed,
   });
 
   final String? delay;
@@ -35,6 +36,9 @@ class SenseLinkRaw {
   /// Sürüm 10 (#110): true = direct, false = through the relay, null = not known yet
   /// (the good-link card shows the connection type).
   final bool? direct;
+
+  /// RustDesk `speed` ("123.45kB/s"): with a good link, little data means a still screen (K44).
+  final String? speed;
 }
 
 /// What the layers need from the RustDesk session.
@@ -221,6 +225,7 @@ class SenseLayerController extends ChangeNotifier {
         lastFrameAt: raw.lastFrameAt,
         probeAt: raw.probeAt,
         watchingSince: _watchingSince,
+        speed: raw.speed,
       ),
     );
     _trackDismissal(now, view.phase);

@@ -3116,6 +3116,8 @@ impl<T: InvokeUiSession> Remote<T> {
             let lc = self.handler.lc.read().unwrap();
             (lc.id.clone(), lc.sense_peer_name())
         };
+        // K48: one folder per session, not per peer (two windows of one peer, #97).
+        let sense_id = crate::client::sense_record_key(&self.handler, &sense_id);
         if start {
             scrap::record::sense_begin_session(&sense_id, &sense_name);
         }

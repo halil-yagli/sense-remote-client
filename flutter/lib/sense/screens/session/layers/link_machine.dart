@@ -13,6 +13,7 @@
 //
 // A short shake shows no layer; the top bar says "Dalgalı" ([SenseLinkView.wavy]).
 import '../../../tokens/sense_tokens.dart';
+import '../data/screen_still.dart';
 import 'layer_spec.dart';
 
 /// What the link looks like at one moment. Null = not known (not measured yet).
@@ -23,6 +24,7 @@ class SenseLinkSample {
     this.fps,
     this.frameAge,
     this.probeAge,
+    this.bandwidthMbit,
   });
 
   /// Round trip of the last delay probe.
@@ -39,6 +41,9 @@ class SenseLinkSample {
 
   /// Time since the last delay probe from the Host arrived.
   final Duration? probeAge;
+
+  /// Picture data in Mbit/s (RustDesk `speed`). Null: not measured.
+  final double? bandwidthMbit;
 
   /// How long the link has been stalled: no picture *and* no probe. A still screen
   /// sends no frame but the probes keep coming, so frames alone never mean "lost"
@@ -63,11 +68,26 @@ class SenseLinkSample {
   /// tile is still coloured by the limit.
   bool get valuesBad => _atLeastWarn(latencyLevel) || _atLeastWarn(lossLevel);
 
+  /// A low frame rate on a screen that is not changing (Sürüm 10 #118, denetim K44): the same
+  /// rule as Ekran bilgisi ([senseStillScreen]) — good link and hardly any picture data or an
+  /// old last frame.
+  bool get still => senseStillScreen(
+        fps: fps,
+        rttMs: rttMs,
+        lossPct: lossPct,
+        mbit: bandwidthMbit,
+        frameAgeMs: frameAge?.inMilliseconds,
+      );
+
+  /// Frame-rate level as shown on the card's tile: a still screen is not a warning (K44).
+  SenseLevel get fpsShownLevel => still ? SenseLevel.ok : fpsLevel;
+
   /// Frame rate under the weak card's limit. 0 fps is a still screen (D1: no frame is
-  /// sent while probes keep coming) and does not count.
+  /// sent while probes keep coming) and does not count; neither does a low rate on a still
+  /// screen ([still], K44). The karar #94 limits themselves are unchanged.
   bool get fpsWeak {
     final f = fps;
-    return f != null && f > 0 && f < SenseLinkTiming.weakFpsBelow;
+    return f != null && f > 0 && f < SenseLinkTiming.weakFpsBelow && !still;
   }
 
   static bool _atLeastWarn(SenseLevel l) => l == SenseLevel.warn || l == SenseLevel.hot;

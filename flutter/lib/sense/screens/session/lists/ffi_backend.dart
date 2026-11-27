@@ -526,7 +526,9 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   /// Sürüm 10 (#116): on → spread at once through RustDesk's own layout path (display 1
   /// full screen here, the others in their own windows on the other monitors). Off → the
   /// extra windows are separate RustDesk windows this session cannot close, so the change
-  /// waits for the next connection and the row says so. "Her ekranı ayrı pencerede aç"
+  /// waits for the next connection and the row says so. On where this session cannot spread
+  /// (single screen on either side) only stores the choice, with no hint (K49).
+  /// "Her ekranı ayrı pencerede aç"
   /// (#97) is not touched.
   @override
   void setUseAllMyDisplays(bool v) {
@@ -545,7 +547,10 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
         }
       }));
     } else {
-      _allMinePending = true;
+      // Off after spreading: the extra windows go at the next connection. On while this
+      // session cannot spread (one remote display, one local monitor or no multi-display
+      // support): no connection would change that, so no "yeni bağlantıda geçerli" (K49).
+      _allMinePending = !v;
     }
     _notify();
   }

@@ -9,6 +9,9 @@ import 'package:flutter/foundation.dart';
 import '../../../../../consts.dart' show kAllDisplayValue;
 import '../../../../../models/model.dart' show FFI;
 import '../../../../../models/platform_model.dart' show bind;
+import '../../data/screen_still.dart' show senseParseSpeedMbit;
+
+export '../../data/screen_still.dart' show senseParseSpeedMbit;
 
 /// Geometry of one remote display as RustDesk knows it.
 @immutable
@@ -66,18 +69,6 @@ class SenseSessionVideo {
   final int watched;
 
   bool get watchingAll => watched == kAllDisplayValue;
-}
-
-/// "123.45kB/s" (RustDesk: kB = 1024 bytes) → megabit per second.
-double? senseParseSpeedMbit(String? speed) {
-  if (speed == null) return null;
-  final m = RegExp(r'^\s*([0-9]+(?:\.[0-9]+)?)\s*([kKmM]?)B/s\s*$').firstMatch(speed);
-  if (m == null) return null;
-  final v = double.tryParse(m.group(1)!);
-  if (v == null) return null;
-  final unit = m.group(2)!.toLowerCase();
-  final bytes = unit == 'k' ? v * 1024 : (unit == 'm' ? v * 1024 * 1024 : v);
-  return bytes * 8 / 1e6;
 }
 
 double? _num(String? s) {

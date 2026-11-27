@@ -29,6 +29,7 @@ class SenseFfiLayerHost implements SenseLayerHost {
       lastFrameAt: d.lastFrameAt,
       probeAt: d.probeAt,
       direct: _direct(),
+      speed: d.speed,
     );
   }
 

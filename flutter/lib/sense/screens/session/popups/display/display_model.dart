@@ -5,18 +5,19 @@
 // YCbCr 4:2:2 / 4:2:0 signal, a slow frame rate (T6) and latency (O9: 80 / 150 ms).
 import '../../../../tokens/sense_tokens.dart';
 import '../../data/peer_status.dart';
+import '../../data/screen_still.dart';
 import '../status/status_format.dart';
 import '../status/status_model.dart';
 import '../status/status_strings.dart';
 import 'display_data.dart';
 
+export '../../data/screen_still.dart'
+    show kSenseSessionLatency, kSenseStillMaxMbit, kSenseStillFrameAgeMs, kSenseStillMaxLossPct;
+
 typedef _D = SenseDisplayStrings;
 
-/// O9 latency colours: 80 ms orange, 150 ms red. YH O9 and the prototype note
-/// say 80 / 150; YH T6 (tokens `latency`) says 150 / 300 for the connection in
-/// general. The popup follows O9; see the C2 report (tokens have no 80 / 150 yet).
-const SenseThreshold kSenseSessionLatency =
-    SenseThreshold(warn: 80, hot: 150, direction: SenseThresholdDirection.above, unit: 'ms');
+// kSenseSessionLatency and the still-screen limits live in ../../data/screen_still.dart
+// (one rule for Ekran bilgisi, the link layer and the link card; denetim K44).
 
 class SenseDisplayView {
   const SenseDisplayView({
@@ -84,27 +85,15 @@ String? _join(Iterable<String?> parts, [String sep = ' · ']) {
   return p.isEmpty ? null : p.join(sep);
 }
 
-/// Sürüm 10 (#118): RustDesk sends a frame only when the picture changed, so a low frame rate on
-/// a screen that is not changing is normal, not a problem. The frame-rate warning is meant for a
-/// changing screen whose frames do not get through. The screen counts as still when the rate is
-/// under the warning line, the link itself is fine (latency under the O9 orange line, loss
-/// estimate under [kSenseStillMaxLossPct]) and either hardly any picture data comes (under
-/// [kSenseStillMaxMbit]) or the last frame is older than [kSenseStillFrameAgeMs].
-const double kSenseStillMaxMbit = 1.0;
-const int kSenseStillFrameAgeMs = 1000;
-const double kSenseStillMaxLossPct = 2.0;
-
-bool senseScreenStill(SenseSessionVideo video) {
-  final fps = video.fps;
-  if (fps == null || SenseThresholds.frameRate.levelOf(fps) == SenseLevel.ok) return false;
-  final rtt = video.rttMs;
-  if (rtt != null && kSenseSessionLatency.levelOf(rtt) != SenseLevel.ok) return false;
-  final loss = video.lossEstPct;
-  if (loss != null && loss >= kSenseStillMaxLossPct) return false;
-  final mbit = video.bandwidthMbit;
-  final age = video.frameAgeMs;
-  return (mbit != null && mbit < kSenseStillMaxMbit) || (age != null && age >= kSenseStillFrameAgeMs);
-}
+/// Sürüm 10 (#118): a low frame rate on a still screen is normal (RustDesk sends a frame only
+/// when the picture changed). The rule itself is [senseStillScreen] (K44: one rule everywhere).
+bool senseScreenStill(SenseSessionVideo video) => senseStillScreen(
+      fps: video.fps,
+      rttMs: video.rttMs,
+      lossPct: video.lossEstPct,
+      mbit: video.bandwidthMbit,
+      frameAgeMs: video.frameAgeMs,
+    );
 
 /// The refresh rate most displays use (ties: the primary display's).
 double? _commonHz(List<SensePeerDisplay> ds) {

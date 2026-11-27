@@ -274,7 +274,7 @@ class SenseLinkLayer extends StatelessWidget {
         SenseStatTile(
           label: SenseLayerStrings.frames,
           value: s.fps == null ? null : SenseLayerStrings.fps(s.fps!.round()),
-          level: s.fps == null ? null : s.fpsLevel,
+          level: s.fps == null ? null : s.fpsShownLevel,
           large: true,
         ),
       ];
@@ -360,7 +360,7 @@ class SenseLinkInfoLayer extends StatelessWidget {
       SenseStatTile(
         label: SenseLayerStrings.frames,
         value: s.fps == null ? null : SenseLayerStrings.fps(s.fps!.round()),
-        level: s.fps == null ? null : s.fpsLevel,
+        level: s.fps == null ? null : s.fpsShownLevel,
         large: true,
       ),
     ];

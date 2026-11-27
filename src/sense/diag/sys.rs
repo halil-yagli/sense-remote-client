@@ -8,7 +8,7 @@ use hbb_common::sysinfo::{System, MINIMUM_CPU_UPDATE_INTERVAL};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
-/// Hardware read once per run from the inventory (blocking, seconds; Windows / macOS only).
+/// Hardware from the health data's inventory, once it is there (Windows / macOS only).
 static HARDWARE: Mutex<Option<Value>> = Mutex::new(None);
 
 /// The hardware part of `sys/info` from an inventory (pure).
@@ -40,38 +40,39 @@ pub fn hardware_fields(inventory: &Inventory) -> Value {
     })
 }
 
-#[cfg(windows)]
-fn read_inventory() -> Option<Inventory> {
-    crate::sense::inventory_win::collect()
+/// Pure: the hardware value to store now, if any. `None` = keep what is there (already known, or
+/// no inventory yet: asked again on the next tick, never stored as empty for good).
+fn hardware_to_store(known: bool, snapshot: Option<&Inventory>) -> Option<Value> {
+    if known {
+        return None;
+    }
+    snapshot.map(hardware_fields)
 }
 
-#[cfg(target_os = "macos")]
-fn read_inventory() -> Option<Inventory> {
-    crate::sense::inventory_mac::collect()
-}
-
-#[cfg(not(any(windows, target_os = "macos")))]
-fn read_inventory() -> Option<Inventory> {
-    None
-}
-
-/// Reads the hardware once (blocking; the ticker thread) and records `sys/info` with it.
+/// Takes the hardware from the health data's inventory and records `sys/info` with it once it is
+/// there. Called by the ticker every 30 s from the second minute; never blocks.
 ///
-/// Sense Remote (Sürüm 10, #117): the inventory the health data already read is used; only when
-/// there is none yet (panel without `health_v2`, first reading not done) is it read here, and
-/// then one script at a time with the health reader (`inventory_win::SCRIPT_LOCK`). Before, this
-/// was a second full reading in the same process that slowed the health reading past its limit.
-pub fn read_hardware_once() {
-    let known = HARDWARE.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+/// Sense Remote (Sürüm 10, #117; denetim K45): the inventory is read by one reader only, the
+/// health data (`health_v2`, background thread, its own time limits and retry). When there is
+/// none yet, the reading is asked for (`health_v2::request_inventory`, also without the panel's
+/// `health_v2`) and the next tick looks again. Before, the ticker read the inventory itself a
+/// second time (up to 90 s blocked) and a failed reading left the hardware empty for good.
+pub fn refresh_hardware() {
+    let known = matches!(
+        *HARDWARE.lock().unwrap_or_else(|e| e.into_inner()),
+        Some(Value::Object(_))
+    );
     if known {
         return;
     }
-    let value = crate::sense::health_v2::inventory_snapshot()
-        .or_else(read_inventory)
-        .map(|inv| hardware_fields(&inv))
-        .unwrap_or(Value::Null);
-    *HARDWARE.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
-    emit_info();
+    let snapshot = crate::sense::health_v2::inventory_snapshot();
+    match hardware_to_store(known, snapshot.as_ref()) {
+        Some(value) => {
+            *HARDWARE.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
+            emit_info();
+        }
+        None => crate::sense::health_v2::request_inventory(),
+    }
 }
 
 fn os_text(system: &System) -> String {
@@ -199,6 +200,23 @@ mod tests {
         assert_eq!(v["os_ad"], "Windows 11 Pro");
         let text = v.to_string();
         assert!(!text.contains("SENSE-SLAYER") && !text.contains("ABC123"), "{text}");
+    }
+
+    #[test]
+    fn hardware_waits_for_the_inventory_and_is_never_stored_empty() {
+        // K45: no inventory yet -> nothing stored (asked again next tick).
+        assert_eq!(hardware_to_store(false, None), None);
+        let inventory = Inventory {
+            cpu: Some(CpuInfo {
+                model: Some("Apple M2".to_owned()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let v = hardware_to_store(false, Some(&inventory)).unwrap();
+        assert_eq!(v["cpu"], "Apple M2");
+        // Known once: not replaced.
+        assert_eq!(hardware_to_store(true, Some(&inventory)), None);
     }
 
     #[test]

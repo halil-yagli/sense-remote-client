@@ -78,6 +78,22 @@ void main() {
       expect(c.ended, isNull);
     });
 
+    test('fps 2 on a still screen (good link, little data): no card (K44, #118)', () {
+      void stillLow() => host.raw = SenseLinkRaw(
+            delay: '5',
+            fps: '2',
+            lossEst: 0,
+            lastFrameMs: 10,
+            lastFrameAt: clock.wall,
+            probeAt: clock.wall,
+            speed: '20kB/s',
+          );
+      seconds(30, stillLow);
+      expect(c.link.layerUp, isFalse);
+      expect(c.link.sample.still, isTrue);
+      expect(c.ended, isNull);
+    });
+
     test('delay 900 ms with fps 20: no card', () {
       seconds(90, host.highDelay);
       expect(c.link.layerUp, isFalse);

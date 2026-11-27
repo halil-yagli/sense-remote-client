@@ -116,14 +116,17 @@ void main() {
       expect(b.calls.where((c) => c == 'spreadDisplays').length, 1, reason: 'already spread');
     });
 
-    test('cannot spread now: the row says "yeni bağlantıda geçerli"', () {
+    test('K49: single screen (cannot spread): stored, but no "yeni bağlantıda geçerli"', () {
       final b = FakeBackend()..canSpread = false;
       allMine(b).onChanged!(true);
+      expect(b.useAllMyDisplays, isTrue, reason: 'the choice is kept');
       expect(b.calls, isNot(contains('spreadDisplays')));
-      expect(b.useAllMyDisplaysPending, isTrue);
-      expect(allMine(b).hint, 'yeni bağlantıda geçerli');
+      expect(b.useAllMyDisplaysPending, isFalse, reason: 'no connection would change it');
+      expect(allMine(b).hint, isNull);
+      expect(allMine(b).toastAfterChange!(), isNull);
       allMine(b).onChanged!(false);
       expect(b.useAllMyDisplaysPending, isFalse, reason: 'back to what this session has');
+      expect(allMine(b).hint, isNull);
     });
 
     test('K20: the switch changes only its own row; separate windows (#97) stay off', () {
@@ -148,7 +151,8 @@ void main() {
 
     testWidgets('on screen: hint in the row and the toast', (tester) async {
       setWindow(tester, const Size(1440, 900));
-      final b = FakeBackend()..canSpread = false;
+      // Spread at connect; turning it off waits for the next connection (K49: the only case).
+      final b = FakeBackend()..useAllMyDisplays = true;
       await tester.pumpWidget(frameApp(b));
       await tester.tap(_menu(SenseBarMenu.screens));
       await tester.pump();

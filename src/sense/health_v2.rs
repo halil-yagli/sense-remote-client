@@ -74,6 +74,14 @@ pub fn set_panel_caps(caps: Option<&[String]>) {
     }
 }
 
+/// Sense Remote (Sürüm 10, denetim K45): the event record's hardware (`diag::sys`) asks for the
+/// inventory without reading it itself. Starts the background reading when it is due (also
+/// without the panel's `health_v2`: the reading is only kept here then, not sent in sysinfo).
+/// Never blocks; a failed reading is retried after `INVENTORY_RETRY`.
+pub fn request_inventory() {
+    start_inventory_if_due();
+}
+
 fn start_inventory_if_due() {
     if !SUPPORTED {
         return;
