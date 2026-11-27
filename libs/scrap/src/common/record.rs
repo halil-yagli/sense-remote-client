@@ -36,7 +36,9 @@ fn sanitize_filename_component(value: &str) -> String {
 
 // Sense Remote (#114): one recording = one folder (`<computer name>_<date>_<time>`) holding the
 // per-display files. The folder name is made once when recording starts and shared by every
-// display's recorder of that session (key = peer id), then dropped when recording stops.
+// display's recorder of that session (key = `sense_record_key`: peer id + session, so two
+// windows of the same peer — #97, one per display — never share or drop each other's folder;
+// denetim K48), then dropped when recording stops.
 static SENSE_SESSIONS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 const SENSE_NAME_MAX: usize = 48;
@@ -72,6 +74,12 @@ pub fn sense_file_name(folder: &str, camera: bool, display_idx: usize, n: usize,
     let kind = if camera { "Kamera" } else { "Ekran" };
     let suffix = if n >= 2 { format!("_{n}") } else { String::new() };
     format!("{folder}_{kind}{}{suffix}.{ext}", display_idx + 1)
+}
+
+/// Key of one session's recording: the peer id plus the session instance (any number unique
+/// among the open sessions of this process, e.g. the address of the session's shared state).
+pub fn sense_record_key(peer_id: &str, instance: usize) -> String {
+    format!("{peer_id}#{instance:x}")
 }
 
 /// The folder of the recording that is running for `key`; made on first ask.
@@ -558,6 +566,24 @@ mod tests {
         assert_eq!(sense_session_folder("test-key-114", "PC"), a);
         assert_eq!(sense_end_session("test-key-114"), Some(a));
         assert_eq!(sense_end_session("test-key-114"), None);
+    }
+
+    // K48: two windows of the same peer (#97) record into their own folders; one stopping does
+    // not take the other's folder away.
+    #[test]
+    fn sense_two_sessions_of_one_peer_keep_their_folders() {
+        use super::{sense_begin_session, sense_end_session, sense_record_key, sense_session_folder};
+        let a = sense_record_key("test-peer-k48", 0x10);
+        let b = sense_record_key("test-peer-k48", 0x20);
+        assert_ne!(a, b);
+        let fa = sense_begin_session(&a, "PC");
+        let fb = sense_begin_session(&b, "PC");
+        // The second start does not reset the first one's folder.
+        assert_eq!(sense_session_folder(&a, "PC"), fa);
+        assert_eq!(sense_end_session(&b), Some(fb));
+        // The first recording keeps its folder after the second one stopped.
+        assert_eq!(sense_session_folder(&a, "PC"), fa);
+        assert_eq!(sense_end_session(&a), Some(fa));
     }
 
     #[test]

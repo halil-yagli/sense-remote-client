@@ -2927,11 +2927,13 @@ impl VideoHandler {
         peer_name: String,
         display_idx: usize,
         camera: bool,
+        sense_key: &str,
     ) {
         self.record = false;
         if start {
-            // Sense Remote (#114): every display of this recording goes to one folder.
-            let sense_folder = Some(scrap::record::sense_session_folder(&id, &peer_name));
+            // Sense Remote (#114): every display of this recording goes to one folder (one per
+            // session, K48: `sense_key` = peer id + session).
+            let sense_folder = Some(scrap::record::sense_session_folder(sense_key, &peer_name));
             self.recorder = Recorder::new(RecorderContext {
                 server: false,
                 id,
@@ -4162,6 +4164,14 @@ pub enum MediaData {
 
 pub type MediaSender = mpsc::Sender<MediaData>;
 
+/// Sense Remote (#114, denetim K48): key of this session's recording folder. The peer id alone is
+/// shared by two windows of the same peer (#97, one per display; the new window reuses the
+/// connection token and so the `lc.session_id`), so the session's own shared state (the `lc`
+/// every clone of this `Session` holds) tells them apart.
+pub fn sense_record_key<T: InvokeUiSession>(session: &Session<T>, id: &str) -> String {
+    scrap::record::sense_record_key(id, Arc::as_ptr(&session.lc) as *const () as usize)
+}
+
 /// Start video thread.
 ///
 /// # Arguments
@@ -4226,7 +4236,8 @@ pub fn start_video_thread<F, T>(
                             let id = session.lc.read().unwrap().id.clone();
                             let peer_name = session.lc.read().unwrap().sense_peer_name(); // Sense Remote (#114)
                             if record_state && record_permission {
-                                handler.record_screen(true, id, peer_name, display, is_view_camera);
+                                let key = sense_record_key(&session, &id); // Sense Remote (K48)
+                                handler.record_screen(true, id, peer_name, display, is_view_camera, &key);
                             }
                             video_handler = Some(handler);
                         }
@@ -4313,8 +4324,9 @@ pub fn start_video_thread<F, T>(
                     MediaData::RecordScreen(start) => {
                         let id = session.lc.read().unwrap().id.clone();
                         let peer_name = session.lc.read().unwrap().sense_peer_name(); // Sense Remote (#114)
+                        let key = sense_record_key(&session, &id); // Sense Remote (K48)
                         if let Some(handler) = video_handler.as_mut() {
-                            handler.record_screen(start, id, peer_name, display, is_view_camera);
+                            handler.record_screen(start, id, peer_name, display, is_view_camera, &key);
                         }
                     }
                     _ => {}
