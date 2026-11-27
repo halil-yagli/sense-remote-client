@@ -55,6 +55,21 @@ abstract final class SenseSessionStrings {
   static const String connecting = 'Bağlanıyor…';
   static const String linkDetail = 'Bağlantı ayrıntısı';
   static String fps(int v) => '$v fps';
+
+  // Frame rate wording (karar #152): one place for the bar hint and the connection card.
+  static String fpsHintMoving(int v, int? remoteHz) =>
+      remoteHz == null ? 'Kare hızı şu an $v fps' : 'Kare hızı şu an $v fps (karşı ekran $remoteHz Hz)';
+  static String fpsHintStill(int v) => 'Ekranda değişiklik yok. Son ölçülen kare hızı $v fps.';
+  static String fpsHintStillUnmeasured(int v) =>
+      'Ekranda değişiklik yok. Kare hızı henüz ölçülmedi; görüntü değişince en çok $v fps ile akar.';
+  static String fpsHintStalling(int v, int? secs) =>
+      secs == null || secs <= 0 ? 'Görüntü takılıyor: şu an $v fps geliyor' : "Görüntü takılıyor: son $secs sn'de $v fps geldi";
+  static String frameLine(int v, {bool still = false, bool stalling = false, int? remoteHz}) => [
+        'Kare hızı: $v fps',
+        if (still) 'ekran durağan',
+        if (stalling) 'takılıyor',
+        if (remoteHz != null) 'karşı ekran $remoteHz Hz',
+      ].join(' · ');
   static String ms(int v) => '$v ms';
 
   // Remote image scale (O1).

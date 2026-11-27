@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../../sense.dart';
 import 'data/session_hub.dart';
+import '../data/frame_rate.dart' show SenseFrameCap;
 import 'layer_controller.dart';
 import 'layer_strings.dart';
 import 'layer_spec.dart';
@@ -172,7 +173,12 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
     } else if (_c.infoOpen) {
       // Sürüm 10 (#110): the card opened from the logo area while the link is good.
       layer = (t) => SenseLinkInfoLayer(
-          view: link, direct: _c.direct, serverName: _c.serverName, onClose: _c.closeInfo, appear: t);
+          view: link,
+          direct: _c.direct,
+          serverName: _c.serverName,
+          frame: SenseFrameCap.of(widget.id).value,
+          onClose: _c.closeInfo,
+          appear: t);
     }
     return SenseToastHost(
       controller: _toast,

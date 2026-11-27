@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../../sense.dart';
 import '../../../strings/session.dart';
+import '../data/frame_rate.dart' show SenseFrameInfo;
 import 'layer_controller.dart';
 import 'layer_spec.dart';
 import 'layer_strings.dart';
@@ -323,6 +324,21 @@ class SenseLinkLayer extends StatelessWidget {
   }
 }
 
+/// Karar #152: the rate the good-link card shows and its line. A still screen (K44 rule,
+/// or 0 fps on a healthy link) shows the last rate measured while the picture moved, else
+/// the reachable one; a moving picture the rate drawn on this screen. Null: not measured.
+({int shown, String line})? senseCardFrame(SenseLinkSample s, SenseFrameInfo f) {
+  final fps = s.fps;
+  if (fps == null) return null;
+  final still = s.still || fps == 0;
+  final stalling = !still && s.fpsLevel != SenseLevel.ok;
+  final shown = still ? (f.recentFps ?? f.reachableFps ?? fps.round()) : (f.drawnFps ?? fps.round());
+  return (
+    shown: shown,
+    line: SenseSessionStrings.frameLine(shown, still: still, stalling: stalling, remoteHz: f.remoteHz),
+  );
+}
+
 /// Sürüm 10 (#110): the O13 card opened from the bar's logo / status area while the link is
 /// good — same layout (logo, title, three value boxes, limits line), with the current
 /// connection type and values; "×" or Kapat closes it, so does a click beside the card.
@@ -333,6 +349,7 @@ class SenseLinkInfoLayer extends StatelessWidget {
     required this.direct,
     required this.onClose,
     this.serverName,
+    this.frame = const SenseFrameInfo(),
     this.appear = 1,
   });
 
@@ -344,11 +361,15 @@ class SenseLinkInfoLayer extends StatelessWidget {
 
   /// Sürüm 11 (#144): ID server name for the `Sunucu:` line (null/empty = `Sunucu: —`).
   final String? serverName;
+
+  /// Karar #152: drawn / last measured / reachable rate and the Host's refresh rate.
+  final SenseFrameInfo frame;
   final double appear;
 
   @override
   Widget build(BuildContext context) {
     final s = view.sample;
+    final fr = senseCardFrame(s, frame);
     final tiles = [
       SenseStatTile(
         label: SenseLayerStrings.latency,
@@ -364,7 +385,7 @@ class SenseLinkInfoLayer extends StatelessWidget {
       ),
       SenseStatTile(
         label: SenseLayerStrings.frames,
-        value: s.fps == null ? null : SenseLayerStrings.fps(s.fps!.round()),
+        value: fr == null ? null : SenseLayerStrings.fps(fr.shown),
         level: s.fps == null ? null : s.fpsShownLevel,
         large: true,
       ),
@@ -408,6 +429,13 @@ class SenseLinkInfoLayer extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted),
               ),
+              if (fr != null)
+                Text(
+                  fr.line,
+                  key: const Key('sense-layer-info-frames'),
+                  textAlign: TextAlign.center,
+                  style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted),
+                ),
               _sub(path),
               _tiles(tiles),
               Text(

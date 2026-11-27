@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../strings/session.dart';
 import '../record_notice.dart';
+import 'screen_still.dart' show senseStillScreen;
 import '../../../tokens/sense_tokens.dart';
 
 /// The four lists of the bar (O3–O6).
@@ -57,6 +58,10 @@ class SenseLinkSample {
     this.lossPct,
     this.wavy,
     this.onRestoreLayer,
+    this.recentFps,
+    this.reachableFps,
+    this.remoteHz,
+    this.troubleSecs,
   });
 
   final SenseLinkPath path;
@@ -78,6 +83,18 @@ class SenseLinkSample {
   /// current values. Null where no connection layer runs (the area takes no click).
   final VoidCallback? onRestoreLayer;
 
+  /// Karar #152 (`frame_rate.dart`): [fps] is the rate drawn on this screen. A still
+  /// screen shows the best rate measured while the picture moved lately ([recentFps]),
+  /// before any movement the reachable rate ([reachableFps]), never 0.
+  final int? recentFps;
+  final int? reachableFps;
+
+  /// The watched Host display's refresh rate (Hz), when known.
+  final int? remoteHz;
+
+  /// How long the line has been showing trouble (seconds), for the hint.
+  final int? troubleSecs;
+
   SenseLinkSample copyWith({
     SenseLinkPath? path,
     int? fps,
@@ -86,6 +103,10 @@ class SenseLinkSample {
     double? lossPct,
     bool? wavy,
     VoidCallback? onRestoreLayer,
+    int? recentFps,
+    int? reachableFps,
+    int? remoteHz,
+    int? troubleSecs,
   }) =>
       SenseLinkSample(
         path: path ?? this.path,
@@ -95,6 +116,10 @@ class SenseLinkSample {
         lossPct: lossPct ?? this.lossPct,
         wavy: wavy ?? this.wavy,
         onRestoreLayer: onRestoreLayer ?? this.onRestoreLayer,
+        recentFps: recentFps ?? this.recentFps,
+        reachableFps: reachableFps ?? this.reachableFps,
+        remoteHz: remoteHz ?? this.remoteHz,
+        troubleSecs: troubleSecs ?? this.troubleSecs,
       );
 }
 
@@ -132,28 +157,89 @@ SenseLinkHealth senseLinkHealth(SenseLinkSample s) {
       : SenseLinkHealth.good;
 }
 
-/// The small line under the computer name and its colour.
-({String text, SenseLevel level}) senseLinkLine(SenseLinkSample s) {
+/// What the frame rate means right now (karar #152).
+enum SenseFrameState {
+  /// Frames come; the measured rate is shown.
+  moving,
+
+  /// Healthy link, no new frames because the picture does not change: the reachable rate.
+  still,
+
+  /// The line shows trouble and the rate is under the warning line: the real low value.
+  stalling,
+}
+
+SenseFrameState senseFrameState(SenseLinkSample s) {
+  final fps = s.fps;
+  if (fps == null) return SenseFrameState.moving;
+  final health = senseLinkHealth(s);
+  if (health == SenseLinkHealth.good &&
+      (fps == 0 ||
+          senseStillScreen(
+            fps: fps.toDouble(),
+            rttMs: s.rttMs?.toDouble(),
+            lossPct: s.lossPct,
+            frameAgeMs: s.lastFrameMs,
+          ))) {
+    return SenseFrameState.still;
+  }
+  if (health != SenseLinkHealth.good && SenseThresholds.frameRate.levelOf(fps.toDouble()) != SenseLevel.ok) {
+    return SenseFrameState.stalling;
+  }
+  return SenseFrameState.moving;
+}
+
+/// The rate the line shows: on a still screen the last measured moving rate (else the
+/// reachable one), otherwise the rate drawn now.
+int? senseShownFps(SenseLinkSample s) {
+  final fps = s.fps;
+  if (fps == null) return null;
+  return senseFrameState(s) == SenseFrameState.still ? (s.recentFps ?? s.reachableFps ?? fps) : fps;
+}
+
+/// The hover hint for the frame rate (null while nothing is measured).
+String? senseFpsHint(SenseLinkSample s) {
+  final shown = senseShownFps(s);
+  if (shown == null) return null;
+  return switch (senseFrameState(s)) {
+    SenseFrameState.still => s.recentFps != null
+        ? SenseSessionStrings.fpsHintStill(shown)
+        : SenseSessionStrings.fpsHintStillUnmeasured(shown),
+    SenseFrameState.stalling => SenseSessionStrings.fpsHintStalling(shown, s.troubleSecs),
+    SenseFrameState.moving => SenseSessionStrings.fpsHintMoving(shown, s.remoteHz),
+  };
+}
+
+/// The connection card's frame line: "Kare hızı: 120 fps · karşı ekran 144 Hz".
+String? senseFrameLine(SenseLinkSample s) {
+  final shown = senseShownFps(s);
+  if (shown == null) return null;
+  final state = senseFrameState(s);
+  return SenseSessionStrings.frameLine(shown,
+      still: state == SenseFrameState.still, stalling: state == SenseFrameState.stalling, remoteHz: s.remoteHz);
+}
+
+/// The small line under the computer name, its colour and the hover hint.
+/// Karar #152: "60 fps · 3 ms" (no path word; the path is on the connection card).
+({String text, SenseLevel level, String? hint}) senseLinkLine(SenseLinkSample s) {
   final health = senseLinkHealth(s);
   if (health == SenseLinkHealth.connecting) {
-    return (text: SenseSessionStrings.connecting, level: SenseLevel.unknown);
+    return (text: SenseSessionStrings.connecting, level: SenseLevel.unknown, hint: null);
   }
   if (health == SenseLinkHealth.noImage) {
-    return (text: SenseSessionStrings.noImage, level: SenseLevel.hot);
+    return (text: SenseSessionStrings.noImage, level: SenseLevel.hot, hint: null);
   }
-  final head = health == SenseLinkHealth.wavy
-      ? SenseSessionStrings.wavy
-      : s.path == SenseLinkPath.relay
-          ? SenseSessionStrings.relay
-          : SenseSessionStrings.direct;
+  final shown = senseShownFps(s);
   final parts = <String>[
-    head,
-    if (s.fps != null) SenseSessionStrings.fps(s.fps!),
+    if (health == SenseLinkHealth.wavy) SenseSessionStrings.wavy,
+    if (shown != null) SenseSessionStrings.fps(shown),
     if (s.rttMs != null) SenseSessionStrings.ms(s.rttMs!),
   ];
+  final hint = senseFpsHint(s);
   return (
     text: parts.join(' · '),
     level: health == SenseLinkHealth.wavy ? SenseLevel.warn : SenseLevel.ok,
+    hint: hint,
   );
 }
 

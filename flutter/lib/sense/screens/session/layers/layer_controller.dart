@@ -112,10 +112,28 @@ class SenseLayerController extends ChangeNotifier {
   /// The top bar reads [wavy] from here ("Dalgalı").
   static SenseLayerController? find(String id) => _byId[id];
 
-  static void attach(String id, SenseLayerController c) => _byId[id] = c;
+  // Sürüm 12 (#150): how many mounted layer widgets hold each id. remote_page.dart rebuilds
+  // its body in another wrapper when the first picture arrives, so the layer widget is
+  // mounted anew with the same controller: the new one attaches before the old one is
+  // disposed. Without the count the old dispose removed the entry for good, `find` gave
+  // null and the logo area stayed disabled (forbidden cursor) for the whole session.
+  static final Map<String, int> _holders = {};
+
+  static void attach(String id, SenseLayerController c) {
+    if (!identical(_byId[id], c)) _holders.remove(id);
+    _byId[id] = c;
+    _holders[id] = (_holders[id] ?? 0) + 1;
+  }
 
   static void detach(String id, SenseLayerController c) {
-    if (identical(_byId[id], c)) _byId.remove(id);
+    if (!identical(_byId[id], c)) return;
+    final left = (_holders[id] ?? 1) - 1;
+    if (left > 0) {
+      _holders[id] = left;
+      return;
+    }
+    _holders.remove(id);
+    _byId.remove(id);
   }
 
   final SenseLayerHost host;

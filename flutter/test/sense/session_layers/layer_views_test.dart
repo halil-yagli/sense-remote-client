@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/sense/sense.dart';
 import 'package:flutter_hbb/sense/screens/session/bar/sense_session_frame.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart' as bar show SenseBarPopup, SenseLinkSample, SenseLinkPath;
+import 'package:flutter_hbb/sense/screens/session/data/frame_rate.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/data/session_hub.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_controller.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_spec.dart';
@@ -513,6 +514,78 @@ void main() {
       await tester.pump();
       expect(c.infoOpen, isFalse);
       expect(find.byType(SenseLayerVeil), findsNothing);
+    });
+
+    // Sürüm 12 (#150): on the device the logo showed the forbidden cursor. remote_page.dart
+    // rebuilds its body in another wrapper when the first picture comes, so the layer is
+    // mounted anew with the same controller; the old dispose used to drop the registration
+    // and the bar never found the card again.
+    testWidgets('#150: after the layer is remounted the logo still opens the card (good link)', (tester) async {
+      void link() => host.raw = SenseLinkRaw(
+            delay: '3',
+            fps: '60',
+            lossEst: 0,
+            lastFrameMs: 10,
+            lastFrameAt: clock.wall,
+            probeAt: clock.wall,
+            serverName: 'Almanya',
+          );
+      link();
+      final backend = FakeBackend(
+        link: bar.SenseLinkSample(
+          path: bar.SenseLinkPath.direct,
+          fps: 0,
+          rttMs: 3,
+          lastFrameMs: 9000,
+          wavy: false,
+          recentFps: 120,
+          remoteHz: 144,
+          onRestoreLayer: () => SenseLayerController.find('p1')?.openCard(),
+        ),
+      )..ready = false; // values still being measured: the card opens anyway
+      Widget window({required bool wrapped}) {
+        final layer = SenseSessionLayers(id: 'p1', controller: c, listenToInput: false);
+        return MaterialApp(
+          theme: senseTheme(),
+          home: Scaffold(
+            body: Stack(children: [
+              Positioned.fill(
+                child: SenseSessionFrame(backend: backend, popups: FakePopups(), child: const SizedBox.expand()),
+              ),
+              Positioned.fill(child: wrapped ? Padding(padding: EdgeInsets.zero, child: layer) : layer),
+            ]),
+          ),
+        );
+      }
+
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(window(wrapped: false));
+      await seconds(tester, 3, link);
+      SenseFrameCap.of('p1').value = const SenseFrameInfo(drawnFps: 58, recentFps: 120, reachableFps: 120, remoteHz: 144);
+      // The first picture arrives: remote_page puts its body in BlockableOverlay.
+      await tester.pumpWidget(window(wrapped: true));
+      expect(SenseLayerController.find('p1'), same(c), reason: 'the remount keeps the registration');
+
+      final area = find.byKey(const ValueKey('sense-bar-link'));
+      final detector = tester.widget<FocusableActionDetector>(
+          find.descendant(of: area, matching: find.byType(FocusableActionDetector)));
+      expect(detector.enabled, isTrue);
+      expect(detector.mouseCursor, SystemMouseCursors.click, reason: 'no forbidden cursor');
+      final line = tester.widget<Text>(find.byKey(const ValueKey('sense-bar-link-text')));
+      expect(line.data, '120 fps · 3 ms');
+
+      await tester.tap(area);
+      await tester.pump();
+      expect(c.infoOpen, isTrue);
+      expect(find.text(SenseLayerStrings.goodTitle), findsOneWidget);
+      expect(find.byKey(const Key('sense-layer-info-server')), findsOneWidget);
+      expect(find.text('Kare hızı: 58 fps · karşı ekran 144 Hz'), findsOneWidget, reason: 'moving picture: drawn rate');
+      SenseFrameCap.remove('p1');
+
+      await tester.pumpWidget(const SizedBox());
+      expect(SenseLayerController.find('p1'), isNull, reason: 'gone with the last layer widget');
     });
 
     testWidgets('lost card keeps showing and has no x', (tester) async {

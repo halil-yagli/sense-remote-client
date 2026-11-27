@@ -240,11 +240,13 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
           name: b.peerName,
           line: line.text,
           level: line.level,
+          hint: line.hint,
           // Karar #94, Sürüm 10 (#110): the logo area opens the connection card (O13
           // layout): the minimized weak card comes back, with a good link the same card
           // shows the current values. Ekran bilgisi opens only from its own button.
           // One popup at a time: open lists and popups close first.
-          onTap: ready && b.link.onRestoreLayer != null
+          // Sürüm 12 (#150): not tied to `ready`: the card opens while values are measured.
+          onTap: b.link.onRestoreLayer != null
               ? () {
                   final open = b.link.onRestoreLayer!;
                   menus.close();
@@ -360,10 +362,13 @@ class _BarLayout extends MultiChildLayoutDelegate {
 }
 
 class _Brand extends StatelessWidget {
-  const _Brand({required this.name, required this.line, required this.level, this.onTap});
+  const _Brand({required this.name, required this.line, required this.level, this.hint, this.onTap});
   final String name;
   final String line;
   final SenseLevel level;
+
+  /// Karar #152: what the frame rate means right now (hover).
+  final String? hint;
   final VoidCallback? onTap;
 
   @override
@@ -390,7 +395,7 @@ class _Brand extends StatelessWidget {
             key: const ValueKey('sense-bar-link'),
             onTap: onTap,
             semanticLabel: SenseSessionStrings.linkDetail,
-            tooltip: SenseSessionStrings.linkDetail,
+            tooltip: hint ?? SenseSessionStrings.linkDetail,
             builder: (context, s) => Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
