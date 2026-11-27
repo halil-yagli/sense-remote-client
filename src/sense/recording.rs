@@ -40,7 +40,7 @@ pub fn ui_state(e: &SenseRecordEvent) -> (&'static str, &'static str) {
 }
 
 fn peer_id<T: InvokeUiSession>(session: &Session<T>) -> String {
-    session.lc.read().unwrap().id.clone()
+    session.lc.read().unwrap().get_id().to_owned()
 }
 
 /// The switch was turned on or off (before anything is written): `starting` / `stopped`.
