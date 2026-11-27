@@ -275,6 +275,7 @@ class _SenseHostCardState extends State<SenseHostCard> {
           author: author,
           time: time,
           onReveal: job.path.isEmpty ? null : () => c.files.reveal(job.path),
+          onRetry: c.canRetry(job.id) ? () => c.retry(job.id) : null, // #122
         );
     }
   }

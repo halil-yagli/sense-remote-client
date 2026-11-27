@@ -805,6 +805,45 @@ impl TransferJob {
         }
     }
 
+    /// Sense Remote (#122): [`Self::modify_time`] of an upload written here (a chat file), but
+    /// the result counts: every file of the job must have its final name. `modify_time` drops a
+    /// failed rename, so a file could stay `<name>.download` while both sides said "saved".
+    /// A file with no `.download` left whose target exists (skipped as identical, or renamed
+    /// when the next file started) is fine. Downloads and printer jobs go the old way.
+    pub fn finish_write(&self) -> ResultType<()> {
+        if self.is_download() || self.r#type == JobType::Printer {
+            self.modify_time();
+            return Ok(());
+        }
+        let DataSource::FilePath(p) = &self.data_source else {
+            return Ok(());
+        };
+        for (n, entry) in self.files.iter().enumerate() {
+            let Some(path) = self.resolve_entry_path(p, &entry.name) else {
+                bail!("invalid file name");
+            };
+            let download_path = PathBuf::from(format!("{}.download", get_string(&path)));
+            if download_path.exists() {
+                std::fs::remove_file(format!("{}.digest", get_string(&path))).ok();
+                std::fs::rename(&download_path, &path)?;
+            }
+            if !path.exists() {
+                // A file the job never reached (it ended early) is not ours to judge; only the
+                // files up to the current one must be there.
+                if n <= self.file_num.max(0) as usize {
+                    bail!("file not saved");
+                }
+                continue;
+            }
+            filetime::set_file_mtime(
+                &path,
+                filetime::FileTime::from_unix_time(entry.modified_time as _, 0),
+            )
+            .ok();
+        }
+        Ok(())
+    }
+
     pub fn remove_download_file(&self) {
         #[cfg(any(target_os = "android", all(test, unix)))]
         if self.is_document() {

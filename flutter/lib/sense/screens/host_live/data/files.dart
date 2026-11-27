@@ -5,9 +5,9 @@
 // folder; it can read only what was offered here.
 
 import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../models/platform_model.dart';
+import '../../shared/reveal_file.dart';
 import '../../shared/chat/chat_entry.dart';
 import '../../shared/chat/data/files.dart';
 
@@ -32,10 +32,7 @@ class SenseHostChatFiles implements SenseChatFiles {
       senseParseFileJobs(await bind.mainSenseHostFileJobs());
 
   @override
-  Future<void> reveal(String path) async {
-    if (path.isEmpty) return;
-    await launchUrl(Uri.file(senseParentFolder(path)));
-  }
+  Future<void> reveal(String path) => senseRevealFile(path);
 }
 
 /// The system file chooser of the Host card's ataç: several files, any kind.

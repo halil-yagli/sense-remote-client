@@ -50,6 +50,9 @@ class SenseChatController extends ChangeNotifier {
 
   final List<SenseChatEntry> _entries = [];
   final Map<String, SenseFileJob> _jobs = {};
+
+  /// Local paths of the files this side sent (for "Yeniden dene"), by job id.
+  final Map<String, String> _paths = {};
   final StreamController<SenseChatIncoming> _incoming = StreamController.broadcast();
 
   bool _open = false;
@@ -151,9 +154,23 @@ class SenseChatController extends ChangeNotifier {
       );
       _entries.add(SenseChatFileEntry(mine: true, at: at, jobId: id));
       _fileCount++;
+      if (i < paths.length) _paths[id] = paths[i];
     }
     _ensurePolling();
     _changed();
+  }
+
+  /// "Yeniden dene" (#122): a file this side sent that failed can go again (a
+  /// new bubble). Memory only, like the rest of the chat (S12).
+  bool canRetry(String id) {
+    final j = _jobs[id];
+    return j != null && j.mine && j.state == SenseFileState.err && _paths.containsKey(id);
+  }
+
+  Future<void> retry(String id) async {
+    if (!canRetry(id)) return;
+    final path = _paths.remove(id)!;
+    await sendFiles([path]);
   }
 
   /// Takes the bridge's job list: updates bubbles, adds received files.
@@ -175,7 +192,11 @@ class SenseChatController extends ChangeNotifier {
           before.done != j.done ||
           before.state != j.state ||
           before.total != j.total ||
-          before.path != j.path) {
+          before.path != j.path ||
+          before.error != j.error ||
+          before.folder != j.folder ||
+          before.dirName != j.dirName ||
+          before.confirm != j.confirm) {
         changed = true;
       }
     }
@@ -255,6 +276,7 @@ class SenseChatController extends ChangeNotifier {
   void clear() {
     _entries.clear();
     _jobs.clear();
+    _paths.clear();
     _unread = 0;
     _open = false;
     _phase = SenseCallPhase.idle;
@@ -274,6 +296,7 @@ class SenseChatController extends ChangeNotifier {
     _poll?.cancel();
     _entries.clear();
     _jobs.clear();
+    _paths.clear();
     _incoming.close();
     super.dispose();
   }
