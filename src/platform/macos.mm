@@ -5,6 +5,7 @@
 #include <Security/AuthorizationTags.h>
 
 #include <CoreGraphics/CoreGraphics.h>
+#include <atomic>
 #include <vector>
 #include <map>
 #include <set>
@@ -46,7 +47,12 @@ extern "C" bool InputMonitoringAuthStatus(bool prompt) {
     #else
     if (floor(NSAppKitVersionNumber) >= NSAppKitVersionNumber10_15) {
         IOHIDAccessType theType = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent);
-        NSLog(@"IOHIDCheckAccess = %d, kIOHIDAccessTypeGranted = %d", theType, kIOHIDAccessTypeGranted);
+        // Sense Remote (S11 M8): asked every second by the setup wizard and on every heartbeat;
+        // written to the system log only when the answer changes.
+        static std::atomic<int> lastType{-1};
+        if (lastType.exchange((int)theType) != (int)theType) {
+            NSLog(@"IOHIDCheckAccess = %d, kIOHIDAccessTypeGranted = %d", theType, kIOHIDAccessTypeGranted);
+        }
         switch (theType) {
             case kIOHIDAccessTypeGranted:
                 return true;
