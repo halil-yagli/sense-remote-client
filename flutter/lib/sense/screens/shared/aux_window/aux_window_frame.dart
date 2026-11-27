@@ -238,7 +238,7 @@ class _MaximizeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget build(bool max) => _WindowButton(
+    Widget button(bool max) => _WindowButton(
           key: const Key('sense-aux-maximize'),
           icon: max ? Icons.filter_none_rounded : Icons.crop_square_rounded,
           iconSize: max ? 13 : 15,
@@ -246,8 +246,8 @@ class _MaximizeButton extends StatelessWidget {
           onTap: actions.onToggleMaximize!,
         );
     final m = actions.maximized;
-    if (m == null) return build(false);
-    return ValueListenableBuilder<bool>(valueListenable: m, builder: (_, v, __) => build(v));
+    if (m == null) return button(false);
+    return ValueListenableBuilder<bool>(valueListenable: m, builder: (_, v, __) => button(v));
   }
 }
 

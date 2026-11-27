@@ -65,6 +65,7 @@ void main() {
       await tester.tap(find.byKey(const Key('sense-aux-maximize')));
       await tester.tap(find.byKey(const Key('sense-aux-close')));
       await tester.drag(find.byKey(const Key('sense-aux-drag')), const Offset(30, 0));
+      await tester.pump(const Duration(milliseconds: 500)); // double-tap timer
       expect([min, max, close], [1, 1, 1]);
       expect(drag, 1);
     });
