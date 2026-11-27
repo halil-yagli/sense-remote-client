@@ -43,6 +43,14 @@
 //! what part is already right. A folder, an old Host without key, an expired wait or a closed
 //! session ends it and removes the half-written files.
 //!
+//! Delivery (#122): a chat file is dated "now" where it lands (the sender's date hid it in
+//! Explorer's Downloads); the Host gives it its final name or reports an error (no `.download`
+//! left behind as "saved"); the sending side says "kaydedildi" only on the receiver's own answer
+//! — Controller → Host: the Host's "write done" plus [`CM_SAVED`] naming the folder; Host →
+//! Controller: the Host asks ([`ask_message`]) and the Controller answers on the offer channel.
+//! A transfer that does not move for [`STALL_MS`] ends with a reason; `file/*` record lines carry
+//! ids, codes and the extension only.
+//!
 //! Closing audit (Y5): [`ConnCounts::audit`] adds `recording_s` and `reason` (the panel's
 //! `AuditConnSense`, no other fields).
 //!
@@ -236,12 +244,301 @@ pub fn host_resolve(
 ) -> String {
     match parse_incoming(&path) {
         Some(name) => {
+            // #122: the file is new here, so its "Date modified" is now — not the sender's
+            // date, which put it under "Last week" in Explorer's Downloads ("it did not
+            // arrive"). RustDesk's file manager (no mark) keeps the sender's date.
+            set_times_now(files);
             let target = host_write_target(&incoming_dir(), name, files, file_num, busy);
             log::info!("sense chat file to the incoming folder");
+            file_event(
+                "start",
+                json!({
+                    "yon": "in",
+                    "rol": "host",
+                    "tur": kind_of(name),
+                    "dosya_sayisi": files.len(),
+                    "devam": file_num > 0,
+                }),
+            );
             target.to_string_lossy().into_owned()
         }
         None => path,
     }
+}
+
+/// Seconds since the epoch.
+fn now_secs() -> u64 {
+    now_ms() / 1000
+}
+
+/// Every file of a chat transfer gets "now" as its modified time at the receiver (#122).
+fn set_times_now(files: &mut [(String, u64)]) {
+    let now = now_secs();
+    for f in files.iter_mut() {
+        f.1 = now;
+    }
+}
+
+/// Sets "now" as the modified time of a received chat file (or of every file of a received
+/// folder) (#122, Controller side: RustDesk's download keeps the Host's date).
+fn touch_now(path: &Path) {
+    fn touch(p: &Path) -> std::io::Result<()> {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(p)?
+            .set_modified(std::time::SystemTime::now())
+    }
+    if path.is_dir() {
+        if let Ok(files) = base::fs::get_recursive_files(&path.to_string_lossy(), true) {
+            for f in files {
+                touch(&path.join(&f.name)).ok();
+            }
+        }
+    } else if let Err(e) = touch(path) {
+        log::warn!("sense chat file: modified time not set: {e}");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// #122: where a file landed, why a transfer failed, the record
+// ---------------------------------------------------------------------------------------------
+
+/// `folder` of a saved chat file: the user's Downloads.
+pub const FOLDER_DOWNLOADS: &str = "downloads";
+/// `folder` of a saved chat file: the folder chosen in Ayarlar › Gelen dosyalar.
+pub const FOLDER_CHOSEN: &str = "chosen";
+
+/// Which folder `dir` is (Downloads or the chosen one) and, for a chosen one, its own name
+/// (never the full path).
+fn folder_of(dir: Option<&Path>) -> (&'static str, String) {
+    let Some(dir) = dir else {
+        return (FOLDER_DOWNLOADS, String::new());
+    };
+    if dir == downloads_dir() {
+        return (FOLDER_DOWNLOADS, String::new());
+    }
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| safe_dir_name(n))
+        .unwrap_or_default();
+    (FOLDER_CHOSEN, name)
+}
+
+/// A folder name the other side may show: one plain name, at most 64 characters.
+fn safe_dir_name(name: &str) -> bool {
+    safe_name(name) && name.chars().count() <= 64
+}
+
+/// `error` of a transfer that stopped moving for [`STALL_MS`] (the other side's process went
+/// away, the link hangs): "yanıt yok", the person can send it again.
+pub const ERR_STALLED: &str = "stalled";
+/// `error` when the receiving folder could not be written (macOS Downloads permission, a
+/// read-only or locked folder).
+pub const ERR_PERMISSION: &str = "permission";
+/// `error` when the Host does not take files on this connection (its file permission, the
+/// Controller's file option, view only).
+pub const ERR_REFUSED: &str = "refused";
+/// `error` when the file was written but could not get its final name (`.download` stayed).
+pub const ERR_NOT_SAVED: &str = "not_saved";
+/// `error` of a Host file the Controller could not save (it said so).
+pub const ERR_RECEIVER: &str = "receiver";
+
+/// No progress for this long: the transfer counts as stalled.
+pub const STALL_MS: u64 = 60_000;
+
+/// Error text the Host's CM sends when a chat file was not saved under its final name.
+pub const NOT_SAVED_TEXT: &str = "sense: file not saved";
+
+const ERROR_CODES: [&str; 7] = [
+    ERR_FAILED,
+    ERR_LINK_LOST,
+    ERR_STALLED,
+    ERR_PERMISSION,
+    ERR_REFUSED,
+    ERR_NOT_SAVED,
+    ERR_RECEIVER,
+];
+
+/// The reason code of a transfer error text (RustDesk's own texts and the OS error texts).
+pub fn error_code(text: &str) -> &'static str {
+    let t = text.trim();
+    // The Host's refusal (`HostAction::Refuse`) is exactly this text; the OS says more.
+    if t == "Permission denied" {
+        return ERR_REFUSED;
+    }
+    if t.starts_with(NOT_SAVED_TEXT) {
+        return ERR_NOT_SAVED;
+    }
+    let lower = t.to_ascii_lowercase();
+    if lower.contains("operation not permitted")
+        || lower.contains("access is denied")
+        || lower.contains("permission denied")
+        || lower.contains("os error 1)")
+        || lower.contains("os error 5)")
+        || lower.contains("os error 13)")
+    {
+        return ERR_PERMISSION;
+    }
+    ERR_FAILED
+}
+
+/// A reason code from the other side: only the known ones, anything else is "failed".
+fn known_code(code: &str) -> &'static str {
+    ERROR_CODES
+        .iter()
+        .find(|c| **c == code)
+        .copied()
+        .unwrap_or(ERR_FAILED)
+}
+
+/// `yol_maskeli` of the record: the folder kind and the extension only, never a name
+/// (`<indirilenler>/<dosya>.jpg`).
+pub fn masked_path(folder: &str, name: &str) -> String {
+    let dir = if folder == FOLDER_CHOSEN { "<secili>" } else { "<indirilenler>" };
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .filter(|e| !e.is_empty() && e.len() <= 8 && e.bytes().all(|b| b.is_ascii_alphanumeric()));
+    match ext {
+        Some(e) => format!("{dir}/<dosya>.{e}"),
+        None => format!("{dir}/<dosya>"),
+    }
+}
+
+/// One `file/<k>` record line (sense-events; the process is the line's own `p`). Numbers and
+/// codes only: never a file name, a path or content (S12).
+fn file_event(k: &str, fields: Value) {
+    crate::sense::diag::event("file", k, fields);
+}
+
+/// CM → connection: a chat file from the Controller was saved (`{id, folder, dir_name}`); the
+/// connection tells the Controller, so its bubble names the real folder.
+pub const CM_SAVED: &str = "sense-file-saved";
+
+/// Chat job ids of the Controller ([`NEXT_ID`] range, below the offers).
+fn is_chat_id(id: i32) -> bool {
+    (0x5E_0000..OFFER_FIRST).contains(&id)
+}
+
+/// CM: job `id` of connection `conn_id` is a chat file from the Controller (Host card row).
+pub fn host_is_chat_job(conn_id: i32, id: i32) -> bool {
+    HOST_JOBS
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|j| j.conn_id == conn_id && j.id == id && j.incoming)
+}
+
+/// CM, `FS::WriteDone` of a chat file (#122): the file must have its final name, or the
+/// transfer is an error the Controller is told (no more "saved" for a `.download` that stayed).
+/// On success the connection hears which folder it went to ([`CM_SAVED`]).
+pub fn host_finish_write(job: &base::fs::TransferJob) -> Result<(), String> {
+    let id = job.id();
+    let path = match &job.data_source {
+        base::fs::DataSource::FilePath(p) => p.clone(),
+        _ => PathBuf::new(),
+    };
+    let leaf = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (folder, dir_name) = folder_of(path.parent());
+    if let Err(e) = job.finish_write() {
+        let code = error_code(&e.to_string());
+        log::warn!("sense chat file {id} not saved: {code}");
+        file_event(
+            "error",
+            json!({ "id": id, "asama": "rename", "hata": code, "taraf": "host" }),
+        );
+        return Err(if code == ERR_PERMISSION {
+            e.to_string()
+        } else {
+            NOT_SAVED_TEXT.to_owned()
+        });
+    }
+    file_event(
+        "saved",
+        json!({
+            "id": id,
+            "klasor": if folder == FOLDER_CHOSEN { "secili" } else { "indirilenler" },
+            "tarih": "simdi",
+            "yol_maskeli": masked_path(folder, &leaf),
+        }),
+    );
+    crate::ui_cm_interface::sense_to_conn(
+        job.conn_id,
+        crate::ipc::Data::Config((
+            CM_SAVED.to_owned(),
+            Some(json!({ "id": id, "folder": folder, "dir_name": dir_name }).to_string()),
+        )),
+    );
+    Ok(())
+}
+
+/// Connection: the CM's [`CM_SAVED`]. Returns what the Controller is told (`{saved, ok,
+/// folder, dir_name}`), `None` for anything that is not a valid notice of a chat file.
+pub fn conn_saved(raw: &str) -> Option<Vec<u8>> {
+    let v: Value = serde_json::from_str(raw).ok()?;
+    let id = i32::try_from(v["id"].as_i64()?).ok()?;
+    if !is_chat_id(id) {
+        return None;
+    }
+    let folder = match v["folder"].as_str() {
+        Some(FOLDER_CHOSEN) => FOLDER_CHOSEN,
+        _ => FOLDER_DOWNLOADS,
+    };
+    let dir_name = v["dir_name"]
+        .as_str()
+        .filter(|n| safe_dir_name(n))
+        .unwrap_or_default();
+    Some(
+        json!({ "saved": id, "ok": true, "folder": folder, "dir_name": dir_name })
+            .to_string()
+            .into_bytes(),
+    )
+}
+
+/// Connection: after a read of an offer ended, the Host asks the Controller whether it saved
+/// the file (`{ask: id}`, same `Misc.plugin_request` as the offer). An old Controller ignores
+/// it (no `id`), and the Host card then says "Gönderildi" without claiming a folder.
+pub fn ask_message(id: i32) -> base::message_proto::Message {
+    offer_message(json!({ "ask": id }).to_string().into_bytes())
+}
+
+/// Connection: the Controller's answer about an offer (`{saved, ok, folder, dir_name, error}`).
+/// Returns the CM message ([`CM_OFFER_END`] with `saved: true`); `None` for anything else.
+pub fn conn_reply(content: &[u8]) -> Option<String> {
+    let v: Value = serde_json::from_slice(content).ok()?;
+    let id = i32::try_from(v["saved"].as_i64()?).ok()?;
+    if !is_offer_id(id) {
+        return None;
+    }
+    let ok = v["ok"].as_bool() == Some(true);
+    let folder = match v["folder"].as_str() {
+        Some(FOLDER_CHOSEN) => FOLDER_CHOSEN,
+        _ => FOLDER_DOWNLOADS,
+    };
+    let dir_name = v["dir_name"]
+        .as_str()
+        .filter(|n| safe_dir_name(n))
+        .unwrap_or_default();
+    let error = if ok {
+        ""
+    } else {
+        known_code(v["error"].as_str().unwrap_or_default())
+    };
+    Some(
+        json!({
+            "id": id,
+            "ok": ok,
+            "saved": true,
+            "folder": folder,
+            "dir_name": dir_name,
+            "error": error,
+        })
+        .to_string(),
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -266,6 +563,22 @@ pub enum HostAction {
 /// (`Connection::file_transfer_enabled`). `offers`: (offer id, real path) the Host card offered
 /// on this connection — the only files a Controller may read (white list).
 pub fn host_file_action(enabled: bool, fa: &FileAction, offers: &[(i32, String)]) -> HostAction {
+    let action = file_action_of(enabled, fa, offers);
+    if let HostAction::Refuse(id) = action {
+        // #122: a refused chat file is recorded with its reason (no name, no path).
+        let neden = if !enabled {
+            "host_izin"
+        } else if matches!(fa.union, Some(file_action::Union::Send(_))) {
+            "gecersiz_anahtar"
+        } else {
+            "gecersiz_isaret"
+        };
+        file_event("refused", json!({ "id": id, "neden": neden }));
+    }
+    action
+}
+
+fn file_action_of(enabled: bool, fa: &FileAction, offers: &[(i32, String)]) -> HostAction {
     match fa.union.as_ref() {
         Some(file_action::Union::Receive(r)) if parse_incoming(&r.path).is_some() => {
             if enabled {
@@ -419,6 +732,39 @@ struct Job {
     cut_at: u64,
     /// Incoming only: it was restarted after a cut; if the Host refuses, the partial goes.
     resumed: bool,
+    /// Where the file landed (#122): [`FOLDER_DOWNLOADS`] / [`FOLDER_CHOSEN`]; "" while
+    /// unknown (sending to an old Host that does not tell).
+    folder: &'static str,
+    /// Name of the chosen folder (never a path); "" for Downloads.
+    dir_name: String,
+    /// When the job started and when its bytes last moved (ms since the epoch); a running job
+    /// that does not move for [`STALL_MS`] ends as [`ERR_STALLED`].
+    started: u64,
+    moved_at: u64,
+}
+
+impl Job {
+    fn new(id: i32, name: String, incoming: bool, local: String, total: u64, key: String) -> Self {
+        let now = now_ms();
+        Job {
+            id,
+            name,
+            incoming,
+            local,
+            total,
+            done: 0,
+            file_num: 0,
+            state: State::Run,
+            error: "",
+            key,
+            cut_at: 0,
+            resumed: false,
+            folder: "",
+            dir_name: String::new(),
+            started: now,
+            moved_at: now,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -497,20 +843,11 @@ pub fn ffi_send_files(sid: u64, peer: &str, paths: &[String], send: impl Fn(Data
         add_job(
             sid,
             peer,
-            Job {
-                id,
-                name: name.clone(),
-                incoming: false,
-                local: path.clone(),
-                total,
-                done: 0,
-                file_num: 0,
-                state: State::Run,
-                error: "",
-                key: String::new(),
-                cut_at: 0,
-                resumed: false,
-            },
+            Job::new(id, name.clone(), false, path.clone(), total, String::new()),
+        );
+        file_event(
+            "start",
+            json!({ "id": id, "yon": "out", "rol": "controller", "tur": kind_of(&name), "bayt": total }),
         );
         send(Data::SendFiles((
             id,
@@ -543,6 +880,7 @@ fn sweep_expired(now: u64) {
 /// `session_sense_file_jobs`: `[{id, name, kind, dir, done, total, state, path}]`.
 pub fn ffi_file_jobs(sid: u64) -> String {
     sweep_expired(now_ms());
+    sweep_stalled(now_ms());
     let jobs = with_session(sid, |s| {
         s.jobs
             .iter()
@@ -562,6 +900,10 @@ pub fn ffi_file_jobs(sid: u64) -> String {
                     if j.incoming { j.local.as_str() } else { "" },
                 );
                 row["error"] = json!(j.error);
+                row["folder"] = json!(j.folder);
+                row["dir_name"] = json!(j.dir_name);
+                // Sending: "ok" comes from the Host's own "write done", a real answer.
+                row["confirm"] = json!(if !j.incoming && j.state == State::Ok { "yes" } else { "" });
                 row
             })
             .collect::<Vec<_>>()
@@ -630,9 +972,30 @@ pub fn forget_closed(alive: impl Fn(u64, &str) -> bool) {
 pub fn on_progress(sid: u64, id: i32, finished: u64) {
     with_job(sid, id, |j| {
         if j.state == State::Run {
+            if finished != j.done {
+                j.moved_at = now_ms();
+            }
             j.done = finished;
         }
     });
+}
+
+/// Running jobs whose bytes did not move for [`STALL_MS`] (at `now`, ms) end as
+/// [`ERR_STALLED`]: "Aktarılamadı · yanıt yok", and the person may send it again. A job that
+/// still finishes later shows its real result.
+fn sweep_stalled(now: u64) {
+    let mut all = SESSIONS.lock().unwrap();
+    for j in all.iter_mut().flat_map(|s| s.jobs.iter_mut()) {
+        if j.state == State::Run && now.saturating_sub(j.moved_at) > STALL_MS {
+            j.state = State::Err;
+            j.error = ERR_STALLED;
+            log::warn!("sense chat file {} stalled", j.id);
+            file_event(
+                "stuck",
+                json!({ "id": j.id, "son_bayt": j.done, "yon": if j.incoming { "in" } else { "out" } }),
+            );
+        }
+    }
 }
 
 /// `io_loop`: a job finished (`err` None) or failed.
@@ -641,11 +1004,48 @@ pub fn on_status(sid: u64, id: i32, err: Option<&str>) {
         None => {
             j.state = State::Ok;
             j.done = j.total;
+            let ms = now_ms().saturating_sub(j.started);
+            if j.incoming {
+                // #122: saved now, so dated now (the Host's date hid it in Downloads).
+                let local = Path::new(&j.local);
+                touch_now(local);
+                let (folder, dir_name) = folder_of(local.parent());
+                j.folder = folder;
+                j.dir_name = dir_name;
+                let leaf = local
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                file_event(
+                    "saved",
+                    json!({
+                        "id": j.id,
+                        "klasor": if folder == FOLDER_CHOSEN { "secili" } else { "indirilenler" },
+                        "ad_degisti": leaf != j.name,
+                        "tarih": "simdi",
+                        "ms": ms,
+                        "yol_maskeli": masked_path(folder, &leaf),
+                    }),
+                );
+            } else {
+                // The Host's "write done" is the receiver's own answer.
+                file_event("done", json!({ "id": j.id, "onay": "alici", "ms": ms }));
+            }
         }
         Some(e) => {
-            log::warn!("sense chat file {} failed: {e}", j.id);
+            let code = error_code(e);
+            log::warn!("sense chat file {} failed: {code}", j.id);
             j.state = State::Err;
-            j.error = ERR_FAILED;
+            j.error = code;
+            file_event(
+                "error",
+                json!({
+                    "id": j.id,
+                    "asama": if code == ERR_REFUSED { "refuse" } else { "finish" },
+                    "hata": code,
+                    "taraf": if j.incoming { "controller" } else { "host" },
+                }),
+            );
             // The Host would not (or could not) continue it: no half-written file stays.
             if j.incoming && j.resumed {
                 discard_partial(Path::new(&j.local));
@@ -723,6 +1123,7 @@ pub fn on_connected(sid: u64) -> Vec<Data> {
         let mut out = Vec::new();
         for j in s.jobs.iter_mut().filter(|j| j.state == State::Resume) {
             j.state = State::Run;
+            j.moved_at = now_ms();
             if j.incoming {
                 // From the Host: the same offer again, by its resume key; RustDesk's resume
                 // (`.download` + `.digest`) checks the part already written.
@@ -894,6 +1295,68 @@ struct HostJob {
     total: u64,
     done: u64,
     state: State,
+    /// Offer only (#122): the read ended and the Controller was asked whether it saved the
+    /// file (`Wait`), or it said it did (`Yes`). The card says "kaydedildi" only on `Yes`.
+    confirm: Confirm,
+    /// Where the file landed: incoming rows here, offers as the Controller said.
+    folder: &'static str,
+    dir_name: String,
+    error: &'static str,
+    /// Incoming rows: when the bytes last moved (ms since the epoch), see [`STALL_MS`].
+    moved_at: u64,
+}
+
+/// Whether the receiver of a Host file said it saved it (#122).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Confirm {
+    None,
+    Wait,
+    Yes,
+}
+
+impl Confirm {
+    fn as_str(self) -> &'static str {
+        match self {
+            Confirm::None => "",
+            Confirm::Wait => "wait",
+            Confirm::Yes => "yes",
+        }
+    }
+}
+
+impl HostJob {
+    fn new(conn_id: i32, id: i32, name: String, incoming: bool, path: String, total: u64) -> Self {
+        let (folder, dir_name) = if incoming {
+            folder_of(Path::new(&path).parent())
+        } else {
+            ("", String::new())
+        };
+        HostJob {
+            conn_id,
+            id,
+            name,
+            incoming,
+            path,
+            total,
+            done: 0,
+            state: State::Run,
+            confirm: Confirm::None,
+            folder,
+            dir_name,
+            error: "",
+            moved_at: now_ms(),
+        }
+    }
+
+    /// The read of an offer (or the write of an incoming file) ended well. An offer then waits
+    /// for the Controller's answer.
+    fn sent(&mut self) {
+        self.state = State::Ok;
+        self.done = self.total;
+        if !self.incoming && self.confirm == Confirm::None {
+            self.confirm = Confirm::Wait;
+        }
+    }
 }
 
 static HOST_JOBS: Mutex<Vec<HostJob>> = Mutex::new(Vec::new());
@@ -931,16 +1394,16 @@ pub fn host_offer(conn_id: i32, paths: &[String], send: impl Fn(String) -> bool)
         let sent = send(
             json!({ "id": id, "path": path, "name": name, "total": total }).to_string(),
         );
-        HOST_JOBS.lock().unwrap().push(HostJob {
-            conn_id,
-            id,
-            name,
-            incoming: false,
-            path: String::new(),
-            total,
-            done: 0,
-            state: if sent { State::Run } else { State::Err },
-        });
+        file_event(
+            "start",
+            json!({ "id": id, "yon": "out", "rol": "host", "tur": kind_of(&name), "bayt": total }),
+        );
+        let mut job = HostJob::new(conn_id, id, name, false, String::new(), total);
+        if !sent {
+            job.state = State::Err;
+            job.error = ERR_FAILED;
+        }
+        HOST_JOBS.lock().unwrap().push(job);
         ids.push(id.to_string());
     }
     json!(ids).to_string()
@@ -968,17 +1431,12 @@ pub fn host_job_in(conn_id: i32, id: i32, path: &str, total: u64) {
         .find(|j| j.conn_id == conn_id && j.id == id && j.incoming)
     {
         // The same job again (resume from a later file).
-        Some(j) => j.state = State::Run,
-        None => all.push(HostJob {
-            conn_id,
-            id,
-            name,
-            incoming: true,
-            path: path.to_owned(),
-            total,
-            done: 0,
-            state: State::Run,
-        }),
+        Some(j) => {
+            j.state = State::Run;
+            j.error = "";
+            j.moved_at = now_ms();
+        }
+        None => all.push(HostJob::new(conn_id, id, name, true, path.to_owned(), total)),
     }
 }
 
@@ -1017,18 +1475,23 @@ pub fn host_transfer_log(action: &str, log: &str) {
         let done = it["done"].as_bool() == Some(true);
         let failed = it["cancel"].as_bool() == Some(true)
             || it["error"].as_str().map_or(false, |e| !e.is_empty());
+        let err_text = it["error"].as_str().unwrap_or_default();
+        let cancelled = it["cancel"].as_bool() == Some(true);
         host_job_update(conn_id, id, |j| {
             if j.state != State::Run {
                 return;
             }
             if let Some(f) = finished {
+                if f != j.done {
+                    j.moved_at = now_ms();
+                }
                 j.done = f;
             }
             if failed {
                 j.state = State::Err;
+                j.error = if cancelled { ERR_FAILED } else { error_code(err_text) };
             } else if done {
-                j.state = State::Ok;
-                j.done = j.total;
+                j.sent();
             }
         });
     }
@@ -1049,11 +1512,50 @@ pub fn host_from_conn(conn_id: i32, name: &str, value: Option<&str>) -> bool {
             if let Some(v) = value.and_then(|v| serde_json::from_str::<Value>(v).ok()) {
                 if let Some(id) = v["id"].as_i64().and_then(|i| i32::try_from(i).ok()) {
                     let ok = v["ok"].as_bool() == Some(true);
+                    // #122: `saved` marks the Controller's own answer ([`conn_reply`]); without
+                    // it this is only the end of the read on this side.
+                    let answer = v["saved"].as_bool() == Some(true);
+                    let folder = match v["folder"].as_str() {
+                        Some(FOLDER_CHOSEN) => FOLDER_CHOSEN,
+                        _ => FOLDER_DOWNLOADS,
+                    };
+                    let dir_name = v["dir_name"]
+                        .as_str()
+                        .filter(|n| safe_dir_name(n))
+                        .unwrap_or_default()
+                        .to_owned();
+                    let error = known_code(v["error"].as_str().unwrap_or_default());
                     host_job_update(Some(conn_id), id, |j| {
-                        if j.state == State::Run {
-                            j.state = if ok { State::Ok } else { State::Err };
-                            if ok {
-                                j.done = j.total;
+                        let waiting = j.state == State::Run
+                            || (j.state == State::Ok && j.confirm == Confirm::Wait);
+                        if j.incoming || !waiting {
+                            return;
+                        }
+                        match (answer, ok) {
+                            (false, true) => j.sent(),
+                            (false, false) => {
+                                j.state = State::Err;
+                                j.error = ERR_FAILED;
+                            }
+                            (true, true) => {
+                                j.sent();
+                                j.confirm = Confirm::Yes;
+                                j.folder = folder;
+                                j.dir_name = dir_name.clone();
+                                file_event("done", json!({ "id": id, "onay": "alici" }));
+                            }
+                            (true, false) => {
+                                j.state = State::Err;
+                                j.error = if error == ERR_FAILED { ERR_RECEIVER } else { error };
+                                file_event(
+                                    "error",
+                                    json!({
+                                        "id": id,
+                                        "asama": "finish",
+                                        "hata": j.error,
+                                        "taraf": "controller",
+                                    }),
+                                );
                             }
                         }
                     });
@@ -1065,6 +1567,23 @@ pub fn host_from_conn(conn_id: i32, name: &str, value: Option<&str>) -> bool {
     }
 }
 
+/// Host card: a running file whose bytes did not move for [`STALL_MS`] (at `now`, ms) ends as
+/// [`ERR_STALLED`]. The transfer log moves `done` while bytes go: the CM logs its write and read
+/// jobs on every block / tick, the connection its own reads (macOS) on every tick.
+fn host_sweep_stalled(now: u64) {
+    let mut all = HOST_JOBS.lock().unwrap();
+    for j in all.iter_mut() {
+        if j.state == State::Run && now.saturating_sub(j.moved_at) > STALL_MS {
+            j.state = State::Err;
+            j.error = ERR_STALLED;
+            file_event(
+                "stuck",
+                json!({ "id": j.id, "son_bayt": j.done, "yon": if j.incoming { "in" } else { "out" } }),
+            );
+        }
+    }
+}
+
 /// Host card: connection `conn_id` ended; its file list is gone (S12).
 pub fn host_forget(conn_id: i32) {
     HOST_JOBS.lock().unwrap().retain(|j| j.conn_id != conn_id);
@@ -1072,6 +1591,7 @@ pub fn host_forget(conn_id: i32) {
 
 /// `main_sense_host_file_jobs`: both directions, same shape as `session_sense_file_jobs`.
 pub fn ffi_host_file_jobs() -> String {
+    host_sweep_stalled(now_ms());
     let all = HOST_JOBS.lock().unwrap();
     let rows: Vec<Value> = all
         .iter()
@@ -1081,7 +1601,12 @@ pub fn ffi_host_file_jobs() -> String {
             } else {
                 j.done.min(j.total)
             };
-            job_json(j.id, &j.name, j.incoming, done, j.total, j.state, &j.path)
+            let mut row = job_json(j.id, &j.name, j.incoming, done, j.total, j.state, &j.path);
+            row["error"] = json!(j.error);
+            row["folder"] = json!(j.folder);
+            row["dir_name"] = json!(j.dir_name);
+            row["confirm"] = json!(j.confirm.as_str());
+            row
         })
         .collect();
     Value::Array(rows).to_string()
@@ -1120,24 +1645,26 @@ pub fn offer_reading(reading: &mut Vec<i32>, id: i32) {
 }
 
 /// Connection: an offer whose read ended (done, failed or cancelled: `still_reading` false)
-/// leaves the white list; it cannot be read a second time.
+/// leaves the white list; it cannot be read a second time. Returns the ended offers: the
+/// connection asks the Controller about each ([`ask_message`], #122).
 pub fn prune_offers(
     offers: &mut Vec<(i32, String)>,
     reading: &mut Vec<i32>,
     still_reading: impl Fn(i32) -> bool,
-) {
+) -> Vec<i32> {
     let ended: Vec<i32> = reading
         .iter()
         .copied()
         .filter(|id| !still_reading(*id))
         .collect();
     if ended.is_empty() {
-        return;
+        return ended;
     }
     reading.retain(|id| !ended.contains(id));
     offers.retain(|(id, _)| !ended.contains(id));
     // An offer whose read ended (done, failed, cancelled) cannot be resumed either.
     resumable_drop(&ended);
+    ended
 }
 
 /// The message that tells the Controller about an offer.
@@ -1158,7 +1685,62 @@ pub fn offer_message(content: Vec<u8>) -> base::message_proto::Message {
 /// incoming folder (same open session, no second connection — S8); `None` for anything that
 /// is not a valid new offer.
 pub fn on_offer(sid: u64, peer: &str, content: &[u8]) -> Option<Data> {
+    if let Some(answer) = on_notice(sid, content) {
+        return answer;
+    }
     on_offer_into(sid, peer, content, &incoming_dir())
+}
+
+/// Controller: a notice of the Host on the offer channel (#122). `None`: not a notice (an
+/// offer). `Some(answer)`: handled; `answer` goes back to the Host.
+/// - `{ask: id}`: did this side save offer `id`? Answered from the job's state: saved (with
+///   the folder), failed (with the reason), or nothing while it still runs.
+/// - `{saved: id, folder, dir_name}`: the Host saved the chat file `id` this side sent.
+fn on_notice(sid: u64, content: &[u8]) -> Option<Option<Data>> {
+    let v: Value = serde_json::from_slice(content).ok()?;
+    if let Some(id) = v["ask"].as_i64().and_then(|i| i32::try_from(i).ok()) {
+        if !is_offer_id(id) {
+            return Some(None);
+        }
+        let reply = with_session(sid, |s| {
+            s.jobs
+                .iter()
+                .find(|j| j.id == id && j.incoming)
+                .and_then(|j| match j.state {
+                    State::Ok => Some(json!({
+                        "saved": id,
+                        "ok": true,
+                        "folder": if j.folder.is_empty() { FOLDER_DOWNLOADS } else { j.folder },
+                        "dir_name": j.dir_name,
+                    })),
+                    State::Err => Some(json!({ "saved": id, "ok": false, "error": j.error })),
+                    State::Run | State::Resume => None,
+                })
+        })
+        .flatten();
+        return Some(reply.map(|r| Data::Message(offer_message(r.to_string().into_bytes()))));
+    }
+    if let Some(id) = v["saved"].as_i64().and_then(|i| i32::try_from(i).ok()) {
+        if is_chat_id(id) && v["ok"].as_bool() == Some(true) {
+            let folder = match v["folder"].as_str() {
+                Some(FOLDER_CHOSEN) => FOLDER_CHOSEN,
+                _ => FOLDER_DOWNLOADS,
+            };
+            let dir_name = v["dir_name"]
+                .as_str()
+                .filter(|n| safe_dir_name(n))
+                .unwrap_or_default()
+                .to_owned();
+            with_job(sid, id, |j| {
+                if !j.incoming {
+                    j.folder = folder;
+                    j.dir_name = dir_name;
+                }
+            });
+        }
+        return Some(None);
+    }
+    None
 }
 
 fn on_offer_into(sid: u64, peer: &str, content: &[u8], dir: &Path) -> Option<Data> {
@@ -1198,23 +1780,32 @@ fn on_offer_into(sid: u64, peer: &str, content: &[u8], dir: &Path) -> Option<Dat
     };
     let target = dir.join(free_name(&name, taken));
     let local = target.to_string_lossy().into_owned();
+    file_event(
+        "start",
+        json!({ "id": id, "yon": "in", "rol": "controller", "tur": kind_of(&name), "bayt": total }),
+    );
+    // #122: a folder this app may not write into (macOS Downloads permission) fails at once,
+    // with its reason, on both sides — instead of a download that cannot be saved.
+    if !writable_dir(dir) {
+        let mut job = Job::new(id, name, true, local, total, key);
+        job.state = State::Err;
+        job.error = ERR_PERMISSION;
+        add_job(sid, peer, job);
+        log::warn!("sense chat file from the Host: the incoming folder cannot be written");
+        file_event(
+            "error",
+            json!({ "id": id, "asama": "izin", "hata": ERR_PERMISSION, "taraf": "controller" }),
+        );
+        return Some(Data::Message(offer_message(
+            json!({ "saved": id, "ok": false, "error": ERR_PERMISSION })
+                .to_string()
+                .into_bytes(),
+        )));
+    }
     add_job(
         sid,
         peer,
-        Job {
-            id,
-            name: name.clone(),
-            incoming: true,
-            local: local.clone(),
-            total,
-            done: 0,
-            file_num: 0,
-            state: State::Run,
-            error: "",
-            key,
-            cut_at: 0,
-            resumed: false,
-        },
+        Job::new(id, name.clone(), true, local.clone(), total, key),
     );
     log::info!("sense chat file from the Host to the incoming folder");
     Some(Data::SendFiles((
@@ -2374,20 +2965,16 @@ mod tests {
         host_transfer_log("transfer", "not json");
 
         // Host → Controller read the connection saw end (Windows: read in the CM).
-        HOST_JOBS.lock().unwrap().push(HostJob {
-            conn_id: conn,
-            id: c,
-            name: "c.txt".to_owned(),
-            incoming: false,
-            path: String::new(),
-            total: 10,
-            done: 0,
-            state: State::Run,
-        });
+        HOST_JOBS
+            .lock()
+            .unwrap()
+            .push(HostJob::new(conn, c, "c.txt".to_owned(), false, String::new(), 10));
         let end = json!({ "id": c, "ok": true }).to_string();
         assert!(host_from_conn(conn, CM_OFFER_END, Some(end.as_str())));
         assert_eq!(host_row(c)["state"], "ok");
         assert_eq!(host_row(c)["done"], 10);
+        // #122: read here, not yet saved there.
+        assert_eq!(host_row(c)["confirm"], "wait");
         assert!(!host_from_conn(conn, "audio-input", Some("x")));
 
         // The connection ends: the list is gone (S12).
@@ -2464,5 +3051,315 @@ mod tests {
         assert!(output_choosable(&outs, ""));
         assert!(output_choosable(&outs, "Hoparlör"));
         assert!(!output_choosable(&outs, "USB"));
+    }
+
+    // ---- #122: date, real confirmation, final name, stall, record ----
+
+    fn set_old_time(p: &Path) {
+        let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+
+    /// Seconds between the file's modified time and now.
+    fn age_s(p: &Path) -> u64 {
+        let m = std::fs::metadata(p).unwrap().modified().unwrap();
+        std::time::SystemTime::now()
+            .duration_since(m)
+            .unwrap_or_default()
+            .as_secs()
+    }
+
+    #[test]
+    fn host_dates_a_chat_file_now_and_leaves_other_transfers_alone() {
+        // The sender's date (2020) as RustDesk sends it in the file list.
+        let old = 1_600_000_000u64;
+        let mut files = vec![(String::new(), old)];
+        host_resolve(incoming_target("rapor.pdf"), &mut files, 0, &[]);
+        let now = now_secs();
+        assert!(now.abs_diff(files[0].1) <= 5, "chat file dated now: {}", files[0].1);
+        // A folder: every file.
+        let mut files = vec![("a.txt".to_owned(), old), ("alt/b.txt".to_owned(), old)];
+        host_resolve(incoming_target("klasor"), &mut files, 0, &[]);
+        assert!(files.iter().all(|f| now.abs_diff(f.1) <= 5));
+        // RustDesk's file manager (no mark): the sender's date stays.
+        let mut files = vec![(String::new(), old)];
+        host_resolve("/home/a/x.txt".to_owned(), &mut files, 0, &[]);
+        assert_eq!(files[0].1, old);
+    }
+
+    fn chat_write_job(id: i32, target: &Path, modified: u64) -> base::fs::TransferJob {
+        let mut job = base::fs::TransferJob::new_write(
+            id,
+            JobType::Generic,
+            String::new(),
+            base::fs::DataSource::FilePath(target.to_path_buf()),
+            0,
+            false,
+            false,
+            false,
+        );
+        let mut entry = base::message_proto::FileEntry::new();
+        entry.modified_time = modified;
+        job.set_files(vec![entry]).unwrap();
+        job
+    }
+
+    #[test]
+    fn host_saves_under_the_final_name_or_says_it_did_not() {
+        let dir = temp_dir("finish");
+        // Written to "a.txt.download"; WriteDone gives the final name, dated now.
+        let target = dir.join("a.txt");
+        std::fs::write(dir.join("a.txt.download"), b"abc").unwrap();
+        std::fs::write(dir.join("a.txt.digest"), b"{}").unwrap();
+        let mut files = vec![(String::new(), 1_600_000_000u64)];
+        set_times_now(&mut files);
+        let job = chat_write_job(0x5E_7101, &target, files[0].1);
+        assert_eq!(host_finish_write(&job), Ok(()));
+        assert_eq!(std::fs::read(&target).unwrap(), b"abc");
+        assert!(!dir.join("a.txt.download").exists());
+        assert!(!dir.join("a.txt.digest").exists());
+        assert!(age_s(&target) <= 5, "dated now");
+
+        // The final name cannot be given (a folder of that name is in the way): an error, the
+        // half file stays, nobody says "saved".
+        let blocked = dir.join("b.txt");
+        std::fs::create_dir_all(blocked.join("inside")).unwrap();
+        std::fs::write(dir.join("b.txt.download"), b"abc").unwrap();
+        let job = chat_write_job(0x5E_7102, &blocked, now_secs());
+        let err = host_finish_write(&job).unwrap_err();
+        assert!(
+            [ERR_NOT_SAVED, ERR_PERMISSION].contains(&error_code(&err)),
+            "{err}"
+        );
+        assert!(dir.join("b.txt.download").exists());
+
+        // Nothing was written at all: not saved either.
+        let job = chat_write_job(0x5E_7103, &dir.join("c.txt"), now_secs());
+        assert_eq!(host_finish_write(&job), Err(NOT_SAVED_TEXT.to_owned()));
+        assert_eq!(error_code(NOT_SAVED_TEXT), ERR_NOT_SAVED);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn host_card_knows_its_chat_jobs() {
+        let conn = 9201;
+        host_job_in(conn, 0x5E_7201, "/in/a.bin", 10);
+        assert!(host_is_chat_job(conn, 0x5E_7201));
+        assert!(!host_is_chat_job(conn + 1, 0x5E_7201));
+        assert!(!host_is_chat_job(conn, 0x5E_7202));
+        host_forget(conn);
+        assert!(!host_is_chat_job(conn, 0x5E_7201));
+    }
+
+    #[test]
+    fn controller_dates_a_host_file_now_and_tells_its_folder() {
+        let in_dir = temp_dir("date-ctrl");
+        let sid = 0xC001;
+        let id = OFFER_FIRST + 101;
+        let offer = json!({ "id": id, "name": "foto.jpg", "total": 3 }).to_string();
+        assert!(matches!(
+            on_offer_into(sid, "p", offer.as_bytes(), &in_dir),
+            Some(Data::SendFiles(_))
+        ));
+        // RustDesk's download wrote it with the Host's date.
+        let local = in_dir.join("foto.jpg");
+        std::fs::write(&local, b"abc").unwrap();
+        set_old_time(&local);
+        assert!(age_s(&local) > 86_400);
+        on_status(sid, id, None);
+        assert!(age_s(&local) <= 5, "dated now");
+        let row = parse(&ffi_file_jobs(sid))[0].clone();
+        assert_eq!(row["state"], "ok");
+        // A temp folder is not Downloads: the chosen folder, by its own name only.
+        assert_eq!(row["folder"], FOLDER_CHOSEN);
+        assert_eq!(row["dir_name"], json!(in_dir.file_name().unwrap().to_string_lossy()));
+        forget_closed(|s, _| s != sid);
+        std::fs::remove_dir_all(&in_dir).ok();
+    }
+
+    fn reply_of(d: Option<Data>) -> Value {
+        match d {
+            Some(Data::Message(m)) => {
+                let p = m.misc().plugin_request();
+                assert_eq!(p.id, OFFER_REQUEST);
+                serde_json::from_slice(&p.content).unwrap()
+            }
+            _ => panic!("no answer"),
+        }
+    }
+
+    #[test]
+    fn host_file_is_saved_only_when_the_controller_says_so() {
+        let conn = 9202;
+        let (a, b) = (OFFER_FIRST + 111, OFFER_FIRST + 112);
+        {
+            let mut all = HOST_JOBS.lock().unwrap();
+            all.push(HostJob::new(conn, a, "a.png".to_owned(), false, String::new(), 3));
+            all.push(HostJob::new(conn, b, "b.png".to_owned(), false, String::new(), 3));
+        }
+        // The read ended here: "Gönderildi", no claim about the other side.
+        for id in [a, b] {
+            let end = json!({ "id": id, "ok": true }).to_string();
+            host_from_conn(conn, CM_OFFER_END, Some(end.as_str()));
+            assert_eq!(host_row(id)["state"], "ok");
+            assert_eq!(host_row(id)["confirm"], "wait");
+        }
+
+        // Controller: asked before it finished, it says nothing; after, it answers.
+        let in_dir = temp_dir("confirm");
+        let sid = 0xC002;
+        for (id, name) in [(a, "a.png"), (b, "b.png")] {
+            let offer = json!({ "id": id, "name": name, "total": 3 }).to_string();
+            on_offer_into(sid, "p", offer.as_bytes(), &in_dir).unwrap();
+        }
+        let ask = |id: i32| json!({ "ask": id }).to_string();
+        assert!(on_notice(sid, ask(a).as_bytes()).unwrap().is_none(), "still running");
+        std::fs::write(in_dir.join("a.png"), b"abc").unwrap();
+        on_status(sid, a, None);
+        on_status(sid, b, Some("Operation not permitted (os error 1)"));
+        let saved = reply_of(on_notice(sid, ask(a).as_bytes()).unwrap());
+        assert_eq!(saved["saved"], a);
+        assert_eq!(saved["ok"], true);
+        assert_eq!(saved["folder"], FOLDER_CHOSEN);
+        let failed = reply_of(on_notice(sid, ask(b).as_bytes()).unwrap());
+        assert_eq!(failed, json!({ "saved": b, "ok": false, "error": ERR_PERMISSION }));
+        // The ask message the Host sends carries only the id.
+        let m = ask_message(a);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&m.misc().plugin_request().content).unwrap(),
+            json!({ "ask": a })
+        );
+
+        // Host connection → Host card.
+        for answer in [saved, failed] {
+            let raw = answer.to_string();
+            let cm = conn_reply(raw.as_bytes()).unwrap();
+            assert!(host_from_conn(conn, CM_OFFER_END, Some(cm.as_str())));
+        }
+        assert_eq!(host_row(a)["state"], "ok");
+        assert_eq!(host_row(a)["confirm"], "yes");
+        assert_eq!(host_row(a)["folder"], FOLDER_CHOSEN);
+        assert_eq!(host_row(b)["state"], "err");
+        assert_eq!(host_row(b)["error"], ERR_PERMISSION);
+        // Anything else from the Controller moves nothing.
+        assert!(conn_reply(br#"{"saved": 5, "ok": true}"#).is_none());
+        assert!(conn_reply(b"not json").is_none());
+        let odd = conn_reply(
+            json!({ "saved": a, "ok": false, "error": "<script>", "dir_name": "../x" })
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        let odd: Value = serde_json::from_str(&odd).unwrap();
+        assert_eq!(odd["error"], ERR_FAILED);
+        assert_eq!(odd["dir_name"], "");
+        host_forget(conn);
+        forget_closed(|s, _| s != sid);
+        std::fs::remove_dir_all(&in_dir).ok();
+    }
+
+    #[test]
+    fn controller_bubble_names_the_hosts_real_folder() {
+        let dir = temp_dir("saved-notice");
+        let file = dir.join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let sid = 0xC003;
+        let ids = parse(&ffi_send_files(sid, "p", &[file.to_string_lossy().into_owned()], |_| {}));
+        let id: i32 = ids[0].as_str().unwrap().parse().unwrap();
+        // CM → connection → Controller.
+        let cm = json!({ "id": id, "folder": FOLDER_CHOSEN, "dir_name": "Projeler" }).to_string();
+        let content = conn_saved(&cm).unwrap();
+        assert!(on_offer(sid, "p", &content).is_none());
+        on_status(sid, id, None);
+        let row = parse(&ffi_file_jobs(sid))[0].clone();
+        assert_eq!(row["confirm"], "yes");
+        assert_eq!(row["folder"], FOLDER_CHOSEN);
+        assert_eq!(row["dir_name"], "Projeler");
+        // Bad notices are dropped.
+        let not_chat = json!({ "id": OFFER_FIRST, "folder": "downloads" }).to_string();
+        assert!(conn_saved(&not_chat).is_none());
+        assert!(conn_saved("x").is_none());
+        let unsafe_name = json!({ "id": id, "folder": "chosen", "dir_name": "a/b" }).to_string();
+        let told = conn_saved(&unsafe_name).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&told).unwrap()["dir_name"], "");
+        forget_closed(|s, _| s != sid);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unwritable_incoming_folder_fails_at_once_on_both_sides() {
+        let missing = std::env::temp_dir().join(format!("sense-no-dir-{}", std::process::id()));
+        let sid = 0xC004;
+        let id = OFFER_FIRST + 121;
+        let offer = json!({ "id": id, "name": "a.pdf", "total": 1 }).to_string();
+        let answer = reply_of(on_offer_into(sid, "p", offer.as_bytes(), &missing));
+        assert_eq!(answer, json!({ "saved": id, "ok": false, "error": ERR_PERMISSION }));
+        let row = parse(&ffi_file_jobs(sid))[0].clone();
+        assert_eq!(row["state"], "err");
+        assert_eq!(row["error"], ERR_PERMISSION);
+        forget_closed(|s, _| s != sid);
+    }
+
+    #[test]
+    fn a_transfer_that_stops_moving_ends_with_its_reason() {
+        let dir = temp_dir("stall");
+        let file = dir.join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let sid = 0xC005;
+        let ids = parse(&ffi_send_files(sid, "p", &[file.to_string_lossy().into_owned()], |_| {}));
+        let id: i32 = ids[0].as_str().unwrap().parse().unwrap();
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["state"], "run");
+        with_job(sid, id, |j| j.moved_at = now_ms() - STALL_MS - 1000);
+        // Bytes that moved keep it alive.
+        on_progress(sid, id, 1);
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["state"], "run");
+        with_job(sid, id, |j| j.moved_at = now_ms() - STALL_MS - 1000);
+        let row = parse(&ffi_file_jobs(sid))[0].clone();
+        assert_eq!(row["state"], "err");
+        assert_eq!(row["error"], ERR_STALLED);
+        // It still finishes later: the real result shows.
+        on_status(sid, id, None);
+        assert_eq!(parse(&ffi_file_jobs(sid))[0]["state"], "ok");
+        forget_closed(|s, _| s != sid);
+
+        // Host card: a file from the Controller that stops.
+        let conn = 9203;
+        host_job_in(conn, 0x5E_7301, "/in/a.bin", 10);
+        host_job_update(Some(conn), 0x5E_7301, |j| j.moved_at = now_ms() - STALL_MS - 1000);
+        assert_eq!(host_row(0x5E_7301)["state"], "err");
+        assert_eq!(host_row(0x5E_7301)["error"], ERR_STALLED);
+        host_forget(conn);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn error_reasons() {
+        assert_eq!(error_code("Permission denied"), ERR_REFUSED);
+        assert_eq!(error_code("Permission denied (os error 13)"), ERR_PERMISSION);
+        assert_eq!(error_code("Operation not permitted (os error 1)"), ERR_PERMISSION);
+        assert_eq!(error_code("Access is denied. (os error 5)"), ERR_PERMISSION);
+        assert_eq!(error_code(NOT_SAVED_TEXT), ERR_NOT_SAVED);
+        assert_eq!(error_code("No space left on device (os error 28)"), ERR_FAILED);
+        assert_eq!(error_code("download overwrite requires confirmation"), ERR_FAILED);
+        assert_eq!(known_code("stalled"), ERR_STALLED);
+        assert_eq!(known_code("anything"), ERR_FAILED);
+    }
+
+    #[test]
+    fn record_path_has_no_name() {
+        assert_eq!(masked_path(FOLDER_DOWNLOADS, "Teklif Mart.PDF"), "<indirilenler>/<dosya>.pdf");
+        assert_eq!(masked_path(FOLDER_CHOSEN, "plan"), "<secili>/<dosya>");
+        assert_eq!(masked_path(FOLDER_DOWNLOADS, "a.ç"), "<indirilenler>/<dosya>");
+        // A refused chat file is recorded (reason only).
+        crate::sense::diag::sink::take();
+        host_file_action(false, &receive(&incoming_target("a.txt")), &[]);
+        assert!(crate::sense::diag::sink::take()
+            .iter()
+            .any(|(c, k)| c == "file" && k == "refused"));
     }
 }

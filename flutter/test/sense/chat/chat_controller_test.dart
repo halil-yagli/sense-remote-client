@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_controller.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_entry.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/data/files.dart';
+import 'package:flutter_hbb/sense/screens/shared/reveal_file.dart';
 import 'package:flutter_hbb/sense/strings/chat.dart';
 
 import 'support.dart';
@@ -119,6 +120,71 @@ void main() {
           'Video · Kaldığı yerden sürüyor · %50 · 1,0 GB / 2,0 GB');
       expect(senseFileSize(300), '1 KB');
       expect(senseCallClock(const Duration(seconds: 95)), '01:35');
+    });
+
+    // #122: rows as the core gives them (chat_file.rs ffi_file_jobs /
+    // ffi_host_file_jobs, the `confirm`, `folder`, `dir_name`, `error` fields).
+    test('#122: "kaydedildi" only on the receiver\'s answer, with the real folder', () {
+      SenseFileJob row(String json) => senseParseFileJobs('[$json]').single;
+      const base = '"id":"1","name":"k.png","kind":"image","dir":"out","done":1,"total":1,"state":"ok"';
+      // Host card: read here, no answer yet.
+      expect(senseFileLine(row('{$base,"confirm":"wait","folder":"","dir_name":""}')),
+          'Resim · 1 KB · Gönderildi');
+      expect(senseFileLine(row('{$base,"confirm":"yes","folder":"downloads","dir_name":""}')),
+          'Resim · 1 KB · ${SenseChatStrings.sentSaved}');
+      expect(senseFileLine(row('{$base,"confirm":"yes","folder":"chosen","dir_name":"Projeler"}')),
+          'Resim · 1 KB · Gönderildi, karşıda “Projeler” klasörüne kaydedildi');
+      // An old Host says nothing about the folder: no folder is claimed.
+      expect(senseFileLine(row('{$base,"confirm":"yes","folder":"","dir_name":""}')),
+          'Resim · 1 KB · Gönderildi, karşıda kaydedildi');
+      // Receiving side: the core names the folder.
+      const inc = '"id":"2","name":"a.pdf","dir":"in","done":1,"total":1,"state":"ok"';
+      final chosen = row('{$inc,"path":"D:\\\\Gelen\\\\a (1).pdf","folder":"chosen","dir_name":"Gelen"}');
+      expect(senseFileLine(chosen), 'Belge · 1 KB · “Gelen” klasörüne kaydedildi');
+      expect(chosen.savedName, 'a (1).pdf');
+      expect(row('{$inc,"path":"/Users/a/Downloads/a.pdf","folder":"downloads"}').savedName, 'a.pdf');
+    });
+
+    test('#122: a failed transfer says why', () {
+      SenseFileJob failed(String error, {String dir = 'out'}) => senseParseFileJobs(
+              '[{"id":"3","name":"v.mp4","dir":"$dir","done":0,"total":1000000,"state":"err","error":"$error"}]')
+          .single;
+      expect(senseFileLine(failed('stalled')), 'Video · 1,0 MB · Aktarılamadı · yanıt yok');
+      expect(senseFileLine(failed('permission', dir: 'in')),
+          'Video · 1,0 MB · Aktarılamadı · klasöre yazma izni yok');
+      expect(senseFileLine(failed('refused')), 'Video · 1,0 MB · Aktarılamadı · karşı taraf dosya almıyor');
+      expect(senseFileLine(failed('not_saved')), 'Video · 1,0 MB · Aktarılamadı · dosya kaydedilemedi');
+      expect(senseFileLine(failed('receiver')), 'Video · 1,0 MB · Aktarılamadı · karşıda kaydedilemedi');
+      expect(senseFileLine(failed('failed')), 'Video · 1,0 MB · Aktarılamadı');
+      expect(senseFileLine(failed('')), 'Video · 1,0 MB · Aktarılamadı');
+    });
+
+    test('#122: a failed file this side sent can go again (Yeniden dene)', () async {
+      final f = FakeFiles();
+      final c = makeController(files: f);
+      await c.sendFiles([r'C:\u\Desktop\rapor.pdf']);
+      expect(c.canRetry('j1'), isFalse, reason: 'still running');
+      c.applyJobs([job('j1', 'rapor.pdf', SenseFileDir.out, state: SenseFileState.err)]);
+      expect(c.canRetry('j1'), isTrue);
+      await c.retry('j1');
+      expect(f.sent.last, [r'C:\u\Desktop\rapor.pdf']);
+      expect(c.entries.whereType<SenseChatFileEntry>(), hasLength(2), reason: 'a new bubble');
+      expect(c.canRetry('j1'), isFalse, reason: 'once');
+      // A received file is never "retried" from this side.
+      c.applyJobs([job('in1', 'a.png', SenseFileDir.incoming, state: SenseFileState.err)]);
+      expect(c.canRetry('in1'), isFalse);
+    });
+
+    test('#122: Klasörde göster selects the file (Explorer / Finder)', () {
+      final win = senseRevealCommand(r'C:\Users\u\Downloads\a b.png', windows: true, mac: false)!;
+      expect(win.exe, 'explorer.exe');
+      expect(win.args, ['/select,', r'C:\Users\u\Downloads\a b.png']);
+      final mac = senseRevealCommand('/Users/u/Downloads/a.png', windows: false, mac: true)!;
+      expect(mac.exe, 'open');
+      expect(mac.args, ['-R', '/Users/u/Downloads/a.png']);
+      expect(senseRevealCommand('/home/u/a.png', windows: false, mac: false), isNull);
+      expect(senseRevealCommand('', windows: true, mac: false), isNull);
+      expect(senseFolderOf(r'C:\Users\u\Downloads\a.png'), r'C:\Users\u\Downloads');
     });
   });
 

@@ -49,6 +49,25 @@ abstract final class SenseChatStrings {
   static const String savedIncoming = 'Gelen dosyalar klasörüne kaydedildi';
   static const String showInFolder = 'Klasörde göster';
 
+  // #122: "kaydedildi" only on the receiver's answer, with the real folder.
+  static const String sent = 'Gönderildi';
+  static const String sentSavedThere = 'Gönderildi, karşıda kaydedildi';
+  static const String sentSavedChosen = 'Gönderildi, karşıda Gelen dosyalar klasörüne kaydedildi';
+  static String sentSavedIn(String folder) => 'Gönderildi, karşıda “$folder” klasörüne kaydedildi';
+  static String savedIn(String folder) => '“$folder” klasörüne kaydedildi';
+  static const String retry = 'Yeniden dene';
+
+  /// Why a transfer failed, after "Aktarılamadı" (#122); empty when unknown.
+  static String failReason(String code) => switch (code) {
+        'stalled' => 'yanıt yok',
+        'permission' => 'klasöre yazma izni yok',
+        'refused' => 'karşı taraf dosya almıyor',
+        'not_saved' => 'dosya kaydedilemedi',
+        'receiver' => 'karşıda kaydedilemedi',
+        'link_lost_not_resumed' => 'bağlantı koptu',
+        _ => '',
+      };
+
   // Icon (O10, H3 look).
   static const String iconTooltip = 'Sohbet · basınca açılır, sürükleyerek taşınır';
   static const String minimize = 'Simgeye küçült';
