@@ -14,6 +14,7 @@ import 'package:flutter_hbb/sense/screens/host_live/data/overlay.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_ended.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_geometry.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_page.dart';
+import 'package:flutter_hbb/sense/screens/host_live/sense_cm_region.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_window.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_call.dart';
 import 'package:flutter_hbb/sense/screens/shared/chat/chat_composer.dart';
@@ -744,6 +745,70 @@ void main() {
     test('nothing counts down before every connection ended', () {
       SenseCm.cancelEnded();
       expect(SenseCm.endedSecondsLeft(DateTime.now()), isNull);
+    });
+  });
+
+  group('#107 the window closes 5 s after the end, whatever the card does', () {
+    test('a live connection is one that has not ended', () {
+      expect(senseCmHasLive(const []), isFalse);
+      expect(senseCmHasLive(const [true]), isFalse);
+      expect(senseCmHasLive(const [true, false]), isTrue);
+    });
+
+    testWidgets('the 0.5 s re-show of ended connections does not stop it',
+        (tester) async {
+      final closer = SenseCmEndedCloser();
+      var closed = 0;
+      expect(closer.start(() => closed++), isTrue);
+      // Slayer v9: ServerModel shows the window every 0.5 s while the ended
+      // connection is still in the list; card / icon clicks do not reach it.
+      for (var i = 0; i < 9; i++) {
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(closer.onClients(const [true]), isFalse);
+        expect(closer.start(() => closed++), isFalse); // not restarted
+      }
+      expect(closed, 0);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(closed, 1);
+      expect(closer.pending, isFalse);
+      await tester.pump(const Duration(seconds: 10));
+      expect(closed, 1);
+    });
+
+    testWidgets('only a new connection stops it', (tester) async {
+      final closer = SenseCmEndedCloser();
+      var closed = 0;
+      closer.start(() => closed++);
+      await tester.pump(const Duration(seconds: 3));
+      expect(closer.onClients(const [true, false]), isTrue);
+      expect(closer.pending, isFalse);
+      await tester.pump(const Duration(seconds: 10));
+      expect(closed, 0);
+      // That one ends too: a fresh 5 s.
+      expect(closer.start(() => closed++), isTrue);
+      await tester.pump(const Duration(seconds: 5));
+      expect(closed, 1);
+    });
+
+    test('Windows icon window is a popup (no 136 px minimum width)', () {
+      const overlappedWindow = 0x00CF0000; // caption, sys menu, frame, min/max
+      const visible = 0x10000000;
+      const clipChildren = 0x02000000;
+      final style = senseCmPopupStyle(overlappedWindow | visible | clipChildren);
+      expect(style & kSenseWsPopup, kSenseWsPopup);
+      expect(style & kSenseWsCaption, 0);
+      expect(style & kSenseWsThickFrame, 0);
+      expect(style & kSenseWsMaximizeBox, 0);
+      expect(style & visible, visible);
+      expect(style & clipChildren, clipChildren);
+      // Already a popup: nothing changes (no frame change per resize).
+      expect(senseCmPopupStyle(style), style);
+      // A sign-extended value from GetWindowLongPtr reads the same.
+      expect(senseCmPopupStyle(style | ~0xFFFFFFFF), style);
+    });
+
+    test('#109 capture exclusion asks for WDA_EXCLUDEFROMCAPTURE', () {
+      expect(kSenseWdaExcludeFromCapture, 0x11);
     });
   });
 }

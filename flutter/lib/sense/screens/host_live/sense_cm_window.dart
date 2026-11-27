@@ -21,6 +21,15 @@
 // dark strips beside it. Frameless, the view is the whole window. After every
 // resize the Flutter view is made to present a frame at the final size (see
 // senseCmRefreshFlutterView), and the sizes go into the record (`[ui] cm.window`).
+//
+// #107 (Sürüm 10): a captioned window cannot be narrower than SM_CXMIN
+// (136 px), so the 64 × 64 icon was 136 × 64; the window is a popup window
+// now. Once every connection ended the window closes after 5 s whatever the
+// card does meanwhile (SenseCmEndedCloser).
+//
+// #109: the card and the icon are left out of screen capture (Windows
+// WDA_EXCLUDEFROMCAPTURE, macOS sharingType none): the Controller does not see
+// the Host's icon next to its own. The Host user still sees the window.
 
 import 'dart:async';
 
@@ -156,25 +165,30 @@ class SenseCm {
 
   /// #101: when every connection ended (null while one is live).
   static final Rxn<DateTime> endedAt = Rxn<DateTime>();
-  static Timer? _endedTimer;
+  static final SenseCmEndedCloser _ended = SenseCmEndedCloser();
 
   /// #101: every connection has ended. The card opens with "Bağlantı sona erdi"
-  /// and the window closes by itself after [kSenseCmEndedLinger].
+  /// and the window closes by itself after [kSenseCmEndedLinger], whatever the
+  /// card does meanwhile (#107: open, icon or edge tab, clicks included).
   static void onAllEnded() {
-    if (_endedTimer != null) return;
+    if (!_ended.start(() => unawaited(_closeAfterEnd()))) return;
     endedAt.value = DateTime.now();
     senseUiEvent('cm.ended', {'closeInS': kSenseCmEndedLinger.inSeconds});
     if (!open.value) unawaited(openPanel());
-    _endedTimer = Timer(kSenseCmEndedLinger, () {
-      _endedTimer = null;
-      unawaited(_closeAfterEnd());
-    });
   }
 
-  /// A new connection came in before the window closed: it stays.
+  /// #107: the window was shown again (ServerModel does this every 0.5 s while
+  /// the list is not empty). Only a live connection stops the countdown.
+  static void onClientsShown(Iterable<bool> disconnected) {
+    if (_ended.onClients(disconnected)) {
+      endedAt.value = null;
+      senseUiEvent('cm.ended', {'cancelled': 'new connection'});
+    }
+  }
+
+  /// Stops the countdown (tests; a new connection goes via [onClientsShown]).
   static void cancelEnded() {
-    _endedTimer?.cancel();
-    _endedTimer = null;
+    _ended.cancel();
     endedAt.value = null;
   }
 
@@ -190,15 +204,22 @@ class SenseCm {
     endedAt.value = null;
     try {
       final clients = gFFI.serverModel.clients;
-      if (!senseCmAllEnded(clients.map((c) => c.disconnected))) return;
+      if (!senseCmAllEnded(clients.map((c) => c.disconnected))) {
+        senseUiEvent('cm.closed', {'reason': 'ended', 'skipped': 'live'});
+        return;
+      }
       for (final id in clients.map((c) => c.id).toList()) {
         await bind.cmRemoveDisconnectedConnection(connId: id);
       }
-      if (await bind.cmGetClientsLength() == 0) {
+      final left = await bind.cmGetClientsLength();
+      if (left == 0) {
         senseUiEvent('cm.closed', {'reason': 'ended'});
         await windowManager.close();
+      } else {
+        senseUiEvent('cm.closed', {'reason': 'ended', 'skipped': 'left=$left'});
       }
     } catch (e) {
+      senseUiEvent('cm.closed', {'reason': 'ended', 'error': '${e.runtimeType}'});
       debugPrint('Sense CM: closing after the end failed: $e');
     }
   }
@@ -281,19 +302,45 @@ class SenseCm {
       // Flutter paints black behind the widgets on macOS; clear it so no
       // black square shows around the rounded icon (design review T3-4).
       await _macHostChannel.invokeMethod('senseCmClearBackground');
+      // #109: on the Host's screen, not in the Controller's picture.
+      await _excludeMacFromCapture();
     } catch (e) {
       debugPrint('Sense CM: macOS window setup failed: $e');
     }
   }
 
+  static bool _macCaptureDone = false;
+
+  /// #109 (macOS): `sharingType = .none` on the CM window, once per start.
+  static Future<void> _excludeMacFromCapture() async {
+    if (_macCaptureDone) return;
+    _macCaptureDone = true;
+    try {
+      final done =
+          await _macHostChannel.invokeMethod<bool>('senseCmExcludeFromCapture');
+      senseUiEvent('cm.capture', {'excluded': done == true});
+    } catch (e) {
+      senseUiEvent('cm.capture', {'excluded': false, 'error': '${e.runtimeType}'});
+    }
+  }
+
   /// Windows (#99): frameless window, no system border or rounded corners.
-  /// Runs before the first bounds are set (startup).
+  /// #107: a popup window, so the icon is really 64 × 64 (see
+  /// senseCmPopupStyle). #109: left out of screen capture (Controller), still
+  /// on the Host's screen. Runs before the first bounds are set (startup).
   static Future<void> _prepareWindowsWindow() async {
     if (!isWindows) return;
     try {
       await windowManager.setAsFrameless();
       await windowManager.setHasShadow(false);
       senseCmPlainFrame();
+      final popup = senseCmPopupFrame();
+      final (excluded, error) = senseCmExcludeFromCapture();
+      senseUiEvent('cm.capture', {
+        'excluded': excluded,
+        if (!excluded) 'error': error,
+        'popup': popup,
+      });
     } catch (e) {
       debugPrint('Sense CM: Windows window setup failed: $e');
     }
@@ -304,6 +351,8 @@ class SenseCm {
     // Windows; the window manager reports this minimum instead. On macOS
     // `rect` is in points and the pixel ratio is not used at all.
     await windowManager.setMinimumSize(kSenseCmEdgeSize);
+    // #107: a caption would hold the icon at 136 px wide (SM_CXMIN).
+    if (isWindows) senseCmPopupFrame();
     await windowManager.setBounds(rect, ignoreDevicePixelRatio: true);
     await _settleBounds(rect);
     _applyRegion(rect);
@@ -472,8 +521,10 @@ Future<bool> senseCmShowWindow(
     {required bool isStartup,
     required bool readyToShow,
     required WindowOptions Function(Size size) startupOptions}) async {
-  // #101: a new connection while the "Bağlantı sona erdi" card was up.
-  SenseCm.cancelEnded();
+  // #101/#107: a new connection while the "Bağlantı sona erdi" card was up.
+  // Only a live connection stops the countdown: this runs every 0.5 s while
+  // ended connections are still in the list (ServerModel's check).
+  SenseCm.onClientsShown(gFFI.serverModel.clients.map((c) => c.disconnected));
   if (isStartup) {
     WindowOptions windowOptions = startupOptions(kSenseCmIconSize);
     await windowManager.waitUntilReadyToShow(windowOptions, null);
