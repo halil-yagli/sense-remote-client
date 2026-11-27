@@ -49,8 +49,8 @@ pub const PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY: &str = "privacy_mode_impl_virtu
 // screens off) are not offered.
 #[cfg(windows)]
 const SENSE_CURTAIN_ONLY: bool = true;
-// Sense Remote (MAC-SONRA-15, Sürüm 9): macOS offers the same ghost mode (Sense curtain +
-// local input blocked, `sense::curtain_mac`) under RustDesk's macOS key; RustDesk's own macOS
+// Sense Remote (MAC-SONRA-15, Sürüm 9): macOS offers the same ghost mode (Sense curtain,
+// local input free since #108, `sense::curtain_mac`) under RustDesk's macOS key; RustDesk's own macOS
 // mode (gamma black screen) is not offered.
 #[cfg(target_os = "macos")]
 fn sense_macos_curtain() -> bool {

@@ -16,8 +16,9 @@ mod sense {
     use crate::sense::curtain;
     use hbb_common::{allow_err, log, ResultType};
 
-    /// Sense Remote: privacy mode = maintenance curtain + local input blocked (as in RustDesk's
-    /// mode 1; Ctrl+P on the computer itself still turns it off, see `win_input`).
+    /// Sense Remote: privacy mode = maintenance curtain only. Local mouse and keyboard stay
+    /// free (#108, `curtain::GHOST_MODE_BLOCKS_LOCAL_INPUT`); the `win_input` hook of RustDesk's
+    /// mode 1 (and its Ctrl+P exit) is not used.
     pub struct PrivacyModeImpl {
         impl_key: String,
         conn_id: i32,
@@ -51,9 +52,12 @@ mod sense {
                 return Ok(true);
             }
             curtain::show()?;
-            if let Err(e) = super::super::win_input::hook() {
-                curtain::hide();
-                return Err(e);
+            // Sense Remote (#108): no local input lock in ghost mode.
+            if curtain::GHOST_MODE_BLOCKS_LOCAL_INPUT {
+                if let Err(e) = super::super::win_input::hook() {
+                    curtain::hide();
+                    return Err(e);
+                }
             }
             self.conn_id = conn_id;
             Ok(true)
@@ -65,7 +69,12 @@ mod sense {
             state: Option<PrivacyModeState>,
         ) -> ResultType<()> {
             self.check_off_conn_id(conn_id)?;
-            let unhook = super::super::win_input::unhook();
+            // Sense Remote (#108): nothing to unhook when ghost mode never hooked.
+            let unhook = if curtain::GHOST_MODE_BLOCKS_LOCAL_INPUT {
+                super::super::win_input::unhook()
+            } else {
+                Ok(())
+            };
             curtain::hide();
             if self.conn_id != INVALID_PRIVACY_MODE_CONN_ID {
                 if let Some(state) = state {
