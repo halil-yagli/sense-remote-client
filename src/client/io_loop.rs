@@ -2754,6 +2754,17 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                     }
+                    // Sense Remote (Sürüm 12, plan 2026-11-28 §2.1): every other `sense.*`
+                    // message goes to one dispatcher; unknown ones are ignored (older/newer peer).
+                    Some(misc::Union::PluginRequest(p))
+                        if crate::sense::peer_msg::is_sense(&p.id) =>
+                    {
+                        let sid = self.handler.lc.read().unwrap().session_id;
+                        if let Some(_ev) = crate::sense::peer_msg::on_controller(sid, &p) {
+                            #[cfg(feature = "flutter")]
+                            crate::sense::peer_msg::push_to_ui(sid, &_ev);
+                        }
+                    }
                     _ => {}
                 },
                 Some(message::Union::TestDelay(t)) => {

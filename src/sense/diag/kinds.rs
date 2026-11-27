@@ -277,9 +277,83 @@ pub fn controller_tick(window: &mut StatsWindow, tick: &Tick) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Sürüm 12 (plan 2026-11-28 §2.6). Codes and numbers only: no command output, file name or path,
+// and never the admin terminal ticket.
+// ---------------------------------------------------------------------------------------------
+
+/// `shortcut/run`: the Host ran (or refused) a favourite shortcut. `id` is the catalogue id
+/// (`win.taskmgr`) or `custom:<uuid>`; `err` is the contract code (`unknown_id`, `no_permission`
+/// …).
+pub fn shortcut_run(id: &str, ok: bool, err: Option<&str>) {
+    super::event("shortcut", "run", json!({ "id": id, "ok": ok, "err": err }));
+}
+
+/// `term/admin`: the Host checked an admin terminal ticket (`bad_sig`, `expired`, `replay` …).
+pub fn term_admin(ok: bool, err: Option<&str>) {
+    super::event("term", "admin", json!({ "ok": ok, "err": err }));
+}
+
+/// `ui/card`: which connecting card the session showed (`wrong_password`, `offline` …).
+pub fn ui_card(kind: &str) {
+    super::event("ui", "card", json!({ "kind": kind }));
+}
+
+/// `ui/dialog`: a stock RustDesk dialog was shown instead of a Sense card (target: never).
+pub fn ui_dialog(kind: &str) {
+    super::event("ui", "dialog", json!({ "kind": kind }));
+}
+
+/// `files/readdir`: one remote folder read in the file window (U168a): took `ms`, or failed.
+pub fn files_readdir(ok: bool, ms: u64, err: Option<&str>) {
+    super::event("files", "readdir", json!({ "ok": ok, "ms": ms, "err": err }));
+}
+
+/// `video/fps_cap`: the Host's frame rate limit and why (`quality`, `network`, `encoder` …;
+/// U168c).
+pub fn video_fps_cap(cap: u32, reason: &str) {
+    super::event("video", "fps_cap", json!({ "cap": cap, "reason": reason }));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn surum_12_kinds_write_valid_lines() {
+        taken();
+        shortcut_run("custom:0b6f0c1e-1d2a-4f3b-9a1e-2c3d4e5f6a7b", false, Some("unknown_id"));
+        term_admin(false, Some("expired"));
+        ui_card("wrong_password");
+        ui_dialog("custom-nocancel");
+        files_readdir(false, 30_000, Some("timeout"));
+        video_fps_cap(30, "quality");
+        let got = taken();
+        let want = [
+            ("shortcut", "run"),
+            ("term", "admin"),
+            ("ui", "card"),
+            ("ui", "dialog"),
+            ("files", "readdir"),
+            ("video", "fps_cap"),
+        ];
+        assert_eq!(got.len(), want.len(), "{got:?}");
+        for ((c, k), (wc, wk)) in got.iter().zip(want) {
+            assert_eq!((c.as_str(), k.as_str()), (wc, wk));
+        }
+        // The fields survive cleaning (none of them is a content or secret name).
+        for (c, k, fields, keep) in [
+            ("shortcut", "run", json!({"id": "win.taskmgr", "ok": true, "err": null}), "id"),
+            ("term", "admin", json!({"ok": false, "err": "replay"}), "err"),
+            ("ui", "card", json!({"kind": "offline"}), "kind"),
+            ("files", "readdir", json!({"ok": true, "ms": 12, "err": null}), "ms"),
+            ("video", "fps_cap", json!({"cap": 30, "reason": "quality"}), "reason"),
+        ] {
+            let line = crate::sense::diag::line::build_line(1, c, k, "server", None, &fields).unwrap();
+            let v: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(v[keep], fields[keep], "{line}");
+        }
+    }
 
     fn tick(fps: i32, bytes: usize, last: Option<i64>) -> Tick {
         Tick {

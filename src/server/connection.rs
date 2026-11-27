@@ -4286,6 +4286,24 @@ impl Connection {
                             }
                         }
                     }
+                    // Sense Remote (Sürüm 12, plan 2026-11-28 §2.1): every other `sense.*`
+                    // message goes to one dispatcher; unknown ones are ignored (older/newer peer).
+                    Some(misc::Union::PluginRequest(p))
+                        if crate::sense::peer_msg::is_sense(&p.id) =>
+                    {
+                        let ctx = crate::sense::peer_msg::HostCtx {
+                            remote: self.is_remote(),
+                            terminal: self.terminal,
+                            keyboard: self.peer_keyboard_enabled(),
+                        };
+                        for action in crate::sense::peer_msg::on_host(&ctx, &p) {
+                            match action {
+                                crate::sense::peer_msg::HostAction::Reply(m) => {
+                                    self.send(m.to_message()).await
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 },
                 Some(message::Union::AudioFrame(frame)) => {
