@@ -13,6 +13,8 @@ import 'package:flutter_hbb/desktop/pages/view_camera_page.dart';
 import 'package:flutter_hbb/main.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
+import 'package:flutter_hbb/common/sense_theme.dart' show senseRoleInstalled;
+import 'package:flutter_hbb/sense/screens/shared/aux_window/aux_label.dart';
 import 'package:get/get.dart';
 import 'package:get/get_rx/src/rx_workers/utils/debouncer.dart';
 import 'package:scroll_pos/scroll_pos.dart';
@@ -241,6 +243,10 @@ class DesktopTab extends StatefulWidget {
   final bool showMinimize;
   final bool showMaximize;
   final bool showClose;
+
+  /// Sense Remote (ST 15): false when a Sense frame draws the bar
+  /// (sense/screens/shared/aux_window); the pages and window logic stay here.
+  final bool showTabBar;
   final Widget Function(Widget pageView)? pageViewBuilder;
   // Right click tab menu
   final TabMenuBuilder? tabMenuBuilder;
@@ -267,6 +273,7 @@ class DesktopTab extends StatefulWidget {
     this.showMinimize = true,
     this.showMaximize = true,
     this.showClose = true,
+    this.showTabBar = true,
     this.pageViewBuilder,
     this.tabMenuBuilder,
     this.tail,
@@ -280,6 +287,9 @@ class DesktopTab extends StatefulWidget {
   }) : super(key: key);
 
   static RxString tablabelGetter(String peerId) {
+    // Sense Remote (ST 16): tabs and window titles show the computer's name,
+    // never its ID ("id@hostname" stays only without a Sense role).
+    if (senseRoleInstalled()) return RxString(senseAuxPeerLabel(peerId));
     final alias = bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
     return RxString(getDesktopTabLabel(peerId, alias));
   }
@@ -525,7 +535,8 @@ class _DesktopTabState extends State<DesktopTab>
   Widget build(BuildContext context) {
     return Column(children: [
       Obx(() {
-        if (stateGlobal.showTabBar.isTrue &&
+        if (widget.showTabBar &&
+            stateGlobal.showTabBar.isTrue &&
             !(kUseCompatibleUiMode && isHideSingleItem())) {
           final showBottomDivider = _showTabBarBottomDivider(tabType);
           return SizedBox(
