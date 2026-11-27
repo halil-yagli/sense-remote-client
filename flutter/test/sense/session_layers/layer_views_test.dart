@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/sense/sense.dart';
 import 'package:flutter_hbb/sense/screens/session/bar/sense_session_frame.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart' as bar show SenseBarPopup, SenseLinkSample, SenseLinkPath;
+import 'package:flutter_hbb/sense/screens/session/data/frame_rate.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/data/session_hub.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_controller.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_spec.dart';
@@ -537,6 +538,8 @@ void main() {
           rttMs: 3,
           lastFrameMs: 9000,
           wavy: false,
+          recentFps: 120,
+          remoteHz: 144,
           onRestoreLayer: () => SenseLayerController.find('p1')?.openCard(),
         ),
       )..ready = false; // values still being measured: the card opens anyway
@@ -560,6 +563,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(window(wrapped: false));
       await seconds(tester, 3, link);
+      SenseFrameCap.of('p1').value = const SenseFrameInfo(drawnFps: 58, recentFps: 120, reachableFps: 120, remoteHz: 144);
       // The first picture arrives: remote_page puts its body in BlockableOverlay.
       await tester.pumpWidget(window(wrapped: true));
       expect(SenseLayerController.find('p1'), same(c), reason: 'the remount keeps the registration');
@@ -570,13 +574,15 @@ void main() {
       expect(detector.enabled, isTrue);
       expect(detector.mouseCursor, SystemMouseCursors.click, reason: 'no forbidden cursor');
       final line = tester.widget<Text>(find.byKey(const ValueKey('sense-bar-link-text')));
-      expect(line.data, 'Doğrudan · Durağan · 3 ms');
+      expect(line.data, '120 fps · 3 ms');
 
       await tester.tap(area);
       await tester.pump();
       expect(c.infoOpen, isTrue);
       expect(find.text(SenseLayerStrings.goodTitle), findsOneWidget);
       expect(find.byKey(const Key('sense-layer-info-server')), findsOneWidget);
+      expect(find.text('Kare hızı: 58 fps · karşı ekran 144 Hz'), findsOneWidget, reason: 'moving picture: drawn rate');
+      SenseFrameCap.remove('p1');
 
       await tester.pumpWidget(const SizedBox());
       expect(SenseLayerController.find('p1'), isNull, reason: 'gone with the last layer widget');

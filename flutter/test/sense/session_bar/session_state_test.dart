@@ -1,6 +1,7 @@
 // Sense Remote: session bar data (YH O1, T6, T9, S9-b, S10; plan C1).
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/sense/screens/session/data/frame_rate.dart';
 import 'package:flutter_hbb/sense/screens/session/data/grants.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/rules.dart';
@@ -8,12 +9,13 @@ import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
 
 void main() {
   group('connection line (O1, T6)', () {
-    test('direct and relay', () {
+    // Karar #152: no path word on the bar (the path is on the connection card).
+    test('direct and relay: only fps and delay', () {
       final l = senseLinkLine(const SenseLinkSample(path: SenseLinkPath.direct, fps: 60, rttMs: 18));
-      expect(l.text, 'Doğrudan · 60 fps · 18 ms');
+      expect(l.text, '60 fps · 18 ms');
       expect(l.level, SenseLevel.ok);
       final r = senseLinkLine(const SenseLinkSample(path: SenseLinkPath.relay, fps: 58, rttMs: 24));
-      expect(r.text, 'Aktarmalı · 58 fps · 24 ms');
+      expect(r.text, '58 fps · 24 ms');
     });
 
     test('nothing measured yet: Bağlanıyor…', () {
@@ -48,21 +50,62 @@ void main() {
       expect(l.level, SenseLevel.ok);
     });
 
-    // Sürüm 12 (#150): "0 fps" in green confused; a still screen says "Durağan".
-    test('still screen on a good link: Durağan instead of the frame rate', () {
-      final l = senseLinkLine(
-          const SenseLinkSample(path: SenseLinkPath.direct, fps: 0, rttMs: 3, lastFrameMs: 9000, wavy: false));
-      expect(l.text, 'Doğrudan · Durağan · 3 ms');
+    // Karar #152: the rate drawn on this screen; a still screen shows the last rate measured
+    // while the picture moved (else the reachable one), never 0.
+    test('still screen: last measured rate, hint says so', () {
+      const s = SenseLinkSample(fps: 0, rttMs: 3, lastFrameMs: 9000, wavy: false, recentFps: 120, reachableFps: 60);
+      final l = senseLinkLine(s);
+      expect(l.text, '120 fps · 3 ms');
       expect(l.level, SenseLevel.ok);
-      // A low rate with an old last frame (K44 rule) also reads Durağan.
-      expect(senseLinkLine(const SenseLinkSample(path: SenseLinkPath.relay, fps: 2, rttMs: 20, lastFrameMs: 6000)).text,
-          'Aktarmalı · Durağan · 20 ms');
-      // Moving picture: the frame rate.
-      expect(senseLinkLine(const SenseLinkSample(path: SenseLinkPath.direct, fps: 60, rttMs: 3, lastFrameMs: 10)).text,
-          'Doğrudan · 60 fps · 3 ms');
-      // A low rate while frames come and the layer says Dalgalı stays a number.
-      expect(senseLinkLine(const SenseLinkSample(fps: 3, rttMs: 20, lastFrameMs: 10, wavy: true)).text,
-          'Dalgalı · 3 fps · 20 ms');
+      expect(l.hint, 'Ekranda değişiklik yok. Son ölçülen kare hızı 120 fps.');
+      expect(senseFrameLine(s), 'Kare hızı: 120 fps · ekran durağan');
+    });
+
+    test('still screen before any movement: reachable rate, "henüz ölçülmedi"', () {
+      const s = SenseLinkSample(fps: 0, rttMs: 3, lastFrameMs: 9000, wavy: false, reachableFps: 60, remoteHz: 144);
+      expect(senseLinkLine(s).text, '60 fps · 3 ms');
+      expect(senseLinkLine(s).hint,
+          'Ekranda değişiklik yok. Kare hızı henüz ölçülmedi; görüntü değişince en çok 60 fps ile akar.');
+      expect(senseFrameLine(s), 'Kare hızı: 60 fps · ekran durağan · karşı ekran 144 Hz');
+      // The K44 rule (low rate, old last frame) is a still screen too.
+      expect(senseLinkLine(const SenseLinkSample(fps: 2, rttMs: 20, lastFrameMs: 6000, reachableFps: 30)).text,
+          '30 fps · 20 ms');
+    });
+
+    test('moving picture: the rate drawn now, with the Host refresh rate in the hint', () {
+      const s = SenseLinkSample(fps: 118, rttMs: 3, lastFrameMs: 10, wavy: false, recentFps: 120, remoteHz: 144);
+      expect(senseLinkLine(s).text, '118 fps · 3 ms');
+      expect(senseLinkLine(s).hint, 'Kare hızı şu an 118 fps (karşı ekran 144 Hz)');
+      expect(senseFrameLine(s), 'Kare hızı: 118 fps · karşı ekran 144 Hz');
+      expect(senseLinkLine(const SenseLinkSample(fps: 58, rttMs: 3, lastFrameMs: 10)).hint, 'Kare hızı şu an 58 fps');
+    });
+
+    test('stalling: the real low rate in orange, hint with the seconds', () {
+      const s = SenseLinkSample(fps: 7, rttMs: 20, lastFrameMs: 10, wavy: true, recentFps: 120, troubleSecs: 6);
+      final l = senseLinkLine(s);
+      expect(l.text, 'Dalgalı · 7 fps · 20 ms');
+      expect(l.level, SenseLevel.warn);
+      expect(l.hint, "Görüntü takılıyor: son 6 sn'de 7 fps geldi");
+      expect(senseFrameLine(s), 'Kare hızı: 7 fps · takılıyor');
+    });
+
+    test('frame helpers', () {
+      expect(senseSessionFpsCap(), kSenseDefaultFpsCap);
+      expect(senseSessionFpsCap(imageQuality: 'custom', customFps: 60), 60);
+      expect(senseSessionFpsCap(imageQuality: 'balanced', customFps: 60), kSenseDefaultFpsCap);
+      expect(senseReachableFps(refreshHz: 144, cap: 120), 120);
+      expect(senseReachableFps(refreshHz: 59.94, cap: 120), 60);
+      expect(senseReachableFps(cap: 30), 30);
+      expect(senseDrawnFps(decoded: 144, rasterized: 120), 120);
+      expect(senseDrawnFps(decoded: 30, rasterized: 60), 30);
+      expect(senseDrawnFps(decoded: 30), 30);
+      final m = SenseFrameMeter();
+      m.add(at: const Duration(seconds: 1), fps: 118, still: false);
+      m.add(at: const Duration(seconds: 2), fps: 120, still: false);
+      m.add(at: const Duration(seconds: 3), fps: 4, still: false);
+      m.add(at: const Duration(seconds: 4), fps: 0, still: true);
+      expect(m.recent(const Duration(seconds: 5)), 120);
+      expect(m.recent(const Duration(seconds: 70)), isNull, reason: 'older than the window');
     });
 
     test('parsers', () {
@@ -123,7 +166,7 @@ void main() {
   });
 
   test('the connection layer decides "Dalgalı" when it runs (C4)', () {
-    expect(senseLinkLine(const SenseLinkSample(fps: 60, rttMs: 200, wavy: false)).text, startsWith('Doğrudan'));
+    expect(senseLinkLine(const SenseLinkSample(fps: 60, rttMs: 200, wavy: false)).text, '60 fps · 200 ms');
     expect(senseLinkLine(const SenseLinkSample(fps: 60, rttMs: 20, wavy: true)).text, startsWith('Dalgalı'));
   });
 

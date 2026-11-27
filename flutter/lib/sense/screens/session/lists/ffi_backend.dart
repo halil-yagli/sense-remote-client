@@ -34,7 +34,9 @@ import '../../../../models/state_model.dart' show stateGlobal;
 import '../../../../utils/scale.dart' show getSessionCustomScalePercent;
 import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart' show SenseSizes;
+import '../data/frame_rate.dart';
 import '../data/grants.dart';
+import '../data/peer_status.dart' show SensePeerStatusFeed;
 import '../data/session_state.dart';
 import '../layers/layer_controller.dart' show SenseLayerController;
 import '../sense_remote_window.dart' show SenseAutoGhost, senseGhostToggle;
@@ -131,6 +133,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
 
   void _listen() {
     _m.addListener(_notify);
+    ffi.qualityMonitorModel.addListener(_onQuality);
     ffi.qualityMonitorModel.addListener(_notify);
     ffi.recordingModel.addListener(_notify);
     // O1 "%N ölçekte" follows the canvas.
@@ -165,7 +168,9 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   void dispose() {
     _disposed = true;
     _m.removeListener(_notify);
+    ffi.qualityMonitorModel.removeListener(_onQuality);
     ffi.qualityMonitorModel.removeListener(_notify);
+    _feed?.removeListener(_publishFrame);
     ffi.recordingModel.removeListener(_notify);
     ffi.canvasModel.removeListener(_notify);
     _signals.removeListener(_notify);
@@ -269,8 +274,87 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   SenseSessionGrants get grants => senseReadSessionGrants();
 
+  // ---- Frame rate (karar #152, data/frame_rate.dart) ----
+  final SenseFrameMeter _meter = SenseFrameMeter();
+  final Stopwatch _meterClock = Stopwatch()..start();
+  int? _drawnFps;
+  DateTime? _troubleSince;
+  bool _frameCapRead = false;
+  SensePeerStatusFeed? _feed;
+  Duration? _drawnLoggedAt;
+
+  /// One quality update a second: the frames drawn now, the moving-picture memory, the
+  /// trouble clock, and what the connection card reads.
+  void _onQuality() {
+    if (_disposed) return;
+    if (!_frameCapRead && ready) _readFrameCap();
+    final decoded = senseParseFps(ffi.qualityMonitorModel.data.fps);
+    if (decoded == null) return;
+    final raster = SenseRasterRate.instance.perSecond();
+    final drawn = senseDrawnFps(decoded: decoded, rasterized: raster);
+    _drawnFps = drawn;
+    final base = _linkSample(withMemory: false);
+    final state = senseFrameState(base);
+    final now = _meterClock.elapsed;
+    _meter.add(at: now, fps: drawn, still: state == SenseFrameState.still);
+    final trouble = senseLinkHealth(base) == SenseLinkHealth.wavy;
+    _troubleSince = trouble ? (_troubleSince ?? DateTime.now()) : null;
+    // Decoded and drawn differ (the window shows fewer frames than come): write it down,
+    // at most every ten seconds.
+    final logged = _drawnLoggedAt;
+    if (state != SenseFrameState.still && drawn != decoded && (logged == null || now - logged >= const Duration(seconds: 10))) {
+      _drawnLoggedAt = now;
+      senseUiEvent('frame_rate', {'decoded': decoded, 'drawn': drawn, 'rasterized': raster});
+    }
+    _publishFrame();
+  }
+
+  /// Reads the session's frame limit once, and the Host's refresh rate (panel status).
+  Future<void> _readFrameCap() async {
+    _frameCapRead = true;
+    final feed = SensePeerStatusFeed.of(ffi.id);
+    _feed = feed..addListener(_publishFrame);
+    if (feed.data == null && feed.fetchedAt == null) feed.refresh();
+    try {
+      _imageQuality = await bind.sessionGetImageQuality(sessionId: _sid) ?? _imageQuality;
+      final fps = await bind.sessionGetOption(sessionId: _sid, arg: 'custom-fps');
+      _customFps = int.tryParse(fps ?? '') ?? _customFps;
+    } catch (_) {}
+    _publishFrame();
+  }
+
+  /// The watched Host display's refresh rate (Hz) from the panel status, when known.
+  int? _remoteHz() {
+    final ds = _feed?.data?.status.displays;
+    if (ds == null || ds.isEmpty) return null;
+    final watched = _pi.currentDisplay;
+    final d = ds.where((e) => e.index == watched).firstOrNull ??
+        ds.where((e) => e.primary == true).firstOrNull ??
+        ds.first;
+    final hz = d.refreshHz?.round();
+    return hz == null || hz <= 0 ? null : hz;
+  }
+
+  SenseFrameInfo _frameInfo() {
+    final hz = _remoteHz();
+    return SenseFrameInfo(
+      drawnFps: _drawnFps,
+      recentFps: _meter.recent(_meterClock.elapsed),
+      reachableFps: senseReachableFps(
+          refreshHz: hz?.toDouble(), cap: senseSessionFpsCap(imageQuality: _imageQuality, customFps: _customFps)),
+      remoteHz: hz,
+    );
+  }
+
+  void _publishFrame() {
+    if (_disposed) return;
+    SenseFrameCap.of(ffi.id).value = _frameInfo();
+  }
+
   @override
-  SenseLinkSample get link {
+  SenseLinkSample get link => _linkSample(withMemory: true);
+
+  SenseLinkSample _linkSample({required bool withMemory}) {
     final d = ffi.qualityMonitorModel.data;
     final ct = _try(() => ConnectionTypeState.find(ffi.id), null);
     final path = ct == null || ct.direct.value == kInvalidValueStr
@@ -279,9 +363,16 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
             ? SenseLinkPath.direct
             : SenseLinkPath.relay;
     final at = d.lastFrameAt;
+    final info = withMemory ? _frameInfo() : null;
+    final since = _troubleSince;
     return SenseLinkSample(
       path: path,
-      fps: senseParseFps(d.fps),
+      // Karar #152: the rate drawn on this screen (decoded, capped by rasterized frames).
+      fps: _drawnFps ?? senseParseFps(d.fps),
+      recentFps: info?.recentFps,
+      reachableFps: info?.reachableFps,
+      remoteHz: info?.remoteHz,
+      troubleSecs: withMemory && since != null ? DateTime.now().difference(since).inSeconds : null,
       rttMs: senseParseMs(d.delay),
       lastFrameMs: d.lastFrameMs == null || at == null
           ? null
@@ -622,6 +713,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void setImageQuality(String v) async {
     _imageQuality = v;
+    _publishFrame();
     _notify();
     await bind.sessionSetImageQuality(sessionId: _sid, value: v);
     if (v == kRemoteImageQualityCustom) {
@@ -670,6 +762,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void setCustomFps(int v) {
     _customFps = v;
+    _publishFrame();
     bind.sessionSetCustomFps(sessionId: _sid, fps: v);
     _notify();
   }

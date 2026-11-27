@@ -22,7 +22,7 @@ void main() {
       expect(find.text(t), findsOneWidget, reason: t);
     }
     expect(find.text('Giriş Salonu PC-2'), findsOneWidget);
-    expect(find.text('Doğrudan · 60 fps · 18 ms'), findsOneWidget);
+    expect(find.text('60 fps · 18 ms'), findsOneWidget);
     expect(tester.getSize(find.byKey(const ValueKey('sense-session-bar'))).height, SenseSizes.sessionToolbarHeight);
     // O1 acceptance: the bar does not cover the remote screen.
     expect(tester.getTopLeft(find.byKey(const ValueKey('fake-remote'))).dy, SenseSizes.sessionToolbarHeight);
