@@ -215,7 +215,8 @@ fn is_name_char(c: char) -> bool {
 /// options are what the team needs to see).
 pub fn is_secret_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    const WORDS: [&str; 20] = [
+    // K39: the same whole words as the UI record (`senseUiSecretKey`: pin, 2fa, otp, salt).
+    const WORDS: [&str; 22] = [
         "key",
         "keys",
         "pass",
@@ -236,6 +237,8 @@ pub fn is_secret_name(name: &str) -> bool {
         "sig",
         "signature",
         "otp",
+        "pin",
+        "2fa",
     ];
     if lower
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -1805,10 +1808,16 @@ mod tests {
         for name in [
             "password", "Password", "api_key", "apiKey", "secret_key", "token", "access-token",
             "key", "private-key", "Authorization", "cookie", "otp", "sig", "salt", "client_secret",
+            // K39: whole words like the UI record.
+            "pin", "PIN", "2fa", "2fa_code", "otp_pin", "user-pin", "otp-code",
         ] {
             assert!(is_secret_name(name), "{name}");
         }
-        for name in ["keyboard", "enable-keyboard", "monkeyish", "version", "role", "error"] {
+        for name in [
+            "keyboard", "enable-keyboard", "monkeyish", "version", "role", "error",
+            // K39: only the whole word; these just contain the letters.
+            "pinned", "spinner", "mapping", "typing", "pinch",
+        ] {
             assert!(!is_secret_name(name), "{name}");
         }
     }
