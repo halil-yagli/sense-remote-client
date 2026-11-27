@@ -8,7 +8,7 @@
 // before any movement the reachable rate (Host refresh rate capped by the session's frame
 // limit) with the hint "henüz ölçülmedi".
 import 'dart:math' as math;
-import 'dart:ui' show FrameTiming;
+import 'dart:ui' show FramePhase, FrameTiming;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
