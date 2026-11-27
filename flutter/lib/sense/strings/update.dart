@@ -21,6 +21,12 @@ const Map<String, String> kSenseUpdateTr = {
   'failed':
       'Güncelleme yapılamadı: {reason}. Sürüm {cur} ile çalışmaya devam ediliyor.',
   'rolled_back': 'Sürüm {n} kurulamadı; Sürüm {cur}{dat} geri dönüldü.',
+  // #134: a failed attempt that is retried by itself is said, not hidden behind Güncelle.
+  'retry_pending':
+      'Son deneme yapılamadı: {reason}. Kendiliğinden yeniden denenecek; hemen denemek için Tekrar dene.',
+  // #134: "Şimdi kur" during a connection asks in place before closing it.
+  'now_body':
+      'Açık bağlantılar kapanacak ve Sürüm {n} hemen kurulacak. Karşı tarafa "Güncelleme kuruluyor" bilgisi gider.',
   // Buttons.
   'update': 'Güncelle',
   'update_now': 'Şimdi güncelle',
@@ -28,6 +34,8 @@ const Map<String, String> kSenseUpdateTr = {
   'retry': 'Tekrar dene',
   'close': 'Tamam',
   'cancel': 'Vazgeç',
+  'install_now': 'Şimdi kur',
+  'now_go': 'Kapat ve kur',
   // Answer of `main_sense_update_install` (§3.7); "" is accepted.
   'install_no_release':
       'Kurulacak sürüm bulunamadı. Bir sonraki denetimde yeniden bakılır.',
@@ -35,6 +43,7 @@ const Map<String, String> kSenseUpdateTr = {
   'install_busy': 'Güncelleme zaten sürüyor.',
   'install_ipc_failed':
       'Sense Remote servisine ulaşılamadı. Biraz sonra yeniden dene.',
+  'install_retry_soon': 'Sense Remote servisi meşgul. Birkaç saniye sonra yeniden dene.',
   'install_unsupported':
       'Bu bilgisayar uygulamadan güncellenemiyor; güncellemeyi Sense ekibi yapar.',
   'install_other': 'Güncelleme başlatılamadı.',
@@ -56,6 +65,9 @@ const Map<String, String> kSenseUpdateTr = {
   'box_checked': 'Son denetim {ago} · panelden otomatik',
   'box_not_checked': 'Henüz denetlenmedi · panelden otomatik',
   'check': 'Denetle',
+  // #134: Denetle asks the panel and waits for its answer.
+  'checking': 'Denetleniyor…',
+  'check_no_answer': 'Panelden yanıt gelmedi; son bilinen durum gösteriliyor.',
   'checked_current': 'Sense Remote güncel',
   'ago_now': 'az önce',
   'ago_min': '{n} dk önce',

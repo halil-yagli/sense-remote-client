@@ -2736,6 +2736,18 @@ pub fn main_sense_update_cancel() -> String {
     crate::sense::update::request_cancel()
 }
 
+// Sense Remote (#134): "Kapat ve kur" in the update strip, after the user confirmed that the
+// open connections close. Same answers as `main_sense_update_install`.
+pub fn main_sense_update_install_now(version: i32) -> String {
+    crate::sense::update::request_install_now(version)
+}
+
+// Sense Remote (#134): "Denetle" in About asks the panel at once (the next heartbeat is sent
+// without waiting). "" when asked, otherwise `retry_soon`, `ipc_failed` or `unsupported`.
+pub fn main_sense_update_check() -> String {
+    crate::sense::update::request_check()
+}
+
 pub fn main_account_auth(op: String, remember_me: bool) {
     let id = get_id();
     let uuid = get_uuid();

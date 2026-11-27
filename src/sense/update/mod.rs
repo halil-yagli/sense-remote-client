@@ -276,6 +276,13 @@ pub struct GuiStatus {
     /// macOS, Host or Host + Controller, `sign != "cert"` (§7).
     pub mac_permission_warning: bool,
     pub last_result: Option<LastResult>,
+    /// Sense Remote (#134): attempts made in this period (0 = `null`), so a failed attempt
+    /// that is retried by itself is shown, not hidden behind "Güncelle".
+    #[serde(default)]
+    pub attempts: Option<u8>,
+    /// Sense Remote (#134): Unix seconds of the next automatic attempt after a failure.
+    #[serde(default)]
+    pub retry_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,6 +312,8 @@ impl GuiStatus {
             checked_at: None,
             mac_permission_warning: false,
             last_result: None,
+            attempts: None,
+            retry_at: None,
         }
     }
 }
@@ -337,6 +346,8 @@ pub enum SenseUpdateIpc {
     /// (`peer_pid`, as for envelopes, G4-4), not per connection: a new connection must not
     /// reset the limit.
     Install { version: u32 },
+    /// Sense Remote (#134), macOS only, agent -> daemon: "Kapat ve kur", as `Install`.
+    InstallNow { version: u32 },
     /// macOS only, daemon → agent: the daemon's status JSON.
     DaemonStatus(String),
     /// Sense Remote (D3e, #68): UI → `--server`: "Vazgeç" while downloading. On the macOS
@@ -348,6 +359,13 @@ pub enum SenseUpdateIpc {
     CloseSessions,
     /// `--server` → UI: the answer to `CancelRequest`, one of `request_cancel`'s codes.
     CancelAnswer(String),
+    /// Sense Remote (#134): UI -> `--server`: "Kapat ve kur", the user confirmed that the open
+    /// connections close. Answered with `InstallAnswer`.
+    InstallNowRequest { version: u32 },
+    /// Sense Remote (#134): UI -> `--server`: "Denetle" in About: send the next heartbeat at
+    /// once (at most every `CHECK_MIN_INTERVAL_S`). Answered with `InstallAnswer("")`, or
+    /// `retry_soon` while the last check is too recent. Never on the `_service` channel.
+    CheckNow,
 }
 
 /// The unsigned hint of every heartbeat answer (`sense_update`, §3.4). It can only drop a
@@ -479,11 +497,22 @@ pub fn extend_heartbeat(sense: &mut Value) {
     };
     // Sense Remote (karar #84): an update that turns `failed` sends the logs to the panel (once
     // per failure; the hourly limit is in `log_upload`).
-    super::log_upload::on_update_state(status.state == UpdateState::Failed);
+    // Sense Remote (#134, Ö7): also after a failed attempt that is retried by itself (it stays
+    // `available` with the error), not only after the last one.
+    super::log_upload::on_update_state(upload_logs_for(&status));
     match serde_json::to_value(&status) {
         Ok(status) => sense["update"] = status,
         Err(err) => log::error!("Sense Remote: update status not serialized: {err}"),
     }
+}
+
+/// Pure (#134): does this `sense.update` call for the logs to go to the panel? `failed`, or
+/// an attempt that failed and waits for its retry.
+pub fn upload_logs_for(status: &UpdateStatus) -> bool {
+    status.state == UpdateState::Failed
+        || (status.error.is_some()
+            && status.attempts.is_some()
+            && matches!(status.state, UpdateState::Available | UpdateState::RolledBack))
 }
 
 /// Main IPC channel, `--server` side: answers `StatusQuery` with `Status` and
@@ -501,6 +530,10 @@ pub async fn on_ipc(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
         let told = crate::server::sense_close_incoming(now::NOTICE);
         log::info!("Sense Remote: update now, {told} connection(s) told to close");
         return None;
+    }
+    // Sense Remote (#134): "Denetle"; the heartbeat runs in this process on both platforms.
+    if message == SenseUpdateIpc::CheckNow {
+        return Some(SenseUpdateIpc::InstallAnswer(ask_check_now().to_owned()));
     }
     #[cfg(target_os = "macos")]
     return forward_to_daemon(message).await;
@@ -525,8 +558,24 @@ async fn forward_to_daemon(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
                 _ => Some(SenseUpdateIpc::CancelAnswer(IPC_FAILED.to_owned())),
             }
         }
-        SenseUpdateIpc::InstallRequest { version } => {
-            let asked = daemon_mac::request_daemon(SenseUpdateIpc::Install { version }).await;
+        SenseUpdateIpc::InstallRequest { version } | SenseUpdateIpc::InstallNowRequest { version } => {
+            // Sense Remote (#134): "Kapat ve kur" goes to the daemon as `InstallNow`.
+            let call = if matches!(message, SenseUpdateIpc::InstallNowRequest { .. }) {
+                SenseUpdateIpc::InstallNow { version }
+            } else {
+                SenseUpdateIpc::Install { version }
+            };
+            let started = std::time::Instant::now();
+            let asked = daemon_mac::request_daemon(call).await;
+            super::diag::event(
+                "update",
+                "daemon_call",
+                serde_json::json!({
+                    "tur": "install",
+                    "yanit": if asked.is_some() { "var" } else { "yok" },
+                    "sure_ms": started.elapsed().as_millis() as u64,
+                }),
+            );
             let code = match asked {
                 Some(SenseUpdateIpc::InstallAnswer(code)) => code,
                 _ => IPC_FAILED.to_owned(),
@@ -539,26 +588,71 @@ async fn forward_to_daemon(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
 
 /// `request_install` when the privileged process did not answer.
 pub const IPC_FAILED: &str = "ipc_failed";
-/// How long the UI waits for `--server`.
-pub const IPC_TIMEOUT_MS: u64 = 3000;
+/// Sense Remote (#134): the macOS daemon got this kind of call less than a second ago, or
+/// "Denetle" was pressed moments ago; nothing was done, try again in a moment (a user action
+/// is sent once more by itself, `ask_action`).
+pub const RETRY_SOON: &str = "retry_soon";
+/// How long the UI waits to reach `--server`.
+pub const IPC_CONNECT_MS: u64 = 1000;
+/// How long the UI waits for `--server`'s answer to a status question. Sense Remote (#134): it
+/// must be longer than what the macOS agent itself waits for the daemon
+/// (`daemon_mac::DAEMON_CONNECT_MS + DAEMON_TIMEOUT_MS`), or the UI gives up first.
+pub const IPC_TIMEOUT_MS: u64 = 4000;
+/// Sense Remote (#134): the wait for an answer to the user's own action ("Güncelle", "Kapat ve
+/// kur", "Vazgeç", "Denetle"); `--server` reads the disk space for it under the engine's lock.
+pub const IPC_ACTION_TIMEOUT_MS: u64 = 8000;
+/// Sense Remote (#134): before a user action is answered `ipc_failed` (or `retry_soon`), it is
+/// sent once more after this pause.
+pub const IPC_RETRY_PAUSE_MS: u64 = 1000;
 
 /// UI side: one message to `--server` on the main channel and its answer; `None` on any
 /// failure. Blocking (FFI threads are not on a tokio runtime).
 fn ask_server(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
+    ask_server_within(message, IPC_TIMEOUT_MS)
+}
+
+fn ask_server_within(message: SenseUpdateIpc, timeout_ms: u64) -> Option<SenseUpdateIpc> {
     let runtime = hbb_common::tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .ok()?;
     runtime.block_on(async move {
-        let mut conn = crate::ipc::connect(1000, "").await.ok()?;
+        let mut conn = crate::ipc::connect(IPC_CONNECT_MS, "").await.ok()?;
         conn.send(&crate::ipc::Data::SenseUpdate(message))
             .await
             .ok()?;
-        match conn.next_timeout(IPC_TIMEOUT_MS).await {
+        match conn.next_timeout(timeout_ms).await {
             Ok(Some(crate::ipc::Data::SenseUpdate(reply))) => Some(reply),
             _ => None,
         }
     })
+}
+
+/// Pure (#134): send a user action again? Only when `--server` was not reached or the macOS
+/// daemon said `retry_soon`, and only once (`tried` = sends so far).
+pub fn should_retry(code: &str, tried: u32) -> bool {
+    tried < 2 && (code == IPC_FAILED || code == RETRY_SOON)
+}
+
+/// Sense Remote (#134): a user action to `--server`, with the longer wait and one retry.
+/// `answer` takes the reply apart into a code (`None` = no usable reply = `ipc_failed`).
+/// Returns the code, the number of sends and the time it took.
+fn ask_action(
+    message: SenseUpdateIpc,
+    answer: impl Fn(SenseUpdateIpc) -> Option<String>,
+) -> (String, u32, u64) {
+    let started = std::time::Instant::now();
+    let mut tried = 0;
+    loop {
+        tried += 1;
+        let code = ask_server_within(message.clone(), IPC_ACTION_TIMEOUT_MS)
+            .and_then(&answer)
+            .unwrap_or_else(|| IPC_FAILED.to_owned());
+        if !should_retry(&code, tried) {
+            return (code, tried, started.elapsed().as_millis() as u64);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(IPC_RETRY_PAUSE_MS));
+    }
 }
 
 /// FFI `main_sense_update_status`: GuiStatus JSON, asked from `--server` (`StatusQuery`); on
@@ -578,8 +672,18 @@ pub fn gui_status_json() -> String {
 }
 
 /// FFI `main_sense_update_install`: `""` (accepted), `no_release`, `not_newer`, `busy`,
-/// `ipc_failed` or `unsupported`; sends `InstallRequest` to `--server`.
+/// `retry_soon`, `ipc_failed` or `unsupported`; sends `InstallRequest` to `--server`.
 pub fn request_install(version: i32) -> String {
+    install_request(version, false)
+}
+
+/// Sense Remote (#134), FFI `main_sense_update_install_now`: "Kapat ve kur" after the user
+/// confirmed in the strip that the open connections close. Same codes as `request_install`.
+pub fn request_install_now(version: i32) -> String {
+    install_request(version, true)
+}
+
+fn install_request(version: i32, now: bool) -> String {
     if !SUPPORTED {
         return UNSUPPORTED.to_owned();
     }
@@ -589,23 +693,88 @@ pub fn request_install(version: i32) -> String {
     else {
         return engine::NO_RELEASE.to_owned();
     };
-    match ask_server(SenseUpdateIpc::InstallRequest { version }) {
-        Some(SenseUpdateIpc::InstallAnswer(code)) if is_install_code(&code) => code,
-        _ => IPC_FAILED.to_owned(),
-    }
+    // Sense Remote (#134): every press and its answer go to the event record (the engine's own
+    // log is the privileged process's and not readable for the user).
+    super::diag::event(
+        "update",
+        "request",
+        serde_json::json!({ "ver": version, "simdi": now }),
+    );
+    let message = if now {
+        SenseUpdateIpc::InstallNowRequest { version }
+    } else {
+        SenseUpdateIpc::InstallRequest { version }
+    };
+    let (code, tried, ms) = ask_action(message, |reply| match reply {
+        SenseUpdateIpc::InstallAnswer(code) if is_install_code(&code) => Some(code),
+        _ => None,
+    });
+    log_answer("answer", &code, tried, ms);
+    code
 }
 
 /// FFI `main_sense_update_cancel` ("Vazgeç" while downloading): `""` (stopped),
-/// `not_downloading`, `panel_order`, `ipc_failed` or `unsupported`; sends `CancelRequest` to
-/// `--server`.
+/// `not_downloading`, `panel_order`, `retry_soon`, `ipc_failed` or `unsupported`; sends
+/// `CancelRequest` to `--server`.
 pub fn request_cancel() -> String {
     if !SUPPORTED {
         return UNSUPPORTED.to_owned();
     }
-    match ask_server(SenseUpdateIpc::CancelRequest) {
-        Some(SenseUpdateIpc::CancelAnswer(code)) if is_cancel_code(&code) => code,
-        _ => IPC_FAILED.to_owned(),
+    let (code, tried, ms) = ask_action(SenseUpdateIpc::CancelRequest, |reply| match reply {
+        SenseUpdateIpc::CancelAnswer(code) if is_cancel_code(&code) => Some(code),
+        _ => None,
+    });
+    log_answer("cancel", &code, tried, ms);
+    code
+}
+
+/// Sense Remote (#134), FFI `main_sense_update_check` ("Denetle" in About): `--server` sends
+/// its next heartbeat at once, so the panel's answer (a new release, or "güncel") arrives
+/// within seconds; the UI then waits for `checked_at` to change. `""`, `retry_soon` (checked
+/// moments ago), `ipc_failed` or `unsupported`.
+pub fn request_check() -> String {
+    if !SUPPORTED {
+        return UNSUPPORTED.to_owned();
     }
+    let (code, tried, ms) = ask_action(SenseUpdateIpc::CheckNow, |reply| match reply {
+        SenseUpdateIpc::InstallAnswer(code) if is_check_code(&code) => Some(code),
+        _ => None,
+    });
+    log_answer("check", &code, tried, ms);
+    code
+}
+
+/// The codes `request_check` may return.
+pub fn is_check_code(code: &str) -> bool {
+    [engine::INSTALL_ACCEPTED, RETRY_SOON, IPC_FAILED, UNSUPPORTED].contains(&code)
+}
+
+/// Sense Remote (#134): the answer of a user action, in the log and the event record
+/// (`update/answer`, `update/cancel`, `update/check`: `kod`, `deneme`, `sure_ms`).
+fn log_answer(kind: &str, code: &str, tried: u32, ms: u64) {
+    if code.is_empty() {
+        log::info!("Sense Remote: update {kind} accepted ({tried} send(s), {ms} ms)");
+    } else {
+        log::warn!("Sense Remote: update {kind} answered {code} ({tried} send(s), {ms} ms)");
+    }
+    super::diag::event(
+        "update",
+        kind,
+        serde_json::json!({ "kod": code, "deneme": tried, "sure_ms": ms }),
+    );
+}
+
+/// Sense Remote (#134): which job made a request `busy`, in the privileged process's log.
+pub fn log_busy(code: &str, state: &engine::State) {
+    if code != engine::BUSY {
+        return;
+    }
+    log::info!("[sense-update] busy_answer neden={}", state.phase.as_str());
+    super::diag::event(
+        "update",
+        "busy_answer",
+        serde_json::json!({ "neden": state.phase.as_str() }),
+    );
 }
 
 /// The codes `request_cancel` may return.
@@ -614,6 +783,7 @@ pub fn is_cancel_code(code: &str) -> bool {
         engine::CANCEL_ACCEPTED,
         engine::NOT_DOWNLOADING,
         engine::PANEL_ORDER,
+        RETRY_SOON,
         UNSUPPORTED,
     ]
     .contains(&code)
@@ -626,10 +796,42 @@ pub fn is_install_code(code: &str) -> bool {
         engine::NO_RELEASE,
         engine::NOT_NEWER,
         engine::BUSY,
+        RETRY_SOON,
         IPC_FAILED,
         UNSUPPORTED,
     ]
     .contains(&code)
+}
+
+/// Sense Remote (#134): "Denetle" asks for a heartbeat at most this often.
+pub const CHECK_MIN_INTERVAL_S: i64 = 10;
+
+static CHECK_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LAST_CHECK_S: std::sync::Mutex<Option<i64>> = std::sync::Mutex::new(None);
+
+/// Pure (#134): may "Denetle" send a heartbeat now, the last one asked at `last_s`? A clock
+/// set back counts as due.
+pub fn check_due(last_s: Option<i64>, now_s: i64) -> bool {
+    last_s.map_or(true, |last| now_s < last || now_s - last >= CHECK_MIN_INTERVAL_S)
+}
+
+/// `--server`: "Denetle" was pressed; the heartbeat loop sends at its next turn.
+fn ask_check_now() -> &'static str {
+    let now = runner::now_s();
+    let mut last = LAST_CHECK_S.lock().unwrap_or_else(|e| e.into_inner());
+    if !check_due(*last, now) {
+        return RETRY_SOON;
+    }
+    *last = Some(now);
+    CHECK_NOW.store(true, std::sync::atomic::Ordering::SeqCst);
+    log::info!("Sense Remote: update check asked from the app");
+    engine::INSTALL_ACCEPTED
+}
+
+/// Sense Remote (#134): called by the heartbeat loop (`hbbs_http/sync.rs`) at every turn; true
+/// once after "Denetle", and the loop then sends the heartbeat without waiting its interval.
+pub fn take_check_now() -> bool {
+    CHECK_NOW.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
 /// FFI `main_sense_installed_version`: the installed Sense version (Windows: HKLM `Version`;
@@ -754,9 +956,9 @@ mod tests {
         assert_eq!(
             keys,
             [
-                "blocked", "checked_at", "current", "error", "error_detail", "last_result",
-                "mac_permission_warning", "notes_url", "progress_pct", "source", "state",
-                "supported", "target",
+                "attempts", "blocked", "checked_at", "current", "error", "error_detail",
+                "last_result", "mac_permission_warning", "notes_url", "progress_pct",
+                "retry_at", "source", "state", "supported", "target",
             ]
         );
         assert_eq!(status["state"], "idle");
@@ -770,10 +972,90 @@ mod tests {
             "blocked": "session_active", "notes_url": "https://panel.example/#surum-4",
             "checked_at": 1_795_000_000, "mac_permission_warning": false,
             "last_result": { "state": "installed", "from": 3, "to": 4, "at": 1_795_000_000 },
+            "attempts": null, "retry_at": null,
         });
         let parsed: GuiStatus = serde_json::from_value(example.clone()).unwrap();
         assert_eq!(parsed.blocked, Some(Blocked::SessionActive));
         assert_eq!(serde_json::to_value(&parsed).unwrap(), example);
+        // Sense Remote (#134): a status without the two new keys (an older daemon or
+        // `--server` during an update) still reads.
+        let mut older = example.clone();
+        older.as_object_mut().unwrap().remove("attempts");
+        older.as_object_mut().unwrap().remove("retry_at");
+        let parsed: GuiStatus = serde_json::from_value(older).unwrap();
+        assert_eq!((parsed.attempts, parsed.retry_at), (None, None));
+    }
+
+    // Sense Remote (#134, D5, K-U4): every inner wait is shorter than the one around it. The
+    // macOS agent waits for the daemon inside the UI's wait for the agent; before, the daemon
+    // wait (5 s) was longer than the UI's (3 s) and a slow answer always became "servise
+    // ulaşılamadı".
+    #[test]
+    fn inner_ipc_waits_are_shorter_than_outer_ones() {
+        let daemon = daemon_mac::DAEMON_CONNECT_MS + daemon_mac::DAEMON_TIMEOUT_MS;
+        assert!(daemon < IPC_TIMEOUT_MS, "{daemon} >= {IPC_TIMEOUT_MS}");
+        assert!(IPC_TIMEOUT_MS < IPC_ACTION_TIMEOUT_MS);
+        // The strip asks every 5 s: a status question ends before the next one.
+        assert!(IPC_CONNECT_MS + IPC_TIMEOUT_MS <= 5000);
+        // Two sends of a user action, with the pause, stay well under half a minute.
+        assert!(2 * (IPC_CONNECT_MS + IPC_ACTION_TIMEOUT_MS) + IPC_RETRY_PAUSE_MS <= 20_000);
+    }
+
+    // Sense Remote (#134): a user action is sent once more only when it did not get through.
+    #[test]
+    fn user_action_is_retried_once_when_not_answered() {
+        assert!(should_retry(IPC_FAILED, 1));
+        assert!(should_retry(RETRY_SOON, 1));
+        assert!(!should_retry(IPC_FAILED, 2));
+        assert!(!should_retry(RETRY_SOON, 2));
+        for answered in ["", "busy", "no_release", "not_newer", "unsupported", "panel_order"] {
+            assert!(!should_retry(answered, 1), "{answered}");
+        }
+    }
+
+    // Sense Remote (#134, D10): "Denetle" sends a heartbeat at most every 10 s, and only once.
+    #[test]
+    fn check_now_is_limited_and_taken_once() {
+        assert!(check_due(None, 100));
+        assert!(!check_due(Some(100), 105));
+        assert!(!check_due(Some(100), 109));
+        assert!(check_due(Some(100), 110));
+        // Clock set back: due rather than locked.
+        assert!(check_due(Some(100), 50));
+        assert!(!take_check_now());
+        CHECK_NOW.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(take_check_now());
+        assert!(!take_check_now());
+        for code in ["", "retry_soon", "ipc_failed", "unsupported"] {
+            assert!(is_check_code(code), "{code}");
+        }
+        assert!(!is_check_code("busy"));
+    }
+
+    // Sense Remote (#134, Ö7): logs go to the panel after every failed attempt, not only the
+    // last; a refused notice (no attempt) does not send them.
+    #[test]
+    fn logs_are_sent_after_every_failed_attempt() {
+        let status = |state, error, attempts| UpdateStatus {
+            state,
+            target: Some(4),
+            from: None,
+            source: Some(UpdateSource::Local),
+            oid: None,
+            progress_pct: None,
+            error,
+            error_detail: None,
+            attempts,
+            have: None,
+            sign: None,
+            at: 0,
+        };
+        let fail = Some(UpdateError::DownloadFailed);
+        assert!(upload_logs_for(&status(UpdateState::Failed, fail, Some(3))));
+        assert!(upload_logs_for(&status(UpdateState::Available, fail, Some(1))));
+        assert!(!upload_logs_for(&status(UpdateState::Available, fail, None)));
+        assert!(!upload_logs_for(&status(UpdateState::Available, None, Some(1))));
+        assert!(!upload_logs_for(&status(UpdateState::Downloading, None, Some(2))));
     }
 
     #[test]
@@ -839,6 +1121,9 @@ mod tests {
             SenseUpdateIpc::CancelRequest,
             SenseUpdateIpc::CancelAnswer("panel_order".to_owned()),
             SenseUpdateIpc::CloseSessions,
+            SenseUpdateIpc::InstallNow { version: 4 },
+            SenseUpdateIpc::InstallNowRequest { version: 4 },
+            SenseUpdateIpc::CheckNow,
         ] {
             let text = serde_json::to_string(&message).unwrap();
             assert_eq!(serde_json::from_str::<SenseUpdateIpc>(&text).unwrap(), message);
@@ -847,7 +1132,7 @@ mod tests {
 
     #[test]
     fn install_codes() {
-        for code in ["", "no_release", "not_newer", "busy", "ipc_failed", "unsupported"] {
+        for code in ["", "no_release", "not_newer", "busy", "retry_soon", "ipc_failed", "unsupported"] {
             assert!(is_install_code(code), "{code}");
         }
         for code in ["ok", "BUSY", " ", "installed"] {
@@ -857,7 +1142,7 @@ mod tests {
 
     #[test]
     fn cancel_codes() {
-        for code in ["", "not_downloading", "panel_order", "unsupported"] {
+        for code in ["", "not_downloading", "panel_order", "retry_soon", "unsupported"] {
             assert!(is_cancel_code(code), "{code}");
         }
         for code in ["ok", "busy", " ", "cancelled"] {

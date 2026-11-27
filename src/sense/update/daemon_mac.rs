@@ -20,8 +20,14 @@
 //! - `StatusQuery` → `DaemonStatus(<GuiStatus JSON>)`.
 //! - Call limit (`PeerLimiter`): one call per `MIN_CALL_INTERVAL_MS` per peer process and at
 //!   most `MAX_CALLS_PER_UID` per interval for all processes of one uid together, so neither a
-//!   new connection nor a new process resets it. A call above the limit gets no answer and
-//!   changes nothing.
+//!   new connection nor a new process resets it. A call above the limit changes nothing.
+//!   Sense Remote (#134): the user's actions (`Install`, `InstallNow`, `CancelRequest`) have
+//!   their own limit (`CallLimits`), so "Güncelle" pressed in the same second as the strip's
+//!   status question is not dropped; and a call above the limit gets a quick answer
+//!   (`limited_answer`: the last status, or `retry_soon`) instead of silence, which made the
+//!   agent wait its whole timeout and the UI say "servise ulaşılamadı".
+//! - `InstallNow { version }` (#134): "Kapat ve kur", the user confirmed closing the open
+//!   sessions; `engine::check_install_now` decides, against the daemon's own release.
 //!
 //! The engine (`engine::next`, `State::restore`, `State::persisted`, `check_install`) is U2's;
 //! the daemon's runner (`daemon_mac/runner.rs`) is the macOS counterpart of `runner.rs`: it
@@ -51,8 +57,13 @@ pub const MIN_CALL_INTERVAL_MS: u64 = 1000;
 pub const MAX_CALLS_PER_UID: u32 = 3;
 /// Peers (processes or uids) the limiter tracks within one interval; more are refused.
 pub const MAX_LIMITED_PEERS: usize = 64;
-/// How long the agent waits for the daemon's answer.
-pub const DAEMON_TIMEOUT_MS: u64 = 5000;
+/// How long the agent waits to reach the daemon.
+pub const DAEMON_CONNECT_MS: u64 = 1000;
+/// How long the agent waits for the daemon's answer. Sense Remote (#134): connect + answer must
+/// stay inside the UI's own wait for the agent (`super::IPC_TIMEOUT_MS`); it was 5 s against
+/// the UI's 3 s, so a slow answer always ended as "servise ulaşılamadı". The daemon answers
+/// from memory (a lock, no network), well inside this.
+pub const DAEMON_TIMEOUT_MS: u64 = 2000;
 
 /// What the daemon checks an offer against. All of it is the daemon's own data.
 #[derive(Debug, Clone, Copy)]
@@ -76,6 +87,8 @@ pub enum Call {
     Offer(Vec<Event>),
     /// "Güncelle" for this version (`engine::check_install` decides).
     Install(u32),
+    /// Sense Remote (#134): "Kapat ve kur" (`engine::check_install_now` decides).
+    InstallNow(u32),
     Status,
     /// Sense Remote (#68): "Vazgeç" while the user's own download runs (`engine::check_cancel`
     /// decides).
@@ -187,11 +200,14 @@ pub fn classify(
             held,
         ))),
         SenseUpdateIpc::Install { version } => Some(Call::Install(*version)),
+        SenseUpdateIpc::InstallNow { version } => Some(Call::InstallNow(*version)),
         SenseUpdateIpc::StatusQuery => Some(Call::Status),
         // Sense Remote (#68): the macOS "Vazgeç", forwarded by the agent as on Windows.
         SenseUpdateIpc::CancelRequest => Some(Call::Cancel),
         SenseUpdateIpc::Status(_)
         | SenseUpdateIpc::InstallRequest { .. }
+        | SenseUpdateIpc::InstallNowRequest { .. }
+        | SenseUpdateIpc::CheckNow
         | SenseUpdateIpc::InstallAnswer(_)
         | SenseUpdateIpc::DaemonStatus(_)
         | SenseUpdateIpc::CancelAnswer(_)
@@ -229,6 +245,65 @@ impl PeerLimiter {
         self.by_pid.insert(pid, pid_calls + 1);
         self.by_uid.insert(uid, uid_calls + 1);
         true
+    }
+}
+
+/// Sense Remote (#134): the user's actions, limited apart from the periodic calls.
+pub fn is_user_action(message: &SenseUpdateIpc) -> bool {
+    matches!(
+        message,
+        SenseUpdateIpc::Install { .. } | SenseUpdateIpc::InstallNow { .. } | SenseUpdateIpc::CancelRequest
+    )
+}
+
+/// Sense Remote (#134): the limits of the daemon. Periodic calls (`Offer`, `StatusQuery`) and
+/// the user's actions each have their own `PeerLimiter`, with the same rules.
+#[derive(Debug, Default)]
+pub struct CallLimits {
+    calls: PeerLimiter,
+    actions: PeerLimiter,
+}
+
+impl CallLimits {
+    pub fn allow(
+        &mut self,
+        message: &SenseUpdateIpc,
+        pid: Option<u32>,
+        uid: Option<u32>,
+        now_ms: u64,
+    ) -> bool {
+        if is_user_action(message) {
+            self.actions.allow(pid, uid, now_ms)
+        } else {
+            self.calls.allow(pid, uid, now_ms)
+        }
+    }
+}
+
+/// Pure (#134): the answer to a call above the limit. Nothing is done; the agent hears at once
+/// instead of waiting `DAEMON_TIMEOUT_MS`: a status question gets the last status given (none
+/// before the first), a user action `retry_soon` (the UI tries once more by itself), an
+/// `Offer` nothing (the next heartbeat brings it again).
+pub fn limited_answer(message: &SenseUpdateIpc, last_status: Option<&str>) -> Option<SenseUpdateIpc> {
+    match message {
+        SenseUpdateIpc::StatusQuery => last_status.map(|s| SenseUpdateIpc::DaemonStatus(s.to_owned())),
+        SenseUpdateIpc::Install { .. } | SenseUpdateIpc::InstallNow { .. } => {
+            Some(SenseUpdateIpc::InstallAnswer(super::RETRY_SOON.to_owned()))
+        }
+        SenseUpdateIpc::CancelRequest => Some(SenseUpdateIpc::CancelAnswer(super::RETRY_SOON.to_owned())),
+        _ => None,
+    }
+}
+
+/// Short name of a `_service` call for the event record (`update/limit_drop tur=`).
+pub fn call_kind(message: &SenseUpdateIpc) -> &'static str {
+    match message {
+        SenseUpdateIpc::Offer { .. } => "offer",
+        SenseUpdateIpc::StatusQuery => "status",
+        SenseUpdateIpc::Install { .. } => "install",
+        SenseUpdateIpc::InstallNow { .. } => "install_now",
+        SenseUpdateIpc::CancelRequest => "cancel",
+        _ => "other",
     }
 }
 
@@ -288,7 +363,7 @@ pub async fn request_daemon(message: SenseUpdateIpc) -> Option<SenseUpdateIpc> {
             }
         }
         // Only a peer with uid 0 is accepted as the daemon.
-        let mut conn = ipc::connect_trusted_device_service(1000).await.ok()?;
+        let mut conn = ipc::connect_trusted_device_service(DAEMON_CONNECT_MS).await.ok()?;
         conn.send(&Data::SenseUpdate(message)).await.ok()?;
         match conn.next_timeout(DAEMON_TIMEOUT_MS).await {
             Ok(Some(Data::SenseUpdate(
