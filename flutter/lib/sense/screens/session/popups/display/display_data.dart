@@ -33,6 +33,7 @@ class SenseSessionVideo {
     this.quality,
     this.bandwidthMbit,
     this.lossEstPct,
+    this.frameAgeMs,
     this.displays = const [],
     this.watched = 0,
   });
@@ -55,6 +56,10 @@ class SenseSessionVideo {
 
   /// D1 estimate (`loss_est`), percent; always "tahmini".
   final double? lossEstPct;
+
+  /// Sürüm 10 (#118): how long ago the last frame was decoded (ms), now. RustDesk sends a frame
+  /// only when the picture changed, so a long gap means a still screen. Null: not measured.
+  final int? frameAgeMs;
   final List<SenseSessionDisplay> displays;
 
   /// Watched display index; [kAllDisplayValue] = all at once.
@@ -120,6 +125,9 @@ class SenseSessionVideoSource extends ChangeNotifier implements ValueListenable<
       quality: _quality,
       bandwidthMbit: senseParseSpeedMbit(q.speed),
       lossEstPct: q.lossEst,
+      frameAgeMs: q.lastFrameMs == null || q.lastFrameAt == null
+          ? null
+          : q.lastFrameMs! + DateTime.now().difference(q.lastFrameAt!).inMilliseconds,
       displays: [
         for (var i = 0; i < pi.displays.length; i++)
           SenseSessionDisplay(

@@ -45,6 +45,8 @@ struct InventoryState {
     sent_summary: Option<String>,
     started: Option<Instant>,
     running: bool,
+    /// Sense Remote (Sürüm 10, #117): the last reading failed (retry after `INVENTORY_RETRY`).
+    failed: bool,
 }
 
 static INVENTORY: Mutex<InventoryState> = Mutex::new(InventoryState {
@@ -53,6 +55,7 @@ static INVENTORY: Mutex<InventoryState> = Mutex::new(InventoryState {
     sent_summary: None,
     started: None,
     running: false,
+    failed: false,
 });
 
 /// Whether the panel takes the v2 fields (last heartbeat answer).
@@ -77,7 +80,7 @@ fn start_inventory_if_due() {
     }
     {
         let mut state = INVENTORY.lock().unwrap_or_else(|e| e.into_inner());
-        if !inventory_refresh_due(state.started, state.running, Instant::now()) {
+        if !inventory_refresh_due(state.started, state.running, state.failed, Instant::now()) {
             return;
         }
         state.running = true;
@@ -90,16 +93,29 @@ fn start_inventory_if_due() {
         });
         let mut state = INVENTORY.lock().unwrap_or_else(|e| e.into_inner());
         state.running = false;
-        match read {
+        state.failed = read.is_none();
+        let changed = match read {
             Some(inventory) => {
+                // Sürüm 10 (#117): a part whose query failed this time keeps the last value, so a
+                // busy WMI never replaces the panel's inventory with an almost empty one.
+                let inventory = keep_known_parts(state.latest.as_ref(), inventory);
                 let summary = inventory_summary(&inventory);
-                if state.latest_summary.as_ref() != Some(&summary) {
-                    log::info!("Sense Remote: inventory read (changed)");
-                }
+                let changed = state.latest_summary.as_ref() != Some(&summary);
                 state.latest_summary = Some(summary);
                 state.latest = Some(inventory);
+                Some(changed)
             }
-            None => log::warn!("Sense Remote: inventory could not be read"),
+            None => None,
+        };
+        drop(state);
+        // Logged after the lock is released (nothing waits on the inventory while a log is written).
+        match changed {
+            Some(true) => log::info!("Sense Remote: inventory read (changed)"),
+            Some(false) => {}
+            None => log::warn!(
+                "Sense Remote: inventory could not be read, next try in {}s",
+                INVENTORY_RETRY.as_secs()
+            ),
         }
     });
 }
@@ -156,7 +172,9 @@ pub fn inventory_changed() -> bool {
     resend
 }
 
-fn inventory_snapshot() -> Option<Inventory> {
+/// The latest read inventory (`None` before the first good reading). Sense Remote (Sürüm 10,
+/// #117): also the event record's hardware (`diag::sys`), so the inventory is read by one reader.
+pub fn inventory_snapshot() -> Option<Inventory> {
     INVENTORY
         .lock()
         .unwrap_or_else(|e| e.into_inner())

@@ -83,6 +83,34 @@ void main() {
     expect(view(const SenseSessionVideo(rttMs: 200)).alerts.map((c) => c.title), contains('Oturum görüntüsü'));
   });
 
+  // Sürüm 10 (#118): direct link, 4 ms, a still screen at 7 fps showed red "Dikkat gerekiyor".
+  test('a still screen is not a frame-rate problem: "durağan", no warning', () {
+    const still = SenseSessionVideo(fps: 7, rttMs: 4, direct: true, codec: 'H265', bandwidthMbit: 0.3, lossEstPct: 0,
+        displays: [SenseSessionDisplay(index: 0, x: 0, y: 0, width: 3840, height: 2160)]);
+    final v = view(still);
+    final m = v.meters[0] as SenseStatusMeter;
+    expect(m.text, '7 / 60 fps · durağan');
+    expect(m.barLevel, SenseLevel.ok);
+    expect(v.alerts.map((c) => c.title), isNot(contains('Oturum görüntüsü')));
+    expect(v.categories.last.summary, 'H265 · 7 fps · durağan · 4 ms');
+    // The last frame is old (nothing changed for a second): still, even without a bandwidth value.
+    expect(senseScreenStill(const SenseSessionVideo(fps: 3, rttMs: 10, frameAgeMs: 2500)), isTrue);
+  });
+
+  test('a changing screen whose frames do not get through still warns', () {
+    // Plenty of picture data and recent frames: the screen is changing.
+    const moving = SenseSessionVideo(fps: 7, rttMs: 4, bandwidthMbit: 6.0, frameAgeMs: 120);
+    expect(senseScreenStill(moving), isFalse);
+    expect((view(moving).meters[0] as SenseStatusMeter).barLevel, SenseLevel.hot);
+    // A bad link is never called still.
+    expect(senseScreenStill(const SenseSessionVideo(fps: 7, rttMs: 200, bandwidthMbit: 0.1)), isFalse);
+    expect(senseScreenStill(const SenseSessionVideo(fps: 7, rttMs: 4, bandwidthMbit: 0.1, lossEstPct: 5)), isFalse);
+    // A good rate is just a good rate.
+    expect(senseScreenStill(const SenseSessionVideo(fps: 60, bandwidthMbit: 0.1)), isFalse);
+    // Nothing known about change: the old rule.
+    expect(senseScreenStill(const SenseSessionVideo(fps: 7, rttMs: 4)), isFalse);
+  });
+
   test('nothing measured: "okunamadı", no guess', () {
     final v = senseBuildDisplayView(panel: const [], video: const SenseSessionVideo());
     final rows = v.categories.single.rows;

@@ -310,15 +310,37 @@ SenseStatusCategory _cpu(SenseHealthDetail? h, SenseInventory? inv) {
 
 // ------------------------------------------------------------------ Ekran kartı
 
+/// Sürüm 10 (#117): card names are compared without case and extra spaces (WMI and DXGI
+/// write the same card's name slightly differently on some drivers).
+String? _gpuKey(String? name) => name?.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+
+bool _gpuHasLive(SenseHealthGpu g) =>
+    g.utilPct != null || g.vramUsedMb != null || g.tempC != null || g.fanPct != null || g.powerW != null;
+
 SenseStatusCategory _gpu(SenseHealthDetail? h, SenseInventory? inv) {
   final cards = <SenseStatusCard>[];
   final live = List<SenseHealthGpu>.of(h?.gpus ?? const []);
-  for (final g in inv?.gpus ?? const <SenseInvGpu>[]) {
-    final i = live.indexWhere((x) => x.name == g.name);
-    cards.add(_gpuCard(g.name, g, i >= 0 ? live.removeAt(i) : null));
+  // A live entry with values is matched first, so a card listed twice by an older Host (one
+  // entry without any value) never takes the inventory's place.
+  int liveFor(String name) {
+    final k = _gpuKey(name);
+    final withValues = live.indexWhere((x) => _gpuKey(x.name) == k && _gpuHasLive(x));
+    return withValues >= 0 ? withValues : live.indexWhere((x) => _gpuKey(x.name) == k);
   }
+
+  final shown = <String?>{};
+  for (final g in inv?.gpus ?? const <SenseInvGpu>[]) {
+    final i = liveFor(g.name);
+    cards.add(_gpuCard(g.name, g, i >= 0 ? live.removeAt(i) : null));
+    shown.add(_gpuKey(g.name));
+  }
+  // Live-only cards; an entry without values whose name is already shown is the same card twice.
+  final liveKeys = {for (final x in live.where(_gpuHasLive)) _gpuKey(x.name)};
   for (final x in live) {
+    final k = _gpuKey(x.name);
+    if (!_gpuHasLive(x) && k != null && (shown.contains(k) || liveKeys.contains(k))) continue;
     cards.add(_gpuCard(x.name ?? _S.gpu, null, x));
+    shown.add(k);
   }
   // Summary: the busiest card (the one v1 gpu_pct / gpu_temp_c describe).
   String? name;

@@ -47,6 +47,9 @@ pub fn health_interval(v2: bool, connected: bool, idle: Duration) -> Duration {
 
 /// The inventory is read again this often (and at start).
 pub const INVENTORY_INTERVAL: Duration = Duration::from_secs(30 * 60);
+/// Sense Remote (Sürüm 10, #117): after a reading that failed (the main script did not finish,
+/// nothing read), the next one starts this soon instead of after `INVENTORY_INTERVAL`.
+pub const INVENTORY_RETRY: Duration = Duration::from_secs(2 * 60);
 
 pub const MAX_TEXT: usize = 128;
 pub const MAX_ITEMS: usize = 32;
@@ -630,10 +633,63 @@ pub fn inventory_resend_needed(v2: bool, latest: Option<&str>, sent: Option<&str
 }
 
 /// A new background reading is due: never started, or the last one started at least
-/// `INVENTORY_INTERVAL` ago, and none is running.
-pub fn inventory_refresh_due(last_started: Option<Instant>, running: bool, now: Instant) -> bool {
-    !running
-        && last_started.map_or(true, |t| now.saturating_duration_since(t) >= INVENTORY_INTERVAL)
+/// `INVENTORY_INTERVAL` ago (`INVENTORY_RETRY` when it failed, #117), and none is running.
+pub fn inventory_refresh_due(
+    last_started: Option<Instant>,
+    running: bool,
+    last_failed: bool,
+    now: Instant,
+) -> bool {
+    let wait = if last_failed { INVENTORY_RETRY } else { INVENTORY_INTERVAL };
+    !running && last_started.map_or(true, |t| now.saturating_duration_since(t) >= wait)
+}
+
+/// Sense Remote (Sürüm 10, #117): a new reading where a part that a computer always has (CPU,
+/// graphics cards, memory, disks, board, BIOS, OS, driver list) came back empty keeps that part
+/// of the previous reading. Such a part only goes missing when its query failed or timed out
+/// (WMI busy); sending the gap would replace the panel's whole inventory with an almost empty
+/// one and every detail of the "Bilgisayar durumu" popup would read "okunamadı". Parts that can
+/// really disappear (network adapters, USB, audio, power settings, serial) are taken as read.
+pub fn keep_known_parts(previous: Option<&Inventory>, mut read: Inventory) -> Inventory {
+    let Some(prev) = previous else { return read };
+    macro_rules! keep {
+        ($($field:ident),*) => {
+            $(if read.$field.is_none() {
+                read.$field = prev.$field.clone();
+            })*
+        };
+    }
+    keep!(cpu, gpus, memory, physical_disks, board, bios, os, drivers);
+    read
+}
+
+/// Sense Remote (Sürüm 10, #117): one card per graphics adapter. DXGI can list one card twice
+/// (a second adapter object with the same name and its own LUID, e.g. after a driver reset);
+/// only one of them has utilisation / memory counters. An entry without any live value whose
+/// name another entry with live values carries is dropped, so the popup shows the card once.
+/// Two real cards of the same model both have counters and both stay.
+pub fn dedupe_gpus(gpus: Vec<GpuLive>) -> Vec<GpuLive> {
+    let has_live = |g: &GpuLive| {
+        g.util_pct.is_some()
+            || g.vram_used_mb.is_some()
+            || g.temp_c.is_some()
+            || g.fan_pct.is_some()
+            || g.power_w.is_some()
+    };
+    let key = |g: &GpuLive| g.name.as_deref().map(|n| n.trim().to_ascii_lowercase());
+    let live_names: Vec<Option<String>> =
+        gpus.iter().filter(|g| has_live(g)).map(key).collect();
+    let mut out: Vec<GpuLive> = Vec::new();
+    for gpu in gpus {
+        if !has_live(&gpu) {
+            let k = key(&gpu);
+            if k.is_some() && (live_names.contains(&k) || out.iter().any(|o| key(o) == k)) {
+                continue;
+            }
+        }
+        out.push(gpu);
+    }
+    out
 }
 
 /// Summary of an inventory for change detection: the JSON without `at`, keys sorted.
@@ -851,10 +907,78 @@ mod tests {
     #[test]
     fn inventory_refresh_timing() {
         let now = Instant::now();
-        assert!(inventory_refresh_due(None, false, now));
-        assert!(!inventory_refresh_due(None, true, now));
-        assert!(!inventory_refresh_due(Some(now), false, now + Duration::from_secs(60)));
-        assert!(inventory_refresh_due(Some(now), false, now + INVENTORY_INTERVAL));
+        assert!(inventory_refresh_due(None, false, false, now));
+        assert!(!inventory_refresh_due(None, true, false, now));
+        assert!(!inventory_refresh_due(Some(now), false, false, now + Duration::from_secs(60)));
+        assert!(inventory_refresh_due(Some(now), false, false, now + INVENTORY_INTERVAL));
+        // #117: a failed reading is tried again after two minutes, not half an hour.
+        assert!(!inventory_refresh_due(Some(now), false, true, now + Duration::from_secs(60)));
+        assert!(inventory_refresh_due(Some(now), false, true, now + INVENTORY_RETRY));
+        assert!(!inventory_refresh_due(Some(now), true, true, now + INVENTORY_RETRY));
+    }
+
+    // Sürüm 10 (#117): a part whose query failed keeps the previous value; parts that can really
+    // disappear are taken as read.
+    #[test]
+    fn a_failed_part_keeps_the_previous_reading() {
+        let previous = Inventory {
+            at: 1,
+            cpu: Some(CpuInfo { model: Some("Ryzen 9".into()), ..Default::default() }),
+            gpus: Some(vec![GpuInfo {
+                name: "NVIDIA GeForce RTX 4090".into(),
+                driver_version: Some("32.0.15.9144".into()),
+                ..Default::default()
+            }]),
+            usb: Some(vec!["Logitech USB Receiver".into()]),
+            drivers: Some(vec![]),
+            ..Default::default()
+        };
+        let read = Inventory {
+            at: 2,
+            memory: Some(MemoryInfo { total_mb: Some(65536), ..Default::default() }),
+            ..Default::default()
+        };
+        let merged = keep_known_parts(Some(&previous), read.clone());
+        assert_eq!(merged.at, 2);
+        assert_eq!(merged.cpu, previous.cpu);
+        assert_eq!(merged.gpus, previous.gpus);
+        assert_eq!(merged.memory, read.memory);
+        assert_eq!(merged.drivers, previous.drivers);
+        assert_eq!(merged.usb, None, "USB devices can be unplugged");
+        assert_eq!(keep_known_parts(None, read.clone()), read);
+    }
+
+    // Sürüm 10 (#117): the RTX 4090 listed twice (one entry with values, one without) is one card.
+    #[test]
+    fn a_card_listed_twice_is_shown_once() {
+        let live = GpuLive {
+            name: Some("NVIDIA GeForce RTX 4090".into()),
+            util_pct: Some(12.0),
+            vram_total_mb: Some(24564),
+            temp_c: Some(41.0),
+            ..Default::default()
+        };
+        let ghost = GpuLive {
+            name: Some("NVIDIA GeForce RTX 4090 ".into()),
+            vram_total_mb: Some(24564),
+            ..Default::default()
+        };
+        let igpu = GpuLive {
+            name: Some("AMD Radeon(TM) Graphics".into()),
+            vram_total_mb: Some(512),
+            ..Default::default()
+        };
+        assert_eq!(
+            dedupe_gpus(vec![ghost.clone(), live.clone(), igpu.clone()]),
+            vec![live.clone(), igpu.clone()]
+        );
+        // A card without counters and no twin stays ("okunamadı" rows are honest there).
+        assert_eq!(dedupe_gpus(vec![igpu.clone()]), vec![igpu.clone()]);
+        // Two empty entries of one name: once.
+        assert_eq!(dedupe_gpus(vec![igpu.clone(), igpu.clone()]), vec![igpu]);
+        // Two real cards of the same model both report values: both stay.
+        let second = GpuLive { util_pct: Some(80.0), ..live.clone() };
+        assert_eq!(dedupe_gpus(vec![live.clone(), second.clone()]), vec![live, second]);
     }
 
     #[test]

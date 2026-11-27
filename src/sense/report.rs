@@ -97,7 +97,7 @@ pub struct SenseDisplay {
     pub y: i32,
     pub width: u32,
     pub height: u32,
-    /// Not sent on Windows (`DisplayInfo.scale` is always 1 there).
+    /// macOS backing scale; Windows per-monitor DPI scale (Sürüm 10 #118). Not sent when unread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scale: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -724,7 +724,8 @@ fn pick_cpu_temp<'a>(readings: impl Iterator<Item = (&'a str, f32)>) -> Option<f
 #[derive(Debug, Clone, Default)]
 pub(super) struct DisplayDetails {
     pub name: Option<String>,
-    /// Sense Remote (Mac M4): backing scale factor (2 on a Retina display); macOS only.
+    /// Sense Remote (Mac M4): backing scale factor (2 on a Retina display); Windows: the display
+    /// scale from its effective DPI (1.5 = 150 %, Sürüm 10 #118).
     pub scale: Option<f64>,
     /// Sense Remote (Mac M4): size in pixels at the backing scale; macOS only (see
     /// `mac_geometry`).
@@ -842,6 +843,12 @@ pub(super) fn mac_scale(mode_pixel_width: usize, mode_width: usize) -> Option<f6
     (1.0..=4.0).contains(&scale).then_some(scale)
 }
 
+/// Sense Remote (Sürüm 10, #118): Windows display scale from the monitor's effective DPI (96 =
+/// 100 %, 144 = 150 %), two decimals. Below 96 or above 480 (500 %) is not a real setting.
+pub(super) fn scale_from_dpi(dpi: u32) -> Option<f64> {
+    (96..=480).contains(&dpi).then(|| round_to(dpi as f64 / 96.0, 2))
+}
+
 /// Sense Remote (Mac M4): size in points (`CGDisplayPixelsWide` / `High`, rotation applied)
 /// times the backing scale. `None` without a scale (the caller then keeps scrap's size).
 pub(super) fn mac_pixel_size(points: (usize, usize), scale: Option<f64>) -> Option<(u32, u32)> {
@@ -894,7 +901,8 @@ fn merge_displays(
 
 fn apply_details(display: &mut SenseDisplay, d: &DisplayDetails) {
     display.name = d.name.as_deref().and_then(display_name);
-    // Sense Remote (Mac M4): only macOS reads a scale (`DisplayInfo.scale` is 1 on Windows).
+    // Sense Remote (Mac M4, Sürüm 10 #118): macOS backing scale; Windows per-monitor DPI scale
+    // (`displays_win::monitor_dpis`; scrap's `DisplayInfo.scale` is always 1 there).
     display.scale = d.scale.filter(|s| s.is_finite() && *s > 0.0);
     display.connection = d.output_technology.map(|t| connection_name(t).to_owned());
     display.refresh_hz = d.refresh.and_then(|(num, den)| refresh_hz(num, den));
@@ -1801,6 +1809,15 @@ mod tests {
     /// Mac M4: what `displays_mac` reads, mapped to the contract.
     #[test]
     fn mac_display_values() {
+        // Sürüm 10 (#118): Windows scale from the effective DPI.
+        assert_eq!(scale_from_dpi(96), Some(1.0));
+        assert_eq!(scale_from_dpi(120), Some(1.25));
+        assert_eq!(scale_from_dpi(144), Some(1.5));
+        assert_eq!(scale_from_dpi(168), Some(1.75));
+        assert_eq!(scale_from_dpi(192), Some(2.0));
+        assert_eq!(scale_from_dpi(0), None);
+        assert_eq!(scale_from_dpi(72), None);
+        assert_eq!(scale_from_dpi(960), None);
         assert_eq!(mac_scale(3024, 1512), Some(2.0));
         assert_eq!(mac_scale(1920, 1920), Some(1.0));
         assert_eq!(mac_scale(0, 1512), None);
@@ -1900,7 +1917,7 @@ mod tests {
                 "index", "name", "x", "y", "width", "height", "scale", "primary", "refresh_hz",
             ])));
         }
-        // Windows details never carry a scale: the field stays out there.
+        // Details without a scale (none read) leave the field out.
         let windows = merge_displays(
             &geometry[..1],
             &HashMap::from([("5".to_owned(), DisplayDetails::default())]),

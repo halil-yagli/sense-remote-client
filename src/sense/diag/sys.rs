@@ -56,12 +56,20 @@ fn read_inventory() -> Option<Inventory> {
 }
 
 /// Reads the hardware once (blocking; the ticker thread) and records `sys/info` with it.
+///
+/// Sense Remote (Sürüm 10, #117): the inventory the health data already read is used; only when
+/// there is none yet (panel without `health_v2`, first reading not done) is it read here, and
+/// then one script at a time with the health reader (`inventory_win::SCRIPT_LOCK`). Before, this
+/// was a second full reading in the same process that slowed the health reading past its limit.
 pub fn read_hardware_once() {
     let known = HARDWARE.lock().unwrap_or_else(|e| e.into_inner()).is_some();
     if known {
         return;
     }
-    let value = read_inventory().map(|inv| hardware_fields(&inv)).unwrap_or(Value::Null);
+    let value = crate::sense::health_v2::inventory_snapshot()
+        .or_else(read_inventory)
+        .map(|inv| hardware_fields(&inv))
+        .unwrap_or(Value::Null);
     *HARDWARE.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
     emit_info();
 }
