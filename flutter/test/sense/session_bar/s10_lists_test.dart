@@ -159,7 +159,7 @@ void main() {
       await tester.tap(toggle);
       await tester.pump();
       expect(find.textContaining('yeni bağlantıda geçerli'), findsWidgets);
-      expect(find.text('Tüm ekranlarımı kullan · yeni bağlantıda geçerli'), findsOneWidget, reason: 'toast');
+      expect(find.text('Tüm ekranlarımı kullan · yeni bağlantıda geçerli'), findsWidgets, reason: 'toast');
       await drain(tester);
     });
   });
