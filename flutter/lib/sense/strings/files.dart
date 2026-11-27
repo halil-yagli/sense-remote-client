@@ -44,6 +44,9 @@ abstract final class SenseFilesStrings {
   static const String refresh = 'Yenile';
   static const String more = 'Diğer işlemler';
   static const String typePath = 'Yol yaz';
+  static const String home = 'Ana klasöre git';
+  static const String search = 'Bu klasörde ara';
+  static const String searchHint = 'Ada göre süz, Esc ile kapat';
   static const String pathHint = 'Klasör yolu, Enter ile aç';
 
   // Columns.
@@ -116,8 +119,17 @@ abstract final class SenseFilesStrings {
   static const String deleted = 'Silindi';
   static String percent(int p) => '%$p';
   static String speedLeft(String speed, int seconds) => '$speed/sn · $seconds sn kaldı';
-  static const String pause = 'Duraklat';
+  static String speed(String speed) => '$speed/sn';
   static const String resume = 'Sürdür';
   static const String cancel = 'İptal';
+  static const String remove = 'Kaldır';
   static const String retry = 'Yeniden dene';
+
+  /// Short month names for "28 Kas 2026 00:38".
+  static const List<String> months = [
+    'Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara',
+  ];
+
+  /// Drag feedback: "3 öğe".
+  static String dragCount(int n) => '$n öğe';
 }

@@ -52,8 +52,59 @@ typedef ReadRemoteDirectory = Future<void> Function(
     SessionID sessionId, String path, bool includeHidden);
 
 const _kRemoteReadDirTimeout = Duration(seconds: 30);
+const _kReadDirTimeoutError = "Failed to read dir, timeout";
 const _kRemoteSessionChangedError =
     'Remote directory read cancelled because the session changed';
+
+/// Sense Remote (U168a): why a folder did not open, for the Sense files view.
+enum SenseDirError { timeout, unreadable, denied, other }
+
+/// Sense Remote (U168a): the local read returned nothing (Rust `read_dir` failed:
+/// missing folder, no access, empty path). Before, `jsonDecode("")` threw
+/// "FormatException: Unexpected end of input".
+class SenseDirReadException implements Exception {
+  const SenseDirReadException();
+  @override
+  String toString() => 'Directory could not be read';
+}
+
+/// Sense Remote (U168a): maps a read failure to [SenseDirError].
+SenseDirError senseDirErrorOf(Object error) {
+  if (error is SenseDirReadException || error is FormatException) {
+    return SenseDirError.unreadable;
+  }
+  final text = error.toString().toLowerCase();
+  if (text.contains('timeout')) return SenseDirError.timeout;
+  if (text.contains('denied') ||
+      text.contains('permission') ||
+      text.contains('os error 5')) {
+    return SenseDirError.denied;
+  }
+  return SenseDirError.other;
+}
+
+/// Tests catch the `files/readdir` events here instead of the bridge.
+@visibleForTesting
+void Function(bool ok, int ms, String? err)? senseReadDirSink;
+
+/// Sense Remote (U168a, plan S12 §2.6): `files/readdir {ok, ms, err}` for a remote
+/// folder read. No path and no file name.
+void _senseReportReadDir(bool ok, int ms, String? err) {
+  final sink = senseReadDirSink;
+  if (sink != null) {
+    sink(ok, ms, err);
+    return;
+  }
+  if (isWeb) return;
+  try {
+    unawaited(bind
+        .mainSenseDiagEvent(
+            category: 'files',
+            kind: 'readdir',
+            fieldsJson: jsonEncode({'ok': ok, 'ms': ms, 'err': err}))
+        .catchError((_) {}));
+  } catch (_) {}
+}
 
 class FileModel {
   final WeakReference<FFI> parent;
@@ -91,7 +142,15 @@ class FileModel {
     evtLoop = FileDialogEventLoop();
   }
 
+  // Sense Remote (U168a): true only while the file window has opened this model.
+  // A screen session also has a FileModel (never opened, empty paths); its
+  // `job_done` for a chat file (a Rust-side job unknown here) asked for
+  // [refreshAll] and read "" on both sides: "Failed to openDirectory:
+  // FormatException" locally and a 30 s "Failed to read dir, timeout" remotely.
+  bool _opened = false;
+
   Future<void> onReady() async {
+    _opened = true;
     fileFetcher.beginRemoteSession();
     await evtLoop.onReady();
     if (!isWeb) await localController.onReady();
@@ -99,6 +158,7 @@ class FileModel {
   }
 
   Future<void> close() async {
+    _opened = false;
     await evtLoop.close();
     parent.target?.dialogManager.dismissAll();
     await localController.close();
@@ -106,6 +166,7 @@ class FileModel {
   }
 
   Future<void> refreshAll() async {
+    if (!_opened) return; // Sense Remote (U168a): see [_opened]
     if (!isWeb) await localController.refresh();
     await remoteController.refresh();
   }
@@ -371,6 +432,13 @@ class FileController {
   final DirectoryData Function() getOtherSideDirectoryData;
   late final SelectedItems selectedItems = SelectedItems(isLocal: isLocal);
 
+  // Sense Remote (#155, U168a): state of the last folder read for the Sense view.
+  final loading = false.obs;
+  final readError = Rxn<SenseDirError>();
+
+  /// The folder that failed to open (shown in "Erişim izni yok: …").
+  String readErrorPath = '';
+
   FileController(
       {required this.isLocal,
       required this.getSessionID,
@@ -533,19 +601,46 @@ class FileController {
       }
     }
     final requestGeneration = ++_directoryRequestGeneration;
+    loading.value = true;
+    final watch = Stopwatch()..start();
     try {
-      final fd = await fileFetcher.fetchDirectory(path, isLocal, showHidden);
+      FileDirectory fd;
+      try {
+        fd = await fileFetcher.fetchDirectory(path, isLocal, showHidden);
+      } catch (e) {
+        // Sense Remote (U168a): one more try after a remote timeout (the peer
+        // may have been busy, e.g. reading a large folder or sending a file).
+        if (isLocal ||
+            requestGeneration != _directoryRequestGeneration ||
+            senseDirErrorOf(e) != SenseDirError.timeout ||
+            AndroidDocuments.isPath(path)) {
+          rethrow;
+        }
+        fd = await fileFetcher.fetchDirectory(path, isLocal, showHidden);
+      }
+      if (!isLocal) {
+        _senseReportReadDir(true, watch.elapsedMilliseconds, null);
+      }
       if (requestGeneration != _directoryRequestGeneration) {
         return true;
       }
       fd.format(isWindows, sort: sortBy.value);
       selectedItems.reconcile(fd.entries);
       directory.value = fd;
+      readError.value = null;
+      loading.value = false;
       return true;
     } catch (e) {
+      final kind = senseDirErrorOf(e);
+      if (!isLocal) {
+        _senseReportReadDir(false, watch.elapsedMilliseconds, kind.name);
+      }
       if (requestGeneration != _directoryRequestGeneration) {
         return true;
       }
+      readErrorPath = path;
+      readError.value = kind;
+      loading.value = false;
       debugPrint("Failed to openDirectory $path: $e");
       if (isAndroid && isLocal && AndroidDocuments.isPath(path)) {
         showToast(e.toString());
@@ -1545,7 +1640,7 @@ class FileFetcher {
     _remoteReadTasks[path] = task;
     task.timer = Timer(_kRemoteReadDirTimeout, () {
       if (!_removeRemoteReadTask(path, task)) return;
-      task.completer.completeError("Failed to read dir, timeout");
+      task.completer.completeError(_kReadDirTimeoutError);
     });
     return task;
   }
@@ -1699,6 +1794,8 @@ class FileFetcher {
       if (isLocal) {
         final res = await bind.sessionReadLocalDirSync(
             sessionId: sessionId, path: path, showHidden: showHidden);
+        // Sense Remote (U168a): Rust returns "" when the folder cannot be read.
+        if (res.isEmpty) throw const SenseDirReadException();
         if (isAndroid && AndroidDocuments.isPath(path)) {
           final data = jsonDecode(res);
           if (data['error'] != null) throw StateError(data['error'] as String);

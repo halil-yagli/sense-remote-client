@@ -26,6 +26,11 @@ import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import '../widgets/popup_menu.dart';
+import '../../common/sense_theme.dart' show senseRoleInstalled;
+import '../../sense/screens/files/files_format.dart' show senseOsName;
+import '../../sense/screens/files/files_view.dart';
+import '../../sense/screens/shared/aux_window/aux_label.dart';
+import '../../sense/tokens/sense_tokens.dart' show SenseColors;
 
 /// status of location bar
 enum LocationStatus {
@@ -165,6 +170,9 @@ class _FileManagerPageState extends State<FileManagerPage>
     super.build(context);
     return Overlay(key: _overlayKeyState.key, initialEntries: [
       OverlayEntry(builder: (_) {
+        // Sense Remote (#155): the Sense "Uzak dosyalar" view (readable, prototype
+        // design) on the same FileModel; the stock view below stays the fallback.
+        if (senseRoleInstalled()) return willPopScope(_senseView());
         return willPopScope(Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           body: Row(
@@ -184,6 +192,34 @@ class _FileManagerPageState extends State<FileManagerPage>
         ));
       })
     ]);
+  }
+
+  /// Sense Remote (#155): the Sense view of this window.
+  Widget _senseView() {
+    final local = senseOsName(isWindows
+        ? kPeerPlatformWindows
+        : isMacOS
+            ? kPeerPlatformMacOS
+            : kPeerPlatformLinux);
+    return Material(
+      color: SenseColors.bg,
+      child: Obx(() => SenseFilesView(
+            local: model.localController,
+            remote: model.remoteController,
+            jobs: jobController,
+            computer: senseAuxPeerLabel(widget.id),
+            localOs: local,
+            remoteOs: senseOsName(_ffi.ffiModel.pi.platform),
+            connected: _ffi.ffiModel.pi.isSet.value,
+            doubleClickMs: bind.getDoubleClickTime(),
+            // Files dropped from the desktop onto the remote panel are sent (stock).
+            wrapPanel: (panel, isLocal) => isLocal
+                ? panel
+                : DropTarget(
+                    onDragDone: (detail) => handleDragDone(detail, false),
+                    child: panel),
+          )),
+    );
   }
 
   Widget dropArea(FileManagerView fileView) {
