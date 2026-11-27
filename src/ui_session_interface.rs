@@ -1770,6 +1770,8 @@ pub trait InvokeUiSession: Send + Sync + Clone + 'static + Sized + Default {
     // Sense Remote (S9-b): a short ghost-mode status note instead of a privacy mode dialog;
     // `code` is one of `sense::privacy_note`, `details` the Host's reason (may be empty).
     fn sense_privacy_note(&self, _code: &str, _details: &str) {}
+    // Sense Remote (#114): recording stopped; `dir` is the folder holding its files.
+    fn sense_record_saved(&self, _dir: &str) {}
 }
 
 impl<T: InvokeUiSession> Deref for Session<T> {

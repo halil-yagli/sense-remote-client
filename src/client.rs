@@ -2920,9 +2920,18 @@ impl VideoHandler {
     }
 
     /// Start or stop screen record.
-    pub fn record_screen(&mut self, start: bool, id: String, display_idx: usize, camera: bool) {
+    pub fn record_screen(
+        &mut self,
+        start: bool,
+        id: String,
+        peer_name: String,
+        display_idx: usize,
+        camera: bool,
+    ) {
         self.record = false;
         if start {
+            // Sense Remote (#114): every display of this recording goes to one folder.
+            let sense_folder = Some(scrap::record::sense_session_folder(&id, &peer_name));
             self.recorder = Recorder::new(RecorderContext {
                 server: false,
                 id,
@@ -2930,6 +2939,7 @@ impl VideoHandler {
                 display_idx,
                 camera,
                 tx: None,
+                sense_folder,
             })
             .map_or(Default::default(), |r| Arc::new(Mutex::new(Some(r))));
         } else {
@@ -3051,6 +3061,17 @@ pub struct LoginConfigHandler {
     pub enable_trusted_devices: bool,
     pub record_state: bool,
     pub record_permission: bool,
+}
+
+impl LoginConfigHandler {
+    /// Sense Remote (#114): the remote computer's name for recording file names (its id when the
+    /// peer has not sent a host name).
+    pub fn sense_peer_name(&self) -> String {
+        match &self.peer_info {
+            Some(pi) if !pi.hostname.trim().is_empty() => pi.hostname.clone(),
+            _ => self.id.clone(),
+        }
+    }
 }
 
 impl Deref for LoginConfigHandler {
@@ -4203,8 +4224,9 @@ pub fn start_video_thread<F, T>(
                             let record_state = session.lc.read().unwrap().record_state;
                             let record_permission = session.lc.read().unwrap().record_permission;
                             let id = session.lc.read().unwrap().id.clone();
+                            let peer_name = session.lc.read().unwrap().sense_peer_name(); // Sense Remote (#114)
                             if record_state && record_permission {
-                                handler.record_screen(true, id, display, is_view_camera);
+                                handler.record_screen(true, id, peer_name, display, is_view_camera);
                             }
                             video_handler = Some(handler);
                         }
@@ -4290,8 +4312,9 @@ pub fn start_video_thread<F, T>(
                     }
                     MediaData::RecordScreen(start) => {
                         let id = session.lc.read().unwrap().id.clone();
+                        let peer_name = session.lc.read().unwrap().sense_peer_name(); // Sense Remote (#114)
                         if let Some(handler) = video_handler.as_mut() {
-                            handler.record_screen(start, id, display, is_view_camera);
+                            handler.record_screen(start, id, peer_name, display, is_view_camera);
                         }
                     }
                     _ => {}

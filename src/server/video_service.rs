@@ -1212,6 +1212,7 @@ fn get_recorder(
             display_idx,
             camera,
             tx,
+            sense_folder: None, // Sense Remote (#114): Host keeps the flat naming
         })
         .map_or(Default::default(), |r| Arc::new(Mutex::new(Some(r))))
     } else {
