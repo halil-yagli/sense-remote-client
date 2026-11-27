@@ -7,6 +7,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../strings/session.dart';
+import '../record_notice.dart';
 import '../../../tokens/sense_tokens.dart';
 
 /// The four lists of the bar (O3–O6).
@@ -264,6 +265,7 @@ abstract final class SenseSessionEvents {
       of(peerId).onPrivacyNote((evt['code'] ?? '').toString());
       return true;
     }
+    if (SenseRecordNotice.handle(evt)) return true; // Sense Remote (#114): "Klasörü aç" note
     return false;
   }
 }

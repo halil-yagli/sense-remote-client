@@ -6,11 +6,12 @@ use hbb_common::{bail, chrono, log, ResultType};
 #[cfg(feature = "hwcodec")]
 use hwcodec::mux::{MuxContext, Muxer};
 use std::{
+    collections::HashMap,
     fs::{File, OpenOptions},
     io,
     ops::{Deref, DerefMut},
     path::PathBuf,
-    sync::mpsc::Sender,
+    sync::{mpsc::Sender, Mutex},
     time::Instant,
 };
 use webm::mux::{self, Segment, Track, VideoTrack, Writer};
@@ -33,6 +34,73 @@ fn sanitize_filename_component(value: &str) -> String {
         .collect()
 }
 
+// Sense Remote (#114): one recording = one folder (`<computer name>_<date>_<time>`) holding the
+// per-display files. The folder name is made once when recording starts and shared by every
+// display's recorder of that session (key = peer id), then dropped when recording stops.
+static SENSE_SESSIONS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+const SENSE_NAME_MAX: usize = 48;
+
+/// A computer name made safe for a file name: Turkish letters stay, characters Windows /
+/// macOS refuse become `_`, trailing dots and spaces (Windows) go, length is capped.
+pub fn sense_readable_component(value: &str) -> String {
+    let cleaned: String = sanitize_filename_component(value.trim())
+        .chars()
+        .take(SENSE_NAME_MAX)
+        .collect();
+    let cleaned = cleaned.trim_matches(|c: char| c == '.' || c == ' ').to_string();
+    let upper = cleaned.to_uppercase();
+    let reserved = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.len() == 4
+            && upper.ends_with(|c: char| c.is_ascii_digit()));
+    if cleaned.is_empty() || reserved {
+        "Bilgisayar".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// `<computer>_<yyyy-mm-dd>_<hh-mm-ss>`.
+pub fn sense_session_folder_name(peer_name: &str, stamp: &str) -> String {
+    format!("{}_{}", sense_readable_component(peer_name), stamp)
+}
+
+/// `<folder>_Ekran1.mp4` (`Kamera1` for a camera); `n >= 2` adds `_2`, `_3`, ... for the rare
+/// second file of the same display (the picture size or codec changed mid-recording).
+pub fn sense_file_name(folder: &str, camera: bool, display_idx: usize, n: usize, ext: &str) -> String {
+    let kind = if camera { "Kamera" } else { "Ekran" };
+    let suffix = if n >= 2 { format!("_{n}") } else { String::new() };
+    format!("{folder}_{kind}{}{suffix}.{ext}", display_idx + 1)
+}
+
+/// The folder of the recording that is running for `key`; made on first ask.
+pub fn sense_session_folder(key: &str, peer_name: &str) -> String {
+    let mut g = SENSE_SESSIONS.lock().unwrap();
+    g.get_or_insert_with(HashMap::new)
+        .entry(key.to_owned())
+        .or_insert_with(|| {
+            let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+            sense_session_folder_name(peer_name, &stamp)
+        })
+        .clone()
+}
+
+/// A new recording starts: forget the old folder name so the next ask makes a fresh one.
+pub fn sense_begin_session(key: &str, peer_name: &str) -> String {
+    sense_end_session(key);
+    sense_session_folder(key, peer_name)
+}
+
+/// Recording stopped: returns the folder name it used, if any.
+pub fn sense_end_session(key: &str) -> Option<String> {
+    SENSE_SESSIONS
+        .lock()
+        .unwrap()
+        .as_mut()
+        .and_then(|m| m.remove(key))
+}
+
 #[derive(Debug, Clone)]
 pub struct RecorderContext {
     pub server: bool,
@@ -41,6 +109,9 @@ pub struct RecorderContext {
     pub display_idx: usize,
     pub camera: bool,
     pub tx: Option<Sender<RecordState>>,
+    /// Sense Remote (#114): sub folder of `dir` for this recording (Controller side); None keeps
+    /// the stock flat naming (Host side).
+    pub sense_folder: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +124,29 @@ pub struct RecorderContext2 {
 
 impl RecorderContext2 {
     pub fn set_filename(&mut self, ctx: &RecorderContext) -> ResultType<()> {
+        // Sense Remote (#114): readable names in one folder per recording.
+        if let Some(folder) = &ctx.sense_folder {
+            let dir = PathBuf::from(&ctx.dir).join(folder);
+            std::fs::create_dir_all(&dir)?;
+            let ext = if self.format == CodecFormat::VP9
+                || self.format == CodecFormat::VP8
+                || self.format == CodecFormat::AV1
+            {
+                "webm"
+            } else {
+                "mp4"
+            };
+            let mut n = 1;
+            let path = loop {
+                let p = dir.join(sense_file_name(folder, ctx.camera, ctx.display_idx, n, ext));
+                if !p.exists() {
+                    break p;
+                }
+                n += 1;
+            };
+            self.filename = path.to_string_lossy().to_string();
+            return Ok(());
+        }
         if !PathBuf::from(&ctx.dir).exists() {
             std::fs::create_dir_all(&ctx.dir)?;
         }
@@ -437,7 +531,34 @@ impl Drop for HwRecorder {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_filename_component;
+    use super::{
+        sanitize_filename_component, sense_file_name, sense_readable_component,
+        sense_session_folder_name,
+    };
+
+    #[test]
+    fn sense_names_are_readable_and_safe() {
+        assert_eq!(sense_readable_component("Müze-Şef PC"), "Müze-Şef PC");
+        assert_eq!(sense_readable_component("a/b:c*"), "a_b_c_");
+        assert_eq!(sense_readable_component("  PC. "), "PC");
+        assert_eq!(sense_readable_component("con"), "Bilgisayar");
+        assert_eq!(sense_readable_component(""), "Bilgisayar");
+        assert_eq!(sense_readable_component(&"x".repeat(200)).chars().count(), 48);
+        let f = sense_session_folder_name("Slayer", "2026-11-27_03-52-04");
+        assert_eq!(f, "Slayer_2026-11-27_03-52-04");
+        assert_eq!(sense_file_name(&f, false, 0, 1, "mp4"), "Slayer_2026-11-27_03-52-04_Ekran1.mp4");
+        assert_eq!(sense_file_name(&f, false, 1, 2, "webm"), "Slayer_2026-11-27_03-52-04_Ekran2_2.webm");
+        assert_eq!(sense_file_name(&f, true, 0, 1, "mp4"), "Slayer_2026-11-27_03-52-04_Kamera1.mp4");
+    }
+
+    #[test]
+    fn sense_session_folder_is_shared_until_ended() {
+        use super::{sense_begin_session, sense_end_session, sense_session_folder};
+        let a = sense_begin_session("test-key-114", "PC");
+        assert_eq!(sense_session_folder("test-key-114", "PC"), a);
+        assert_eq!(sense_end_session("test-key-114"), Some(a));
+        assert_eq!(sense_end_session("test-key-114"), None);
+    }
 
     #[test]
     fn sanitize_recording_filename_component() {

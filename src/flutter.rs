@@ -713,6 +713,11 @@ impl InvokeUiSession for FlutterHandler {
         self.push_event("sense_privacy_note", &[("code", code), ("details", details)], &[]);
     }
 
+    // Sense Remote (#114): recording stopped; the session offers "Klasörü aç" for `dir`.
+    fn sense_record_saved(&self, dir: &str) {
+        self.push_event("sense_record_saved", &[("dir", dir)], &[]);
+    }
+
     fn set_permission(&self, name: &str, value: bool) {
         self.push_event("permission", &[(name, &value.to_string())], &[]);
     }

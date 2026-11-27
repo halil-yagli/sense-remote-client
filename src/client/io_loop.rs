@@ -3111,11 +3111,29 @@ impl<T: InvokeUiSession> Remote<T> {
         }
         self.last_record_state = start;
         log::info!("record screen start: {start}");
+        // Sense Remote (#114): one folder per recording; on stop, tell the UI where it is.
+        let (sense_id, sense_name) = {
+            let lc = self.handler.lc.read().unwrap();
+            (lc.id.clone(), lc.sense_peer_name())
+        };
+        if start {
+            scrap::record::sense_begin_session(&sense_id, &sense_name);
+        }
         // update local
         for (_, v) in self.video_threads.iter_mut() {
             v.video_sender.send(MediaData::RecordScreen(start)).ok();
         }
         self.handler.update_record_status(start);
+        if !start {
+            if let Some(folder) = scrap::record::sense_end_session(&sense_id) {
+                let dir = std::path::PathBuf::from(crate::ui_interface::video_save_directory(false))
+                    .join(folder);
+                // Only when frames reached the disk; an empty recording leaves no folder.
+                if dir.is_dir() {
+                    self.handler.sense_record_saved(&dir.to_string_lossy());
+                }
+            }
+        }
         // update remote
         let mut misc = Misc::new();
         misc.set_client_record_status(start);
