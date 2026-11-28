@@ -269,7 +269,7 @@ void main() {
               confirmLabel: 'Yeniden başlat',
               onConfirm: () {},
               onCancel: () {}),
-          width: 220))));
+          width: 220)));
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('inline_confirm_narrow')));
     }, skip: goldenSkip('inline_confirm_narrow'), tags: const ['golden']);
   });
