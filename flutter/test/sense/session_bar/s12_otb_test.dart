@@ -160,6 +160,9 @@ void main() {
       await tester.pumpWidget(frameApp(FakeBackend()));
       await tester.tap(_menu(SenseBarMenu.favorites));
       await tester.pump();
+      // Keys reach the frame through the focused widget (the remote screen in the app).
+      await tester.tap(find.byKey(const ValueKey('sense-fav-search')));
+      await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
       expect(_list(SenseBarMenu.favorites), findsNothing);

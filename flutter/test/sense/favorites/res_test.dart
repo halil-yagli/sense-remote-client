@@ -123,11 +123,11 @@ void main() {
       final io = paneIo(['win.ping'])..host['win.ping'] = ((run) => (ok: true, err: null, res: kResPing));
       await pumpPanes(t, io);
       await t.tap(find.byKey(const ValueKey('sense-fav-run-win.ping')));
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
       await t.enterText(find.byKey(const ValueKey('sense-fav-ping-addr')), 'sergi.example');
       await t.tap(find.byKey(const ValueKey('sense-fav-ping-start')));
-      await t.pump();
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
+      await t.pump(const Duration(milliseconds: 1));
       expect(find.text('4/4 yanıt · ort. 18 ms · kayıp %0'), findsOneWidget);
       expect(io.sent.last.$2['arg'], 'sergi.example');
     }, timeout: const Timeout(Duration(seconds: 30)));
@@ -140,16 +140,16 @@ void main() {
             : (ok: true, err: null, res: null));
       await pumpPanes(t, io, notes: notes);
       await t.tap(find.byKey(const ValueKey('sense-fav-run-win.killhung')));
-      await t.pump();
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
+      await t.pump(const Duration(milliseconds: 1));
       expect(find.text('Sergi uygulaması — yanıt vermiyor'), findsOneWidget);
       expect(find.text('Medya oynatıcı'), findsOneWidget);
       expect(find.byKey(const ValueKey('sense-fav-window-close-4120')), findsOneWidget);
       expect(find.text(SenseFavoritesStrings.windowClose), findsNWidgets(3));
 
       await t.tap(find.byKey(const ValueKey('sense-fav-window-close-5532')));
-      await t.pump();
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
+      await t.pump(const Duration(milliseconds: 1));
       expect(io.sent.last.$2, {'req': 2, 'id': 'win.killhung', 'arg': '5532'});
       expect(find.text('Medya oynatıcı'), findsNothing);
       expect(notes.last, 'Medya oynatıcı kapatıldı · Giriş Salonu PC-2');
@@ -162,11 +162,11 @@ void main() {
             : (ok: false, err: 'failed', res: null));
       await pumpPanes(t, io);
       await t.tap(find.byKey(const ValueKey('sense-fav-run-win.killhung')));
-      await t.pump();
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
+      await t.pump(const Duration(milliseconds: 1));
       await t.tap(find.byKey(const ValueKey('sense-fav-window-close-4120')));
-      await t.pump();
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
+      await t.pump(const Duration(milliseconds: 1));
       expect(find.byKey(const ValueKey('sense-fav-windows-error')), findsOneWidget);
       expect(find.text('Sergi uygulaması — yanıt vermiyor'), findsOneWidget, reason: 'row stays');
     }, timeout: const Timeout(Duration(seconds: 30)));
@@ -176,8 +176,8 @@ void main() {
         ..host['mac.forcequit'] = ((run) => (ok: true, err: null, res: kResWindows));
       await pumpPanes(t, io, os: SenseFavOs.mac);
       await t.tap(find.byKey(const ValueKey('sense-fav-run-mac.forcequit')));
-      await t.pump();
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
+      await t.pump(const Duration(milliseconds: 1));
       expect(find.text(SenseFavoritesStrings.windowQuit), findsNWidgets(3));
     }, timeout: const Timeout(Duration(seconds: 30)));
 
@@ -187,9 +187,9 @@ void main() {
       final m = await pumpPanes(t, io);
       m.ipInfo = () => const SenseFavIpInfo(ip: '10.0.0.9');
       await t.tap(find.byKey(const ValueKey('sense-fav-run-win.ipinfo')));
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
       expect(find.text('10.0.0.9'), findsOneWidget, reason: 'session data first');
-      await t.pump();
+      await t.pump(const Duration(milliseconds: 1));
       expect(find.text('192.168.10.42'), findsOneWidget);
       expect(find.text('192.168.10.1 · 8.8.8.8'), findsOneWidget);
       expect(find.text('10.0.0.9'), findsNothing);

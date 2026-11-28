@@ -22,7 +22,8 @@ void main() {
   testWidgets('G1: list buttons draw their caret (no ▾ text)', (tester) async {
     setWindow(tester, const Size(1600, 900));
     await tester.pumpWidget(frameApp(FakeBackend()));
-    expect(find.byType(SenseCaret), findsNWidgets(4));
+    // Sürüm 12 (#160): five lists with Sık kullanılanlar.
+    expect(find.byType(SenseCaret), findsNWidgets(5));
     expect(find.textContaining('▾'), findsNothing);
     await drain(tester);
   });
