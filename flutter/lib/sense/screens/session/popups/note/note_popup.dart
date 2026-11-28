@@ -14,8 +14,7 @@ import '../../../../sense.dart';
 import '../../../../strings/note.dart';
 import '../../layers/layer_controller.dart';
 import '../../layers/layer_strings.dart';
-import '../status/status_model.dart' show SenseStatusLine;
-import '../status/status_widgets.dart' show SenseLiveLine, SenseLineRowView, SenseHintView, kSenseStatusBoxGap;
+import '../status/status_widgets.dart' show SenseLiveLine, SenseHintView, kSenseStatusBoxGap;
 import 'note_state.dart';
 
 export 'note_state.dart';
@@ -34,6 +33,10 @@ abstract final class SenseNoteLook {
   static const double footPadH = 12;
   static const double footPadV = 10;
   static const double footGap = 6;
+  // `.r`: padding 3, gap 10, dash 3 (status popup rows).
+  static const double rowPadV = 3;
+  static const double rowGap = 10;
+  static const double dash = 3;
 }
 
 class SenseNotePopup extends StatefulWidget {
@@ -124,14 +127,9 @@ class _SenseNotePopupState extends State<SenseNotePopup> {
               level: SenseLevel.ok,
               title: SenseNoteStrings.boxTitle,
               children: [
-                SenseLineRowView(
-                    row: SenseStatusLine(SenseNoteStrings.rowComputer,
-                        f.computer.isEmpty ? SenseLayerStrings.noValue : f.computer)),
-                SenseLineRowView(
-                    row: SenseStatusLine(SenseNoteStrings.rowDuration, SenseLayerStrings.durationValue(f.duration))),
-                SenseLineRowView(
-                    row: SenseStatusLine(SenseNoteStrings.rowSession, SenseNoteStrings.sessionCounts(f.messages, f.files)),
-                    last: true),
+                _FactRow(SenseNoteStrings.rowComputer, f.computer.isEmpty ? SenseLayerStrings.noValue : f.computer),
+                _FactRow(SenseNoteStrings.rowDuration, SenseLayerStrings.durationValue(f.duration)),
+                _FactRow(SenseNoteStrings.rowSession, SenseNoteStrings.sessionCounts(f.messages, f.files), last: true),
               ],
             ),
             const SizedBox(height: kSenseStatusBoxGap),
@@ -195,6 +193,55 @@ class _SenseNotePopupState extends State<SenseNotePopup> {
       ),
     );
   }
+}
+
+/// `.r` of the box: label left (never broken), value right, dashed line under it unless [last].
+class _FactRow extends StatelessWidget {
+  const _FactRow(this.label, this.value, {this.last = false});
+
+  final String label;
+  final String value;
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(vertical: SenseNoteLook.rowPadV),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label,
+            softWrap: false,
+            style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted)),
+        const SizedBox(width: SenseNoteLook.rowGap),
+        Expanded(
+          child: Text(value,
+              textAlign: TextAlign.right,
+              style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.text)),
+        ),
+      ]),
+    );
+    if (last) return row;
+    return CustomPaint(painter: const _Dashes(), child: row);
+  }
+}
+
+class _Dashes extends CustomPainter {
+  const _Dashes();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // `border-bottom:1px dashed #1b1b22` (same as the status popup rows).
+    final paint = Paint()
+      ..color = SenseColors.hover
+      ..strokeWidth = 1;
+    final y = size.height - 0.5;
+    for (var x = 0.0; x < size.width; x += SenseNoteLook.dash * 2) {
+      final end = x + SenseNoteLook.dash;
+      canvas.drawLine(Offset(x, y), Offset(end < size.width ? end : size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_Dashes old) => false;
 }
 
 /// `.nt`: black ground, line border, several lines.
