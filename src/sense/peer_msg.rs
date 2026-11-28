@@ -14,7 +14,8 @@
 //! ticket passes through here but never goes to the record or to Dart.
 //!
 //! Handlers are pure (context in, actions out) so they are tested here; the two RustDesk files
-//! only apply the actions. Shortcuts answer "not supported" until FAV-Ç fills `shortcuts`.
+//! only apply the actions. A shortcut run is handed to `shortcuts::run_job` on its own thread
+//! (FAV-Ç); its answer may carry a small result body (`res`, #171).
 //!
 //! Also here (ÇK): the Host's idle value sent to the Controller (`sense.idle`, [`idle_minutes`]),
 //! the Host card's share of these messages on the CM side ([`cm_from_conn`]: card capture #151,
@@ -36,9 +37,11 @@ pub const PREFIX: &str = "sense.";
 pub const HOST_CHAT_VISIBLE: &str = "sense.host-chat-visible";
 /// H → C `{min: u32 | null}`: the Host's `auto-disconnect-timeout` (#167).
 pub const IDLE: &str = "sense.idle";
-/// C → H `{req: u32, id: string}`: run one favourite shortcut.
+/// C → H `{req: u32, id: string, arg?: string}`: run one favourite shortcut. `arg` (FAV-Ç, #171):
+/// only the ping address or the process id to close, checked again by the Host.
 pub const SHORTCUT_RUN: &str = "sense.shortcut-run";
-/// H → C `{req, ok, err?}`.
+/// H → C `{req, ok, err?, res?}`; `res` (FAV-Ç, #171) is the optional result body: ping counts,
+/// window list or IP card (`shortcuts::results`).
 pub const SHORTCUT_RESULT: &str = "sense.shortcut-result";
 /// C → H `{ticket}` on a terminal connection, before `TerminalAction::Open`.
 pub const TERM_ADMIN: &str = "sense.term-admin";
@@ -71,8 +74,8 @@ const MAX_CODE: usize = 32;
 pub enum PeerMsg {
     HostChatVisible { on: bool },
     Idle { min: Option<u32> },
-    ShortcutRun { req: u32, id: String },
-    ShortcutResult { req: u32, ok: bool, err: Option<String> },
+    ShortcutRun { req: u32, id: String, arg: Option<String> },
+    ShortcutResult { req: u32, ok: bool, err: Option<String>, res: Option<Value> },
     TermAdmin { ticket: String },
     TermAdminResult { ok: bool, err: Option<String> },
 }
@@ -102,6 +105,8 @@ struct IdleBody {
 struct RunBody {
     req: u32,
     id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    arg: Option<String>,
 }
 #[derive(Deserialize, Serialize)]
 struct RunResultBody {
@@ -109,6 +114,8 @@ struct RunResultBody {
     ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     err: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    res: Option<Value>,
 }
 #[derive(Deserialize, Serialize)]
 struct TicketBody {
@@ -132,6 +139,19 @@ fn valid_shortcut_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':'))
+}
+
+/// The shortcut argument (FAV-Ç): absent, or a plain name / number (`shortcuts::results`).
+fn valid_arg(arg: &Option<String>) -> bool {
+    arg.as_deref()
+        .map_or(true, |a| super::shortcuts::results::arg_problem(a).is_none())
+}
+
+/// The result body (FAV-Ç, #171): absent, or an object that stays small.
+fn valid_res(res: &Option<Value>) -> bool {
+    res.as_ref().map_or(true, |r| {
+        r.is_object() && r.to_string().len() <= super::shortcuts::results::MAX_RES_BYTES
+    })
 }
 
 /// An error code: `unknown_id`, `bad_sig` … A newer peer may send codes this version does not
@@ -162,14 +182,19 @@ pub fn parse(id: &str, content: &[u8]) -> Parsed {
         HOST_CHAT_VISIBLE => body::<OnBody>(content).map(|b| PeerMsg::HostChatVisible { on: b.on }),
         IDLE => body::<IdleBody>(content).map(|b| PeerMsg::Idle { min: b.min }),
         SHORTCUT_RUN => body::<RunBody>(content)
-            .filter(|b| valid_shortcut_id(&b.id))
-            .map(|b| PeerMsg::ShortcutRun { req: b.req, id: b.id }),
+            .filter(|b| valid_shortcut_id(&b.id) && valid_arg(&b.arg))
+            .map(|b| PeerMsg::ShortcutRun {
+                req: b.req,
+                id: b.id,
+                arg: b.arg,
+            }),
         SHORTCUT_RESULT => body::<RunResultBody>(content)
-            .filter(|b| valid_code(&b.err))
+            .filter(|b| valid_code(&b.err) && valid_res(&b.res))
             .map(|b| PeerMsg::ShortcutResult {
                 req: b.req,
                 ok: b.ok,
                 err: b.err,
+                res: b.res,
             }),
         TERM_ADMIN => body::<TicketBody>(content)
             .filter(|b| !b.ticket.is_empty() && b.ticket.len() <= 2048)
@@ -201,14 +226,16 @@ impl PeerMsg {
         let v = match self {
             PeerMsg::HostChatVisible { on } => serde_json::to_value(OnBody { on: *on }),
             PeerMsg::Idle { min } => serde_json::to_value(IdleBody { min: *min }),
-            PeerMsg::ShortcutRun { req, id } => serde_json::to_value(RunBody {
+            PeerMsg::ShortcutRun { req, id, arg } => serde_json::to_value(RunBody {
                 req: *req,
                 id: id.clone(),
+                arg: arg.clone(),
             }),
-            PeerMsg::ShortcutResult { req, ok, err } => serde_json::to_value(RunResultBody {
+            PeerMsg::ShortcutResult { req, ok, err, res } => serde_json::to_value(RunResultBody {
                 req: *req,
                 ok: *ok,
                 err: err.clone(),
+                res: res.clone(),
             }),
             PeerMsg::TermAdmin { ticket } => serde_json::to_value(TicketBody {
                 ticket: ticket.clone(),
@@ -273,6 +300,9 @@ pub enum HostAction {
     Reply(PeerMsg),
     /// Tell the CM `sense-cm-capture` Y (true) / N (false) for this connection.
     CmCapture(bool),
+    /// Run a shortcut off the connection loop (FAV-Ç: ping and the window list take seconds);
+    /// the connection sends `shortcuts::run_job`'s answer when it is ready.
+    RunShortcut(super::shortcuts::Job),
     /// The ticket was accepted: the connection's terminal runs with the service's rights and the
     /// CM shows "Yönetici terminali açık · `by`". Comes before the reply, so the terminal the
     /// Controller opens after the answer is already the admin one.
@@ -297,19 +327,19 @@ fn host_msg(ctx: &HostCtx, m: PeerMsg) -> Vec<HostAction> {
         // when it ends.
         PeerMsg::HostChatVisible { on } if ctx.remote => vec![HostAction::CmCapture(on)],
         PeerMsg::HostChatVisible { .. } => Vec::new(),
-        PeerMsg::ShortcutRun { req, id } => {
-            let result = if !ctx.remote || !ctx.keyboard {
-                Err(super::shortcuts::RunError::NoPermission)
-            } else {
-                super::shortcuts::run(&id)
-            };
-            let err = result.err().map(|e| e.code().to_owned());
-            super::diag::kinds::shortcut_run(&id, err.is_none(), err.as_deref());
-            vec![HostAction::Reply(PeerMsg::ShortcutResult {
-                req,
-                ok: err.is_none(),
-                err,
-            })]
+        PeerMsg::ShortcutRun { req, id, arg } => {
+            if !ctx.remote || !ctx.keyboard {
+                let err = super::shortcuts::RunError::NoPermission.code();
+                super::diag::kinds::shortcut_run(&id, false, Some(err));
+                return vec![HostAction::Reply(PeerMsg::ShortcutResult {
+                    req,
+                    ok: false,
+                    err: Some(err.to_owned()),
+                    res: None,
+                })];
+            }
+            // FAV-Ç: the runner answers (and records) from its own thread.
+            vec![HostAction::RunShortcut(super::shortcuts::Job { req, id, arg })]
         }
         PeerMsg::TermAdmin { ticket } => {
             let result = if ctx.terminal {
@@ -554,9 +584,14 @@ fn controller_msg(sid: u64, m: PeerMsg) -> Option<UiEvent> {
                 fields: vec![("min", json!(min))],
             })
         }
-        PeerMsg::ShortcutResult { req, ok, err } => Some(UiEvent {
+        PeerMsg::ShortcutResult { req, ok, err, res } => Some(UiEvent {
             name: EV_SHORTCUT_RESULT,
-            fields: vec![("req", json!(req)), ("ok", json!(ok)), ("err", json!(err))],
+            fields: vec![
+                ("req", json!(req)),
+                ("ok", json!(ok)),
+                ("err", json!(err)),
+                ("res", res.unwrap_or(Value::Null)),
+            ],
         }),
         // Only an answer this session waits for (a late one, after the timeout, is dropped).
         PeerMsg::TermAdminResult { ok, err } if super::term_admin::take_pending(sid) => {
@@ -657,7 +692,8 @@ mod tests {
             parse(SHORTCUT_RUN, br#"{"req":7,"id":"win.taskmgr","later":{"x":1}}"#),
             Parsed::Msg(PeerMsg::ShortcutRun {
                 req: 7,
-                id: "win.taskmgr".to_owned()
+                id: "win.taskmgr".to_owned(),
+                arg: None,
             })
         );
         assert_eq!(
@@ -665,7 +701,8 @@ mod tests {
             Parsed::Msg(PeerMsg::ShortcutResult {
                 req: 7,
                 ok: false,
-                err: Some("some_new_code".to_owned())
+                err: Some("some_new_code".to_owned()),
+                res: None,
             })
         );
     }
@@ -679,16 +716,30 @@ mod tests {
             PeerMsg::ShortcutRun {
                 req: 3,
                 id: "custom:0b6f0c1e-1d2a-4f3b-9a1e-2c3d4e5f6a7b".to_owned(),
+                arg: None,
+            },
+            PeerMsg::ShortcutRun {
+                req: 5,
+                id: "win.ping".to_owned(),
+                arg: Some("8.8.8.8".to_owned()),
             },
             PeerMsg::ShortcutResult {
                 req: 3,
                 ok: true,
                 err: None,
+                res: None,
             },
             PeerMsg::ShortcutResult {
                 req: 4,
                 ok: false,
                 err: Some("needs_admin".to_owned()),
+                res: None,
+            },
+            PeerMsg::ShortcutResult {
+                req: 5,
+                ok: true,
+                err: None,
+                res: Some(json!({"ping": {"sent": 4, "received": 4, "avg_ms": 18, "loss": 0}})),
             },
             PeerMsg::TermAdmin {
                 ticket: "e30.e30.sig".to_owned(),
@@ -709,8 +760,15 @@ mod tests {
             req: 1,
             ok: true,
             err: None,
+            res: None,
         };
         assert_eq!(ok.body(), json!({"req": 1, "ok": true}));
+        let run = PeerMsg::ShortcutRun {
+            req: 1,
+            id: "win.taskmgr".to_owned(),
+            arg: None,
+        };
+        assert_eq!(run.body(), json!({"req": 1, "id": "win.taskmgr"}));
         assert_eq!(PeerMsg::Idle { min: None }.body(), json!({"min": null}));
     }
 
@@ -754,19 +812,49 @@ mod tests {
                 PeerMsg::ShortcutResult {
                     req: 5,
                     ok: false,
-                    err: Some("no_permission".to_owned())
+                    err: Some("no_permission".to_owned()),
+                    res: None,
                 }
             );
         }
-        // Until the catalogue exists (FAV-Ç) no id is known.
+        // FAV-Ç: a connection that may type hands the run to the runner's thread.
         assert_eq!(
-            reply(on_host(&SCREEN, &run)),
-            PeerMsg::ShortcutResult {
+            on_host(&SCREEN, &req(SHORTCUT_RUN, r#"{"req":5,"id":"win.ping","arg":"8.8.8.8"}"#)),
+            vec![HostAction::RunShortcut(crate::sense::shortcuts::Job {
                 req: 5,
-                ok: false,
-                err: Some("unknown_id".to_owned())
-            }
+                id: "win.ping".to_owned(),
+                arg: Some("8.8.8.8".to_owned()),
+            })]
         );
+    }
+
+    #[test]
+    fn shortcut_arguments_and_result_bodies_are_checked() {
+        for body in [
+            r#"{"req":1,"id":"win.ping","arg":"-t"}"#,
+            r#"{"req":1,"id":"win.ping","arg":"8.8.8.8 & calc"}"#,
+            r#"{"req":1,"id":"win.ping","arg":""}"#,
+            r#"{"req":1,"id":"win.ping","arg":5}"#,
+        ] {
+            assert_eq!(parse(SHORTCUT_RUN, body.as_bytes()), Parsed::Bad, "{body}");
+        }
+        for body in [
+            r#"{"req":1,"ok":true,"res":[1]}"#,
+            r#"{"req":1,"ok":true,"res":"text"}"#,
+        ] {
+            assert_eq!(parse(SHORTCUT_RESULT, body.as_bytes()), Parsed::Bad, "{body}");
+        }
+        let big = format!(r#"{{"req":1,"ok":true,"res":{{"windows":"{}"}}}}"#, "x".repeat(3100));
+        assert_eq!(parse(SHORTCUT_RESULT, big.as_bytes()), Parsed::Bad);
+        // An older Host answers without `res`; the event then carries null.
+        let ev = on_controller(12, &req(SHORTCUT_RESULT, r#"{"req":2,"ok":true}"#)).unwrap();
+        assert_eq!(ev.fields.last(), Some(&("res", Value::Null)));
+        let ev = on_controller(
+            12,
+            &req(SHORTCUT_RESULT, r#"{"req":3,"ok":true,"res":{"ip":{"ip":"192.168.10.42","gateway":[],"dns":[]}}}"#),
+        )
+        .unwrap();
+        assert_eq!(ev.fields.last().unwrap().1["ip"]["ip"], "192.168.10.42");
     }
 
     #[test]
@@ -903,7 +991,12 @@ mod tests {
         assert_eq!(ev.name, EV_SHORTCUT_RESULT);
         assert_eq!(
             ev.fields,
-            vec![("req", json!(2)), ("ok", json!(false)), ("err", json!("failed"))]
+            vec![
+                ("req", json!(2)),
+                ("ok", json!(false)),
+                ("err", json!("failed")),
+                ("res", Value::Null)
+            ]
         );
         // The admin result reaches the UI only when the session asked for it, once.
         assert!(on_controller(11, &req(TERM_ADMIN_RESULT, r#"{"ok":true}"#)).is_none());
@@ -945,8 +1038,12 @@ mod tests {
     #[test]
     fn shortcut_run_is_recorded_without_content() {
         crate::sense::diag::sink::take();
-        on_host(&SCREEN, &req(SHORTCUT_RUN, r#"{"req":5,"id":"win.taskmgr"}"#));
+        let no_keys = HostCtx {
+            keyboard: false,
+            ..SCREEN
+        };
+        on_host(&no_keys, &req(SHORTCUT_RUN, r#"{"req":5,"id":"win.taskmgr"}"#));
         let got = crate::sense::diag::sink::take();
-        assert_eq!(got, vec![("shortcut".to_owned(), "run".to_owned())]);
+        assert!(got.contains(&("shortcut".to_owned(), "run".to_owned())));
     }
 }

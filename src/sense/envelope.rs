@@ -168,6 +168,11 @@ pub struct StrategyBody {
     pub revision: i64,
     #[serde(default, deserialize_with = "present")]
     pub sense_role: Option<PanelRole>,
+    /// Sense Remote (Sürüm 12, FAV-Ç; plan 2026-11-28 §2.3): the approved custom shortcuts that
+    /// cover this computer. The panel adds the key only for a computer that reports the
+    /// `shortcuts` capability; absent = none. Entries are strict (an `args` key is refused).
+    #[serde(default, deserialize_with = "present")]
+    pub sense_shortcuts: Option<Vec<super::shortcuts::custom::Entry>>,
 }
 
 /// A verified strategy envelope, ready to apply.
@@ -255,6 +260,10 @@ impl StrategyBody {
             && self.disconnect.as_ref().map_or(true, |ids| {
                 ids.len() <= MAX_DISCONNECT && ids.iter().copied().all(is_safe_int)
             })
+            && self
+                .sense_shortcuts
+                .as_deref()
+                .map_or(true, super::shortcuts::custom::list_is_valid)
     }
 }
 

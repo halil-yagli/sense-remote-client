@@ -647,6 +647,8 @@ fn sense_follow_daemon(
         );
         return;
     }
+    // Sense Remote (Sürüm 12, FAV-Ç): the approved custom shortcuts of this envelope.
+    crate::sense::shortcuts::custom::set_from_envelope(verified.body.sense_shortcuts.as_deref());
     if !applied.disconnect.is_empty() {
         SENDER.lock().unwrap().send(applied.disconnect.clone()).ok();
     }
@@ -814,6 +816,8 @@ fn sense_apply(
         seq: verified.seq,
     };
     envelope_apply::apply_steps(&mut steps, installed, new_role)?;
+    // Sense Remote (Sürüm 12, FAV-Ç): the approved custom shortcuts of this envelope.
+    crate::sense::shortcuts::custom::set_from_envelope(verified.body.sense_shortcuts.as_deref());
     if let Some(ids) = &verified.body.disconnect {
         let conns: Vec<i32> = ids.iter().filter_map(|id| i32::try_from(*id).ok()).collect();
         if !conns.is_empty() {

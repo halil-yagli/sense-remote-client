@@ -4337,6 +4337,16 @@ impl Connection {
                                 crate::sense::peer_msg::HostAction::TermAdminGranted { by } => {
                                     self.sense_term_admin_grant(by).await
                                 }
+                                // Sense Remote (Sürüm 12, FAV-Ç): a shortcut runs on its own
+                                // thread (ping and the window list take seconds); the answer
+                                // goes out through this connection's queue.
+                                crate::sense::peer_msg::HostAction::RunShortcut(job) => {
+                                    let mut inner = self.inner.clone();
+                                    std::thread::spawn(move || {
+                                        let answer = crate::sense::shortcuts::run_job(&job);
+                                        inner.send(Arc::new(answer.to_message()));
+                                    });
+                                }
                             }
                         }
                     }

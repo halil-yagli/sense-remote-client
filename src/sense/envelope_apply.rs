@@ -690,6 +690,38 @@ mod tests {
         );
     }
 
+    // Sense Remote (Sürüm 12, FAV-Ç): the approved custom shortcuts ride in the signed envelope;
+    // a broken list or an extra key refuses the whole envelope.
+    #[test]
+    fn custom_shortcuts_come_through_verification() {
+        let s = signer();
+        let keys = vec![s.trusted.clone()];
+        let entry = json!({
+            "id": "custom:0b6f0c1e-1d2a-4f3b-9a1e-2c3d4e5f6a7b",
+            "os": "win", "kind": "program", "target": "C:\\Sergi\\oynatici.exe",
+        });
+        let item = s.sign(&strategy(7, json!({ "sense_shortcuts": [entry.clone()] })));
+        let verified = check(&item, &keys, &expect(0), true).unwrap();
+        let list = verified.body.sense_shortcuts.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].target, "C:\\Sergi\\oynatici.exe");
+        // No key: none (older panels never send it).
+        let item = s.sign(&strategy(7, json!({})));
+        assert_eq!(check(&item, &keys, &expect(0), true).unwrap().body.sense_shortcuts, None);
+        let mut with_args = entry.clone();
+        with_args["args"] = json!("-x");
+        let mut http = entry.clone();
+        http["kind"] = json!("url");
+        http["target"] = json!("http://example.test");
+        for bad in [json!([with_args]), json!([http]), json!([entry.clone(), entry])] {
+            let item = s.sign(&strategy(7, json!({ "sense_shortcuts": bad })));
+            assert_eq!(
+                check(&item, &keys, &expect(0), true).unwrap_err().reason,
+                Reason::BadPayload
+            );
+        }
+    }
+
     #[test]
     fn role_change_between_all_three_roles() {
         // K-ROL-2: every switch is allowed, the same role changes nothing.
