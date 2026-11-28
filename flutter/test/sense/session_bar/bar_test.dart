@@ -22,7 +22,8 @@ void main() {
       expect(find.text(t), findsOneWidget, reason: t);
     }
     expect(find.text('Giriş Salonu PC-2'), findsOneWidget);
-    expect(find.text('60 fps · 18 ms'), findsOneWidget);
+    // Sürüm 12 (FO-B2): the image scale is on the line.
+    expect(find.text('60 fps · 18 ms · %38 ölçekte'), findsOneWidget);
     expect(tester.getSize(find.byKey(const ValueKey('sense-session-bar'))).height, SenseSizes.sessionToolbarHeight);
     // O1 acceptance: the bar does not cover the remote screen.
     expect(tester.getTopLeft(find.byKey(const ValueKey('fake-remote'))).dy, SenseSizes.sessionToolbarHeight);
@@ -50,7 +51,8 @@ void main() {
   testWidgets('the two middle groups sit around the centre (island in the middle)', (tester) async {
     setWindow(tester, const Size(1600, 900));
     await tester.pumpWidget(frameApp(FakeBackend()));
-    final actionsRight = tester.getTopRight(menu(SenseBarMenu.actions)).dx;
+    // Sürüm 12 (#160): "Sık kullanılanlar" is the last list, next to the centre.
+    final actionsRight = tester.getTopRight(menu(SenseBarMenu.favorites)).dx;
     final statusLeft = tester.getTopLeft(find.byKey(const ValueKey('sense-bar-popup-status'))).dx;
     expect((800 - actionsRight - (statusLeft - 800)).abs(), lessThan(1));
     final island = tester.getCenter(find.byType(SenseIsland));

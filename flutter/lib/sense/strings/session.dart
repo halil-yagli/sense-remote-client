@@ -76,6 +76,10 @@ abstract final class SenseSessionStrings {
   static String scaleNote(int w, int h, int pct) => '$w×$h · %$pct ölçekte';
   static String scaleNoteShort(int pct) => '%$pct ölçekte';
 
+  /// Sürüm 12 (FO-B2): the bar line "59 fps · 19 ms · %31 ölçekte".
+  static String barLineWithScale(String line, int pct) =>
+      line.isEmpty ? scaleNoteShort(pct) : '$line · ${scaleNoteShort(pct)}';
+
   // ---- Island (O2) ----
   static const String islandHide = 'Gizle';
   static const String islandShow = 'Göster';
@@ -124,6 +128,9 @@ abstract final class SenseSessionStrings {
 
   // ---- Lists, shared (O7) ----
   static const String frequent = 'Sık kullanılan';
+
+  /// Sürüm 12 (#160): the fifth list (its words are in `strings/favorites.dart`).
+  static const String favorites = 'Sık kullanılanlar';
   static const String noRights = 'Yetkin yok · panelden';
   static const String saved = 'Uygulandı';
 
@@ -210,7 +217,8 @@ abstract final class SenseSessionStrings {
   static const String mute = 'Uzak bilgisayarın sesini kapat';
   static const String remoteImage = 'Uzak ekran';
   static String scalePct(int pct) => '%$pct';
-  static const String renderSection = 'Gelişmiş';
+  /// Sürüm 12 (FO-B3): "Gelişmiş çizim", after Kodek and before Ses.
+  static const String renderSection = 'Gelişmiş çizim';
   static const String textureRender = 'Doku ile çiz';
   static const String d3dRender = 'D3D ile çiz';
   static const String nextConnection = 'yeni bağlantıda';
@@ -280,6 +288,11 @@ abstract final class SenseSessionStrings {
   static const String lockGo = 'Kilitle';
   static const String blockInput = 'Sahadaki fare ve klavyeyi kilitle';
   static const String record = 'Oturumu kaydet';
+
+  /// Sürüm 12 (#156): the recordings are on this (Controller) computer; the folder opens here.
+  static const String openRecordFolder = 'Kayıt klasörünü aç';
+  static const String openRecordFolderHint = 'bu bilgisayarda';
+  static const String recordFolderOpened = 'Kayıt klasörü açıldı';
   static const String clipboardFiles = 'Pano ve dosya';
   static const String clipboardOpen = 'pano açık';
   static const String clipboardOff = 'pano kapalı';
@@ -296,7 +309,9 @@ abstract final class SenseSessionStrings {
   static const String advancedSummary = 'terminal, tünel…';
   static const String advancedSummaryCamera = 'terminal, tünel, kamera…';
   static const String terminal = 'Terminal aç';
-  static const String terminalAdmin = 'Terminal aç (yönetici)';
+  /// Sürüm 12 (FO-B4): prototype "Yönetici olarak terminal aç · Windows", red "dikkat".
+  static const String terminalAdmin = 'Yönetici olarak terminal aç';
+  static const String caution = 'dikkat';
   static const String terminalAdminHint = 'Windows';
   static const String camera = 'Kamerayı görüntüle';
   static const String cameraHint = 'ayrı pencere';

@@ -11,6 +11,7 @@
 // functions as the peer card, the settings page and the resolution menu.
 import 'package:flutter_hbb/sense/screens/session/sense_swap_key_default.dart';
 import 'dart:async';
+import 'dart:io' show Directory;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -46,7 +47,10 @@ import '../data/peer_status.dart' show SensePeerStatusFeed;
 import '../data/session_state.dart';
 import '../layers/layer_controller.dart' show SenseLayerController;
 import '../sense_remote_window.dart' show SenseAutoGhost, senseGhostToggle;
+import '../record_notice.dart' show senseOpenRecordFolder;
 import 'backend.dart';
+import 'favorites/favorites_ffi.dart';
+import 'favorites/favorites_list.dart';
 import 'rules.dart';
 
 /// Platform addition a peer sends when it can show its cameras (RustDesk server,
@@ -134,7 +138,9 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   FfiModel get _m => ffi.ffiModel;
 
   void _notify() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    _syncFavorites();
+    notifyListeners();
   }
 
   void _listen() {
@@ -183,6 +189,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
     for (final w in _workers) {
       w.dispose();
     }
+    _disposeFavorites();
     super.dispose();
   }
 
@@ -1240,5 +1247,90 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       _hostChatVisible = was;
       _notify();
     }
+  }
+
+  // ---- Sürüm 12 (#156) ----
+  @override
+  bool get canOpenRecordFolder => true;
+
+  /// The folder RustDesk records into on this computer (`video-save-directory`).
+  @override
+  void openRecordFolder() async {
+    final dir = _try(() => bind.mainVideoSaveDirectory(root: false), '');
+    if (dir.isEmpty) return;
+    try {
+      // The folder is made with the first recording; open it before that too.
+      await Directory(dir).create(recursive: true);
+    } catch (_) {}
+    await senseOpenRecordFolder(dir);
+  }
+
+  // ---- Sürüm 12 (#160–#163): "Sık kullanılanlar", the fifth list ----
+  SenseFavoritesModel? _fav;
+
+  /// The global event the core sends when the account's preferences changed (#169).
+  static const String _prefsHandler = 'sense-favorites';
+  static bool _prefsRegistered = false;
+
+  SenseFavOs? get _favOs => ready ? SenseFavOs.fromPlatform(_pi.platform) : null;
+
+  /// Keyboard and mouse permission, and not "Yalnız izle" (#160: grey rows otherwise).
+  bool get _favInput => grants.allows(SenseGrant.control) && !viewOnly;
+
+  @override
+  SenseFavoritesModel? get favorites {
+    if (_disposed) return null;
+    final existing = _fav;
+    if (existing != null) return existing.os == null ? null : existing;
+    final os = _favOs;
+    if (os == null) return null;
+    final m = SenseFavoritesModel(
+      io: SenseFavoritesFfiIo(_sid),
+      os: os,
+      peerId: ffi.id,
+      computerName: peerName,
+      inputAllowed: _favInput,
+      localMac: isMacOS,
+      // The IP card's fallback while the Host's own answer is on its way (or an older Host).
+      ipInfo: () {
+        final d = SensePeerStatusFeed.of(ffi.id).data;
+        return senseFavIpInfoFrom(d?.status, d?.inventory);
+      },
+    );
+    _fav = m;
+    SenseFavoritesHotkeys.activate(m);
+    // Ctrl+Alt+Shift+1–9 through the shortcut matcher, when it is bound there (K4).
+    for (var n = 1; n <= 9; n++) {
+      ffi.shortcutModel.register('${SenseFavoritesHotkeys.actionPrefix}$n', () {
+        SenseFavoritesHotkeys.handleAction('${SenseFavoritesHotkeys.actionPrefix}$n');
+      });
+    }
+    if (!_prefsRegistered) {
+      _prefsRegistered = platformFFI.registerEventHandler(
+          SenseFavoritesEvents.prefsChanged, _prefsHandler, (evt) async => SenseFavoritesEvents.handleGlobal(evt),
+          replace: true);
+    }
+    return m;
+  }
+
+  /// Keeps the list's facts in step with the session (system, permission, name).
+  void _syncFavorites() {
+    final m = _fav;
+    if (m == null) return;
+    final os = _favOs;
+    if (os != null) m.setOs(os);
+    m.setInputAllowed(_favInput);
+    final name = peerName;
+    if (name.isNotEmpty) m.computerName = name;
+  }
+
+  void _disposeFavorites() {
+    final m = _fav;
+    _fav = null;
+    if (m == null) return;
+    for (var n = 1; n <= 9; n++) {
+      ffi.shortcutModel.unregister('${SenseFavoritesHotkeys.actionPrefix}$n');
+    }
+    m.dispose();
   }
 }

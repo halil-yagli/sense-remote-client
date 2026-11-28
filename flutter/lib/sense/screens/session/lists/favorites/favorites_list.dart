@@ -317,9 +317,17 @@ class _SenseFavoritesListState extends State<SenseFavoritesList> {
   }
 
   Widget _paneOf(SenseFavItem it) => switch (it.pane) {
-        SenseFavPane.ip => SenseFavIpPane(info: _m.ipInfo?.call() ?? const SenseFavIpInfo()),
-        SenseFavPane.ping => SenseFavPingPane(onPing: _m.ping),
-        SenseFavPane.windows => const SenseFavWindowsPane(),
+        // Sürüm 12 (#171): the Host answers with its own values (`res`).
+        SenseFavPane.ip => SenseFavHostIpPane(
+            fallback: _m.ipInfo?.call() ?? const SenseFavIpInfo(),
+            load: () => _m.hostIpInfo(it.id),
+          ),
+        SenseFavPane.ping => SenseFavPingPane(onPing: (a) => _m.ping(it.id, a)),
+        SenseFavPane.windows => SenseFavWindowsPane(
+            load: () => _m.windows(it.id),
+            close: (w) => _m.closeWindow(it.id, w),
+            mac: _m.os == SenseFavOs.mac,
+          ),
         SenseFavPane.none => const SizedBox.shrink(),
       };
 

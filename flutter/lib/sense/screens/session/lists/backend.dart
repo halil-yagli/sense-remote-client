@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../data/grants.dart';
 import '../data/session_state.dart';
+import 'favorites/favorites_model.dart' show SenseFavoritesModel;
 import 'list_model.dart' show SenseResolutionTrial;
 import 'rules.dart';
 
@@ -232,6 +233,16 @@ abstract class SenseSessionBackend extends ChangeNotifier {
 
   /// Asks the Host to show / hide its card. An older Host ignores the message.
   void setHostChatVisible(bool v) {}
+
+  /// #156: the recording folder of this computer can be opened (Eylemler › Kayıt klasörünü aç).
+  bool get canOpenRecordFolder => false;
+
+  /// Opens the recording folder in Explorer / Finder.
+  void openRecordFolder() {}
+
+  /// #160: the "Sık kullanılanlar" list of this session (fifth list), or null when the peer's
+  /// system has no list (not Windows, macOS or Linux) or the session cannot run shortcuts.
+  SenseFavoritesModel? get favorites => null;
 
   @override
   void dispose() {

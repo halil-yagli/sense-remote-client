@@ -189,7 +189,7 @@ void main() {
     test('Görüntü › Gelişmiş, D3D only on a Windows Controller, summary names what is on', () {
       final b = FakeBackend();
       final render = senseDisplayList(b).sections.firstWhere((s) => s.id == 'render');
-      expect(render.title, 'Gelişmiş');
+      expect(render.title, 'Gelişmiş çizim');
       expect(render.entries.map((e) => e.id), ['display.textureRender', 'display.d3dRender', 'display.renderInfo']);
       expect(render.summary, 'varsayılan');
       b.textureRender = true;
@@ -202,7 +202,8 @@ void main() {
 
     test('the existing Görüntü sections keep their order; Gelişmiş is last', () {
       final ids = senseDisplayList(FakeBackend()).sections.map((s) => s.id).toList();
-      expect(ids, ['scale', 'quality', 'codec', 'audio', 'render']);
+      // Sürüm 12 (FO-B3): Kodek · Gelişmiş çizim · Ses.
+      expect(ids, ['scale', 'quality', 'codec', 'render', 'audio']);
     });
   });
 

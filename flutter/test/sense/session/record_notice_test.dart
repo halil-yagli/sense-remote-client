@@ -11,7 +11,7 @@ void main() {
       textDirection: TextDirection.ltr,
       child: SenseRecordNoticeBar(onOpen: () => opened++),
     ));
-    expect(find.text('Kaydedildi · '), findsOneWidget);
+    expect(find.text('Bu bilgisayara kaydedildi · '), findsOneWidget);
     expect(find.text('Klasörü aç'), findsOneWidget);
     await tester.tap(find.byKey(const Key('sense-record-notice-open')));
     expect(opened, 1);
@@ -96,7 +96,7 @@ void main() {
       gotFile = f;
     });
     await tester.pump();
-    expect(find.text('Kaydedildi · '), findsOneWidget);
+    expect(find.text('Bu bilgisayara kaydedildi · '), findsOneWidget);
     await tester.tap(find.byKey(const Key('sense-record-notice-open')));
     await tester.pump();
     expect(gotDir, endsWith('Slayer_2026-11-27_03-52-04'));

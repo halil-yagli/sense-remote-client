@@ -23,6 +23,9 @@ SenseListSpec senseBuildList(SenseBarMenu menu, SenseSessionBackend b) {
       return senseKeyboardList(b);
     case SenseBarMenu.actions:
       return senseActionsList(b);
+    case SenseBarMenu.favorites:
+      // Sürüm 12 (#160): the fifth list is its own widget (`lists/favorites/`); no entries here.
+      return const SenseListSpec(title: SenseSessionStrings.favorites, frequent: [], sections: []);
   }
 }
 
@@ -419,6 +422,13 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
         entries: quality,
       ),
       SenseListSection(id: 'codec', title: _S.codec, summary: _codecLabel(b.codec), entries: codecEntries),
+      // Sürüm 12 (FO-B3): Kodek · Gelişmiş çizim · Ses (prototype order).
+      SenseListSection(
+        id: 'render',
+        title: _S.renderSection,
+        summary: renderOn.isEmpty ? _S.renderDefault : renderOn.join(' · '),
+        entries: render,
+      ),
       SenseListSection(
         id: 'audio',
         title: _S.audio,
@@ -433,12 +443,6 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
               onChanged: b.setMuted,
             ),
         ],
-      ),
-      SenseListSection(
-        id: 'render',
-        title: _S.renderSection,
-        summary: renderOn.isEmpty ? _S.renderDefault : renderOn.join(' · '),
-        entries: render,
       ),
     ]),
   );
@@ -729,6 +733,16 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         // neden", "Kaydedildi · Klasörü aç", record_notice.dart) are the one source.
         toastAfterChange: () => '',
       ),
+    // Sürüm 12 (#156): recordings are saved on this computer; open their folder here.
+    if (SenseRules.recording(f) && b.canOpenRecordFolder)
+      SenseActionEntry(
+        id: 'actions.recordFolder',
+        label: _S.openRecordFolder,
+        hint: _S.openRecordFolderHint,
+        rustdesk: '— (Sense: video-save-directory)',
+        onTap: b.openRecordFolder,
+        toast: _S.recordFolderOpened,
+      ),
   ];
 
   final clipboard = <SenseListEntry>[
@@ -819,7 +833,9 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
           label: _S.terminalAdmin,
           hint: _S.terminalAdminHint,
           rustdesk: 'Terminal (Run as administrator)',
-          tag: _S.technical,
+          // Sürüm 12 (FO-B4): red "dikkat" (prototype `.warnTag.hot`).
+          tag: _S.caution,
+          tagLevel: SenseLevel.hot,
           noRights: !terminal,
           toast: _S.toastTerminal,
           onTap: b.openTerminalAdmin,

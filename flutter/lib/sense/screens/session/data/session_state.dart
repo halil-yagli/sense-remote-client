@@ -12,9 +12,10 @@ import '../record_notice.dart';
 import 'screen_still.dart' show senseStillScreen;
 import '../../../tokens/sense_tokens.dart';
 import '../../terminal/terminal_admin.dart' show SenseTermAdminEvents;
+import '../lists/favorites/favorites_io.dart' show SenseFavoritesEvents;
 
-/// The four lists of the bar (O3–O6).
-enum SenseBarMenu { screens, display, keyboard, actions }
+/// The lists of the bar (O3–O6) and, Sürüm 12 (#160), "Sık kullanılanlar" as the fifth.
+enum SenseBarMenu { screens, display, keyboard, actions, favorites }
 
 /// The two popups of the bar (O8, O9; drawn by C2).
 enum SenseBarPopup { status, info }
@@ -368,6 +369,7 @@ abstract final class SenseSessionEvents {
     }
     if (SenseRecordNotice.handle(evt)) return true; // Sense Remote (#114): "Klasörü aç" note
     if (SenseTermAdminEvents.handle(peerId, evt)) return true; // Sürüm 12 (#157): admin terminal
+    if (SenseFavoritesEvents.handle(peerId, evt)) return true; // Sürüm 12 (#160): shortcut results
     return false;
   }
 }

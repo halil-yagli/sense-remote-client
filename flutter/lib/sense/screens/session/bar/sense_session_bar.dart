@@ -1,8 +1,9 @@
 // Sense Remote: the one 46 px session bar (YH O1, T9; prototype `.bar`, `.brand`, `.peer`,
 // `.cats`, `.cat`, `.right`, `.btn`).
-//  Left   logo · computer name · "Doğrudan · 60 fps · 18 ms" (orange "Dalgalı", red
+//  Left   logo · computer name · "59 fps · 19 ms · %31 ölçekte" (FO-B2; orange "Dalgalı", red
 //         "Görüntü gelmiyor"); pressing it opens the connection detail.
-//  Lists  Ekranlar ▾ · Görüntü ▾ · Klavye ve fare ▾ · Eylemler ▾ (right-aligned to the middle),
+//  Lists  Ekranlar ▾ · Görüntü ▾ · Klavye ve fare ▾ · Eylemler ▾ · Sık kullanılanlar ▾
+//         (Sürüm 12, #160; a star on a narrow window, #167) (right-aligned to the middle),
 //         with the status tags (red "Kayıt" + blinking dot, orange "Yalnız izle" /
 //         "Giriş kilitli").
 //  Popups Bilgisayar durumu · Ekran bilgisi (left-aligned from the middle), each with the
@@ -25,6 +26,7 @@ import '../../../tokens/theme.dart';
 import '../data/grants.dart' show SenseGrant;
 import '../data/session_state.dart';
 import '../lists/backend.dart';
+import '../lists/favorites/favorites_list.dart' show SenseFavoritesButton, SenseFavoritesHotkeys;
 import '../lists/list_specs.dart' show senseRecordingShown;
 import '../record_notice.dart' show SenseRecordNotice;
 import '../lists/session_list.dart' show SenseStateChip;
@@ -96,6 +98,13 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
     super.initState();
     _seenSerial = b.ghostNoteSerial;
     b.addListener(_onBackend);
+    _activateFavorites();
+  }
+
+  /// The window (tab) in front takes Ctrl+Alt+Shift+1–9 (K4).
+  void _activateFavorites() {
+    final m = b.favorites;
+    if (m != null) SenseFavoritesHotkeys.activate(m);
   }
 
   @override
@@ -105,6 +114,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
       old.backend.removeListener(_onBackend);
       widget.backend.addListener(_onBackend);
       _seenSerial = widget.backend.ghostNoteSerial;
+      _activateFavorites();
     }
   }
 
@@ -207,6 +217,25 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
                   : null,
             );
 
+        // Sürüm 12 (#160, #167): the fifth list; a star with a tooltip on a narrow window.
+        final favorites = b.favorites;
+        Widget favoritesButton() {
+          final m = SenseBarMenu.favorites;
+          final button = SenseFavoritesButton(
+            compact: compact,
+            open: menus.isOpen(m),
+            onTap: ready
+                ? () {
+                    if (!menus.isOpen(m)) widget.popups.closeAll();
+                    senseUiList(m.name, open: !menus.isOpen(m));
+                    menus.toggle(m);
+                  }
+                : null,
+          );
+          final key = widget.links[m];
+          return key == null ? button : KeyedSubtree(key: key, child: button);
+        }
+
         final keyboardTag = b.inputLocked
             ? SenseSessionStrings.tagInputLocked
             : b.viewOnly
@@ -229,6 +258,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
                   label: SenseSessionStrings.tagRecording,
                   level: SenseLevel.hot),
           ]),
+          if (favorites != null) favoritesButton(),
         ]);
         final popups = Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           popup(SenseBarPopup.status, labels.status),
@@ -238,7 +268,7 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
         final line = senseLinkLine(b.link);
         final left = _Brand(
           name: b.peerName,
-          line: line.text,
+          line: senseBarLineText(b.link, line.text, b.viewScalePercent),
           level: line.level,
           hint: line.hint,
           // Karar #94, Sürüm 10 (#110): the logo area opens the connection card (O13
@@ -331,6 +361,15 @@ class _SenseSessionBarState extends State<SenseSessionBar> {
       },
     );
   }
+}
+
+/// FO-B2: the line under the computer name with the image scale: "59 fps · 19 ms · %31 ölçekte".
+/// The scale is left out while there is no image to speak of (connecting, no image, reconnecting).
+String senseBarLineText(SenseLinkSample s, String line, int? scalePct) {
+  if (scalePct == null || s.reconnectAttempt != null) return line;
+  final health = senseLinkHealth(s);
+  if (health == SenseLinkHealth.connecting || health == SenseLinkHealth.noImage) return line;
+  return SenseSessionStrings.barLineWithScale(line, scalePct);
 }
 
 enum _Slot { left, lists, popups, right }
@@ -444,7 +483,7 @@ class _MenuButton extends StatelessWidget {
   });
   final String label;
 
-  /// T9 narrow window (≤ 1300 px): tighter padding, no caret.
+  /// T9 narrow window (≤ 1300 px): tighter padding (the caret stays, FO-B9).
   final bool compact;
   final bool open;
   final VoidCallback? onTap;
@@ -468,15 +507,14 @@ class _MenuButton extends StatelessWidget {
                 maxLines: 1,
                 style: SenseTextStyles.of(weight: SenseFontWeight.medium, color: fg)),
             for (final w in tags) ...[const SizedBox(width: 6), w],
-            if (!compact) ...[
-              const SizedBox(width: 6),
-              const SenseCaret(
-                key: ValueKey('sense-bar-caret'),
-                direction: SenseCaretDirection.down,
-                size: 10,
-                small: true,
-              ),
-            ],
+            // Sürüm 12 (FO-B9): the ▾ shows at every width, 1280 px too.
+            SizedBox(width: compact ? 4 : 6),
+            const SenseCaret(
+              key: ValueKey('sense-bar-caret'),
+              direction: SenseCaretDirection.down,
+              size: 10,
+              small: true,
+            ),
           ]),
         );
       },

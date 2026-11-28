@@ -1,6 +1,6 @@
 // Sense Remote (#114, #136): the session recording's notes.
 //
-// - Recording stopped and its files are complete: "Kaydedildi · Klasörü aç". The core sends
+// - Recording stopped and its files are complete: "Bu bilgisayara kaydedildi · Klasörü aç". The core sends
 //   `sense_record_saved` {dir, file} (one folder per recording, `file` its first file); the
 //   button shows the file selected in Explorer / Finder (the folder when that is not possible).
 // - Recording could not start or go on: "Kayıt başlatılamadı · <neden>" (`sense_record_state`
@@ -19,7 +19,8 @@ import '../../../common.dart' show globalKey;
 import '../../tokens/sense_tokens.dart';
 
 abstract final class SenseRecordStrings {
-  static const String saved = 'Kaydedildi';
+  /// Sürüm 12 (#156): says where the file is (the Controller, not the Host).
+  static const String saved = 'Bu bilgisayara kaydedildi';
   static const String openFolder = 'Klasörü aç';
   static const String failed = 'Kayıt başlatılamadı';
   static const String empty = 'Kayıt dosyası oluşmadı';

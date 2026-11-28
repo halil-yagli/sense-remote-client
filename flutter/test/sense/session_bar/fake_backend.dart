@@ -5,6 +5,10 @@ import 'package:flutter_hbb/sense/screens/session/bar/sense_session_bar.dart';
 import 'package:flutter_hbb/sense/screens/session/data/grants.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/backend.dart';
+import 'package:flutter_hbb/sense/screens/session/lists/favorites/catalog.dart';
+import 'package:flutter_hbb/sense/screens/session/lists/favorites/favorites_model.dart';
+
+import '../favorites/support.dart' show FakeFavIo;
 import 'package:flutter_hbb/sense/screens/session/lists/rules.dart';
 import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
 
@@ -212,7 +216,11 @@ class FakeBackend extends SenseSessionBackend {
   @override
   void setMuted(bool v) => set(() => muted = v);
   @override
-  int? viewScalePercent = 38;
+  /// Like the real backend: no scale before the session is ready.
+  int? scalePercent = 38;
+  @override
+  int? get viewScalePercent => ready ? scalePercent : null;
+  set viewScalePercent(int? v) => scalePercent = v;
   @override
   bool textureRender = false;
   @override
@@ -349,6 +357,18 @@ class FakeBackend extends SenseSessionBackend {
   void copyFingerprint() => _call('fingerprint');
 
   // Sürüm 12 (#151)
+  // ---- Sürüm 12: the fifth list (#160) and the recording folder (#156) ----
+  /// The "Sık kullanılanlar" list; null = the peer's system has none (the button is not shown).
+  late SenseFavoritesModel? favoritesModel =
+      SenseFavoritesModel(io: FakeFavIo(), os: SenseFavOs.win, computerName: peerName);
+  @override
+  SenseFavoritesModel? get favorites => favoritesModel;
+
+  @override
+  bool canOpenRecordFolder = true;
+  @override
+  void openRecordFolder() => _call('recordFolder');
+
   @override
   bool hostChatVisible = false;
   @override

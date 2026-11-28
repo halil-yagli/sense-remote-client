@@ -23,6 +23,7 @@ import 'local_flutter_shortcuts.dart';
 import 'relative_mouse_model.dart';
 import '../common.dart';
 import '../consts.dart';
+import '../sense/screens/session/lists/favorites/favorites_list.dart' show SenseFavoritesHotkeys; // Sense Remote
 
 /// Mouse button enum.
 enum MouseButtons { left, right, wheel, back, forward }
@@ -845,6 +846,8 @@ class InputModel {
 
   KeyEventResult handleKeyEvent(KeyEvent e) {
     if (_localFlutterShortcuts.tryDispatch(e)) return KeyEventResult.handled;
+    // Sense Remote (#160, K4): Ctrl+Alt+Shift+1–9 run that "Sık kullanılanlar" slot here.
+    if (SenseFavoritesHotkeys.handle(e)) return KeyEventResult.handled;
     if (isViewOnly) {
       if (isWeb && !isInputSourceFlutter) return KeyEventResult.ignored;
       _tryDispatchFlutterShortcut(e, releaseModifiers: false);

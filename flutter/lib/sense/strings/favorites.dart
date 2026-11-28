@@ -94,6 +94,19 @@ abstract final class SenseFavoritesStrings {
   static const String windowClose = 'Kapat';
   static const String windowQuit = 'Çık';
 
+  // Sürüm 12 (#171): the Host's own answers (ping, window list, IP card).
+  static const String pingBadAddress = 'Yalnız ad ya da IP adresi yaz (harf, rakam, nokta, tire)';
+  static const String windowsLoading = 'Pencereler alınıyor…';
+  static const String windowsEmpty = 'Açık pencere yok';
+  static const String windowHung = 'yanıt vermiyor';
+
+  /// "Sergi uygulaması — yanıt vermiyor".
+  static String windowName(String name, {required bool hung}) => hung ? '$name — $windowHung' : name;
+
+  /// Toast after a window / app was closed: "Medya oynatıcı kapatıldı · Giriş Salonu PC-2".
+  static String windowClosed(String name, String computer) =>
+      computer.isEmpty ? '$name kapatıldı' : '$name kapatıldı · $computer';
+
   // ---- Custom shortcut form (#161, K3, K8) ----
   static const String addCustom = '+ Özel kısayol ekle';
   static const String formName = 'Kısayol adı';
