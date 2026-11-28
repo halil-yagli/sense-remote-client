@@ -813,6 +813,8 @@ pub mod single_conn;
 pub mod link_quality;
 // Sense Remote (Sürüm 12, U168c): frame rate ceiling on direct connections.
 pub mod fps_policy;
+// Sense Remote (S12): Ctrl+Alt+Shift+1-9 favorites chord for the rdev shortcut matcher.
+pub mod fav_hotkey;
 // Sense Remote: design values used on the Rust side (T1).
 pub mod tokens;
 // Sense Remote (S9-b): ghost mode status notes instead of dialogs.
