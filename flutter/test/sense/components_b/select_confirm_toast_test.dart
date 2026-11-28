@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_hbb/sense/components/button.dart';
 import 'package:flutter_hbb/sense/components/components_b.dart';
 import 'package:flutter_hbb/sense/tokens/sense_tokens.dart';
 
@@ -175,11 +176,8 @@ void main() {
     testWidgets('confirm button is the red one', (tester) async {
       await tester.pumpWidget(app(Center(
           child: SenseConfirmStrip(question: 'Kaldırılsın mı?', confirmLabel: 'Kaldır', onConfirm: () {}, onCancel: () {}))));
-      final ok = tester.widget<SenseSmallButton>(find.byKey(const Key('sense-confirm-ok')));
-      expect(ok.danger, isTrue);
-      final box = tester.widget<Container>(find.descendant(
-          of: find.byKey(const Key('sense-confirm-ok')), matching: find.byType(Container)));
-      expect((box.decoration! as BoxDecoration).color, SenseColors.danger);
+      final ok = tester.widget<SenseButton>(find.byKey(const Key('sense-confirm-ok')));
+      expect(ok.kind, SenseButtonKind.danger);
     });
 
     testWidgets('golden: second step', (tester) async {
@@ -190,6 +188,90 @@ void main() {
           onCancel: () {}))));
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('inline_confirm')));
     }, skip: goldenSkip('inline_confirm'), tags: const ['golden']);
+
+    // Sürüm 12 (#158): two lines, buttons right-aligned under them, nothing slides.
+    testWidgets('question, detail, then Vazgeç + action on the right', (tester) async {
+      setWindow(tester, const Size(600, 300));
+      await tester.pumpWidget(app(Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+              width: 320,
+              child: SenseConfirmStrip(
+                  question: 'Uzak bilgisayar yeniden başlatılsın mı?',
+                  detail: 'Bağlantı kopar, açılınca yeniden bağlanır.',
+                  confirmLabel: 'Yeniden başlat',
+                  onConfirm: () {},
+                  onCancel: () {})))));
+      final q = tester.getRect(find.byKey(const Key('sense-confirm-question')));
+      final d = tester.getRect(find.byKey(const Key('sense-confirm-detail')));
+      final cancel = tester.getRect(find.byKey(const Key('sense-confirm-cancel')));
+      final ok = tester.getRect(find.byKey(const Key('sense-confirm-ok')));
+      expect(d.top, greaterThanOrEqualTo(q.bottom), reason: 'detail is the second line');
+      expect(cancel.top, greaterThanOrEqualTo(d.bottom), reason: 'buttons under the text');
+      expect(ok.left, greaterThan(cancel.left), reason: 'Vazgeç, then the action');
+      expect(ok.right, moreOrLessEquals(320, epsilon: 0.5), reason: 'right-aligned');
+      expect(tester.widget<SenseButton>(find.byKey(const Key('sense-confirm-ok'))).kind, SenseButtonKind.danger);
+    });
+
+    testWidgets('a reversible step has the white button', (tester) async {
+      await tester.pumpWidget(app(Center(
+          child: SenseConfirmStrip(
+              question: 'Uzak ekran kilitlensin mi?',
+              confirmLabel: 'Kilitle',
+              confirmKind: SenseButtonKind.primary,
+              onConfirm: () {},
+              onCancel: () {}))));
+      expect(tester.widget<SenseButton>(find.byKey(const Key('sense-confirm-ok'))).kind, SenseButtonKind.primary);
+    });
+
+    testWidgets('narrow row: long question wraps, buttons wrap, no overflow', (tester) async {
+      setWindow(tester, const Size(400, 400));
+      await tester.pumpWidget(app(Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+              width: 150,
+              child: SenseConfirmStrip(
+                  question: 'Bilgisayar listeden ve bütün Controller listelerinden kaldırılsın mı?',
+                  detail: 'Geçmişi denetim kaydında kalır.',
+                  confirmLabel: 'Bilgisayarı kaldır',
+                  onConfirm: () {},
+                  onCancel: () {})))));
+      expect(tester.takeException(), isNull);
+      final strip = tester.getRect(find.byKey(const Key('sense-confirm')));
+      expect(strip.width, lessThanOrEqualTo(150));
+      expect(tester.getRect(find.byKey(const Key('sense-confirm-ok'))).right, lessThanOrEqualTo(150.5));
+    });
+
+    testWidgets('detail is passed through SenseInlineConfirm and wrapped by askingBuilder', (tester) async {
+      await tester.pumpWidget(app(Center(
+          child: SizedBox(
+              width: 300,
+              child: SenseInlineConfirm(
+                question: 'Uzak ekran kilitlensin mi?',
+                detail: 'Sahadaki kişi ekranı kendi şifresiyle açar.',
+                confirmLabel: 'Kilitle',
+                confirmKind: SenseButtonKind.primary,
+                onConfirm: () {},
+                askingBuilder: (context, strip) => Container(key: const Key('asking-row'), child: strip),
+                builder: (context, ask) => TextButton(onPressed: ask, child: const Text('Kilitle')),
+              )))));
+      await tester.tap(find.text('Kilitle'));
+      await tester.pump();
+      expect(find.byKey(const Key('asking-row')), findsOneWidget);
+      expect(find.text('Sahadaki kişi ekranı kendi şifresiyle açar.'), findsOneWidget);
+    });
+
+    testWidgets('golden: narrow, with detail (#158)', (tester) async {
+      await tester.pumpWidget(app(sample(
+          SenseConfirmStrip(
+              question: 'Uzak bilgisayar yeniden başlatılsın mı?',
+              detail: 'Bağlantı kopar, açılınca yeniden bağlanır.',
+              confirmLabel: 'Yeniden başlat',
+              onConfirm: () {},
+              onCancel: () {}),
+          width: 220)));
+      await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('inline_confirm_narrow')));
+    }, skip: goldenSkip('inline_confirm_narrow'), tags: const ['golden']);
   });
 
   group('SenseToast (T7)', () {

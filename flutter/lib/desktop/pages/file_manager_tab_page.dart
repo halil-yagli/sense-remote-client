@@ -205,7 +205,10 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
           bind.mainGetLocalOption(key: kOptionEnableConfirmClosingTabs))) {
         res = true;
       } else {
-        res = await closeConfirmDialog();
+        // Sense Remote (Sürüm 12, ST 14): the Sense confirm; the stock box stays the fallback.
+        res = kSenseDialogs
+            ? await senseCloseTabsConfirm(connLength)
+            : await closeConfirmDialog();
       }
       if (res) {
         tabController.clear();

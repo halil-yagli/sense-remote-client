@@ -102,6 +102,8 @@ SenseListSpec senseScreensList(SenseSessionBackend b) {
         height: start?.height,
         noRights: !b.grants.allows(SenseGrant.control),
         onApply: (w, h) => b.setResolution(SenseResolution(w, h)),
+        // Sürüm 12 (FO-A7/B7): tried for 15 s, taken back unless kept.
+        trial: b.resolutionTrial,
       ));
     }
   }
@@ -225,6 +227,16 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
       onTap: b.refreshVideo,
       toast: _S.refresh,
     ),
+    // Sürüm 12 (#151): off at the start of every session; the Host card enters the image.
+    if (SenseRules.hostChat(f))
+      SenseToggleEntry(
+        id: 'display.hostChat',
+        label: _S.hostChat,
+        hint: _S.hostChatHint,
+        rustdesk: '— (Sense: sense.host-chat-visible)',
+        value: b.hostChatVisible,
+        onChanged: b.setHostChatVisible,
+      ),
   ];
 
   final pct = b.viewScalePercent;
@@ -378,6 +390,15 @@ SenseListSpec senseDisplayList(SenseSessionBackend b) {
         onChanged: b.setD3dRender,
       ),
   ];
+  // Sürüm 12 (FO-A9): these settings never touch the remote computer.
+  if (render.isNotEmpty) {
+    render.add(const SenseInfoEntry(
+      id: 'display.renderInfo',
+      label: _S.renderInfo,
+      detail: _S.renderInfoDetail,
+      rustdesk: '—',
+    ));
+  }
   final renderOn = [
     if (SenseRules.textureRender(f) && b.textureRender) _S.renderTexture,
     if (SenseRules.d3dRender(f) && b.d3dRender) _S.renderD3d,
@@ -667,6 +688,11 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         noRights: !control,
         onTap: b.lockScreen,
         toast: _S.lockScreen,
+        // Sürüm 12 (FO-A10): asked in place; the person on site unlocks with their password.
+        confirmQuestion: _S.lockConfirm,
+        confirmDetail: _S.lockConfirmDetail,
+        confirmLabel: _S.lockGo,
+        confirmPrimary: true,
       ),
     if (SenseRules.restart(f))
       SenseActionEntry(
@@ -677,6 +703,7 @@ SenseListSpec senseActionsList(SenseSessionBackend b) {
         onTap: b.restart,
         toast: _S.toastRestart,
         confirmQuestion: _S.restartConfirm,
+        confirmDetail: _S.restartConfirmDetail,
         confirmLabel: _S.restartGo,
       ),
     if (SenseRules.blockInput(f))

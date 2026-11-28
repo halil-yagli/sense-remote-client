@@ -185,6 +185,10 @@ abstract final class SenseRules {
   static bool textureRender(SensePeerFacts f) => f.defaultConn;
   static bool d3dRender(SensePeerFacts f) => f.defaultConn && f.localWindows;
 
+  /// Sürüm 12 (#151): "Karşı tarafın sohbet penceresini göster" — a screen session only (the
+  /// card is about the image). An older Host ignores the message.
+  static bool hostChat(SensePeerFacts f) => f.defaultConn;
+
   // ---- O5 Klavye ve fare ----
   static bool viewOnlyEnabled(SensePeerFacts f) => senseVersionCmp(f.version, '1.2.0') >= 0 && f.keyboard;
 

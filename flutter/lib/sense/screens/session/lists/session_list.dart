@@ -17,6 +17,7 @@ import '../../../diag_log.dart';
 import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart';
 import '../../../tokens/theme.dart';
+import 'backend.dart' show SenseResolution;
 import 'list_model.dart';
 
 /// `where` of the interface records written from the lists (karar #103).
@@ -324,11 +325,21 @@ class SenseListEntryView extends StatelessWidget {
     }
 
     if (e.confirmQuestion != null) {
+      // Sürüm 12 (#158): the row asks in place in the prototype's `.it.asking` layout —
+      // question, detail, buttons right-aligned under them; the row grows, nothing slides.
       return SenseInlineConfirm(
         question: e.confirmQuestion!,
+        detail: e.confirmDetail,
         confirmLabel: e.confirmLabel ?? e.label,
+        confirmKind: e.confirmPrimary ? SenseButtonKind.primary : SenseButtonKind.danger,
         onConfirm: run,
         builder: (context, ask) => line(ask),
+        askingBuilder: (context, strip) => Container(
+          key: ValueKey('sense-asking-${e.id}'),
+          color: senseAskRowColor,
+          padding: const EdgeInsets.fromLTRB(12 + _lead + 10, 8, 12, 10),
+          child: strip,
+        ),
       );
     }
     return line(run);
@@ -708,8 +719,58 @@ class _SizeInputRowState extends State<_SizeInputRow> {
     final w = int.parse(_w.text.trim()), h = int.parse(_h.text.trim());
     setState(() => _wrong = false);
     senseUiSetting(e.id, '-', '$w×$h', where: _where);
+    final trial = e.trial;
+    if (trial != null) {
+      // Sürüm 12 (FO-A7/B7): tried; the box below asks "Koru" for 15 s.
+      trial.start(SenseResolution(w, h), note: widget.notify);
+      return;
+    }
     apply(w, h);
     widget.notify('${e.label} · $w×$h');
+  }
+
+  /// Sürüm 12 (FO-A7/B7, prototype `.cres.warn`): the size being tried, the seconds left,
+  /// Geri al / Koru. Orange frame: the image may be wrong until the person says.
+  Widget _trialBox(SenseResolutionTrial t) {
+    final size = t.trying!;
+    return Container(
+      key: ValueKey('sense-size-trial-${widget.entry.id}'),
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: SenseColors.warn.withOpacity(0.07),
+        border: Border.all(color: SenseColors.warn.withOpacity(0.55)),
+        borderRadius: BorderRadius.circular(SenseRadii.button),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        Text(SenseSessionStrings.resolutionTrialQuestion(size.width, size.height),
+            style: SenseTextStyles.of(size: SenseFontSize.bodySmall, weight: SenseFontWeight.bold)),
+        const SizedBox(height: 6),
+        Text(SenseSessionStrings.resolutionTrialLeft(t.secondsLeft),
+            key: ValueKey('sense-size-trial-left-${widget.entry.id}'),
+            style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted)),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Wrap(spacing: kSenseAskGap, runSpacing: kSenseAskGap, children: [
+            SenseButton(
+              key: ValueKey('sense-size-undo-${widget.entry.id}'),
+              label: SenseSessionStrings.resolutionUndo,
+              size: SenseButtonSize.small,
+              onPressed: t.undo,
+            ),
+            SenseButton(
+              key: ValueKey('sense-size-keep-${widget.entry.id}'),
+              label: SenseSessionStrings.resolutionKeep,
+              size: SenseButtonSize.small,
+              kind: SenseButtonKind.primary,
+              autofocus: true,
+              onPressed: t.keep,
+            ),
+          ]),
+        ),
+      ]),
+    );
   }
 
   OutlineInputBorder _border(Color c) =>
@@ -751,8 +812,18 @@ class _SizeInputRowState extends State<_SizeInputRow> {
 
   @override
   Widget build(BuildContext context) {
+    final trial = widget.entry.trial;
+    if (trial == null) return _row(context);
+    return ListenableBuilder(
+      listenable: trial,
+      builder: (context, _) => trial.active ? _trialBox(trial) : _row(context),
+    );
+  }
+
+  Widget _row(BuildContext context) {
     final e = widget.entry;
     final enabled = e.onApply != null && !e.noRights;
+    final trial = e.trial != null;
     final row = Padding(
       padding: const EdgeInsets.fromLTRB(12 + 24, 4, 12, 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
@@ -778,7 +849,7 @@ class _SizeInputRowState extends State<_SizeInputRow> {
           const Spacer(),
           SenseButton(
             key: ValueKey('sense-size-apply-${e.id}'),
-            label: SenseSessionStrings.customResolutionApply,
+            label: trial ? SenseSessionStrings.customResolutionTry : SenseSessionStrings.customResolutionApply,
             size: SenseButtonSize.small,
             onPressed: enabled ? _apply : null,
           ),
@@ -789,6 +860,14 @@ class _SizeInputRowState extends State<_SizeInputRow> {
             child: Text(SenseSessionStrings.customResolutionRange(e.min, e.max),
                 key: ValueKey('sense-size-wrong-${e.id}'),
                 style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.warn)),
+          )
+        else if (trial)
+          // Sürüm 12 (FO-A7): the limits are said before the try (prototype `.cres small`).
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(SenseSessionStrings.customResolutionNote(e.min, e.max),
+                key: ValueKey('sense-size-note-${e.id}'),
+                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted)),
           ),
       ]),
     );

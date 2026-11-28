@@ -25,6 +25,12 @@ import '../../../../common/widgets/toolbar.dart'
     show TToggleMenu, allowDisplaySwitchInPrivacyMode, toolbarPrivacyMode;
 import '../../../../consts.dart';
 import '../../../diag_log.dart';
+import '../../../components/popup_host.dart' show SensePopupHost;
+import '../../../strings/terminal.dart' show SenseTerminalStrings;
+import '../../terminal/terminal_admin.dart' show senseRequestAdminTerminal;
+import '../bar/session_popups.dart' show SenseSessionPopups;
+import '../popups/terminal/terminal_popup.dart' show senseShowTerminalPopup, SenseTerminalPopup;
+import '../popups/note/note_popup.dart' show senseEndWithNote, senseAddNote;
 import '../../../../desktop/widgets/kb_layout_type_chooser.dart' show KBLayoutType;
 import '../../../../desktop/widgets/remote_toolbar.dart' show ScreenAdjustor, ToolbarState;
 import '../../../../models/model.dart';
@@ -341,7 +347,12 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       drawnFps: _drawnFps,
       recentFps: _meter.recent(_meterClock.elapsed),
       reachableFps: senseReachableFps(
-          refreshHz: hz?.toDouble(), cap: senseSessionFpsCap(imageQuality: _imageQuality, customFps: _customFps)),
+          refreshHz: hz?.toDouble(),
+          // Sürüm 12 (U168c): same rule as the core (`src/sense/fps_policy.rs`): 60 on a direct link.
+          cap: senseSessionFpsCap(
+              imageQuality: _imageQuality,
+              customFps: _customFps,
+              direct: _try(() => ConnectionTypeState.find(ffi.id).direct.value == ConnectionType.strDirect, false))),
       remoteHz: hz,
     );
   }
@@ -380,6 +391,8 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       lossPct: d.lossEst,
       // O13: the connection layer decides "Dalgalı" (C4); the T6 limits only without it.
       wavy: SenseLayerController.find(ffi.id)?.wavy.value,
+      // Sürüm 12 (FO-A12): "Kesildi · Yeniden bağlanılıyor (N. deneme)" while the link is lost.
+      reconnectAttempt: SenseLayerController.find(ffi.id)?.reconnectInfo?.attempt,
       // Sürüm 10 (#110): the logo area opens the link card (minimized weak card, or the
       // same card with the current values while the link is good) — not Ekran bilgisi.
       // Sürüm 12 (#150): looked up on the click, not when the bar was built, so the area
@@ -459,8 +472,31 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   /// Decision 4: no note window; the note is in Eylemler › Oturuma not ekle.
   /// Sürüm 11 (O2): the connection ends in every window that shows it (a display in its own
   /// window, "Tüm ekranlarımı kullan"), not only in this one.
+  /// Sürüm 12 (FO-A4, FO-A11): "Bitir" goes through the note step of BK — with "Oturum bitince
+  /// not sor" on the note popup comes first (Vazgeç keeps the connection); the ended card then
+  /// says "Bağlantıyı sen bitirdin". Without the connection layer: the old direct end.
   @override
   void end() {
+    if (SenseLayerController.find(ffi.id) == null) {
+      _endAll();
+      return;
+    }
+    senseEndWithNote(
+      contextOf(),
+      peerId: ffi.id,
+      ask: _try(() => mainGetLocalBoolOptionSync(kOptionAllowAskForNoteAtEndOfConnection), false),
+      computer: _computerName(),
+      popups: SenseSessionPopups.of(ffi.id, ffi).controller,
+    );
+  }
+
+  /// The computer's name for popups: alias or host name, never the ID (ST 16).
+  String _computerName() {
+    final alias = _try(() => bind.mainGetPeerOptionSync(id: ffi.id, key: 'alias'), '');
+    return alias.isNotEmpty ? alias : _pi.hostname;
+  }
+
+  void _endAll() {
     // The other windows are found through this window's session: close it only afterwards.
     bind
         .sessionSenseEndAll(sessionId: ffi.sessionId)
@@ -1111,17 +1147,39 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   void setLockAfterEnd(bool v) => _set('lock-after-session-end', v);
 
   @override
-  void addNote() => showAuditDialog(ffi);
+  void addNote() => senseAddNote(contextOf(),
+      peerId: ffi.id, computer: _computerName(), popups: SenseSessionPopups.of(ffi.id, ffi).controller);
 
   @override
   void openTerminal() => _connectWithToken(terminal: true);
 
-  /// Like the RustDesk peer card: the flag is read (and cleared) when the terminal
-  /// session is added.
+  /// Sürüm 12 (#157, FO-A5): the Sense admin terminal — the popup's in-place step, then the
+  /// terminal window asks the panel ticket (no Windows password). The stock
+  /// `setEnvTerminalAdmin` path stays only inside TT's window as the fallback when the Host
+  /// answers `unsupported`.
   @override
   void openTerminalAdmin() {
-    setEnvTerminalAdmin();
-    _connectWithToken(terminal: true);
+    final computer = _computerName();
+    final ctx = contextOf();
+    if (SensePopupHost.maybeOf(ctx) != null) {
+      senseShowTerminalPopup(ctx, admin: true, computer: computer, peerId: ffi.id, onOpen: openTerminal);
+      return;
+    }
+    // The bar's context is outside the remote page's popup host: open the same popup on this
+    // session's popup place (one popup at a time, the place the overlay draws).
+    final popups = SenseSessionPopups.of(ffi.id, ffi).controller;
+    popups.open(
+      SenseTerminalStrings.popupId,
+      (_) => SenseTerminalPopup(
+        computer: computer,
+        onClose: () => popups.close(SenseTerminalStrings.popupId),
+        onOpenAdmin: () {
+          popups.close(SenseTerminalStrings.popupId);
+          senseRequestAdminTerminal(ffi.id);
+          openTerminal();
+        },
+      ),
+    );
   }
 
   @override
@@ -1154,5 +1212,33 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   void copyFingerprint() {
     final f = fingerprint;
     if (f.isNotEmpty) Clipboard.setData(ClipboardData(text: f));
+  }
+
+  // ---- Sürüm 12 (#151) ----
+  bool _hostChatVisible = false;
+
+  @override
+  bool get hostChatVisible => _hostChatVisible;
+
+  /// `sense.host-chat-visible {on}` to the Host (plan §2.1); the Host turns it off by itself
+  /// when the session ends. A refused send ("no_session", …) keeps the switch where it was.
+  @override
+  void setHostChatVisible(bool v) async {
+    final was = _hostChatVisible;
+    _hostChatVisible = v;
+    _notify();
+    String err;
+    try {
+      err = await bind.sessionSenseSendMsg(
+          sessionId: _sid, name: 'sense.host-chat-visible', json: jsonEncode({'on': v}));
+    } catch (_) {
+      err = 'failed';
+    }
+    if (_disposed) return;
+    if (err.isNotEmpty) {
+      debugPrint('[sense] host-chat-visible not sent: $err');
+      _hostChatVisible = was;
+      _notify();
+    }
   }
 }

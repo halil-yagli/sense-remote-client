@@ -4,7 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart';
-import 'package:flutter_hbb/sense/screens/session/lists/backend.dart' show SenseDisplayRef;
+import 'package:flutter_hbb/sense/screens/session/lists/backend.dart' show SenseDisplayRef, SenseResolution;
 import 'package:flutter_hbb/sense/screens/session/lists/rules.dart';
 
 import 'fake_backend.dart';
@@ -77,4 +77,26 @@ void main() {
     b.displays = [for (var i = 0; i < 4; i++) SenseDisplayRef(i, primary: i == 0, width: 1920, height: 1080)];
     return shot(t, 'list_screens_4_tumu', b, open: SenseBarMenu.screens);
   }, skip: goldenSkip('list_screens_4_tumu'), tags: const ['golden']);
+
+  // Sürüm 12 (#158): the in-place question of a list row (prototype `.it.asking`).
+  testWidgets('Eylemler, yeniden başlat soruyor',
+      (t) => shot(t, 'list_actions_ask_restart', FakeBackend(), open: SenseBarMenu.actions,
+          taps: ['Uzak bilgisayarı yeniden başlat…']),
+      skip: goldenSkip('list_actions_ask_restart'), tags: const ['golden']);
+  // Sürüm 12 (FO-A7/B7): the custom resolution being tried (prototype `.cres.warn`).
+  testWidgets('Ekranlar, özel çözünürlük deneniyor', (t) async {
+    final b = FakeBackend(
+        facts: const SensePeerFacts(displaysCount: 3, resolutionsCount: 3, virtualResolution: true, rustDeskIdd: true));
+    setWindow(t, const Size(1440, 900));
+    await t.pumpWidget(frameApp(b, still: true));
+    await t.tap(find.byKey(const ValueKey('sense-bar-menu-screens')));
+    await t.pump();
+    await t.tap(find.text('Uzak çözünürlük').last);
+    await t.pump(const Duration(milliseconds: 400));
+    b.resolutionTrial.start(const SenseResolution(3840, 1080));
+    await t.pump(const Duration(seconds: 3)); // 12 s left
+    await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('list_screens_res_trial')));
+    b.resolutionTrial.keep();
+    await drain(t);
+  }, skip: goldenSkip('list_screens_res_trial'), tags: const ['golden']);
 }

@@ -190,7 +190,7 @@ void main() {
       final b = FakeBackend();
       final render = senseDisplayList(b).sections.firstWhere((s) => s.id == 'render');
       expect(render.title, 'Gelişmiş');
-      expect(render.entries.map((e) => e.id), ['display.textureRender', 'display.d3dRender']);
+      expect(render.entries.map((e) => e.id), ['display.textureRender', 'display.d3dRender', 'display.renderInfo']);
       expect(render.summary, 'varsayılan');
       b.textureRender = true;
       b.d3dRender = true;
