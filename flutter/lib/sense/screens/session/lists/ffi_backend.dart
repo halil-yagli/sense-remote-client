@@ -1155,4 +1155,32 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
     final f = fingerprint;
     if (f.isNotEmpty) Clipboard.setData(ClipboardData(text: f));
   }
+
+  // ---- Sürüm 12 (#151) ----
+  bool _hostChatVisible = false;
+
+  @override
+  bool get hostChatVisible => _hostChatVisible;
+
+  /// `sense.host-chat-visible {on}` to the Host (plan §2.1); the Host turns it off by itself
+  /// when the session ends. A refused send ("no_session", …) keeps the switch where it was.
+  @override
+  void setHostChatVisible(bool v) async {
+    final was = _hostChatVisible;
+    _hostChatVisible = v;
+    _notify();
+    String err;
+    try {
+      err = await bind.sessionSenseSendMsg(
+          sessionId: _sid, name: 'sense.host-chat-visible', json: jsonEncode({'on': v}));
+    } catch (_) {
+      err = 'failed';
+    }
+    if (_disposed) return;
+    if (err.isNotEmpty) {
+      debugPrint('[sense] host-chat-visible not sent: $err');
+      _hostChatVisible = was;
+      _notify();
+    }
+  }
 }

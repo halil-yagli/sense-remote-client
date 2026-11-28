@@ -132,4 +132,20 @@ abstract final class SenseFilesStrings {
 
   /// Drag feedback: "3 öğe".
   static String dragCount(int n) => '$n öğe';
+
+  // Sürüm 12 (UD'nin bıraktığı, OT): overwrite and delete questions in the Sense dialog.
+  static const String overwriteTitle = 'Dosya zaten var';
+  static const String overwriteHeadline = 'Bu dosya hedefte zaten var';
+  static const String overwriteIdentical = 'İki dosya aynı görünüyor; atlamak yeterli olabilir.';
+  static const String overwriteRemember = 'Bu aktarımdaki bütün çakışmalarda aynısını yap';
+  static const String overwriteStop = 'Aktarımı durdur';
+  static const String overwriteSkip = 'Atla';
+  static const String overwriteGo = 'Üzerine yaz';
+  static const String deleteTitle = 'Sil';
+  static const String deleteFile = 'Bu dosya silinsin mi?';
+  static const String deleteEmptyDir = 'Bu boş klasör silinsin mi?';
+  static const String deleteDirFile = 'Klasördeki bu dosya silinsin mi?';
+  static String deleteCount(String head, int i, int n) => '$head ($i/$n)';
+  static const String deleteIrreversible = 'Silinen geri alınamaz.';
+  static const String deleteRemember = 'Klasördeki kalan dosyalar için de aynısını yap';
 }

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/sense/screens/files/file_confirm_dialogs.dart';
 import 'package:flutter_hbb/utils/download_paths.dart';
 import 'package:flutter_hbb/utils/event_loop.dart';
 import 'package:get/get.dart';
@@ -279,6 +280,24 @@ class FileModel {
   Future<bool?> showFileConfirmDialog(
       String title, String content, bool showCheckbox, bool isIdentical) async {
     fileConfirmCheckboxRemember = false;
+    // Sense Remote (Sürüm 12, #162): the Sense dialog; same answers (true overwrite, null
+    // skip, false stop). The stock box below stays the fallback.
+    final dm = parent.target?.dialogManager;
+    if (kSenseDialogs && dm != null) {
+      return await senseDialog<bool?>(
+          dm,
+          (setState, close) => senseFileOverwriteDialog(
+                path: content,
+                identical: isIdentical,
+                showRemember: showCheckbox,
+                remember: fileConfirmCheckboxRemember,
+                onRemember: (v) => setState(() => fileConfirmCheckboxRemember = v),
+                onStop: () => close(false),
+                onSkip: () => close(null),
+                onOverwrite: () => close(true),
+              ),
+          keepOthers: true);
+    }
     return await parent.target?.dialogManager.show<bool?>(
         (setState, Function(bool? v) close, context) {
       cancel() => close(false);
@@ -899,7 +918,10 @@ class FileController {
               translate(
                   "Are you sure you want to delete this empty directory?"),
               item.name,
-              false);
+              false,
+              senseHeadline:
+                  senseFileDeleteHeadline(SenseFileDeleteKind.emptyDir),
+              sensePath: item.path);
           if (confirm == true) {
             await sendRemoveEmptyDir(
               item.path,
@@ -934,6 +956,13 @@ class FileController {
           count.isEmpty ? title : "$title ($count)",
           content,
           item.isDirectory,
+          senseHeadline: senseFileDeleteHeadline(
+              item.isDirectory
+                  ? SenseFileDeleteKind.dirFile
+                  : SenseFileDeleteKind.file,
+              index: i + 1,
+              count: entries.length),
+          sensePath: entries[i].path,
         );
         try {
           if (confirm == true) {
@@ -975,7 +1004,25 @@ class FileController {
   }
 
   Future<bool?> showRemoveDialog(
-      String title, String content, bool showCheckbox) async {
+      String title, String content, bool showCheckbox,
+      {String? senseHeadline, String? sensePath}) async {
+    // Sense Remote (Sürüm 12, #162): the Sense dialog; same answers. Stock box = fallback.
+    final dm = dialogManager;
+    if (kSenseDialogs && dm != null) {
+      return await senseDialog<bool>(
+          dm,
+          (setState, close) => senseFileDeleteDialog(
+                headline: senseHeadline ?? title,
+                path: sensePath ?? content,
+                showRemember: showCheckbox,
+                remember: _removeCheckboxRemember,
+                onRemember: (v) =>
+                    setState(() => _removeCheckboxRemember = v),
+                onCancel: () => close(false),
+                onDelete: () => close(true),
+              ),
+          keepOthers: true);
+    }
     return await dialogManager?.show<bool>(
         (setState, Function(bool v) close, context) {
       cancel() => close(false);
