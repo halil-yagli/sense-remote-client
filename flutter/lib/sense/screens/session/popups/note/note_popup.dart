@@ -63,6 +63,16 @@ class _SenseNotePopupState extends State<SenseNotePopup> {
   bool _done = false;
 
   @override
+  void didUpdateWidget(SenseNotePopup old) {
+    super.didUpdateWidget(old);
+    // Opened again in the same place (a new caller): a new answer, a new text.
+    if (old.onDone != widget.onDone || old.mode != widget.mode) {
+      _done = false;
+      _text.text = widget.initialText;
+    }
+  }
+
+  @override
   void dispose() {
     _text.dispose();
     super.dispose();
