@@ -158,6 +158,7 @@ void main() {
     expect(events.length, 1);
     expect(events.single.$1, isTrue);
     expect(events.single.$3, isNull);
+    debugPrint = savedPrint; // testWidgets checks debug variables before tearDown
   });
 
   testWidgets('two remote timeouts end in the timeout state and one files/readdir event', (tester) async {
@@ -172,5 +173,6 @@ void main() {
     expect(events.single.$1, isFalse);
     expect(events.single.$3, 'timeout');
     expect(events.single.$2, greaterThanOrEqualTo(0));
+    debugPrint = savedPrint; // testWidgets checks debug variables before tearDown
   });
 }

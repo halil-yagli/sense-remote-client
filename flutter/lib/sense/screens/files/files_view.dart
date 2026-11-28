@@ -94,8 +94,11 @@ class _SenseFilesViewState extends State<SenseFilesView> {
               SizedBox(
                 width: _kMiddle,
                 child: Obx(() {
-                  final canSend = widget.connected && widget.local.selectedItems.items.isNotEmpty;
-                  final canReceive = widget.connected && widget.remote.selectedItems.items.isNotEmpty;
+                  // Read both lists first: Obx must see an observable even when not connected.
+                  final localSel = widget.local.selectedItems.items.isNotEmpty;
+                  final remoteSel = widget.remote.selectedItems.items.isNotEmpty;
+                  final canSend = widget.connected && localSel;
+                  final canReceive = widget.connected && remoteSel;
                   return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                     SenseTransferButton(
                       key: const Key('sense-files-send'),
