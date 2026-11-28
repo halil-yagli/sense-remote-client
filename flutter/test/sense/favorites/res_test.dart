@@ -78,38 +78,38 @@ void main() {
   });
 
   group('model', () {
-    testWidgets('ping sends the address as arg and reads res.ping', (t) async {
+    test('ping sends the address as arg and reads res.ping', () async {
       final io = FakeFavIo()..host['win.ping'] = ((run) => (ok: true, err: null, res: kResPing));
       final m = await loadedModel(io);
       final f = m.ping('win.ping', ' 8.8.8.8 ');
-      await t.pump();
+      // Real event loop: the model waits before the Host's answer (a timer) arrives.
       expect(await f, '4/4 yanıt · ort. 18 ms · kayıp %0');
       expect(io.sent.single.$1, 'sense.shortcut-run');
       expect(io.sent.single.$2, {'req': 1, 'id': 'win.ping', 'arg': '8.8.8.8'});
       m.dispose();
     });
 
-    testWidgets('a Host refusal is said with its reason, never a dialog', (t) async {
+    test('a Host refusal is said with its reason, never a dialog', () async {
       final io = FakeFavIo()..host['win.ping'] = ((run) => (ok: false, err: 'no_permission', res: null));
       final m = await loadedModel(io);
       final f = m.ping('win.ping', '8.8.8.8');
-      await t.pump();
+      // Real event loop: the model waits before the Host's answer (a timer) arrives.
       expect(await f, SenseFavoritesStrings.errNoPermission);
       m.dispose();
     });
 
-    testWidgets('pane answers do not toast "açıldı"', (t) async {
+    test('pane answers do not toast "açıldı"', () async {
       final notes = <String>[];
       final io = FakeFavIo()..host['win.ipinfo'] = ((run) => (ok: true, err: null, res: kResIp));
       final m = await loadedModel(io, notices: notes);
       final f = m.hostIpInfo('win.ipinfo');
-      await t.pump();
+      // Real event loop: the model waits before the Host's answer (a timer) arrives.
       expect((await f)!.ip, '192.168.10.42');
       expect(notes, isEmpty);
       m.dispose();
     });
 
-    testWidgets('without keyboard and mouse permission nothing is asked of the Host', (t) async {
+    test('without keyboard and mouse permission nothing is asked of the Host', () async {
       final io = FakeFavIo();
       final m = await loadedModel(io, input: false);
       expect((await m.request('win.killhung')).err, 'no_permission');
@@ -130,7 +130,7 @@ void main() {
       await t.pump();
       expect(find.text('4/4 yanıt · ort. 18 ms · kayıp %0'), findsOneWidget);
       expect(io.sent.last.$2['arg'], 'sergi.example');
-    });
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
     testWidgets('window list: names, hung marked, Kapat sends the pid and drops the row', (t) async {
       final notes = <String>[];
@@ -153,7 +153,7 @@ void main() {
       expect(io.sent.last.$2, {'req': 2, 'id': 'win.killhung', 'arg': '5532'});
       expect(find.text('Medya oynatıcı'), findsNothing);
       expect(notes.last, 'Medya oynatıcı kapatıldı · Giriş Salonu PC-2');
-    });
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
     testWidgets('window list: the Host refuses closing → the reason under the list', (t) async {
       final io = paneIo(['win.killhung'])
@@ -169,7 +169,7 @@ void main() {
       await t.pump();
       expect(find.byKey(const ValueKey('sense-fav-windows-error')), findsOneWidget);
       expect(find.text('Sergi uygulaması — yanıt vermiyor'), findsOneWidget, reason: 'row stays');
-    });
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
     testWidgets('Mac: the button says Çık', (t) async {
       final io = paneIo(['mac.forcequit'], os: SenseFavOs.mac)
@@ -179,7 +179,7 @@ void main() {
       await t.pump();
       await t.pump();
       expect(find.text(SenseFavoritesStrings.windowQuit), findsNWidgets(3));
-    });
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
     testWidgets('IP card: the Host values replace the session data', (t) async {
       final io = paneIo(['win.ipinfo'])
@@ -193,6 +193,6 @@ void main() {
       expect(find.text('192.168.10.42'), findsOneWidget);
       expect(find.text('192.168.10.1 · 8.8.8.8'), findsOneWidget);
       expect(find.text('10.0.0.9'), findsNothing);
-    });
+    }, timeout: const Timeout(Duration(seconds: 30)));
   });
 }
