@@ -219,7 +219,7 @@ abstract final class SenseSessionStrings {
   static String scalePct(int pct) => '%$pct';
   /// Sürüm 12 (FO-B3): "Gelişmiş çizim", after Kodek and before Ses.
   static const String renderSection = 'Gelişmiş çizim';
-  static const String textureRender = 'Doku ile çiz';
+  static const String textureRender = 'Doku (texture) ile çiz';
   static const String d3dRender = 'D3D ile çiz';
   static const String nextConnection = 'yeni bağlantıda';
   static const String d3dHint = 'Windows · yeni bağlantıda';

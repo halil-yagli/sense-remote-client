@@ -22,6 +22,7 @@ import '../../../../common.dart';
 import '../../../../common/shared_state.dart';
 import '../../../../common/widgets/dialog.dart' show showRequestElevationDialog, showAuditDialog;
 import '../../../../common/widgets/keyboard_shortcuts/display.dart';
+import '../../../../common/widgets/keyboard_shortcuts/shortcut_constants.dart' show kShortcutLocalConfigKey;
 import '../../../../common/widgets/toolbar.dart'
     show TToggleMenu, allowDisplaySwitchInPrivacyMode, toolbarPrivacyMode;
 import '../../../../consts.dart';
@@ -42,6 +43,7 @@ import '../../../../utils/scale.dart' show getSessionCustomScalePercent;
 import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart' show SenseSizes;
 import '../data/frame_rate.dart';
+import '../data/account_view_prefs.dart';
 import '../data/grants.dart';
 import '../data/peer_status.dart' show SensePeerStatusFeed;
 import '../data/session_state.dart';
@@ -129,6 +131,10 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   bool _localMultiScreens = false;
   bool _canAdjust = false;
   bool _forceRelay = false;
+
+  /// U169: quality, scaling and key bindings follow the person's account.
+  SenseAccountViewPrefs account = const SenseAccountViewPrefs();
+  bool _accountApplied = false;
 
   late final ScreenAdjustor _adjustor =
       ScreenAdjustor(id: ffi.id, ffi: ffi, cbExitFullscreen: () => stateGlobal.setFullscreen(false));
@@ -408,11 +414,47 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
     );
   }
 
+  /// U169: once per session, the account's quality, scaling and key bindings are put in this
+  /// session. With no account store, or nothing set yet, the local values stay as they are.
+  Future<void> _applyAccount() async {
+    try {
+      final a = await account.read();
+      if (a == null) return;
+      final q = a.quality;
+      if (q != null) {
+        await bind.sessionSetImageQuality(sessionId: _sid, value: q);
+        if (q == kRemoteImageQualityCustom && a.fps != null && showCustomFps) {
+          await bind.sessionSetCustomFps(sessionId: _sid, fps: a.fps!);
+        }
+      }
+      final style = a.scale;
+      // "Custom scale" has no account value: a custom choice here is not overwritten.
+      if (style != null && await bind.sessionGetViewStyle(sessionId: _sid) != SenseRd.viewCustom) {
+        await bind.sessionSetViewStyle(sessionId: _sid, value: style);
+        await ffi.canvasModel.updateViewStyle();
+      }
+      final keys = a.bindings;
+      if (keys != null) {
+        final merged = SenseAccountViewPrefs.mergeBindings(bind.mainGetLocalOption(key: kShortcutLocalConfigKey), keys);
+        if (merged != null) {
+          await bind.mainSetLocalOption(key: kShortcutLocalConfigKey, value: merged);
+          bind.mainReloadKeyboardShortcuts();
+        }
+      }
+    } catch (e) {
+      debugPrint('Sense session account prefs: $e');
+    }
+  }
+
   void _openLinkCard() => SenseLayerController.find(ffi.id)?.openCard();
 
   @override
   Future<void> refresh() async {
     if (!ready) return;
+    if (!_accountApplied) {
+      _accountApplied = true;
+      await _applyAccount();
+    }
     try {
       _viewStyle = await bind.sessionGetViewStyle(sessionId: _sid) ?? _viewStyle;
       _imageQuality = await bind.sessionGetImageQuality(sessionId: _sid) ?? _imageQuality;
@@ -733,6 +775,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void setViewStyle(String v) {
     _viewStyle = v;
+    unawaited(account.writeScale(v));
     bind.sessionSetViewStyle(sessionId: _sid, value: v).then((_) => ffi.canvasModel.updateViewStyle());
     _notify();
   }
@@ -758,6 +801,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
     _imageQuality = v;
     _publishFrame();
     _notify();
+    unawaited(account.writeQuality(v, fps: showCustomFps ? _customFps : null));
     await bind.sessionSetImageQuality(sessionId: _sid, value: v);
     if (v == kRemoteImageQualityCustom) {
       await bind.sessionSetCustomImageQuality(sessionId: _sid, value: _customQuality);
@@ -806,6 +850,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   void setCustomFps(int v) {
     _customFps = v;
     _publishFrame();
+    if (_imageQuality == kRemoteImageQualityCustom) unawaited(account.writeQuality(_imageQuality, fps: v));
     bind.sessionSetCustomFps(sessionId: _sid, fps: v);
     _notify();
   }
