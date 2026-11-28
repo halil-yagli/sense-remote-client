@@ -216,8 +216,32 @@ class TerminalModel with ChangeNotifier {
     };
   }
 
+  /// Sense Remote (Sürüm 12, #157): runs once before the first `TerminalAction::Open` of this
+  /// terminal (the admin terminal asks the panel ticket and waits for the Host). true = open;
+  /// false = do not open (the page offers the choice and calls [openTerminal] itself).
+  Future<bool> Function()? senseBeforeOpen;
+  Future<bool>? _senseGate;
+
   void onReady() {
     parent.dialogManager.dismissAll();
+
+    // Sense Remote (#157): the admin ticket goes before the terminal is opened.
+    final before = senseBeforeOpen;
+    if (before != null && !_terminalOpened) {
+      if (_senseGate != null) return; // already asking (a reconnect meanwhile)
+      final gate = _senseGate = before();
+      gate.then((go) {
+        _senseGate = null;
+        if (!go || _disposed) return;
+        senseBeforeOpen = null;
+        openTerminal().catchError((e) {
+          debugPrint('[TerminalModel] Error opening terminal: $e');
+        });
+      }, onError: (_) {
+        _senseGate = null;
+      });
+      return;
+    }
 
     // Fire and forget - don't block onReady. If the transport reconnects while
     // this model is still open, re-send OpenTerminal so the remote service marks

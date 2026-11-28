@@ -8,7 +8,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../consts.dart' show kRemoteViewStyleAdaptive, kRemoteViewStyleOriginal,
-    kRemoteImageQualityBest, kRemoteImageQualityBalanced, kRemoteImageQualityLow;
+    kRemoteImageQualityBest, kRemoteImageQualityBalanced, kRemoteImageQualityLow, kOptionEnableRecordSession;
 import '../../../data/option_keys.dart';
 import '../../../diag_log.dart';
 import '../../../sense.dart';
@@ -360,13 +360,21 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
     final incoming = <Widget>[
       dirRow(SenseOptionKeys.incomingFilesDir.key, SenseSettingsStrings.incomingDir,
           SenseSettingsStrings.incomingDirHint, senseFolderLabel(_incoming), _changeIncoming,
-          last: !controller),
+          last: !controller && !host),
       if (controller) ...[
         toggle(SenseOptionKeys.autoRecordOutgoing, SenseSettingsStrings.autoRecord),
         dirRow(SenseOptionKeys.videoSaveDirectory.key, SenseSettingsStrings.recordDir,
             SenseSettingsStrings.recordDirHint, _b.recordDir(), _changeRecordDir,
-            last: true),
+            last: !host),
       ],
+      // FU-A5: whether the Controller may record connections to this Host is the panel's
+      // `enable-record-session`; the value is read, not written here.
+      if (host)
+        lockedRow(SenseSettingsStrings.recordIncoming,
+            _b.readBool(kOptionEnableRecordSession, SenseOptionStore.main)
+                ? SenseSettingsStrings.on
+                : SenseSettingsStrings.off,
+            last: true, key: const Key('sense-set-enable-record-session')),
     ];
     final incomingSummary = [
       senseFolderShort(_incoming),
@@ -388,19 +396,22 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
             key: Key('sense-set-password'),
             label: SenseSettingsStrings.password,
             description: SenseSettingsStrings.passwordController),
-      lockedRow(SenseSettingsStrings.acceptConn,
-          connType == 'outgoing' ? SenseSettingsStrings.acceptConnNone : SenseSettingsStrings.acceptConnFor(approve),
-          key: const Key('sense-set-conn-type')),
-      lockedRow(SenseSettingsStrings.idleDisconnect,
-          idleOn ? SenseSettingsStrings.idleMinutes(idleMin) : SenseSettingsStrings.off,
-          key: const Key('sense-set-allow-auto-disconnect')),
-      lockedRow(SenseSettingsStrings.lanDiscovery,
-          _bool(SenseOptionKeys.lanDiscovery) ? SenseSettingsStrings.on : SenseSettingsStrings.off,
-          key: const Key('sense-set-enable-lan-discovery')),
-      lockedRow(SenseSettingsStrings.directIp,
-          directOn ? (port.isEmpty ? SenseSettingsStrings.on : SenseSettingsStrings.directIpPort(port)) : SenseSettingsStrings.off,
-          hint: SenseSettingsStrings.directIpHint,
-          key: const Key('sense-set-direct-server')),
+      // FU-B2 (#166): these four are the Host's; a Controller-only computer does not show them.
+      if (host) ...[
+        lockedRow(SenseSettingsStrings.acceptConn,
+            connType == 'outgoing' ? SenseSettingsStrings.acceptConnNone : SenseSettingsStrings.acceptConnFor(approve),
+            key: const Key('sense-set-conn-type')),
+        lockedRow(SenseSettingsStrings.idleDisconnect,
+            idleOn ? SenseSettingsStrings.idleMinutes(idleMin) : SenseSettingsStrings.off,
+            key: const Key('sense-set-allow-auto-disconnect')),
+        lockedRow(SenseSettingsStrings.lanDiscovery,
+            _bool(SenseOptionKeys.lanDiscovery) ? SenseSettingsStrings.on : SenseSettingsStrings.off,
+            key: const Key('sense-set-enable-lan-discovery')),
+        lockedRow(SenseSettingsStrings.directIp,
+            directOn ? (port.isEmpty ? SenseSettingsStrings.on : SenseSettingsStrings.directIpPort(port)) : SenseSettingsStrings.off,
+            hint: SenseSettingsStrings.directIpHint,
+            key: const Key('sense-set-direct-server')),
+      ],
       lockedRow(SenseSettingsStrings.login, SenseSettingsStrings.loginValue, last: true, key: const Key('sense-set-login')),
     ];
 

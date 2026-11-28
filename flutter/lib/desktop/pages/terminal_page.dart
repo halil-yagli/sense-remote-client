@@ -7,6 +7,15 @@ import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/terminal_model.dart';
 import 'package:flutter_hbb/models/terminal_mouse_handler.dart';
 import 'terminal_connection_manager.dart';
+import '../../models/platform_model.dart';
+import '../../consts.dart' show kPeerPlatformWindows;
+import '../../sense/screens/session/layers/connect_cards.dart'
+    show SenseConnectCards, SenseConnectKind;
+import '../../sense/screens/session/layers/data/session_bridge.dart'
+    show SenseFfiConnectHost;
+import '../../sense/screens/shared/aux_window/aux_label.dart';
+import '../../sense/screens/terminal/terminal_admin.dart';
+import '../../sense/screens/terminal/terminal_view.dart';
 
 class TerminalPage extends StatefulWidget {
   TerminalPage({
@@ -22,6 +31,9 @@ class TerminalPage extends StatefulWidget {
     this.connToken,
     this.onClipboardWriteBlocked,
     this.onClipboardWriteSucceeded,
+    this.senseAdmin = false,
+    this.onSenseClose,
+    this.onSenseReopen,
   }) : super(key: key);
   final String id;
   final String? password;
@@ -33,6 +45,17 @@ class TerminalPage extends StatefulWidget {
   final ValueChanged<String>? onClipboardWriteBlocked;
   final ValueChanged<String>? onClipboardWriteSucceeded;
   final int terminalId;
+
+  /// Sense Remote (Sürüm 12, #157): this terminal opens as the admin terminal (panel ticket,
+  /// no Windows password). Only on a new connection.
+  final bool senseAdmin;
+
+  /// Sense Remote: "Terminali kapat" and the connecting card's "Kapat" (the tab's own close).
+  final VoidCallback? onSenseClose;
+
+  /// Sense Remote: open this computer's terminal again on a new connection, as the admin
+  /// terminal, or ([stockAdmin]) with RustDesk's administrator sign-in box (fallback).
+  final void Function({required bool stockAdmin})? onSenseReopen;
 
   /// Tab key for focus management, passed from parent to avoid duplicate construction
   final String tabKey;
@@ -59,9 +82,18 @@ class _TerminalPageState extends State<TerminalPage>
   final FocusNode _terminalFocusNode = FocusNode(canRequestFocus: false);
   StreamSubscription<DesktopTabState>? _tabStateSubscription;
 
+  // Sense Remote (Sürüm 12): the Sense terminal window (ST 4, #157).
+  late final bool _senseOn = senseAuxFrameOn();
+
+  /// This page started the connection: it carries the connecting cards (#164).
+  bool _ownsConnection = false;
+  SenseTermAdminController? _admin;
+  bool _asking = false;
+
   @override
   void initState() {
     super.initState();
+    _ownsConnection = !TerminalConnectionManager.hasConnection(widget.id);
 
     // Listen for tab selection changes to request focus
     _tabStateSubscription = widget.tabController.state.listen(_onTabStateChanged);
@@ -104,6 +136,16 @@ class _TerminalPageState extends State<TerminalPage>
     // Register this terminal model with FFI for event routing
     _ffi.registerTerminalModel(widget.terminalId, _terminalModel);
 
+    // Sense Remote (#157): the admin ticket goes before `TerminalAction::Open`.
+    if (_senseOn && widget.senseAdmin && _ownsConnection) {
+      _admin = SenseTermAdminController(
+        peerId: widget.id,
+        begin: () =>
+            bind.sessionSenseTermAdminBegin(sessionId: _ffi.sessionId),
+      );
+      _terminalModel.senseBeforeOpen = _admin!.run;
+    }
+
     // Auto-close tab when shell exits
     _terminalModel.onClosed = () {
       if (mounted) {
@@ -123,8 +165,11 @@ class _TerminalPageState extends State<TerminalPage>
 
       if (!isExistingConnection) {
         // First terminal - show loading dialog, wait for onReady
-        _ffi.dialogManager
-            .showLoading(translate('Connecting...'), onCancel: closeConnection);
+        // Sense Remote (#164): the Sense connecting card says "Bağlanılıyor" instead.
+        if (!_senseOn) {
+          _ffi.dialogManager.showLoading(translate('Connecting...'),
+              onCancel: closeConnection);
+        }
       } else {
         // Additional terminal - connection already established
         // Open the terminal directly
@@ -141,9 +186,42 @@ class _TerminalPageState extends State<TerminalPage>
     _ffi.unregisterTerminalModel(widget.terminalId);
     _terminalModel.dispose();
     _terminalFocusNode.dispose();
+    _admin?.dispose();
     // Release connection reference instead of closing directly
     TerminalConnectionManager.releaseConnection(widget.id);
+    // Sense Remote: the connection is gone: no admin chip, no card controller.
+    if (_senseOn && !TerminalConnectionManager.hasConnection(widget.id)) {
+      SenseTermAdminEvents.setGranted(widget.id, false);
+      SenseConnectCards.remove(widget.id);
+    }
     super.dispose();
+  }
+
+  // ---- Sense Remote (Sürüm 12, #157): admin choices of the tab ----
+
+  void _openNormal() {
+    _terminalModel.senseBeforeOpen = null;
+    _admin?.reset();
+    _terminalModel.openTerminal().catchError((e) {
+      debugPrint('[TerminalPage] Error opening terminal: $e');
+    });
+  }
+
+  void _retryAdmin() {
+    final a = _admin;
+    if (a == null || a.busy) return;
+    a.run().then((ok) {
+      if (!ok || !mounted) return;
+      _terminalModel.senseBeforeOpen = null;
+      _terminalModel.openTerminal().catchError((e) {
+        debugPrint('[TerminalPage] Error opening terminal: $e');
+      });
+    });
+  }
+
+  bool get _adminPossible {
+    final p = _ffi.ffiModel.pi.platform;
+    return p.isEmpty || p == kPeerPlatformWindows;
   }
 
   void _onTabStateChanged(DesktopTabState state) {
@@ -198,39 +276,90 @@ class _TerminalPageState extends State<TerminalPage>
     );
   }
 
+  Widget _terminalView({required double backgroundOpacity}) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final heightPx = constraints.maxHeight;
+        return TerminalMouseInteraction(
+          _terminalModel.terminal,
+          controller: _terminalModel.terminalController,
+          focusNode: _terminalFocusNode,
+          // Note: autofocus is not used here because focus is managed manually
+          // via _onTabStateChanged() to handle tab switching properly.
+          backgroundOpacity: backgroundOpacity,
+          padding: _calculatePadding(heightPx),
+          onSecondaryTapDown: (details, offset) async {
+            final selection = _terminalModel.terminalController.selection;
+            if (selection != null) {
+              final text = _terminalModel.terminal.buffer.getText(selection);
+              _terminalModel.terminalController.clearSelection();
+              await Clipboard.setData(ClipboardData(text: text));
+            } else {
+              final data = await Clipboard.getData('text/plain');
+              final text = data?.text;
+              if (text != null) {
+                _terminalModel.terminal.paste(text);
+              }
+            }
+          },
+        );
+      },
+    );
+  }
+
+  /// Sense Remote (Sürüm 12, ST 4, #157): the Sense terminal tab (admin step, black box,
+  /// footer) with the connecting cards over it (#164).
+  Widget _senseBuild(BuildContext context) {
+    final terminal = _terminalView(backgroundOpacity: 0);
+    final reopen = widget.onSenseReopen;
+    final body = ListenableBuilder(
+      listenable: Listenable.merge([
+        SenseTermAdminEvents.grantedOf(widget.id),
+        if (_admin != null) _admin!,
+      ]),
+      builder: (context, _) => SenseTerminalBody(
+        computer: senseAuxPeerLabel(widget.id),
+        terminal: terminal,
+        admin: SenseTermAdminEvents.isGranted(widget.id),
+        adminView: senseTerminalAdminViewOf(_admin, asking: _asking),
+        adminError: _admin?.error,
+        onCopyOutput: () => _terminalModel.terminal.buffer.getText(),
+        onAskAdmin: reopen == null || !_adminPossible
+            ? null
+            : () => setState(() => _asking = true),
+        onCancelAsk: () => setState(() => _asking = false),
+        onConfirmAdmin: () {
+          setState(() => _asking = false);
+          reopen?.call(stockAdmin: false);
+        },
+        onOpenNormal: _openNormal,
+        onWindowsAccount:
+            reopen == null ? null : () => reopen(stockAdmin: true),
+        onRetryAdmin: _retryAdmin,
+        onClose: widget.onSenseClose,
+      ),
+    );
+    return Stack(children: [
+      Positioned.fill(child: body),
+      if (_ownsConnection)
+        Positioned.fill(
+          child: SenseConnectCards.attach(widget.id,
+              kind: SenseConnectKind.terminal,
+              host: SenseFfiConnectHost(widget.id, _ffi,
+                  kind: SenseConnectKind.terminal,
+                  onClose: widget.onSenseClose)),
+        ),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    // Sense Remote (Sürüm 12, ST 4): the Sense tab; the stock one below stays the fallback.
+    if (_senseOn) return _senseBuild(context);
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final heightPx = constraints.maxHeight;
-          return TerminalMouseInteraction(
-            _terminalModel.terminal,
-            controller: _terminalModel.terminalController,
-            focusNode: _terminalFocusNode,
-            // Note: autofocus is not used here because focus is managed manually
-            // via _onTabStateChanged() to handle tab switching properly.
-            backgroundOpacity: 1.0,
-            padding: _calculatePadding(heightPx),
-            onSecondaryTapDown: (details, offset) async {
-              final selection = _terminalModel.terminalController.selection;
-              if (selection != null) {
-                final text = _terminalModel.terminal.buffer.getText(selection);
-                _terminalModel.terminalController.clearSelection();
-                await Clipboard.setData(ClipboardData(text: text));
-              } else {
-                final data = await Clipboard.getData('text/plain');
-                final text = data?.text;
-                if (text != null) {
-                  _terminalModel.terminal.paste(text);
-                }
-              }
-            },
-          );
-        },
-      ),
+      body: _terminalView(backgroundOpacity: 1.0),
     );
   }
 
