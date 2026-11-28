@@ -21,8 +21,10 @@ import '../login/login_controller.dart';
 import '../login/login_page.dart';
 import '../sense_home_strings.dart' show SenseHomeRole, senseRoleLabel;
 import '../settings/sense_settings_page.dart';
+import '../update/sense_update_model.dart' show SenseUpdateStatus;
 import '../update/sense_update_view.dart' show SenseUpdateWatch;
 import 'account_box.dart';
+import 'nav_dots.dart';
 import '../../../../desktop/pages/desktop_tab_page.dart' show DesktopTabPage;
 import '../../../router.dart' show senseAboutRequest, senseRoleChangeReopen;
 
@@ -33,7 +35,7 @@ enum SenseControllerNav { computers, thisComputer, settings, about }
 const double _kRailTop = 14, _kRailSide = 10, _kRailBottom = 12, _kNavGap = 2;
 const double _kNavPadV = 9, _kNavPadH = 10, _kChipPadV = 2, _kChipPadH = 7, _kChipRadius = 6;
 
-const double _kMainTop = 18, _kMainSide = 22, _kMainBottom = 24;
+const double _kMainTop = 18, _kMainSide = 22, _kMainBottom = 24, _kNavDot = 7;
 
 /// Name shown at the bottom: the panel's display name, else the part of the
 /// e-mail before "@".
@@ -68,13 +70,26 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
   late final SenseGrantsWatch _grants = SenseGrantsWatch(widget.grantsBackend);
   late final SenseLoginController _login = SenseLoginController(widget.loginBackend);
   SenseControllerNav _nav = SenseControllerNav.computers;
+  SenseLevel? _aboutLevel;
+  SenseLevel? _hostLevel;
+
+  /// FU-A3: the red dot of "Bu bilgisayar" (only Host + Controller has that item here).
+  late final SenseHostDotWatch _hostDot = SenseHostDotWatch(onChanged: (l) {
+    if (mounted) setState(() => _hostLevel = l);
+  });
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _grants.start();
+    if (widget.role == SenseHomeRole.both) _hostDot.start();
     senseAboutRequest.addListener(_showAbout); // Sense Remote (D3f): macOS app menu
+  }
+
+  void _onUpdateStatus(SenseUpdateStatus s) {
+    final level = senseAboutNavLevel(s);
+    if (level != _aboutLevel && mounted) setState(() => _aboutLevel = level);
   }
 
   // Signed out the sign-in page stays (About is in the menu after sign-in).
@@ -96,6 +111,7 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     senseAboutRequest.removeListener(_showAbout);
+    _hostDot.dispose();
     _grants.dispose();
     _login.dispose();
     super.dispose();
@@ -133,10 +149,13 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
         final count = gFFI.groupModel.peers.map((p) => p.id).toSet().length;
         if (!signedIn && _nav != SenseControllerNav.computers) _nav = SenseControllerNav.computers;
         return SenseUpdateWatch(
+          onStatus: _onUpdateStatus,
           builder: (context, strip) => SenseControllerShellView(
             role: widget.role,
             nav: _nav,
             onNav: _goto,
+            aboutLevel: _aboutLevel,
+            thisComputerLevel: _hostLevel,
             signedIn: signedIn,
             name: senseAccountName(user.displayName.value, email),
             email: email,
@@ -159,6 +178,7 @@ class _SenseControllerShellState extends State<SenseControllerShell> with Widget
                 : _scroll(SenseLoginPage(
                     controller: _login,
                     onConnect: (id) => connect(context, id),
+                    onConnectRelay: (id) => connect(context, id, forceRelay: true),
                   )),
           ),
         );
@@ -178,6 +198,8 @@ class SenseControllerShellView extends StatelessWidget {
     this.email = '',
     this.computerCount,
     this.version,
+    this.aboutLevel,
+    this.thisComputerLevel,
     this.strip,
     this.splash = false,
     this.onSignOut,
@@ -198,6 +220,10 @@ class SenseControllerShellView extends StatelessWidget {
 
   /// Null = the build has no number: no chip (nothing made up).
   final int? version;
+
+  /// FU-A3: dots in the menu (null / ok = none): Hakkında (update waits), Bu bilgisayar (Host not ready).
+  final SenseLevel? aboutLevel;
+  final SenseLevel? thisComputerLevel;
   final Widget? strip;
   final bool splash;
   final VoidCallback? onSignOut;
@@ -266,12 +292,14 @@ class SenseControllerShellView extends StatelessWidget {
               _item(SenseControllerNav.computers, SenseControllerStrings.computers, count: computerCount),
               if (role == SenseHomeRole.both) ...[
                 const SizedBox(height: _kNavGap),
-                _item(SenseControllerNav.thisComputer, SenseControllerStrings.thisComputer),
+                _item(SenseControllerNav.thisComputer, SenseControllerStrings.thisComputer,
+                    level: thisComputerLevel, levelLabel: SenseControllerStrings.navHostDot),
               ],
               const SizedBox(height: _kNavGap),
               _item(SenseControllerNav.settings, SenseControllerStrings.settings),
               const SizedBox(height: _kNavGap),
-              _item(SenseControllerNav.about, SenseControllerStrings.about),
+              _item(SenseControllerNav.about, SenseControllerStrings.about,
+                  level: aboutLevel, levelLabel: SenseControllerStrings.navUpdateDot),
             ],
             const Spacer(),
             if (signedIn) _footer(),
@@ -279,10 +307,12 @@ class SenseControllerShellView extends StatelessWidget {
         ),
       );
 
-  Widget _item(SenseControllerNav n, String label, {int? count}) => _NavItem(
+  Widget _item(SenseControllerNav n, String label, {int? count, SenseLevel? level, String? levelLabel}) => _NavItem(
         key: Key('sense-controller-nav-${n.name}'),
         label: label,
         count: count,
+        level: level,
+        levelLabel: levelLabel,
         selected: nav == n,
         onTap: () => onNav(n),
       );
@@ -320,18 +350,31 @@ class SenseControllerShellView extends StatelessWidget {
 
 /// Left menu item (`.anv`), with the computer count on the right.
 class _NavItem extends StatelessWidget {
-  const _NavItem({super.key, required this.label, required this.selected, required this.onTap, this.count});
+  const _NavItem(
+      {super.key,
+      required this.label,
+      required this.selected,
+      required this.onTap,
+      this.count,
+      this.level,
+      this.levelLabel});
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
   final int? count;
 
+  /// FU-A3: the dot at the right edge (not for ok / unknown); [levelLabel] is what it means.
+  final SenseLevel? level;
+  final String? levelLabel;
+
+  bool get _dot => level != null && level != SenseLevel.ok && level != SenseLevel.unknown;
+
   @override
   Widget build(BuildContext context) => SenseInteractive(
         onTap: onTap,
         selected: selected,
-        semanticLabel: label,
+        semanticLabel: _dot && levelLabel != null ? '$label, $levelLabel' : label,
         builder: (_, s) => SenseFocusRing(
           visible: s.focused,
           radius: SenseRadii.category,
@@ -351,6 +394,13 @@ class _NavItem extends StatelessWidget {
               ),
               if (count != null && count! > 0)
                 Text('$count', style: SenseTextStyles.of(size: SenseFontSize.caps, color: SenseColors.textMuted)),
+              if (_dot)
+                // Prototype `.anv .d`: 7 px; the red one glows.
+                SenseStatusDot(
+                    key: Key('sense-nav-dot-${level!.name}'),
+                    color: level!.color,
+                    size: _kNavDot,
+                    glow: level == SenseLevel.hot),
             ]),
           ),
         ),

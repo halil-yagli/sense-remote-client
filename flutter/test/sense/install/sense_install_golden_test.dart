@@ -2,6 +2,7 @@
 // Calisma/dokuman/img/i01–i09.png). 860 × 620 like the setup window; the images are
 // compared with the prototype by eye before they are accepted (İnşa planı §5).
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -132,4 +133,67 @@ void main() {
     await pumpWizard(tester, FakeBackend(), upgrade: FakeUpgrade().make());
     await golden(tester, 'i09_upgrade');
   }, skip: _missing('i09_upgrade'), tags: const ['golden']);
+
+  // Sürüm 12 (A7): the states of the prototype's demo selector that had no image.
+
+  testWidgets('K1 macOS · Uygulamalar klasörü', (tester) async {
+    final backend = FakeBackend()..inApps = false;
+    await pumpWizard(tester, backend, mac: true);
+    expect(find.byKey(const Key('sense-apps-outside')), findsOneWidget);
+    await golden(tester, 'k1_mac_apps');
+  }, skip: _missing('k1_mac_apps'), tags: const ['golden']);
+
+  testWidgets('K5 Kuruluyor · ilerleme', (tester) async {
+    final backend = FakeBackend()..pendingInstall = Completer();
+    await pumpWizard(tester, backend);
+    await toSummary(tester, backend);
+    await tap(tester, 'sense-install');
+    expect(find.byKey(const Key('sense-installing')), findsOneWidget);
+    await golden(tester, 'k5_installing');
+    backend.pendingInstall!.complete('cancelled');
+    await frames(tester);
+  }, skip: _missing('k5_installing'), tags: const ['golden']);
+
+  testWidgets('K5 Yönetici onayı verilmedi', (tester) async {
+    final backend = FakeBackend()..installResult = 'cancelled';
+    await pumpWizard(tester, backend);
+    await toSummary(tester, backend);
+    await tap(tester, 'sense-install');
+    expect(find.text(t('error-cancelled')), findsOneWidget);
+    await golden(tester, 'k5_install_denied');
+  }, skip: _missing('k5_install_denied'), tags: const ['golden']);
+
+  testWidgets('K6 macOS izinleri · Daha sonra uyarısı', (tester) async {
+    final backend = FakeBackend();
+    await pumpWizard(tester, backend, mac: true);
+    await toSummary(tester, backend);
+    await tap(tester, 'sense-install');
+    backend.permissions = const SenseMacPermissions();
+    await tester.pump(const Duration(seconds: 1));
+    await frames(tester);
+    await tap(tester, 'sense-perm-later');
+    expect(find.byKey(const Key('sense-perm-warning')), findsOneWidget);
+    await golden(tester, 'k6_mac_later_warning');
+  }, skip: _missing('k6_mac_later_warning'), tags: const ['golden']);
+
+  testWidgets('K6 macOS izinleri · yalnız Controller', (tester) async {
+    final backend = FakeBackend();
+    await pumpWizard(tester, backend, mac: true);
+    await toSummary(tester, backend, host: false, controller: true);
+    await tap(tester, 'sense-install');
+    backend.permissions = const SenseMacPermissions();
+    await tester.pump(const Duration(seconds: 1));
+    await frames(tester);
+    expect(find.byKey(const Key('sense-perm-screenRecording')), findsNothing);
+    await golden(tester, 'k6_mac_controller_only');
+  }, skip: _missing('k6_mac_controller_only'), tags: const ['golden']);
+
+  testWidgets('K7 Kuruldu · Controller', (tester) async {
+    final backend = FakeBackend();
+    await pumpWizard(tester, backend);
+    await toSummary(tester, backend, host: false, controller: true);
+    await tap(tester, 'sense-install');
+    expect(find.byKey(const Key('sense-finish-open')), findsOneWidget);
+    await golden(tester, 'k7_done_controller');
+  }, skip: _missing('k7_done_controller'), tags: const ['golden']);
 }

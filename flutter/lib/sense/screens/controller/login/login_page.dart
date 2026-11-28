@@ -20,11 +20,15 @@ class SenseLoginPage extends StatefulWidget {
     super.key,
     required this.controller,
     required this.onConnect,
+    this.onConnectRelay,
     this.canConnect = true,
   });
 
   final SenseLoginController controller;
   final ValueChanged<String> onConnect;
+
+  /// FU-A1: the same box as in the list, with "Aktarma sunucusu üzerinden bağlan".
+  final ValueChanged<String>? onConnectRelay;
   final bool canConnect;
 
   @override
@@ -98,7 +102,8 @@ class _SenseLoginPageState extends State<SenseLoginPage> {
       ),
       if (_idOpen) ...[
         const SizedBox(height: _kGap),
-        SenseConnectByIdBox(onConnect: widget.onConnect, enabled: widget.canConnect),
+        SenseConnectByIdBox(
+            onConnect: widget.onConnect, onConnectRelay: widget.onConnectRelay, enabled: widget.canConnect),
       ],
     ];
   }

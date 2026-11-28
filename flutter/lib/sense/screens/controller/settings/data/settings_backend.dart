@@ -3,6 +3,7 @@
 // same functions the stock settings page used, with the same stores and the
 // same yes/no encoding, so a switch here changes the setting the core reads.
 // Tests replace the whole backend with a fake and check key, store and value.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -47,6 +48,14 @@ abstract class SenseSettingsBackend {
 
   /// Called after a value was written (e.g. probe the hardware codec).
   void afterWrite(String key, String value) {}
+
+  /// U169: the account's "Hayalet modla başla" (`view.ghost_start`, preference store of the
+  /// core). `(supported, value)`: [supported] is false when nothing is kept for the account
+  /// (signed out, old core); [value] is null when the account has not set it yet.
+  Future<(bool, bool?)> ghostStartAccount() async => (false, null);
+
+  /// Keeps the choice in the account; false when it could not be stored.
+  Future<bool> setGhostStartAccount(bool value) async => false;
 }
 
 class SenseSettingsBridge extends SenseSettingsBackend {
@@ -104,6 +113,34 @@ class SenseSettingsBridge extends SenseSettingsBackend {
         ? (value ? 'Y' : defaultOptionNo as String)
         : bool2option(key, value);
     return write(key, store, raw);
+  }
+
+  @override
+  Future<(bool, bool?)> ghostStartAccount() async {
+    try {
+      final v = jsonDecode(await bind.mainSensePrefsGet(os: 'any'));
+      if (v is! Map || v['error'] != null || v['entries'] is! List) return (false, null);
+      for (final e in v['entries'] as List) {
+        if (e is Map && e['key'] == 'view.ghost_start') {
+          final x = e['value'];
+          return (true, x is bool ? x : null);
+        }
+      }
+      return (true, null);
+    } catch (_) {
+      return (false, null);
+    }
+  }
+
+  @override
+  Future<bool> setGhostStartAccount(bool value) async {
+    try {
+      final r = await bind.mainSensePrefsSet(
+          json: jsonEncode({'entries': [{'os': 'any', 'key': 'view.ghost_start', 'value': value}]}));
+      return r.isEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override

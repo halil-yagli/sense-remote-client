@@ -130,7 +130,8 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
       SenseToast.show(context, SenseControllerStrings.busyNow); // B16
       return;
     }
-    if (!widget.grants.grants.can(SensePerm.connect) && widget.grants.loaded) {
+    // #149: only a settled answer can say "Bağlanma yetkin kaldırıldı" (not the first failed read).
+    if (!widget.grants.grants.can(SensePerm.connect) && widget.grants.settled) {
       SenseToast.show(context, SenseControllerStrings.rightRevoked);
       return;
     }
@@ -156,6 +157,8 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
           isFileTransfer: kind == SenseConnectKind.fileTransfer,
           isTerminal: kind == SenseConnectKind.terminal,
           isTcpTunneling: kind == SenseConnectKind.tcpTunnel,
+          // FU-A1 / FU-A2: this one connection goes over the relay server.
+          forceRelay: kind == SenseConnectKind.relay,
         ));
     if (!mounted) return;
     _connectTimer?.cancel();
@@ -199,11 +202,14 @@ class _SenseComputersPageState extends State<SenseComputersPage> {
             now: _health.now(),
             health: _health,
             connectingId: _connecting,
-            canConnect: !g.loaded || g.grants.can(SensePerm.connect),
-            grantsMissing: g.loaded && !g.grants.ok,
+            // #149: nothing is locked or warned until the answer is settled (3 reads).
+            canConnect: !g.settled || g.grants.can(SensePerm.connect),
+            grantsMissing: g.settled && !g.grants.ok,
             onConnect: (id) => _connect(projects, id),
-            canFileTransfer: g.loaded && senseKindAllowed(SenseConnectKind.fileTransfer, g.grants),
-            canTerminalTunnel: g.loaded && senseKindAllowed(SenseConnectKind.terminal, g.grants),
+            onConnectRelay: (id) => _connect(projects, id, SenseConnectKind.relay),
+            canFileTransfer: g.settled && senseKindAllowed(SenseConnectKind.fileTransfer, g.grants),
+            canTerminalTunnel: g.settled && senseKindAllowed(SenseConnectKind.terminal, g.grants),
+            canRelay: !g.settled || g.grants.can(SensePerm.connect),
             onConnectKind: (id, kind) => _connect(projects, id, kind),
             onRetry: () => group.pull(force: true),
             onTileOrder: _saveTileOrder,
@@ -231,7 +237,7 @@ Future<bool> senseOpenConnection(Future<void> Function() open) async {
 /// R6: whether the grants allow opening a computer in [kind] (the screen needs
 /// only the connect right, checked by the caller).
 bool senseKindAllowed(SenseConnectKind kind, SenseGrants g) => switch (kind) {
-      SenseConnectKind.screen => true,
+      SenseConnectKind.screen || SenseConnectKind.relay => true,
       SenseConnectKind.fileTransfer => g.can(SensePerm.fileTransfer),
       SenseConnectKind.terminal || SenseConnectKind.tcpTunnel => g.can(SensePerm.terminalTunnel),
     };

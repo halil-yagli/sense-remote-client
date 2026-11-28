@@ -9,14 +9,18 @@ import 'package:flutter/widgets.dart';
 import '../../../sense.dart';
 import '../../../strings/controller.dart';
 
-/// How a computer is opened.
-enum SenseConnectKind { screen, fileTransfer, terminal, tcpTunnel }
+/// How a computer is opened. [relay] (FU-A2) is the screen over the relay server.
+enum SenseConnectKind { screen, fileTransfer, terminal, tcpTunnel, relay }
 
-/// The entries of the menu, in order, for the allowed kinds.
-List<SenseConnectKind> senseMoreKinds({required bool fileTransfer, required bool terminalTunnel}) => [
+/// The entries of the menu, in order, for the allowed kinds. [relay] (the connect right) adds
+/// "Aktarmayla bağlan" last, under a line.
+List<SenseConnectKind> senseMoreKinds(
+        {required bool fileTransfer, required bool terminalTunnel, bool relay = false}) =>
+    [
       if (fileTransfer) SenseConnectKind.fileTransfer,
       if (terminalTunnel) SenseConnectKind.terminal,
       if (terminalTunnel) SenseConnectKind.tcpTunnel,
+      if (relay) SenseConnectKind.relay,
     ];
 
 String senseConnectKindLabel(SenseConnectKind k) => switch (k) {
@@ -24,6 +28,7 @@ String senseConnectKindLabel(SenseConnectKind k) => switch (k) {
       SenseConnectKind.fileTransfer => SenseControllerStrings.openFileTransfer,
       SenseConnectKind.terminal => SenseControllerStrings.openTerminal,
       SenseConnectKind.tcpTunnel => SenseControllerStrings.openTcpTunnel,
+      SenseConnectKind.relay => SenseControllerStrings.openRelay,
     };
 
 const double _kButton = 26, _kMenuWidth = 168, _kMenuGap = 6, _kItemV = 8, _kItemH = 11, _kPad = 4;
@@ -108,7 +113,15 @@ class _SenseTileMoreState extends State<SenseTileMore> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final k in widget.kinds)
+                    for (final k in widget.kinds) ...[
+                      // FU-A2: the relay entry stands apart (prototype `<hr>`).
+                      if (k == SenseConnectKind.relay && widget.kinds.length > 1)
+                        Container(
+                          key: Key('sense-tile-more-sep-$id'),
+                          height: 1,
+                          margin: const EdgeInsets.symmetric(vertical: _kPad, horizontal: _kItemH - _kPad),
+                          color: SenseColors.line,
+                        ),
                       SenseInteractive(
                         key: Key('sense-tile-more-${k.name}-$id'),
                         onTap: () => _pick(k),
@@ -118,10 +131,21 @@ class _SenseTileMoreState extends State<SenseTileMore> {
                             color: s.hovered || s.focused ? SenseColors.hover : null,
                             borderRadius: BorderRadius.circular(SenseRadii.popup),
                           ),
-                          child: Text(senseConnectKindLabel(k),
-                              style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.text)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(senseConnectKindLabel(k),
+                                  style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.text)),
+                              if (k == SenseConnectKind.relay)
+                                Text(SenseControllerStrings.openRelayHint,
+                                    style: SenseTextStyles.of(
+                                        size: SenseFontSize.hintSmall, color: SenseColors.textMuted)),
+                            ],
+                          ),
                         ),
                       ),
+                    ],
                   ],
                 ),
               ),

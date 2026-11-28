@@ -75,6 +75,7 @@ class SenseUpdateStatus {
     this.error,
     this.blocked,
     this.notesUrl,
+    this.notesSummary,
     this.checkedAt,
     this.macPermissionWarning = false,
     this.lastResult,
@@ -100,6 +101,10 @@ class SenseUpdateStatus {
   /// `session_active` or `night_window`.
   final String? blocked;
   final String? notesUrl;
+
+  /// #166: the release's one-line "Neler yeni" (panel `notes_summary`, at most 120 characters,
+  /// signed with the release); null when the panel sent none.
+  final String? notesSummary;
   final int? checkedAt;
   final bool macPermissionWarning;
   final SenseUpdateLastResult? lastResult;
@@ -125,6 +130,7 @@ class SenseUpdateStatus {
         error: _str(v['error']),
         blocked: _str(v['blocked']),
         notesUrl: _safeUrl(_str(v['notes_url'])),
+        notesSummary: senseNotesSummary(_str(v['notes_summary'])),
         checkedAt: _int(v['checked_at']),
         macPermissionWarning: v['mac_permission_warning'] == true,
         lastResult: SenseUpdateLastResult.fromJson(v['last_result']),
@@ -145,6 +151,16 @@ class SenseUpdateStatus {
   /// #134: an attempt failed and the job waits for its automatic retry
   /// (`available` with the job's source and the error kept).
   bool get retryPending => hasReadyRelease && source != null && error != null;
+}
+
+/// The summary as the strip shows it: one line, no control characters, at most 120 characters
+/// (the panel's limit; the core refuses longer ones too). Null when nothing is left.
+String? senseNotesSummary(String? raw) {
+  if (raw == null) return null;
+  final t = raw.replaceAll(RegExp(r'[\u0000-\u001f\u007f]+'), ' ').replaceAll(RegExp(r' {2,}'), ' ').trim();
+  if (t.isEmpty) return null;
+  final runes = t.runes.toList();
+  return runes.length <= 120 ? t : '${String.fromCharCodes(runes.take(119)).trimRight()}…';
 }
 
 /// Release notes open in the browser; only https (or http for a local panel
@@ -189,8 +205,12 @@ class SenseUpdateStrip {
       this.busy = false,
       this.problem = false,
       this.done = false,
-      this.asking = false});
+      this.asking = false,
+      this.detail});
   final String text;
+
+  /// Lighter text after [text] on the same line ("· Neler yeni: …", #166).
+  final String? detail;
   final List<SenseUpdateAction> actions;
 
   /// Work in progress (downloading, verifying, installing).
@@ -321,7 +341,9 @@ SenseUpdateStrip? senseUpdateStrip(SenseUpdateStatus s,
       if (ui.requested && s.blocked == 'session_active') {
         return SenseUpdateStrip(sessionText, actions: act([SenseUpdateAction.installNow]));
       }
+      final summary = s.notesSummary;
       return SenseUpdateStrip(senseUpdateText('available', {'n': n}),
+          detail: summary == null ? null : '${senseUpdateText('notes_prefix')}$summary',
           actions: act([SenseUpdateAction.update, ...notes]));
     case SenseUpdateState.scheduled:
     case SenseUpdateState.waitingIdle:

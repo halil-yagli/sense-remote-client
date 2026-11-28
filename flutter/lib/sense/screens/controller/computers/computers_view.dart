@@ -37,6 +37,8 @@ class SenseComputersView extends StatefulWidget {
     this.canFileTransfer = false,
     this.canTerminalTunnel = false,
     this.onConnectKind,
+    this.canRelay = false,
+    this.onConnectRelay,
     this.grantsMissing = false,
     this.onRetry,
     this.onTileOrder,
@@ -45,6 +47,7 @@ class SenseComputersView extends StatefulWidget {
     this.initialLocation,
     this.initialIdOpen = false,
     this.ledOpenId,
+    this.moreOpenId,
   });
 
   /// Every group, unfiltered, in the person's order.
@@ -70,6 +73,14 @@ class SenseComputersView extends StatefulWidget {
   final bool canTerminalTunnel;
   final void Function(String id, SenseConnectKind kind)? onConnectKind;
 
+  /// FU-A2: "Aktarmayla bağlan" in the tile's "⋯" menu (the connect right; [onConnectKind] opens
+  /// it as [SenseConnectKind.relay]).
+  final bool canRelay;
+
+  /// FU-A1: Kimlikle bağlan with its check row "Aktarma sunucusu üzerinden bağlan"; null = no
+  /// check row (the box connects directly only).
+  final ValueChanged<String>? onConnectRelay;
+
   /// The grants envelope could not be read ("Yetkiler panelden alınamadı").
   final bool grantsMissing;
   final VoidCallback? onRetry;
@@ -87,6 +98,9 @@ class SenseComputersView extends StatefulWidget {
 
   /// Goldens: the LED box of this computer is shown open.
   final String? ledOpenId;
+
+  /// Goldens: the "⋯" menu of this computer is shown open.
+  final String? moreOpenId;
 
   @override
   State<SenseComputersView> createState() => _SenseComputersViewState();
@@ -177,6 +191,7 @@ class _SenseComputersViewState extends State<SenseComputersView> {
       if (_idOpen)
         SenseConnectByIdBox(
           onConnect: widget.onConnect,
+          onConnectRelay: widget.onConnectRelay,
           enabled: widget.canConnect,
           disabledTip: SenseControllerStrings.noRightTip,
         ),
@@ -315,12 +330,16 @@ class _SenseComputersViewState extends State<SenseComputersView> {
         onConnect: () => widget.onConnect(c.id),
         moreKinds: widget.onConnectKind == null
             ? const []
-            : senseMoreKinds(fileTransfer: widget.canFileTransfer, terminalTunnel: widget.canTerminalTunnel),
+            : senseMoreKinds(
+                fileTransfer: widget.canFileTransfer,
+                terminalTunnel: widget.canTerminalTunnel,
+                relay: widget.canRelay),
         onConnectKind: widget.onConnectKind == null ? null : (k) => widget.onConnectKind!(c.id, k),
         onLedHover: widget.health == null ? null : () => widget.health!.want([c.id], first: true),
         dropMark: dropMark,
         ghost: ghost,
         ledOpen: widget.ledOpenId == c.id,
+        moreOpen: widget.moreOpenId == c.id,
       );
 
   Widget _header(SenseCounts counts, bool ready) => Padding(

@@ -52,6 +52,9 @@ abstract final class SenseSettingsStrings {
   static const String viewOnly = 'Yalnız izleyerek başla';
   static const String privacy = 'Hayalet modla başla';
   static const String privacyHint = 'Ziyaretçi saatinde bağlanırken.';
+
+  /// U169: this switch follows the person's account (`view.ghost_start`), on every computer.
+  static const String privacyAccount = 'Hesabına kayıtlı. Ziyaretçi saatinde bağlanırken.';
   static const String sumViewOnly = 'yalnız izleme';
   static const String sumPrivacy = 'Hayalet mod';
 
