@@ -1788,10 +1788,11 @@ impl<T: InvokeUiSession> Remote<T> {
         });
         let custom_fps = self.handler.lc.read().unwrap().custom_fps.clone();
         let custom_fps = custom_fps.lock().unwrap().clone();
-        let mut custom_fps = custom_fps.unwrap_or(30);
-        if custom_fps < 5 || custom_fps > 120 {
-            custom_fps = 30;
-        }
+        // Sense Remote (Sürüm 12, U168c): on a direct connection the stock qualities may ask for
+        // up to 60 fps (was 30, #168); relayed and custom quality keep RustDesk's rule.
+        let custom_quality = self.handler.lc.read().unwrap().image_quality == "custom";
+        let custom_fps =
+            crate::sense::fps_policy::controller_fps_ceiling(direct, custom_quality, custom_fps);
         let inactive_threshold = 15;
         let max_queue_len = self
             .video_threads

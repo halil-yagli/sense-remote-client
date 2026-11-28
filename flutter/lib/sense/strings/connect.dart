@@ -19,11 +19,38 @@ abstract final class SenseConnectStrings {
   static const String busyTitle = 'Meşgul';
   static String busyBody(String name) => '$name şu an başka biri tarafından kullanılıyor.';
   static const String busyHint = 'Bir bilgisayara aynı anda tek kişi bağlanır';
+
+  /// Sürüm 12: the Host says who is connected and since when (prototype `cstSim` busy:
+  /// "… şu an Elif K. tarafından kullanılıyor · 12 dk'dır"). Without either, [busyBody].
+  static String busyBodyDetail(String name, {String? by, int? minutes}) {
+    if (by == null && minutes == null) return busyBody(name);
+    final who = by == null
+        ? '$name şu an başka biri tarafından kullanılıyor'
+        : '$name şu an $by tarafından kullanılıyor';
+    return minutes == null ? '$who.' : '$who · ${busyFor(minutes)}';
+  }
+
+  static String busyFor(int minutes) =>
+      minutes < 60 ? '${minutes < 1 ? 1 : minutes} dk'dır' : '${minutes ~/ 60} saattir';
   static const String later = 'Sonra dene';
 
   static const String offlineTitle = 'Çevrimdışı';
   static const String offlineBody = 'Bilgisayar kapalı ya da internete bağlı değil.';
   static const String notFoundBody = 'Bu kimlikte bir bilgisayar bulunamadı.';
+
+  /// Sürüm 12: the panel's last heartbeat (prototype: "… · son görülme 14:20").
+  static String offlineBodySeen(String when) => 'Bilgisayar kapalı ya da internete bağlı değil · son görülme $when';
+
+  /// "14:20" today, "dün 14:20" yesterday, "27.11.2026 14:20" before.
+  static String seenAt(DateTime t, DateTime now) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final clock = '${two(t.hour)}:${two(t.minute)}';
+    final day = DateTime(t.year, t.month, t.day);
+    final today = DateTime(now.year, now.month, now.day);
+    if (day == today) return clock;
+    if (day == DateTime(now.year, now.month, now.day - 1)) return 'dün $clock';
+    return '${two(t.day)}.${two(t.month)}.${t.year} $clock';
+  }
 
   static const String passwordTitle = 'Parola gerekiyor';
   static String passwordBody(String name) => '$name bağlantı için parola istiyor.';

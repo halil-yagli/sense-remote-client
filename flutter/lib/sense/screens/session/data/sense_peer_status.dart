@@ -182,6 +182,7 @@ class SensePeerStatus {
     this.health,
     this.displays = const [],
     this.network = const [],
+    this.wakeable,
   });
 
   final bool online;
@@ -202,6 +203,10 @@ class SensePeerStatus {
   /// Ethernet first, then Wi-Fi, then the rest (see [senseOrderNetwork]).
   final List<SensePeerNetwork> network;
 
+  /// Sürüm 12 (Çevrimdışı kartı): the panel can wake this computer (Wake-on-LAN through an
+  /// online computer at the same place). Null = the panel did not say (older panel).
+  final bool? wakeable;
+
   static SensePeerStatus? fromJson(Object? json) {
     if (json is! Map) return null;
     final online = _bool(json['online']);
@@ -216,6 +221,7 @@ class SensePeerStatus {
       displays: _list(json['displays'], SensePeerDisplay.fromJson),
       network: senseOrderNetwork(
           _list(json['network'], SensePeerNetwork.fromJson)),
+      wakeable: _bool(json['wakeable']),
     );
   }
 

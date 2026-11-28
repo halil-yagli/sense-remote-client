@@ -31,6 +31,16 @@ class FakeConnectHost implements SenseConnectHost {
   @override
   void retry() => calls.add('retry');
 
+  SenseOfflineInfo? offline;
+
+  @override
+  Future<SenseOfflineInfo?> offlineInfo() async {
+    offlineAsked++;
+    return offline;
+  }
+
+  int offlineAsked = 0;
+
   @override
   void close() => calls.add('close');
 }

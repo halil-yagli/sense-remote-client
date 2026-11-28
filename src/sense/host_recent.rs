@@ -138,6 +138,16 @@ pub fn screens(conn_id: i32, count: usize) {
     }
 }
 
+/// Sense Remote (Sürüm 12, S8 "Meşgul" ayrıntısı): the connection open longest on this Host —
+/// its Controller's display name and start (Unix s) — for the busy answer to a second Controller.
+pub fn current() -> Option<(String, i64)> {
+    locked(&OPEN)
+        .as_ref()?
+        .values()
+        .min_by_key(|open| open.at)
+        .map(|open| (open.name.clone(), open.at))
+}
+
 /// The connection closed: it goes into the list (and the file).
 pub fn ended(conn_id: i32) {
     let Some(open) = locked(&OPEN)

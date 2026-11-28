@@ -10,6 +10,7 @@ import '../../../../../models/chat_model.dart';
 import '../../../../../models/model.dart';
 import '../../../../../models/platform_model.dart';
 import '../../../shared/chat/data/files.dart' show senseParseFileJobs;
+import '../../data/sense_peer_status.dart' show SensePeerStatusClient;
 import '../../../../strings/connect.dart';
 import '../../bar/session_popups.dart' show SenseSessionPopups;
 import '../connect_cards.dart';
@@ -234,6 +235,14 @@ class SenseFfiConnectHost implements SenseConnectHost {
       ffi.inputModel.setRelativeMouseMode(false);
     } catch (_) {}
     bind.sessionReconnect(sessionId: ffi.sessionId, forceRelay: false);
+  }
+
+  @override
+  Future<SenseOfflineInfo?> offlineInfo() async {
+    // Sürüm 12: the panel's peer-status (the same key the status popup uses).
+    final status = (await SensePeerStatusClient().fetch(id)).status;
+    if (status == null) return null;
+    return SenseOfflineInfo(lastSeenAt: status.lastSeenAt, wakeable: status.wakeable);
   }
 
   @override
