@@ -289,9 +289,41 @@ void main() {
     });
   });
 
+  group('FU-A5: "Gelen bağlantıları kaydet" (Host)', () {
+    testWidgets('locked row; the value is the panel\'s enable-record-session', (tester) async {
+      final b = _FakeBackend(homeRole: SenseHomeRole.both);
+      await _pump(tester, b,
+          open: SenseSettingsCategory.incoming, password: const Text('pw', key: Key('pw')));
+      final row = find.byKey(const Key('sense-set-enable-record-session'));
+      expect(row, findsOneWidget);
+      expect(find.descendant(of: row, matching: find.text('Gelen bağlantıları kaydet')), findsOneWidget);
+      // Not set = on (option2bool: "enable-*" is on unless "N").
+      expect(find.descendant(of: row, matching: find.text('Açık')), findsOneWidget);
+      expect(find.descendant(of: row, matching: find.text(SenseCommonStrings.managedByPanel)), findsOneWidget);
+      await _tapRow(tester, 'enable-record-session');
+      expect(b.writes, isEmpty);
+    });
+
+    testWidgets('"N" reads as Kapalı', (tester) async {
+      final b = _FakeBackend(homeRole: SenseHomeRole.host)
+        ..stores[SenseOptionStore.main]!['enable-record-session'] = 'N';
+      await _pump(tester, b,
+          open: SenseSettingsCategory.incoming, password: const Text('pw', key: Key('pw')));
+      final row = find.byKey(const Key('sense-set-enable-record-session'));
+      expect(find.descendant(of: row, matching: find.text('Kapalı')), findsOneWidget);
+    });
+
+    testWidgets('a Controller-only computer has no such row', (tester) async {
+      final b = _FakeBackend();
+      await _pump(tester, b, open: SenseSettingsCategory.incoming);
+      expect(find.byKey(const Key('sense-set-enable-record-session')), findsNothing);
+      expect(find.text('Gelen bağlantıları kaydet'), findsNothing);
+    });
+  });
+
   group('Güvenlik, Performans, Ağ, Güncelleme', () {
-    testWidgets('locked rows show the value and "Panelden yönetilir"', (tester) async {
-      final b = _FakeBackend()
+    testWidgets('locked rows show the value and "Panelden yönetilir" (Host)', (tester) async {
+      final b = _FakeBackend(homeRole: SenseHomeRole.both)
         ..stores[SenseOptionStore.main]!.addAll({
           'allow-auto-disconnect': 'Y',
           'auto-disconnect-timeout': '30',
@@ -299,8 +331,9 @@ void main() {
           'direct-server': 'N',
           'conn-type': 'outgoing',
         });
-      await _pump(tester, b, open: SenseSettingsCategory.security);
-      expect(find.text(SenseSettingsStrings.passwordController), findsOneWidget);
+      await _pump(tester, b,
+          open: SenseSettingsCategory.security, password: const Text('password-flow', key: Key('pw')));
+      expect(find.byKey(const Key('pw')), findsOneWidget);
       expect(find.text('30 dk sonra'), findsOneWidget);
       expect(find.text(SenseSettingsStrings.acceptConnNone), findsOneWidget);
       expect(find.text(SenseSettingsStrings.loginValue), findsOneWidget);
@@ -311,9 +344,28 @@ void main() {
       expect(b.writes, isEmpty);
     });
 
-    testWidgets('IP access (security) and direct connection (network) are told apart', (tester) async {
-      final b = _FakeBackend()..stores[SenseOptionStore.main]!.addAll({'direct-server': 'N'});
+    testWidgets('FU-B2 (#166): a Controller-only computer shows only password note and login', (tester) async {
+      final b = _FakeBackend();
       await _pump(tester, b, open: SenseSettingsCategory.security);
+      expect(find.text(SenseSettingsStrings.passwordController), findsOneWidget);
+      expect(find.text(SenseSettingsStrings.loginValue), findsOneWidget);
+      for (final host in [
+        SenseSettingsStrings.acceptConn,
+        SenseSettingsStrings.idleDisconnect,
+        SenseSettingsStrings.lanDiscovery,
+        SenseSettingsStrings.directIp,
+      ]) {
+        expect(find.text(host), findsNothing, reason: host);
+      }
+      // Only "Giriş" is locked here.
+      expect(find.text(SenseCommonStrings.managedByPanel), findsNWidgets(1));
+    });
+
+    testWidgets('IP access (security) and direct connection (network) are told apart', (tester) async {
+      final b = _FakeBackend(homeRole: SenseHomeRole.both)
+        ..stores[SenseOptionStore.main]!.addAll({'direct-server': 'N'});
+      await _pump(tester, b,
+          open: SenseSettingsCategory.security, password: const Text('password-flow', key: Key('pw')));
       expect(find.text(SenseSettingsStrings.directIp), findsOneWidget);
       expect(find.text(SenseSettingsStrings.directIpHint), findsOneWidget);
       expect(find.text('Doğrudan IP erişimi'), findsNothing);
@@ -390,7 +442,8 @@ void main() {
     testWidgets('overview counts the rows (Controller)', (tester) async {
       final b = _FakeBackend();
       await _pump(tester, b);
-      expect(find.text(SenseSettingsStrings.overviewTitle('Controller', 15, 10)), findsOneWidget);
+      // FU-B2: the Host's four security rows are not counted on a Controller-only computer.
+      expect(find.text(SenseSettingsStrings.overviewTitle('Controller', 15, 6)), findsOneWidget);
       expect(find.text(SenseSettingsStrings.live), findsOneWidget);
     });
 

@@ -74,6 +74,33 @@ abstract final class SenseHostStrings {
   static const String permRestart = 'Yeniden başlatma';
   static const String permRecord = 'Oturum kaydı';
   static const String permGhost = 'Hayalet mod';
+  // #166 (FU-B10): the panel's other five (its order: ... Hayalet mod, Terminal, Tünel, Kamera, ...).
+  static const String permBlockInput = 'Yerel girişi engelleme';
+  static const String permTerminal = 'Terminal';
+  static const String permTunnel = 'Tünel';
+  static const String permCamera = 'Kamera';
+  static const String permPrinter = 'Uzak yazıcı';
+  static const String permWallpaper = 'Duvar kâğıdını kaldırma';
+
+  // Audio and network (FU-A4): locked, the panel's signed Host settings.
+  static const String net = 'Ses ve ağ';
+  static const String netSummary = 'panelden · kilitli';
+  static const String netHint = 'Yalnız Sense panelinden imzalı gelir; burada değiştirilemez.';
+  static const String netAudioIn = 'Ses girişi';
+  static const String netAudioSystem = 'Sistem sesi';
+  static const String netAudioMic = 'Mikrofon';
+  static const String netAwake = 'Gelen oturumda uyanık tut';
+  static const String netRelay = 'Aktarmaya düşme gecikmesi';
+  static const String netRelayDefault = 'Varsayılan';
+  static const String netRelayNow = 'Hemen';
+  static String netRelaySeconds(int s) => '$s sn';
+  static const String netUdp = 'UDP';
+  static const String netTcpOnly = 'Yalnız TCP / WebSocket';
+  static const String valueOn = 'Açık';
+  static const String valueOff = 'Kapalı';
+
+  /// The setting could not be read: no value is made up.
+  static const String unreadable = 'okunamadı';
 
   static const String password = 'Kalıcı şifre';
   static const String passwordNone = 'ayarlı değil';
