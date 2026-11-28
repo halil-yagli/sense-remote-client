@@ -29,6 +29,10 @@ import '../widgets/popup_menu.dart';
 import '../../common/sense_theme.dart' show senseRoleInstalled;
 import '../../sense/screens/files/files_format.dart' show senseOsName;
 import '../../sense/screens/files/files_view.dart';
+import '../../sense/screens/session/layers/connect_cards.dart'
+    show SenseConnectCards, SenseConnectKind;
+import '../../sense/screens/session/layers/data/session_bridge.dart'
+    show SenseFfiConnectHost;
 import '../../sense/screens/shared/aux_window/aux_label.dart';
 import '../../sense/tokens/sense_tokens.dart' show SenseColors;
 
@@ -111,8 +115,14 @@ class _FileManagerPageState extends State<FileManagerPage>
         connToken: widget.connToken,
         forceRelay: widget.forceRelay);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _ffi.dialogManager
-          .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      // Sense Remote (#164): the "Bağlanılıyor" card (SenseConnectCards) is up already;
+      // RustDesk's box only without the Sense window.
+      if (!senseRoleInstalled()) {
+        _ffi.dialogManager.showLoading(
+          translate('Connecting...'),
+          onCancel: closeConnection,
+        );
+      }
     });
     Get.put<FFI>(_ffi, tag: 'ft_${widget.id}');
     WakelockManager.enable(_uniqueKey);
@@ -130,6 +140,8 @@ class _FileManagerPageState extends State<FileManagerPage>
 
   @override
   void dispose() {
+    // Sense Remote (#164): the window closes, the card controller goes with it.
+    SenseConnectCards.remove(widget.id);
     model.close().whenComplete(() {
       _ffi.close();
       _ffi.dialogManager.dismissAll();
@@ -172,7 +184,19 @@ class _FileManagerPageState extends State<FileManagerPage>
       OverlayEntry(builder: (_) {
         // Sense Remote (#155): the Sense "Uzak dosyalar" view (readable, prototype
         // design) on the same FileModel; the stock view below stays the fallback.
-        if (senseRoleInstalled()) return willPopScope(_senseView());
+        if (senseRoleInstalled()) {
+          return willPopScope(Stack(children: [
+            Positioned.fill(child: _senseView()),
+            // Sense Remote (#164): connecting / offline / wrong password / busy cards.
+            Positioned.fill(
+              child: SenseConnectCards.attach(widget.id,
+                  kind: SenseConnectKind.file,
+                  host: SenseFfiConnectHost(widget.id, _ffi,
+                      kind: SenseConnectKind.file,
+                      onClose: () => widget.tabController?.closeBy(widget.id))),
+            ),
+          ]));
+        }
         return willPopScope(Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           body: Row(
