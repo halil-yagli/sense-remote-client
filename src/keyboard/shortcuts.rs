@@ -319,17 +319,30 @@ pub fn current() -> Arc<Bindings> {
 /// session state the user cannot see.
 pub fn match_event(event: &rdev::Event) -> Option<String> {
     let bindings = current();
-    if !bindings.enabled || bindings.pass_through {
+    // Sense Remote (S12): the favorites chord works without the user turning the matcher on;
+    // only "pass through" (all shortcuts suspended) lets it reach the remote.
+    let sense_fav = !bindings.pass_through
+        && matches!(event.event_type, rdev::EventType::KeyPress(k)
+            if crate::sense::fav_hotkey::slot_of_key(k).is_some());
+    if (!bindings.enabled || bindings.pass_through) && !sense_fav {
         return None;
     }
     // Note: `match_normalized` re-checks both flags below — this short-circuit
     // is just to avoid the `event_to_key_name` + `get_modifiers_state` work
     // in the common bypass case.
-    let key_name = event_to_key_name(event)?;
     let (alt, ctrl, shift, command) =
         crate::keyboard::client::get_modifiers_state(false, false, false, false);
     let mods = normalize_modifiers(alt, ctrl, shift, command);
-    let action = match_normalized(&key_name, &mods, &bindings)?;
+    let user_action = event_to_key_name(event)
+        .and_then(|key_name| match_normalized(&key_name, &mods, &bindings).map(str::to_owned));
+    // A binding of the user on the same chord wins over the Sense one.
+    let sense_action = match (&user_action, event.event_type) {
+        (None, rdev::EventType::KeyPress(k)) if sense_fav => {
+            crate::sense::fav_hotkey::action_for(k, &mods)
+        }
+        _ => None,
+    };
+    let action = user_action.or(sense_action)?;
     // AltGraph is text input, not the ordinary Alt recorded in a shortcut.
     // Keep the shared modifier snapshot unchanged for remote key encoding.
     #[cfg(target_os = "windows")]
@@ -350,7 +363,7 @@ pub fn match_event(event: &rdev::Event) -> Option<String> {
             }
         }
     }
-    Some(action.to_owned())
+    Some(action)
 }
 
 #[cfg(feature = "flutter")]
@@ -1577,6 +1590,32 @@ mod tests {
     fn reset_fired_keys() {
         FIRED_KEYS.lock().unwrap().clear();
         RELEASE_ACTIONS.lock().unwrap().clear();
+    }
+
+    /// Sense Remote (S12): the favorites chord is matched even with the matcher off, and is
+    /// consumed by `try_dispatch`; "pass through" or a missing chord lets keys reach the remote.
+    #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
+    #[test]
+    fn sense_fav_chord_is_matched_with_matcher_off() {
+        use rdev::Key;
+        use std::sync::atomic::Ordering;
+
+        let _guard = CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = super::super::IS_RDEV_ENABLED.swap(false, Ordering::SeqCst);
+        let chord = enable_defaults_and_hold_chord();
+        *CACHE.write().unwrap() = Arc::new(Bindings::default());
+        let on = match_event(&make_press(Key::Num2));
+        let other = match_event(&make_press(Key::Num0));
+        *CACHE.write().unwrap() = Arc::new(Bindings { enabled: false, pass_through: true, bindings: vec![] });
+        let suspended = match_event(&make_press(Key::Num2));
+        *CACHE.write().unwrap() = Arc::new(Bindings::default());
+        super::super::IS_RDEV_ENABLED.store(previous, Ordering::SeqCst);
+        release_chord(chord);
+        clear_session_state(&SID_A);
+        reset_fired_keys();
+        assert_eq!(on.as_deref(), Some("sense_fav_2"));
+        assert_eq!(other, None);
+        assert_eq!(suspended, None);
     }
 
     #[cfg(feature = "flutter")]
