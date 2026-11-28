@@ -914,14 +914,14 @@ class FileController {
         dialogManager?.dismissAll();
         if (fd.entries.isEmpty) {
           var deleteJobId = jobController.addDeleteDirJob(item, !isLocal, 0);
+          _senseRemoveHeadline =
+              senseFileDeleteHeadline(SenseFileDeleteKind.emptyDir);
+          _senseRemovePath = item.path;
           final confirm = await showRemoveDialog(
               translate(
                   "Are you sure you want to delete this empty directory?"),
               item.name,
-              false,
-              senseHeadline:
-                  senseFileDeleteHeadline(SenseFileDeleteKind.emptyDir),
-              sensePath: item.path);
+              false);
           if (confirm == true) {
             await sendRemoveEmptyDir(
               item.path,
@@ -952,17 +952,17 @@ class FileController {
             : "";
         final count = entries.length > 1 ? "${i + 1}/${entries.length}" : "";
         content = "$dirShow\n\n${entries[i].path}".trim();
+        _senseRemoveHeadline = senseFileDeleteHeadline(
+            item.isDirectory
+                ? SenseFileDeleteKind.dirFile
+                : SenseFileDeleteKind.file,
+            index: i + 1,
+            count: entries.length);
+        _senseRemovePath = entries[i].path;
         final confirm = await showRemoveDialog(
           count.isEmpty ? title : "$title ($count)",
           content,
           item.isDirectory,
-          senseHeadline: senseFileDeleteHeadline(
-              item.isDirectory
-                  ? SenseFileDeleteKind.dirFile
-                  : SenseFileDeleteKind.file,
-              index: i + 1,
-              count: entries.length),
-          sensePath: entries[i].path,
         );
         try {
           if (confirm == true) {
@@ -1003,11 +1003,19 @@ class FileController {
     refresh();
   }
 
+  // Sense Remote (Sürüm 12, #162): Turkish headline and path of the next delete question,
+  // set by removeAction just before it asks (the signature of showRemoveDialog stays).
+  String? _senseRemoveHeadline;
+  String? _senseRemovePath;
+
   Future<bool?> showRemoveDialog(
-      String title, String content, bool showCheckbox,
-      {String? senseHeadline, String? sensePath}) async {
+      String title, String content, bool showCheckbox) async {
     // Sense Remote (Sürüm 12, #162): the Sense dialog; same answers. Stock box = fallback.
     final dm = dialogManager;
+    final senseHeadline = _senseRemoveHeadline;
+    final sensePath = _senseRemovePath;
+    _senseRemoveHeadline = null;
+    _senseRemovePath = null;
     if (kSenseDialogs && dm != null) {
       return await senseDialog<bool>(
           dm,
