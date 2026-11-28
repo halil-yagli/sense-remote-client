@@ -260,7 +260,7 @@ jobs:
       # Sense Remote: libs/hbb_common yamasının (store_path yeniden deneme) testleri.
       - name: Run the hbb_common patch tests
         shell: bash
-        run: cargo test --locked --features "$(python3 ./build.py --flutter --print-features)" -p hbb_common --lib sense_store_retry_tests
+        run: cargo test --locked -p hbb_common --lib sense_store_retry_tests
 
   # Mac koduna (cfg(target_os = "macos")) PR'da derleme denetimi: Linux işi bunu derlemez, Mac
   # derlemesi ise yalnız master'da koşardı (Mac'e özgü kırık sürüm gününe kalıyordu). Yalnız
