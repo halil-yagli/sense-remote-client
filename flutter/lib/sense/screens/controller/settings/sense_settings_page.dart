@@ -14,6 +14,7 @@ import '../../../diag_log.dart';
 import '../../../sense.dart';
 import '../../../strings/settings.dart';
 import '../../../router.dart' show senseRoleChangeReopen;
+import '../../session/lists/favorites/favorites_io.dart' show SenseFavoritesEvents;
 import '../../host/data/role.dart' show SenseRoleBackend, SenseRoleBridge;
 import '../../host/role/role_category.dart' show SenseRoleController, SenseRoleCategoryBody, senseRoleSummary;
 import '../../host/password/password_about_row.dart' show SensePasswordAboutRow;
@@ -92,6 +93,9 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
 
   /// B9: a setting that could not be written; shown on top of the page until the next try.
   String? _failed;
+  /// U169: "Hayalet modla başla" follows the account when the core keeps preferences for it.
+  bool _ghostAccount = false;
+  bool? _ghostValue;
   late final SenseRoleController _role = SenseRoleController(widget.roleBackend,
       onRestart: () {
     if (mounted) setState(() => _restarting = true);
@@ -105,6 +109,8 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
   void initState() {
     super.initState();
     _loadIncoming();
+    _loadGhost();
+    SenseFavoritesEvents.listenPrefs(_loadGhost);
     _role.addListener(_onRole);
     _role.load().catchError((_) {});
   }
@@ -115,10 +121,34 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
 
   @override
   void dispose() {
+    SenseFavoritesEvents.forgetPrefs(_loadGhost);
     _role.removeListener(_onRole);
     _role.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// U169: reads the account's choice; the core's start option follows it, so a connection
+  /// begins as the account says on every computer.
+  Future<void> _loadGhost() async {
+    (bool, bool?) r = (false, null);
+    try {
+      r = await _b.ghostStartAccount();
+    } catch (_) {}
+    if (!mounted) return;
+    final (supported, value) = r;
+    final k = SenseOptionKeys.privacyMode;
+    final local = _raw(k) != 'N';
+    setState(() {
+      _ghostAccount = supported;
+      _ghostValue = value;
+    });
+    if (supported && value != null && value != local && !_locked(k.key)) {
+      try {
+        await _b.write(k.key, k.store, value ? 'Y' : 'N');
+      } catch (_) {}
+      if (mounted) setState(() {});
+    }
   }
 
   Future<void> _loadIncoming() async {
@@ -167,12 +197,16 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
 
   /// B7: "Hayalet modla başla" is on unless turned off (karar #95); off is written as "N"
   /// explicitly, because the empty default means on.
-  bool _ghostStart() => _raw(SenseOptionKeys.privacyMode) != 'N';
+  bool _ghostStart() => (_ghostAccount ? _ghostValue : null) ?? _raw(SenseOptionKeys.privacyMode) != 'N';
 
   Future<void> _setGhostStart(bool v) async {
     final k = SenseOptionKeys.privacyMode;
     if (_locked(k.key)) return;
     await _write(k.key, _ghostStart(), v, () => _b.write(k.key, k.store, v ? 'Y' : 'N'));
+    // U169: the account keeps it too (the local option above is what a connection reads).
+    if (_ghostAccount && _failed == null && await _b.setGhostStartAccount(v) && mounted) {
+      setState(() => _ghostValue = v);
+    }
   }
 
   Future<void> _changeIncoming() async {
@@ -340,7 +374,8 @@ class _SenseSettingsViewState extends State<SenseSettingsView> {
         ]),
         toggle(SenseOptionKeys.viewOnly, SenseSettingsStrings.viewOnly),
         toggle(SenseOptionKeys.privacyMode, SenseSettingsStrings.privacy,
-            hint: SenseSettingsStrings.privacyHint, last: true, value: _ghostStart(), set: _setGhostStart),
+            hint: _ghostAccount ? SenseSettingsStrings.privacyAccount : SenseSettingsStrings.privacyHint,
+            last: true, value: _ghostStart(), set: _setGhostStart),
       ]);
     }
     final view = _raw(SenseOptionKeys.viewStyle);

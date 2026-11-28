@@ -73,6 +73,22 @@ class _FakeBackend extends SenseSettingsBackend {
 
   bool failWrites = false;
 
+  // U169: the account's "Hayalet modla başla".
+  bool accountSupported = false;
+  bool? accountGhost;
+  bool accountStoreOk = true;
+  final accountWrites = <bool>[];
+
+  @override
+  Future<(bool, bool?)> ghostStartAccount() async => (accountSupported, accountGhost);
+
+  @override
+  Future<bool> setGhostStartAccount(bool value) async {
+    accountWrites.add(value);
+    if (accountStoreOk) accountGhost = value;
+    return accountStoreOk;
+  }
+
   @override
   Future<void> write(String key, SenseOptionStore store, String value) async {
     if (failWrites) throw StateError('write failed');
@@ -241,6 +257,59 @@ void main() {
       expect(find.text('1:1 · Dengeli · yalnız izleme'), findsOneWidget);
       await _tapRow(tester, 'privacy_mode');
       expect(b.writes.last.toString(), 'privacy_mode/userDefault=Y');
+    });
+
+    testWidgets('U169: Hayalet modla başla follows the account and says so', (tester) async {
+      final b = _FakeBackend()
+        ..accountSupported = true
+        ..accountGhost = false;
+      await _pump(tester, b, open: SenseSettingsCategory.newConnections);
+      expect(find.text(SenseSettingsStrings.privacyAccount), findsOneWidget);
+      expect(find.text(SenseSettingsStrings.privacyHint), findsNothing);
+      // The account says off although this computer's option is empty (= on): off wins, and
+      // the option a connection reads follows it.
+      expect(find.text('1:1 · Dengeli'), findsOneWidget);
+      expect(b.stores[SenseOptionStore.userDefault]!['privacy_mode'], 'N');
+      await _tapRow(tester, 'privacy_mode');
+      expect(b.writes.last.toString(), 'privacy_mode/userDefault=Y');
+      expect(b.accountWrites, [true]);
+      expect(b.accountGhost, isTrue);
+    });
+
+    testWidgets('U169: an account that has not chosen yet leaves this computer's value', (tester) async {
+      final b = _FakeBackend()..accountSupported = true;
+      await _pump(tester, b, open: SenseSettingsCategory.newConnections);
+      expect(find.text('1:1 · Dengeli · Hayalet mod'), findsOneWidget);
+      expect(b.writes, isEmpty, reason: 'nothing to copy');
+      await _tapRow(tester, 'privacy_mode');
+      expect(b.accountWrites, [false]);
+    });
+
+    testWidgets('U169: no account store, the switch is this computer's as before', (tester) async {
+      final b = _FakeBackend();
+      await _pump(tester, b, open: SenseSettingsCategory.newConnections);
+      expect(find.text(SenseSettingsStrings.privacyHint), findsOneWidget);
+      await _tapRow(tester, 'privacy_mode');
+      expect(b.accountWrites, isEmpty);
+    });
+
+    testWidgets('U169: an account write that fails keeps the shown value from the local write', (tester) async {
+      final b = _FakeBackend()
+        ..accountSupported = true
+        ..accountStoreOk = false;
+      await _pump(tester, b, open: SenseSettingsCategory.newConnections);
+      await _tapRow(tester, 'privacy_mode');
+      expect(b.writes.last.toString(), 'privacy_mode/userDefault=N');
+      expect(b.accountWrites, [false]);
+      await tester.pumpAndSettle(const Duration(seconds: 3));
+      expect(find.text('1:1 · Dengeli'), findsOneWidget);
+    });
+
+    testWidgets('U169: the other choices stay on this computer', (tester) async {
+      final b = _FakeBackend()..accountSupported = true;
+      await _pump(tester, b, open: SenseSettingsCategory.incoming);
+      expect(find.text(SenseSettingsStrings.recordDirHint), findsOneWidget, reason: 'Kayıtlar yalnız bu bilgisayarda');
+      expect(b.accountWrites, isEmpty);
     });
 
     testWidgets('B9: a write that fails says "Kaydedilemedi" and writes no record', (tester) async {
