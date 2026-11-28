@@ -70,6 +70,10 @@ validate_patch_inputs() {
     echo "Flutter 3.44 source patch input is missing or unreadable: flutter/lib/common.dart" >&2
     return 1
   fi
+  if [[ ! -f flutter/lib/common/sense_theme.dart || ! -r flutter/lib/common/sense_theme.dart ]]; then
+    echo "Flutter 3.44 source patch input is missing or unreadable: flutter/lib/common/sense_theme.dart" >&2
+    return 1
+  fi
   if [[ ! -f flutter/pubspec.yaml || ! -r flutter/pubspec.yaml ]]; then
     echo "Flutter 3.44 source patch input is missing or unreadable: flutter/pubspec.yaml" >&2
     return 1
@@ -81,6 +85,8 @@ is_complete_patch_state() {
     has_exact_count "$THEME_MATCHES" 'tabBarTheme: const TabBarThemeData(' flutter/lib/common.dart &&
     has_exact_count "$SINGLE_MATCH" 'backgroundColor: Colors.white,' flutter/lib/common.dart &&
     has_exact_count "$SINGLE_MATCH" 'backgroundColor: Color(0xFF18191E),' flutter/lib/common.dart &&
+    has_exact_count "$SINGLE_MATCH" 'dialogTheme: DialogThemeData(' flutter/lib/common/sense_theme.dart &&
+    has_exact_count "$NO_MATCHES" 'dialogTheme: DialogTheme(' flutter/lib/common/sense_theme.dart &&
     has_exact_count "$SINGLE_MATCH" 'extended_text: 15.0.2' flutter/pubspec.yaml &&
     has_exact_count "$SINGLE_MATCH" 'google_fonts: ^8.1.0' flutter/pubspec.yaml &&
     has_exact_count "$NO_MATCHES" 'dialogTheme: DialogTheme(' flutter/lib/common.dart &&
@@ -98,6 +104,8 @@ is_complete_patch_state() {
 is_unpatched_state() {
   has_exact_count "$THEME_MATCHES" 'dialogTheme: DialogTheme(' flutter/lib/common.dart &&
     has_exact_count "$THEME_MATCHES" 'tabBarTheme: const TabBarTheme(' flutter/lib/common.dart &&
+    has_exact_count "$SINGLE_MATCH" 'dialogTheme: DialogTheme(' flutter/lib/common/sense_theme.dart &&
+    has_exact_count "$NO_MATCHES" 'dialogTheme: DialogThemeData(' flutter/lib/common/sense_theme.dart &&
     has_exact_count "$SINGLE_MATCH" 'extended_text: 14.0.0' flutter/pubspec.yaml &&
     has_exact_count "$SINGLE_MATCH" 'google_fonts: ^6.2.1' flutter/pubspec.yaml &&
     has_exact_count "$NO_MATCHES" 'dialogTheme: DialogThemeData(' flutter/lib/common.dart &&
@@ -114,7 +122,7 @@ fi
 
 if is_complete_patch_state; then
   echo "Flutter 3.44 source patches already applied."
-  git --no-pager diff -- flutter/lib/common.dart flutter/pubspec.yaml
+  git --no-pager diff -- flutter/lib/common.dart flutter/lib/common/sense_theme.dart flutter/pubspec.yaml
   exit 0
 fi
 
@@ -125,6 +133,8 @@ fi
 
 # ThemeData API renames (Flutter 3.27+):
 sed -i 's/dialogTheme: DialogTheme(/dialogTheme: DialogThemeData(/g' flutter/lib/common.dart
+# Sense Remote: the Sense theme has its own dialogTheme.
+sed -i 's/dialogTheme: DialogTheme(/dialogTheme: DialogThemeData(/g' flutter/lib/common/sense_theme.dart
 sed -i 's/tabBarTheme: const TabBarTheme(/tabBarTheme: const TabBarThemeData(/g' flutter/lib/common.dart
 sed -i '/static ThemeData lightTheme = ThemeData(/,/static ThemeData darkTheme = ThemeData(/s/dialogTheme: DialogThemeData(/dialogTheme: DialogThemeData(\
       backgroundColor: Colors.white,/' flutter/lib/common.dart
@@ -140,4 +150,4 @@ if ! is_complete_patch_state; then
   exit 1
 fi
 
-git --no-pager diff -- flutter/lib/common.dart flutter/pubspec.yaml
+git --no-pager diff -- flutter/lib/common.dart flutter/lib/common/sense_theme.dart flutter/pubspec.yaml

@@ -1,0 +1,119 @@
+diff --git a/src/config.rs b/src/config.rs
+index 9ee5cac..584fff3 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -711,18 +711,108 @@ pub fn load_path<T: serde::Serialize + serde::de::DeserializeOwned + Default + s
+ 
+ #[inline]
+ pub fn store_path<T: serde::Serialize>(path: PathBuf, cfg: T) -> crate::ResultType<()> {
++    // Sense Remote (Sürüm 12, U168b, #168 W20): confy writes a temporary file and renames it over
++    // the config; on Windows the rename fails while another process (antivirus, indexer, the
++    // other Sense process reading it) holds the file open. Three more tries 20 ms apart, and the
++    // OS error kind goes to the log (the bare message "Failed to write configuration file" said
++    // nothing about why).
++    store_with_retry(|| store_path_once(&path, &cfg), std::time::Duration::from_millis(20))
++}
++
++fn store_path_once<T: serde::Serialize>(path: &PathBuf, cfg: &T) -> Result<(), confy::ConfyError> {
+     #[cfg(not(windows))]
+     {
+         use std::os::unix::fs::PermissionsExt;
+-        Ok(confy::store_path_perms(
+-            path,
+-            cfg,
+-            fs::Permissions::from_mode(0o600),
+-        )?)
++        confy::store_path_perms(path, cfg, fs::Permissions::from_mode(0o600))
+     }
+     #[cfg(windows)]
+     {
+-        Ok(confy::store_path(path, cfg)?)
++        confy::store_path(path, cfg)
++    }
++}
++
++/// Sense Remote (U168b): one try plus [`STORE_RETRIES`] more, `gap` apart, for a write error only
++/// (a serialization error does not get better by waiting).
++const STORE_RETRIES: usize = 3;
++fn store_with_retry(
++    mut once: impl FnMut() -> Result<(), confy::ConfyError>,
++    gap: std::time::Duration,
++) -> crate::ResultType<()> {
++    let mut tries = 0;
++    loop {
++        match once() {
++            Ok(()) => {
++                if tries > 0 {
++                    log::info!("Sense Remote: config stored after {tries} retries");
++                }
++                return Ok(());
++            }
++            Err(confy::ConfyError::WriteConfigurationFileError(io)) => {
++                let kind = io.kind();
++                let os = io.raw_os_error();
++                if tries >= STORE_RETRIES {
++                    log::error!(
++                        "Sense Remote: config not stored after {tries} retries: kind={kind:?} os_error={os:?} {io}"
++                    );
++                    return Err(confy::ConfyError::WriteConfigurationFileError(io).into());
++                }
++                log::warn!("Sense Remote: config write failed (kind={kind:?} os_error={os:?}), retrying");
++                tries += 1;
++                std::thread::sleep(gap);
++            }
++            Err(err) => return Err(err.into()),
++        }
++    }
++}
++
++#[cfg(test)]
++mod sense_store_retry_tests {
++    use super::*;
++
++    fn locked() -> confy::ConfyError {
++        // ERROR_SHARING_VIOLATION, what a held file gives on Windows.
++        confy::ConfyError::WriteConfigurationFileError(std::io::Error::from_raw_os_error(32))
++    }
++
++    #[test]
++    fn a_briefly_locked_file_is_stored_on_a_retry() {
++        let mut calls = 0;
++        let result = store_with_retry(
++            || {
++                calls += 1;
++                if calls < 3 { Err(locked()) } else { Ok(()) }
++            },
++            std::time::Duration::ZERO,
++        );
++        assert!(result.is_ok());
++        assert_eq!(calls, 3);
++    }
++
++    #[test]
++    fn a_file_that_stays_locked_fails_after_three_retries() {
++        let mut calls = 0;
++        let result = store_with_retry(
++            || {
++                calls += 1;
++                Err(locked())
++            },
++            std::time::Duration::ZERO,
++        );
++        assert!(result.is_err());
++        assert_eq!(calls, 1 + STORE_RETRIES);
++    }
++
++    #[test]
++    fn a_real_store_into_a_temp_dir_works() {
++        let dir = std::env::temp_dir().join(format!("sense-store-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let path = dir.join("cfg.toml");
++        let mut cfg = Config2::default();
++        cfg.rendezvous_server = "example.invalid".to_owned();
++        store_path(path.clone(), &cfg).unwrap();
++        let back: Config2 = load_path(path);
++        assert_eq!(back.rendezvous_server, "example.invalid");
++        let _ = std::fs::remove_dir_all(&dir);
+     }
+ }
+ 
