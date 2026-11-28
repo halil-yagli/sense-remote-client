@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/models/state_model.dart' show SvcStatus;
+import 'package:flutter_hbb/sense/screens/host/data/host_settings.dart';
 import 'package:flutter_hbb/sense/screens/host/data/host_status.dart';
 import 'package:flutter_hbb/sense/screens/host/data/identity.dart';
 import 'package:flutter_hbb/sense/screens/install/sense_install_model.dart' show SenseLoginStatus;
@@ -28,7 +29,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'host_support.dart';
 
-const _allOn = [true, true, true, true, true, true, true, true];
+// #166: the panel's 13 permissions.
+const _allOn = [true, true, true, true, true, true, true, true, true, true, true, true, true];
 
 SenseThisComputerView _view({
   SenseHostPhase phase = SenseHostPhase.ready,
@@ -36,6 +38,7 @@ SenseThisComputerView _view({
   SensePasswordController? password,
   SenseRoleController? role,
   List<bool> permissions = _allOn,
+  SenseHostNet hostNet = SenseHostNet.unknown,
   List<SenseRecentConnection> recent = const [],
   Future<String?> Function(String)? onRename,
   Future<String?> Function(SensePlace)? onPlace,
@@ -54,6 +57,7 @@ SenseThisComputerView _view({
       identity: identity,
       deviceId: '482 913 207',
       permissions: permissions,
+      hostNet: hostNet,
       recent: recent,
       now: DateTime(2026, 11, 23, 12),
       macMissing: macMissing,
@@ -181,7 +185,9 @@ void main() {
       expect(senseOptionOn(''), isTrue);
       expect(senseOptionOn('N'), isFalse);
       expect(kSenseHostPermissions.map((p) => p.label), [
-        'Ekran', 'Fare ve klavye', 'Pano', 'Dosya', 'Ses', 'Yeniden başlatma', 'Oturum kaydı', 'Hayalet mod', //
+        'Fare ve klavye', 'Pano', 'Dosya', 'Ses', 'Yeniden başlatma', 'Oturum kaydı', //
+        'Yerel girişi engelleme', 'Hayalet mod', 'Terminal', 'Tünel', 'Kamera', 'Uzak yazıcı', //
+        'Duvar kâğıdını kaldırma',
       ]);
       final recent = senseRecentParse('[{"name":"Ayşe","at":1000,"seconds":60,"screens":3},{"name":1}]');
       expect(recent, hasLength(1));
@@ -362,8 +368,8 @@ void main() {
       final pw = passwordIn(SensePasswordStage.locked);
       final role = roleWith();
       await tester.pumpWidget(app(page(_view(
-          password: pw, role: role, recent: _recent, permissions: const [true, true, true, true, true, true, true, false]))));
-      expect(find.text('panelden · imzalı · 7 açık'), findsOneWidget);
+          password: pw, role: role, recent: _recent, permissions: const [true, true, true, true, true, true, true, true, true, true, true, true, false]))));
+      expect(find.text('panelden · imzalı · 12 açık'), findsOneWidget);
       expect(find.text('ayarlı · 12 Kas 2026'), findsOneWidget);
       expect(find.text('Host'), findsOneWidget);
       expect(find.text('dün · Mevlüt · 14 dk'), findsOneWidget);
@@ -386,9 +392,9 @@ void main() {
       setWindow(tester, const Size(1180, 1400));
       await tester.pumpWidget(app(page(_view(initialOpen: 'perm'))));
       expect(find.text(SenseHostStrings.permissionsHint), findsOneWidget);
-      expect(find.text('Panelden yönetilir'), findsNWidgets(8));
+      expect(find.text('Panelden yönetilir'), findsNWidgets(13));
       final toggles = find.byType(SenseToggle);
-      expect(toggles, findsNWidgets(8));
+      expect(toggles, findsNWidgets(13));
       for (final t in tester.widgetList<SenseToggle>(toggles)) {
         expect(t.locked, isTrue);
         expect(t.onChanged, isNull);
@@ -918,5 +924,160 @@ void main() {
         c.dispose();
       }
     }, skip: goldenSkip('host_steps'), tags: const ['golden']);
+  });
+
+  group('Sürüm 12 (HB): 13 yetki, Ses ve ağ', () {
+    test('13 permissions, panel order; allow-* options are on only with "Y"', () {
+      expect(kSenseHostPermissions, hasLength(13));
+      // The panel's keys, in the panel's order (PERMISSION_OPTION_KEYS).
+      expect(kSenseHostPermissions.map((p) => p.key), [
+        'enable-keyboard', 'enable-clipboard', 'enable-file-transfer', 'enable-audio', //
+        'enable-remote-restart', 'enable-record-session', 'enable-block-input', //
+        'enable-privacy-mode', 'enable-terminal', 'enable-tunnel', 'enable-camera', //
+        'enable-remote-printer', 'allow-remove-wallpaper',
+      ]);
+      final terminal = kSenseHostPermissions.firstWhere((p) => p.key == 'enable-terminal');
+      final wallpaper = kSenseHostPermissions.firstWhere((p) => p.key == 'allow-remove-wallpaper');
+      expect(senseHostPermissionOn(terminal, ''), isTrue);
+      expect(senseHostPermissionOn(terminal, 'N'), isFalse);
+      expect(senseHostPermissionOn(wallpaper, ''), isFalse);
+      expect(senseHostPermissionOn(wallpaper, 'N'), isFalse);
+      expect(senseHostPermissionOn(wallpaper, 'Y'), isTrue);
+    });
+
+    test('Ses ve ağ values are read from the options', () async {
+      Future<SenseHostNet> read(Map<String, String> v) =>
+          senseHostNetRead((key) async => v[key] ?? '');
+      final system = await read({
+        'audio-input': '',
+        'enable-audio': 'Y',
+        'keep-awake-during-incoming-sessions': 'Y',
+        'relay-fallback-delay': '',
+        'disable-udp': 'N',
+      });
+      expect(system.audioText, 'Sistem sesi');
+      expect(system.awakeText, 'Açık');
+      expect(system.relayText, 'Varsayılan');
+      expect(system.udpText, 'Açık');
+      expect(system.tcpOnlyText, 'Kapalı');
+
+      final other = await read({
+        'audio-input': 'Mikrofon (USB)',
+        'relay-fallback-delay': '5',
+        'disable-udp': 'Y',
+      });
+      expect(other.audioText, 'Mikrofon');
+      expect(other.awakeText, 'Kapalı');
+      expect(other.relayText, '5 sn');
+      expect(other.udpText, 'Kapalı');
+      expect(other.tcpOnlyText, 'Açık');
+
+      // The panel's "off" also turns the audio permission off.
+      expect((await read({'audio-input': '', 'enable-audio': 'N'})).audioText, 'Kapalı');
+      expect((await read({'relay-fallback-delay': '0'})).relayText, 'Hemen');
+      expect((await read({'relay-fallback-delay': 'x'})).relayText, 'okunamadı');
+    });
+
+    test('a value that cannot be read is "okunamadı", never made up', () async {
+      final net = await senseHostNetRead((key) async => throw StateError('no bridge'));
+      for (final t in [net.audioText, net.awakeText, net.relayText, net.udpText, net.tcpOnlyText]) {
+        expect(t, 'okunamadı');
+      }
+      expect(SenseHostNet.unknown.udpText, 'okunamadı');
+    });
+
+    testWidgets('Ses ve ağ: the category after Yetkiler, five locked rows', (tester) async {
+      setWindow(tester, const Size(1180, 1400));
+      final pw = passwordIn(SensePasswordStage.locked);
+      final role = roleWith();
+      await tester.pumpWidget(app(page(_view(
+          password: pw,
+          role: role,
+          recent: _recent,
+          initialOpen: 'hset',
+          hostNet: const SenseHostNet(
+              audioInput: '',
+              audioEnabled: 'Y',
+              keepAwake: 'N',
+              relayDelay: '',
+              disableUdp: 'N')))));
+      double y = -1;
+      for (final id in ['perm', 'hset', 'pw', 'role', 'recent']) {
+        final f = find.byKey(ValueKey('sense-acc-$id'));
+        expect(f, findsOneWidget, reason: id);
+        final top = tester.getTopLeft(f).dy;
+        expect(top, greaterThan(y), reason: id);
+        y = top;
+      }
+      expect(find.text('Ses ve ağ'), findsOneWidget);
+      expect(find.text('panelden · kilitli'), findsOneWidget);
+      expect(find.text(SenseHostStrings.netHint), findsOneWidget);
+      for (final label in [
+        'Ses girişi', 'Gelen oturumda uyanık tut', 'Aktarmaya düşme gecikmesi', 'UDP', //
+        'Yalnız TCP / WebSocket',
+      ]) {
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+      expect(find.text('Sistem sesi'), findsOneWidget);
+      expect(find.text('Varsayılan'), findsOneWidget);
+      expect(find.text('Panelden yönetilir'), findsNWidgets(5));
+      // Locked: nothing here is a switch.
+      expect(find.byType(SenseToggle), findsNothing);
+      pw.dispose();
+      role.dispose();
+    });
+
+    testWidgets('Ses ve ağ: unread values say "okunamadı"', (tester) async {
+      setWindow(tester, const Size(1180, 1400));
+      await tester.pumpWidget(app(page(_view(initialOpen: 'hset'))));
+      expect(find.text('okunamadı'), findsNWidgets(5));
+    });
+  
+
+    // Golden: "Yetkiler" with the panel's 13 and "Ses ve ağ" (compare prototype `thisView`).
+    Future<void> shot(WidgetTester tester, String name, String open) async {
+      setWindow(tester, const Size(1180, 1100));
+      final pw = passwordIn(SensePasswordStage.locked);
+      final role = roleWith();
+      await tester.pumpWidget(app(Align(
+        alignment: Alignment.topLeft,
+        child: RepaintBoundary(
+          key: const Key('golden'),
+          child: SizedBox(
+            width: SenseSizes.windowWidth,
+            height: 1100,
+            child: SenseHostShellView(
+              nav: SenseHostNav.thisComputer,
+              version: 4,
+              onNav: (_) {},
+              child: _view(
+                  password: pw,
+                  role: role,
+                  recent: _recent,
+                  initialOpen: open,
+                  permissions: const [
+                    true, true, true, true, true, true, true, true, false, false, false, false, false //
+                  ],
+                  hostNet: const SenseHostNet(
+                      audioInput: '',
+                      audioEnabled: 'Y',
+                      keepAwake: 'N',
+                      relayDelay: '',
+                      disableUdp: 'N')),
+            ),
+          ),
+        ),
+      )));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile(name)));
+      pw.dispose();
+      role.dispose();
+    }
+
+    testWidgets('s12: Yetkiler, 13 madde', (tester) => shot(tester, 'host_s12_perms', 'perm'),
+        skip: goldenSkip('host_s12_perms'), tags: const ['golden']);
+    testWidgets('s12: Ses ve ağ, kilitli', (tester) => shot(tester, 'host_s12_net', 'hset'),
+        skip: goldenSkip('host_s12_net'), tags: const ['golden']);
   });
 }

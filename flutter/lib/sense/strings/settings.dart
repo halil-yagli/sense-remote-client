@@ -63,6 +63,9 @@ abstract final class SenseSettingsStrings {
   static const String autoRecord = 'Bağlantıları otomatik kaydet';
   static const String recordDir = 'Kayıt klasörü';
 
+  /// FU-A5: Host role, locked; the value is the panel's `enable-record-session`.
+  static const String recordIncoming = 'Gelen bağlantıları kaydet';
+
   /// #57: recordings never leave this computer.
   static const String recordDirHint = 'Kayıtlar yalnız bu bilgisayarda kalır; panele yüklenmez';
   static const String sumRecordOn = 'kayıt açık';
