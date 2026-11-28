@@ -15,32 +15,20 @@
 /// Login error sent to a second Controller. The app maps it to its "Meşgul" text.
 pub const BUSY: &str = "sense_busy";
 
-/// Sense Remote (Sürüm 12, "Meşgul" ayrıntısı): the login error with who is connected and since
-/// when: `sense_busy {"by":"<display name>","since":<unix s>}`. It still starts with [`BUSY`], so
-/// an older Controller shows its plain "Meşgul" card. Only the Sense employee's display name (the
-/// name the Controller logs in with) and the start time; no id, address or computer name.
-pub fn busy_text(current: Option<(&str, i64)>) -> String {
-    let mut detail = serde_json::Map::new();
-    if let Some((name, since)) = current {
-        let name = name.trim();
-        if !name.is_empty() {
-            detail.insert("by".to_owned(), name.into());
-        }
-        if since > 0 {
-            detail.insert("since".to_owned(), since.into());
-        }
-    }
-    if detail.is_empty() {
-        BUSY.to_owned()
-    } else {
-        format!("{BUSY} {}", serde_json::Value::Object(detail))
+/// Sense Remote (Sürüm 12, "Meşgul" ayrıntısı): the login error with since when the Host is in
+/// use: `sense_busy {"since":<unix s>}`. It still starts with [`BUSY`], so an older Controller
+/// shows its plain "Meşgul" card. The answer goes out before the password check, so it carries
+/// no name, id, address or computer name (karar #173); "who" comes from the panel (`busy_by`).
+pub fn busy_text(since: Option<i64>) -> String {
+    match since.filter(|s| *s > 0) {
+        Some(since) => format!("{BUSY} {}", serde_json::json!({ "since": since })),
+        None => BUSY.to_owned(),
     }
 }
 
 /// [`busy_text`] for the connection open on this Host now (`host_recent`).
 pub fn busy_message() -> String {
-    let current = super::host_recent::current();
-    busy_text(current.as_ref().map(|(name, at)| (name.as_str(), *at)))
+    busy_text(super::host_recent::open_since())
 }
 
 /// Held from the second check until the connection is in `AUTHED_CONNS`. A tokio mutex: the
@@ -110,23 +98,19 @@ mod tests {
     }
 
     #[test]
-    fn busy_text_names_who_and_since() {
-        assert_eq!(
-            busy_text(Some(("Ayşe Y.", 1_732_790_000))),
-            r#"sense_busy {"by":"Ayşe Y.","since":1732790000}"#
-        );
-        // Quotes and braces in a name stay inside the JSON string.
-        let text = busy_text(Some(("A \"B\" {C}", 5)));
-        assert!(text.starts_with("sense_busy {"));
+    fn busy_text_says_since_when_and_nothing_else() {
+        let text = busy_text(Some(1_732_790_000));
+        assert_eq!(text, r#"sense_busy {"since":1732790000}"#);
+        // Karar #173: one key only (no name before the password check).
         let json: serde_json::Value = serde_json::from_str(&text[BUSY.len() + 1..]).unwrap();
-        assert_eq!(json["by"], "A \"B\" {C}");
+        assert_eq!(json.as_object().unwrap().len(), 1);
     }
 
     #[test]
-    fn busy_text_without_detail_is_the_old_code() {
+    fn busy_text_without_a_time_is_the_old_code() {
         assert_eq!(busy_text(None), "sense_busy");
-        assert_eq!(busy_text(Some(("  ", 0))), "sense_busy");
-        assert_eq!(busy_text(Some(("", 7))), r#"sense_busy {"since":7}"#);
+        assert_eq!(busy_text(Some(0)), "sense_busy");
+        assert_eq!(busy_text(Some(-5)), "sense_busy");
     }
 
     #[test]

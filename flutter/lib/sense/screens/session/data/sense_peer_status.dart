@@ -183,6 +183,7 @@ class SensePeerStatus {
     this.displays = const [],
     this.network = const [],
     this.wakeable,
+    this.busyBy,
   });
 
   final bool online;
@@ -207,6 +208,10 @@ class SensePeerStatus {
   /// online computer at the same place). Null = the panel did not say (older panel).
   final bool? wakeable;
 
+  /// Sürüm 12 (Meşgul kartı, karar #173): display name of the Sense employee connected to this
+  /// computer, for a signed-in employee who may see it. Null = nobody, or an older panel.
+  final String? busyBy;
+
   static SensePeerStatus? fromJson(Object? json) {
     if (json is! Map) return null;
     final online = _bool(json['online']);
@@ -222,6 +227,7 @@ class SensePeerStatus {
       network: senseOrderNetwork(
           _list(json['network'], SensePeerNetwork.fromJson)),
       wakeable: _bool(json['wakeable']),
+      busyBy: _name(json['busy_by']),
     );
   }
 
@@ -378,6 +384,14 @@ double? _num(Object? v) {
 }
 
 bool? _bool(Object? v) => v is bool ? v : null;
+
+/// A display name: trimmed, at most 64 characters, empty = none.
+String? _name(Object? v) {
+  if (v is! String) return null;
+  final s = v.trim();
+  if (s.isEmpty) return null;
+  return s.length > 64 ? s.substring(0, 64) : s;
+}
 
 String? _str(Object? v) => v is String ? v : null;
 

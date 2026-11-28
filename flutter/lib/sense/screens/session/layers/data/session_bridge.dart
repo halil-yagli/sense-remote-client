@@ -238,11 +238,11 @@ class SenseFfiConnectHost implements SenseConnectHost {
   }
 
   @override
-  Future<SenseOfflineInfo?> offlineInfo() async {
+  Future<SensePanelInfo?> panelInfo() async {
     // Sürüm 12: the panel's peer-status (the same key the status popup uses).
     final status = (await SensePeerStatusClient().fetch(id)).status;
     if (status == null) return null;
-    return SenseOfflineInfo(lastSeenAt: status.lastSeenAt, wakeable: status.wakeable);
+    return SensePanelInfo(lastSeenAt: status.lastSeenAt, wakeable: status.wakeable, busyBy: status.busyBy);
   }
 
   @override

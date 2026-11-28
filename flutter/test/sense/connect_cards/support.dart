@@ -31,15 +31,15 @@ class FakeConnectHost implements SenseConnectHost {
   @override
   void retry() => calls.add('retry');
 
-  SenseOfflineInfo? offline;
+  SensePanelInfo? panel;
 
   @override
-  Future<SenseOfflineInfo?> offlineInfo() async {
-    offlineAsked++;
-    return offline;
+  Future<SensePanelInfo?> panelInfo() async {
+    panelAsked++;
+    return panel;
   }
 
-  int offlineAsked = 0;
+  int panelAsked = 0;
 
   @override
   void close() => calls.add('close');

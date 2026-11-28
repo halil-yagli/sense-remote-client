@@ -20,12 +20,12 @@ abstract final class SenseConnectStrings {
   static String busyBody(String name) => '$name şu an başka biri tarafından kullanılıyor.';
   static const String busyHint = 'Bir bilgisayara aynı anda tek kişi bağlanır';
 
-  /// Sürüm 12: the Host says who is connected and since when (prototype `cstSim` busy:
+  /// Sürüm 12: who (panel `busy_by`) and since when (Host) (prototype `cstSim` busy:
   /// "… şu an Elif K. tarafından kullanılıyor · 12 dk'dır"). Without either, [busyBody].
   static String busyBodyDetail(String name, {String? by, int? minutes}) {
     if (by == null && minutes == null) return busyBody(name);
     final who = by == null
-        ? '$name şu an başka biri tarafından kullanılıyor'
+        ? '$name şu an başka bir Sense çalışanı tarafından kullanılıyor'
         : '$name şu an $by tarafından kullanılıyor';
     return minutes == null ? '$who.' : '$who · ${busyFor(minutes)}';
   }

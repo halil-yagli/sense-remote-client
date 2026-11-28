@@ -138,14 +138,11 @@ pub fn screens(conn_id: i32, count: usize) {
     }
 }
 
-/// Sense Remote (Sürüm 12, S8 "Meşgul" ayrıntısı): the connection open longest on this Host —
-/// its Controller's display name and start (Unix s) — for the busy answer to a second Controller.
-pub fn current() -> Option<(String, i64)> {
-    locked(&OPEN)
-        .as_ref()?
-        .values()
-        .min_by_key(|open| open.at)
-        .map(|open| (open.name.clone(), open.at))
+/// Sense Remote (Sürüm 12, S8 "Meşgul" ayrıntısı): start (Unix s) of the connection open longest
+/// on this Host, for the busy answer to a second Controller. Only the time, never the name: that
+/// answer goes out before the password check (karar #173).
+pub fn open_since() -> Option<i64> {
+    locked(&OPEN).as_ref()?.values().map(|open| open.at).min()
 }
 
 /// The connection closed: it goes into the list (and the file).
