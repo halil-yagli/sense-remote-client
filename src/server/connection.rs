@@ -390,6 +390,11 @@ pub struct Connection {
     sense_offers_reading: Vec<i32>,
     // Sense Remote (H4, O11): time stamp of a call the Host started, until the Controller answers.
     sense_call_out: Option<i64>,
+    // Sense Remote (Sürüm 12, #167): the idle value last sent to the Controller (`sense.idle`).
+    sense_idle_sent: Option<Option<u32>>,
+    // Sense Remote (Sürüm 12, #157): a terminal was opened on this connection (the admin ticket
+    // is taken only before that).
+    sense_term_opened: bool,
     trusted_device: Option<crate::trusted_devices::host::Attempt>,
     keyboard: bool,
     clipboard: bool,
@@ -592,6 +597,8 @@ impl Connection {
             sense_offers: Vec::new(),
             sense_offers_reading: Vec::new(),
             sense_call_out: None,
+            sense_idle_sent: None,
+            sense_term_opened: false,
             trusted_device: None,
             // Defer display enumeration until login succeeds. Monitor login replaces this
             // with the primary index returned with the refreshed display snapshot.
@@ -1219,6 +1226,21 @@ impl Connection {
                             conn.send_close_reason_no_retry("Connection failed due to inactivity").await;
                             conn.on_close("auto disconnect", true).await;
                             break;
+                        }
+                    }
+                    // Sense Remote (Sürüm 12, #167): the Host's idle value to the Controller,
+                    // after the login and when it changes (then the running timer follows it).
+                    if conn.authorized && conn.is_remote() {
+                        let first = conn.sense_idle_sent.is_none();
+                        let now = crate::sense::peer_msg::idle_minutes(
+                            &Config::get_option("allow-auto-disconnect"),
+                            &Config::get_option("auto-disconnect-timeout"),
+                        );
+                        if let Some(m) = crate::sense::peer_msg::idle_update(&mut conn.sense_idle_sent, now) {
+                            if !first {
+                                conn.auto_disconnect_timer = Connection::get_auto_disconenct_timer();
+                            }
+                            conn.send(m.to_message()).await;
                         }
                     }
                     conn.file_remove_log_control.on_timer().drain(..).map(|x| conn.send_to_cm(x)).count();
@@ -4295,11 +4317,25 @@ impl Connection {
                             remote: self.is_remote(),
                             terminal: self.terminal,
                             keyboard: self.peer_keyboard_enabled(),
+                            term_admin_capable: self.sense_term_admin_capable(),
+                            terminal_enabled: Self::permission(
+                                keys::OPTION_ENABLE_TERMINAL,
+                                &self.control_permissions,
+                            ),
                         };
                         for action in crate::sense::peer_msg::on_host(&ctx, &p) {
                             match action {
                                 crate::sense::peer_msg::HostAction::Reply(m) => {
                                     self.send(m.to_message()).await
+                                }
+                                crate::sense::peer_msg::HostAction::CmCapture(on) => {
+                                    self.send_to_cm(ipc::Data::Config((
+                                        crate::sense::peer_msg::CM_CAPTURE.to_owned(),
+                                        Some(if on { "Y" } else { "N" }.to_owned()),
+                                    )));
+                                }
+                                crate::sense::peer_msg::HostAction::TermAdminGranted { by } => {
+                                    self.sense_term_admin_grant(by).await
                                 }
                             }
                         }
@@ -4356,6 +4392,10 @@ impl Connection {
                 }
                 Some(message::Union::PortForwardChannel(ch)) => self.handle_port_forward_channel(ch),
                 Some(message::Union::TerminalAction(action)) => {
+                    // Sense Remote (#157): after the first open the admin ticket is refused.
+                    if matches!(action.union, Some(terminal_action::Union::Open(_))) {
+                        self.sense_term_opened = true;
+                    }
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     allow_err!(self.handle_terminal_action(action).await);
                     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -4466,6 +4506,56 @@ impl Connection {
             );
             Some("Failed to get user token.")
         }
+    }
+
+    // Sense Remote (Sürüm 12, #157): the admin terminal ticket can be taken on this connection:
+    // Windows, installed service (the server runs as SYSTEM), a terminal connection that has not
+    // opened a terminal yet.
+    fn sense_term_admin_capable(&self) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            crate::sense::term_admin::SUPPORTED
+                && self.terminal
+                && !self.sense_term_opened
+                && self.terminal_user_token.is_some()
+                && crate::platform::is_installed()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = self.sense_term_opened;
+            false
+        }
+    }
+
+    // Sense Remote (Sürüm 12, #157): the panel-signed ticket was accepted. The terminal of this
+    // connection runs with the service's rights, as after RustDesk's own administrator sign-in
+    // (`handle_administrator_check` → `SelfUser`), in a new terminal service (the session user's
+    // one is left as it was); the Host card shows who opened it.
+    async fn sense_term_admin_grant(&mut self, by: String) {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(s) = self.terminal_generic_service.take() {
+                s.join();
+            }
+            if let Some(TerminalUserToken::CurrentLogonUser(token)) = self.terminal_user_token.take()
+            {
+                if token.as_raw() != 0 {
+                    unsafe {
+                        hbb_common::allow_err!(CloseHandle(HANDLE(token.as_raw() as _)));
+                    };
+                }
+            }
+            self.terminal_user_token = Some(TerminalUserToken::SelfUser);
+            self.terminal_service_id = terminal_service::generate_service_id();
+            self.init_terminal_service().await;
+            log::info!("#{} Sense Remote: admin terminal enabled", self.inner.id());
+            self.send_to_cm(ipc::Data::Config((
+                crate::sense::term_admin::CM_KEY.to_owned(),
+                Some(by),
+            )));
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = by;
     }
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -5712,6 +5802,14 @@ impl Connection {
         };
         #[cfg(any(target_os = "android", target_os = "ios"))]
         let data = ipc::Data::Close;
+        // Sense Remote (Sürüm 12, #151): the Host card leaves the picture again, whatever the
+        // Controller asked.
+        if self.is_remote() {
+            self.send_to_cm(ipc::Data::Config((
+                crate::sense::peer_msg::CM_CAPTURE.to_owned(),
+                Some("N".to_owned()),
+            )));
+        }
         self.tx_to_cm.send(data).ok();
         self.port_forward_socket.take();
         if let Some(mut mux) = self.port_forward_mux.take() {

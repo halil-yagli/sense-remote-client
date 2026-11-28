@@ -767,7 +767,10 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                 // Sense Remote (S5, O11): call level and offer results from the
                                 // connection.
                                 Data::Config((name, value)) => {
-                                    crate::sense::chat_file::host_from_conn(self.conn_id, &name, value.as_deref());
+                                    // Sense Remote (Sürüm 12, #151, #157): card capture, admin terminal.
+                                    if !crate::sense::peer_msg::cm_from_conn(self.conn_id, &name, value.as_deref()) {
+                                        crate::sense::chat_file::host_from_conn(self.conn_id, &name, value.as_deref());
+                                    }
                                 }
                                 _ => {
 

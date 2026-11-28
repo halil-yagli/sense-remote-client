@@ -2026,6 +2026,11 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         self.handler.handle_peer_info(pi);
+                        // Sense Remote (Sürüm 12, FO-A12): reconnect attempts count from here.
+                        crate::sense::peer_msg::mark_connected(
+                            self.handler.lc.read().unwrap().session_id,
+                            self.handler.reconnect_count.load(Ordering::SeqCst),
+                        );
                         // Sense Remote (O12): resume the chat files a dropped link cut, from
                         // where they stopped (same session only).
                         if self.handler.is_default() {
