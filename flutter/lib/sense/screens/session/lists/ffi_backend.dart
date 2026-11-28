@@ -25,6 +25,11 @@ import '../../../../common/widgets/toolbar.dart'
     show TToggleMenu, allowDisplaySwitchInPrivacyMode, toolbarPrivacyMode;
 import '../../../../consts.dart';
 import '../../../diag_log.dart';
+import '../../../components/popup_host.dart' show SensePopupHost;
+import '../../../strings/terminal.dart' show SenseTerminalStrings;
+import '../../terminal/terminal_admin.dart' show senseRequestAdminTerminal;
+import '../bar/session_popups.dart' show SenseSessionPopups;
+import '../popups/terminal/terminal_popup.dart' show senseShowTerminalPopup, SenseTerminalPopup;
 import '../../../../desktop/widgets/kb_layout_type_chooser.dart' show KBLayoutType;
 import '../../../../desktop/widgets/remote_toolbar.dart' show ScreenAdjustor, ToolbarState;
 import '../../../../models/model.dart';
@@ -1116,12 +1121,34 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   @override
   void openTerminal() => _connectWithToken(terminal: true);
 
-  /// Like the RustDesk peer card: the flag is read (and cleared) when the terminal
-  /// session is added.
+  /// Sürüm 12 (#157, FO-A5): the Sense admin terminal — the popup's in-place step, then the
+  /// terminal window asks the panel ticket (no Windows password). The stock
+  /// `setEnvTerminalAdmin` path stays only inside TT's window as the fallback when the Host
+  /// answers `unsupported`.
   @override
   void openTerminalAdmin() {
-    setEnvTerminalAdmin();
-    _connectWithToken(terminal: true);
+    final alias = _try(() => bind.mainGetPeerOptionSync(id: ffi.id, key: 'alias'), '');
+    final computer = alias.isNotEmpty ? alias : _pi.hostname; // never the ID (ST 16)
+    final ctx = contextOf();
+    if (SensePopupHost.maybeOf(ctx) != null) {
+      senseShowTerminalPopup(ctx, admin: true, computer: computer, peerId: ffi.id, onOpen: openTerminal);
+      return;
+    }
+    // The bar's context is outside the remote page's popup host: open the same popup on this
+    // session's popup place (one popup at a time, the place the overlay draws).
+    final popups = SenseSessionPopups.of(ffi.id, ffi).controller;
+    popups.open(
+      SenseTerminalStrings.popupId,
+      (_) => SenseTerminalPopup(
+        computer: computer,
+        onClose: () => popups.close(SenseTerminalStrings.popupId),
+        onOpenAdmin: () {
+          popups.close(SenseTerminalStrings.popupId);
+          senseRequestAdminTerminal(ffi.id);
+          openTerminal();
+        },
+      ),
+    );
   }
 
   @override
