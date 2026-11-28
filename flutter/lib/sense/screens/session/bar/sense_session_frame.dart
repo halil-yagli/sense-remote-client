@@ -12,6 +12,7 @@ import '../data/session_state.dart';
 import '../island/sense_island.dart';
 import '../layers/layer_controller.dart' show SenseLayerController;
 import '../lists/backend.dart';
+import '../lists/favorites/favorites_list.dart' show SenseFavoritesList;
 import '../lists/list_specs.dart';
 import '../lists/session_list.dart';
 import '../record_notice.dart' show SenseRecordNotice;
@@ -103,6 +104,28 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
     if (popups != null && !popups.menuAllowed && _menus.openMenu != null) _menus.close();
   }
 
+  /// The open list: one of the four spec lists, or "Sık kullanılanlar" (Sürüm 12, #160).
+  Widget _list(BuildContext context, SenseBarMenu open, SenseSessionBackend b, double maxHeight) {
+    void notify(String m) {
+      if (context.mounted) SenseToast.show(context, m);
+    }
+    final fav = open == SenseBarMenu.favorites ? b.favorites : null;
+    if (fav != null) {
+      // The model's own results (a shortcut ran, the Host refused) come as toasts too.
+      fav.onNotice = notify;
+      return KeyedSubtree(
+        key: const ValueKey('sense-list-favorites'),
+        child: SenseFavoritesList(model: fav, maxHeight: maxHeight, onNotify: notify, onClose: _menus.close),
+      );
+    }
+    return SenseSessionList(
+      key: ValueKey('sense-list-${open.name}'),
+      spec: senseBuildList(open, b),
+      maxHeight: maxHeight,
+      onNotify: notify,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final b = widget.backend;
@@ -187,12 +210,7 @@ class _SenseSessionFrameState extends State<SenseSessionFrame> {
                         Positioned(
                           left: _anchorX(open, c.maxWidth),
                           top: 0,
-                          child: SenseSessionList(
-                              key: ValueKey('sense-list-${open.name}'),
-                              spec: senseBuildList(open, b),
-                              maxHeight: (c.maxHeight - kSenseListBottomGap).clamp(120.0, double.infinity),
-                              onNotify: (m) => SenseToast.show(context, m),
-                            ),
+                          child: _list(context, open, b, (c.maxHeight - kSenseListBottomGap).clamp(120.0, double.infinity)),
                         ),
                       ],
                     ]);

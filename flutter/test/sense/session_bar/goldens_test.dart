@@ -36,6 +36,10 @@ void main() {
   testWidgets('bar at 1280 × 720 (T9)',
       (t) => shot(t, 'bar_1280', FakeBackend()..recordingOn = true, size: const Size(1280, 720)),
       skip: goldenSkip('bar_1280'), tags: const ['golden']);
+  // Sürüm 12 (#160): "Sık kullanılanlar" as the fifth list, hanging under its button.
+  testWidgets('Sık kullanılanlar open under the bar (1600 px)',
+      (t) => shot(t, 'list_favorites_open', FakeBackend(), size: const Size(1600, 900), open: SenseBarMenu.favorites),
+      skip: goldenSkip('list_favorites_open'), tags: const ['golden']);
   testWidgets('c10 bar hidden, island at the top', (t) => shot(t, 'island_hidden_c10', FakeBackend()..barHidden = true, chatIcon: true),
       skip: goldenSkip('island_hidden_c10'), tags: const ['golden']);
   testWidgets('c02 Ekranlar', (t) => shot(t, 'list_screens_c02', FakeBackend(), open: SenseBarMenu.screens),
@@ -58,7 +62,7 @@ void main() {
       skip: goldenSkip('list_actions_c05'), tags: const ['golden']);
   // Sürüm 9 (Paket L): drawing settings (R4), custom resolution of a virtual display (R5).
   testWidgets('Görüntü, Gelişmiş (çizim) open',
-      (t) => shot(t, 'list_display_render', FakeBackend(), open: SenseBarMenu.display, taps: ['Gelişmiş']),
+      (t) => shot(t, 'list_display_render', FakeBackend(), open: SenseBarMenu.display, taps: ['Gelişmiş çizim']),
       skip: goldenSkip('list_display_render'), tags: const ['golden']);
   testWidgets('Ekranlar, Uzak çözünürlük open on a virtual display',
       (t) => shot(

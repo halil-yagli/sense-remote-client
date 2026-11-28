@@ -5,6 +5,8 @@
 //
 // The core answers "not supported" until FAV-Ç fills the bodies; an older Host never
 // answers a run at all. The model turns both into a calm line, never a dialog.
+import 'dart:convert';
+
 import 'catalog.dart';
 
 abstract class SenseFavoritesIo {
@@ -29,8 +31,9 @@ abstract class SenseFavoritesIo {
   bool sendKeys(SenseFavKeys keys);
 }
 
-/// A run the Host answered (`sense_shortcut_result {req, ok, err}`).
-typedef SenseFavResultSink = void Function(int req, bool ok, String? err);
+/// A run the Host answered (`sense_shortcut_result {req, ok, err, res}`). `res` (FAV-Ç, #171)
+/// is the optional result body: `{ping: …}`, `{windows: […]}` or `{ip: …}`; null when absent.
+typedef SenseFavResultSink = void Function(int req, bool ok, String? err, Map<String, dynamic>? res);
 
 /// Routes the core's events to the open lists. The session event listener calls
 /// [handle] (one line next to `SenseSessionEvents.handle`); the main event listener
@@ -60,7 +63,7 @@ abstract final class SenseFavoritesEvents {
       final ok = '${evt['ok']}' == 'true';
       final raw = evt['err'];
       final err = raw == null || '$raw' == 'null' || '$raw'.isEmpty ? null : '$raw';
-      if (req != null) _results[peerId]?.call(req, ok, err);
+      if (req != null) _results[peerId]?.call(req, ok, err, resOf(evt['res']));
       return true;
     }
     if (name == prefsChanged) {
@@ -68,6 +71,21 @@ abstract final class SenseFavoritesEvents {
       return true;
     }
     return false;
+  }
+
+  /// The result body as a map: the core sends it nested (JSON object), a string is decoded.
+  static Map<String, dynamic>? resOf(Object? raw) {
+    Object? v = raw;
+    if (v is String) {
+      if (v.isEmpty || v == 'null') return null;
+      try {
+        v = jsonDecode(v);
+      } catch (_) {
+        return null;
+      }
+    }
+    if (v is Map) return v.map((k, e) => MapEntry('$k', e));
+    return null;
   }
 
   /// A session-less event; false when [evt] is not one of ours.

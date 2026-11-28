@@ -8,6 +8,7 @@ import 'package:flutter_hbb/sense/screens/session/lists/favorites/catalog.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/favorites/favorites_ffi.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/favorites/favorites_list.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/favorites/favorites_model.dart';
+import 'package:flutter_hbb/sense/components/inline_confirm.dart' show SenseConfirmStrip;
 import 'package:flutter_hbb/sense/strings/favorites.dart';
 import 'package:uuid/uuid.dart';
 
@@ -101,12 +102,15 @@ void main() {
     expect(find.text('Oturum kapatılsın mı?'), findsOneWidget);
     expect(find.text('Açık programlardaki kaydedilmemiş işler kaybolabilir.'), findsOneWidget);
     expect(io.sent, isEmpty);
-    await t.tap(find.byKey(const ValueKey('sense-fav-ask-cancel')));
+    // Sürüm 12 (#158): the library's one question layout.
+    expect(find.descendant(of: find.byKey(const ValueKey('sense-fav-ask')), matching: find.byType(SenseConfirmStrip)),
+        findsOneWidget);
+    await t.tap(find.byKey(const Key('sense-confirm-cancel')));
     await t.pump();
     expect(find.text('Oturum kapatılsın mı?'), findsNothing);
     await t.tap(find.byKey(const ValueKey('sense-fav-run-win.logoff')));
     await t.pump();
-    await t.tap(find.byKey(const ValueKey('sense-fav-ask-ok')));
+    await t.tap(find.byKey(const Key('sense-confirm-ok')));
     await t.pump();
     expect(io.sent.single.$2['id'], 'win.logoff');
     m.dispose();
@@ -124,9 +128,9 @@ void main() {
     m.ipInfo = () => const SenseFavIpInfo(ip: '192.168.10.42', gateway: ['192.168.10.1'], dns: ['192.168.10.1', '8.8.8.8']);
     await t.tap(find.byKey(const ValueKey('sense-fav-run-win.ipinfo')));
     await t.pump();
-    expect(find.text('192.168.10.42'), findsOneWidget);
+    expect(find.text('192.168.10.42'), findsOneWidget, reason: 'the session data shows at once');
     expect(find.text('192.168.10.1 · 8.8.8.8'), findsOneWidget);
-    expect(io.sent, isEmpty, reason: 'the card reads data the session has');
+    expect(io.sent.single.$2['id'], 'win.ipinfo', reason: 'the Host is asked for its own values (#171)');
     expect(m.recent.first.id, 'win.ipinfo');
 
     await t.tap(find.byKey(const ValueKey('sense-fav-run-win.ping')));
@@ -134,10 +138,16 @@ void main() {
     expect(find.text('192.168.10.42'), findsNothing, reason: 'one pane at a time');
     await t.tap(find.byKey(const ValueKey('sense-fav-ping-start')));
     await t.pump();
+    expect(find.text(SenseFavoritesStrings.pingRunning), findsOneWidget);
+    expect(io.sent.last.$2['arg'], '8.8.8.8');
+    // This Host never answers (older build): calm line after the timeout.
+    await t.pump(const Duration(seconds: 31));
     expect(find.text(SenseFavoritesStrings.pingUnsupported), findsOneWidget);
 
     await t.tap(find.byKey(const ValueKey('sense-fav-run-win.killhung')));
     await t.pump();
+    expect(find.byKey(const ValueKey('sense-fav-windows-loading')), findsOneWidget);
+    await t.pump(const Duration(seconds: 9));
     expect(find.byKey(const ValueKey('sense-fav-windows-unsupported')), findsOneWidget);
   });
 

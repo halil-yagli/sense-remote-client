@@ -2,6 +2,7 @@
 // with the core's real strings: by default exactly what this build's core (ÇK-0 skeleton)
 // returns — an empty catalogue, `{"error":"unsupported"}` for the preference store and the
 // custom request, "" for a sent message.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -36,6 +37,12 @@ class FakeFavIo implements SenseFavoritesIo {
   final List<(String, Map<String, dynamic>)> sent = [];
   final List<SenseFavKeys> keys = [];
 
+  /// Sürüm 12 (#171): the Host's answers by shortcut id, pushed back the way the core pushes
+  /// `sense_shortcut_result` (after the run was sent). Ids without an answer are never
+  /// answered (an older Host). [answer] may look at the run (`arg`).
+  final Map<String, HostAnswer Function(Map<String, dynamic> run)> host = {};
+  String hostPeer = 'p1';
+
   @override
   Future<String> catalog(SenseFavOs os) async => catalogJson;
 
@@ -56,7 +63,22 @@ class FakeFavIo implements SenseFavoritesIo {
 
   @override
   Future<String> send(String name, String json) async {
-    sent.add((name, jsonDecode(json) as Map<String, dynamic>));
+    final body = jsonDecode(json) as Map<String, dynamic>;
+    sent.add((name, body));
+    final answer = host[body['id']];
+    if (answer != null && sendAnswer.isEmpty) {
+      final a = answer(body);
+      // A timer, not a microtask: the model waits for the answer only after `send` returned.
+      Timer(Duration.zero, () {
+        SenseFavoritesEvents.handle(hostPeer, {
+          'name': 'sense_shortcut_result',
+          'req': body['req'],
+          'ok': a.ok,
+          'err': a.err,
+          'res': a.res,
+        });
+      });
+    }
     return sendAnswer;
   }
 
@@ -66,6 +88,31 @@ class FakeFavIo implements SenseFavoritesIo {
     return true;
   }
 }
+
+/// One Host answer (`sense_shortcut_result {ok, err, res}`).
+typedef HostAnswer = ({bool ok, String? err, Object? res});
+
+/// Result bodies exactly as the Host builds them (`src/sense/shortcuts/results.rs`).
+const Map<String, dynamic> kResPing = {
+  'ping': {'sent': 4, 'received': 4, 'avg_ms': 18, 'loss': 0}
+};
+const Map<String, dynamic> kResPingLost = {
+  'ping': {'sent': 4, 'received': 0, 'avg_ms': null, 'loss': 100}
+};
+const Map<String, dynamic> kResWindows = {
+  'windows': [
+    {'pid': 4120, 'name': 'Sergi uygulaması', 'hung': true},
+    {'pid': 5532, 'name': 'Medya oynatıcı', 'hung': false},
+    {'pid': 7781, 'name': 'Tarayıcı', 'hung': false},
+  ]
+};
+const Map<String, dynamic> kResIp = {
+  'ip': {
+    'ip': '192.168.10.42',
+    'gateway': ['192.168.10.1'],
+    'dns': ['192.168.10.1', '8.8.8.8'],
+  }
+};
 
 /// A preference store answer as the core gives it (`{entries, custom}`).
 String prefsJson({

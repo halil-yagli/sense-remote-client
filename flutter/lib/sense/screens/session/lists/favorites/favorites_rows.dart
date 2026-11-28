@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../../../components/button.dart';
 import '../../../../components/caret.dart';
+import '../../../../components/inline_confirm.dart' show SenseConfirmStrip, senseAskRowColor;
 import '../../../../components/glyph.dart';
 import '../../../../components/sense_select.dart';
 import '../../../../components/spinner.dart';
@@ -255,7 +256,8 @@ class SenseFavKeyPicker extends StatelessWidget {
       );
 }
 
-/// The in-place question of a row that cannot be undone (`.it.asking.fvask`).
+/// The in-place question of a row that cannot be undone (`.it.asking.fvask`). Sürüm 12
+/// (#158): the one question layout of the library ([SenseConfirmStrip]) on the row's red tint.
 class SenseFavAskRow extends StatelessWidget {
   const SenseFavAskRow({super.key, required this.ask, required this.onCancel, required this.onConfirm});
   final SenseFavAsk ask;
@@ -264,39 +266,21 @@ class SenseFavAskRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.escape): onCancel},
-      child: Container(
-        key: const ValueKey('sense-fav-ask'),
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.fromLTRB(34, 8, 10, 10),
-        decoration: BoxDecoration(
-          color: SenseColors.hot.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(SenseRadii.button),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          Text(ask.question,
-              style: SenseTextStyles.of(size: SenseFontSize.body, weight: SenseFontWeight.medium)),
-          const SizedBox(height: 2),
-          Text(ask.detail, style: SenseTextStyles.of(size: SenseFontSize.hint, color: SenseColors.textDim)),
-          const SizedBox(height: 8),
-          Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: [
-            SenseButton(
-              key: const ValueKey('sense-fav-ask-cancel'),
-              label: SenseCommonStrings.cancel,
-              size: SenseButtonSize.small,
-              autofocus: true,
-              onPressed: onCancel,
-            ),
-            SenseButton(
-              key: const ValueKey('sense-fav-ask-ok'),
-              label: ask.ok,
-              size: SenseButtonSize.small,
-              kind: ask.danger ? SenseButtonKind.danger : SenseButtonKind.primary,
-              onPressed: onConfirm,
-            ),
-          ]),
-        ]),
+    return Container(
+      key: const ValueKey('sense-fav-ask'),
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.fromLTRB(34, 8, 10, 10),
+      decoration: BoxDecoration(
+        color: senseAskRowColor,
+        borderRadius: BorderRadius.circular(SenseRadii.button),
+      ),
+      child: SenseConfirmStrip(
+        question: ask.question,
+        detail: ask.detail,
+        confirmLabel: ask.ok,
+        confirmKind: ask.danger ? SenseButtonKind.danger : SenseButtonKind.primary,
+        onCancel: onCancel,
+        onConfirm: onConfirm,
       ),
     );
   }
@@ -364,6 +348,32 @@ class SenseFavIpPane extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// IP card with the Host's own answer (#171, `res.ip`): the session's data shows at once, the
+/// Host's values replace it when they come; an older Host leaves the session's data.
+class SenseFavHostIpPane extends StatefulWidget {
+  const SenseFavHostIpPane({super.key, required this.fallback, required this.load});
+  final SenseFavIpInfo fallback;
+  final Future<SenseFavIpInfo?> Function() load;
+
+  @override
+  State<SenseFavHostIpPane> createState() => _SenseFavHostIpPaneState();
+}
+
+class _SenseFavHostIpPaneState extends State<SenseFavHostIpPane> {
+  SenseFavIpInfo? _host;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.load().then((v) {
+      if (mounted && v != null && !v.empty) setState(() => _host = v);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => SenseFavIpPane(info: _host ?? widget.fallback);
 }
 
 /// A one-line text field of the list (search, ping address, form): dark, white frame on focus.
@@ -493,26 +503,110 @@ class _SenseFavPingPaneState extends State<SenseFavPingPane> {
   }
 }
 
-/// Window list pane (`favPanel('killhung')`): no message brings the Host's windows yet.
-class SenseFavWindowsPane extends StatelessWidget {
-  const SenseFavWindowsPane({super.key});
+/// Window list pane (`favPanel('killhung')`, #171): the Host's windows / apps (`res.windows`),
+/// the ones that do not answer first with a red button; "Kapat" (Mac "Çık") closes one.
+class SenseFavWindowsPane extends StatefulWidget {
+  const SenseFavWindowsPane({super.key, required this.load, required this.close, this.mac = false});
+  final Future<(List<SenseFavWindow>?, String?)> Function() load;
+  final Future<String?> Function(SenseFavWindow w) close;
+  final bool mac;
 
   @override
-  Widget build(BuildContext context) => _PaneBox(
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2, bottom: 4),
-            child: Text(SenseFavoritesStrings.windowList,
-                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim)),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 3),
-            child: Text(SenseFavoritesStrings.windowsUnsupported,
-                key: const ValueKey('sense-fav-windows-unsupported'),
-                style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted)),
-          ),
-        ]),
+  State<SenseFavWindowsPane> createState() => _SenseFavWindowsPaneState();
+}
+
+class _SenseFavWindowsPaneState extends State<SenseFavWindowsPane> {
+  List<SenseFavWindow>? _list;
+  String? _error;
+  bool _loading = true;
+  int? _closing;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.load().then((r) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _list = r.$1;
+        _error = r.$2;
+      });
+    });
+  }
+
+  Future<void> _close(SenseFavWindow w) async {
+    setState(() {
+      _closing = w.pid;
+      _error = null;
+    });
+    final err = await widget.close(w);
+    if (!mounted) return;
+    setState(() {
+      _closing = null;
+      if (err == null) {
+        _list = [for (final x in _list ?? const <SenseFavWindow>[]) if (x.pid != w.pid) x];
+      } else {
+        _error = err;
+      }
+    });
+  }
+
+  Widget _line(String text, {Key? key, Color color = SenseColors.textMuted}) => Padding(
+        padding: const EdgeInsets.only(bottom: 3),
+        child: Text(text, key: key, style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: color)),
       );
+
+  @override
+  Widget build(BuildContext context) {
+    final list = _list;
+    return _PaneBox(
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2, bottom: 4),
+          child: Text(SenseFavoritesStrings.windowList,
+              style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim)),
+        ),
+        if (_loading)
+          Padding(
+            key: const ValueKey('sense-fav-windows-loading'),
+            padding: const EdgeInsets.only(bottom: 3),
+            child: Row(children: [
+              const SenseSpinner(size: 10),
+              const SizedBox(width: 6),
+              Text(SenseFavoritesStrings.windowsLoading,
+                  style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted)),
+            ]),
+          ),
+        if (!_loading && list != null && list.isEmpty)
+          _line(SenseFavoritesStrings.windowsEmpty, key: const ValueKey('sense-fav-windows-empty')),
+        if (list != null)
+          for (final w in list)
+            Padding(
+              key: ValueKey('sense-fav-window-${w.pid}'),
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                Expanded(
+                  child: Text(SenseFavoritesStrings.windowName(w.name, hung: w.hung),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: SenseTextStyles.of(size: SenseFontSize.hintLarge)),
+                ),
+                const SizedBox(width: 8),
+                SenseButton(
+                  key: ValueKey('sense-fav-window-close-${w.pid}'),
+                  label: widget.mac ? SenseFavoritesStrings.windowQuit : SenseFavoritesStrings.windowClose,
+                  size: SenseButtonSize.small,
+                  kind: w.hung ? SenseButtonKind.danger : SenseButtonKind.normal,
+                  onPressed: _closing == null ? () => _close(w) : null,
+                ),
+              ]),
+            ),
+        if (_error != null)
+          _line(_error!,
+              key: ValueKey(list == null ? 'sense-fav-windows-unsupported' : 'sense-fav-windows-error')),
+      ]),
+    );
+  }
 }
 
 /// A recent chip (`.frec button`).

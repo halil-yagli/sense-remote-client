@@ -338,10 +338,14 @@ void main() {
     expect(senseFavIpInfoFrom(null, null).empty, isTrue);
   });
 
-  test('ping has no message yet: a calm line instead of a result', () async {
-    final m = await loadedModel(FakeFavIo());
-    expect(await m.ping('8.8.8.8'), SenseFavoritesStrings.pingUnsupported);
-    expect(await m.ping(' '), SenseFavoritesStrings.pingEmpty);
+  test('ping: empty or unsafe address is refused here, nothing is sent', () async {
+    final io = FakeFavIo();
+    final m = await loadedModel(io);
+    expect(await m.ping('win.ping', ' '), SenseFavoritesStrings.pingEmpty);
+    expect(await m.ping('win.ping', '-t 8.8.8.8'), SenseFavoritesStrings.pingBadAddress);
+    expect(await m.ping('win.ping', '8.8.8.8 & del'), SenseFavoritesStrings.pingBadAddress);
+    expect(io.sent, isEmpty);
+    m.dispose();
   });
 
   test('events that are not ours are left for the other handlers', () {

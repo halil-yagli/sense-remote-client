@@ -11,7 +11,9 @@
 //
 // Runs: a `keys` entry is sent from here (Ctrl+Alt+Del, lock, Win+D); the rest go to the
 // Host as `sense.shortcut-run {req, id}` (id only, never a command) and the result comes
-// back as `sense_shortcut_result`.
+// back as `sense_shortcut_result`. Sürüm 12 (#171): ping and the window list carry one
+// checked argument (`arg`: the address, the process id to close) and the answer may carry a
+// result body (`res`: ping counts, the window list, the IP card).
 import 'dart:async';
 import 'dart:convert';
 
@@ -124,6 +126,73 @@ SenseFavIpInfo senseFavIpInfoFrom(SensePeerStatus? status, SenseInventory? inven
   return const SenseFavIpInfo();
 }
 
+/// The Host's answer to a pane request (ping, window list, IP card).
+@immutable
+class SenseFavAnswer {
+  const SenseFavAnswer({required this.ok, this.err, this.res});
+  final bool ok;
+  final String? err;
+  final Map<String, dynamic>? res;
+}
+
+/// One window (Windows) or app (macOS) of the Host's signed-in user (`res.windows`).
+@immutable
+class SenseFavWindow {
+  const SenseFavWindow({required this.pid, required this.name, this.hung = false});
+  final int pid;
+  final String name;
+  final bool hung;
+}
+
+/// `res.windows` → rows; entries without a process id or a name are left out.
+List<SenseFavWindow>? senseFavWindowsFrom(Map<String, dynamic>? res) {
+  final list = res?['windows'];
+  if (list is! List) return null;
+  final out = <SenseFavWindow>[];
+  for (final w in list) {
+    if (w is! Map) continue;
+    final pid = int.tryParse('${w['pid']}');
+    final name = '${w['name'] ?? ''}'.trim();
+    if (pid == null || pid <= 0 || name.isEmpty) continue;
+    out.add(SenseFavWindow(pid: pid, name: name, hung: w['hung'] == true || '${w['hung']}' == 'true'));
+  }
+  return out;
+}
+
+/// `res.ip` → the IP card; null when the body has none.
+SenseFavIpInfo? senseFavIpFromRes(Map<String, dynamic>? res) {
+  final ip = res?['ip'];
+  if (ip is! Map) return null;
+  List<String> list(Object? v) =>
+      v is List ? [for (final e in v) if ('$e'.trim().isNotEmpty) '$e'.trim()] : const <String>[];
+  final addr = ip['ip'];
+  return SenseFavIpInfo(
+    ip: addr == null || '$addr'.trim().isEmpty ? null : '$addr'.trim(),
+    gateway: list(ip['gateway']),
+    dns: list(ip['dns']),
+  );
+}
+
+/// `res.ping` → "4/4 yanıt · ort. 18 ms · kayıp %0"; null when the body has none.
+String? senseFavPingText(Map<String, dynamic>? res) {
+  final p = res?['ping'];
+  if (p is! Map) return null;
+  int? n(Object? v) => v == null ? null : (v is num ? v.round() : int.tryParse('$v'));
+  final sent = n(p['sent']), got = n(p['received']);
+  if (sent == null || got == null) return null;
+  final loss = n(p['loss']) ?? (sent == 0 ? 100 : ((sent - got) * 100 / sent).round());
+  return SenseFavoritesStrings.pingLine(got, sent, got == 0 ? null : n(p['avg_ms']), loss);
+}
+
+/// The ping address as the Host takes it (`shortcuts::results::arg_problem`): 1–253 letters,
+/// digits, `.`, `-`, `:`; not starting with `-` or `.`. Never put through a shell.
+bool senseFavPingAddressOk(String a) =>
+    a.isNotEmpty &&
+    a.length <= 253 &&
+    !a.startsWith('-') &&
+    !a.startsWith('.') &&
+    RegExp(r'^[A-Za-z0-9.:-]+$').hasMatch(a);
+
 /// What the custom shortcut form sends (K3: no arguments; https only; absolute paths).
 enum SenseFavCustomKind { program, folder, url }
 
@@ -220,6 +289,7 @@ class SenseFavoritesModel extends ChangeNotifier {
     bool inputAllowed = true,
     this.localMac = false,
     this.runTimeout = const Duration(seconds: 8),
+    this.pingTimeout = const Duration(seconds: 30),
     this.ipInfo,
     this.onNotice,
   })  : _os = os,
@@ -238,6 +308,9 @@ class SenseFavoritesModel extends ChangeNotifier {
   final bool localMac;
   final Duration runTimeout;
 
+  /// Four pings to an address that does not answer take up to ~16 s on Windows.
+  final Duration pingTimeout;
+
   /// The IP card's values (the session wires the status popup's data here).
   SenseFavIpInfo Function()? ipInfo;
 
@@ -254,7 +327,7 @@ class SenseFavoritesModel extends ChangeNotifier {
   List<String> _recent = [];
   List<SenseFavItem> _approved = [];
   int _seq = 0;
-  final Map<int, (String, Timer)> _waiting = {};
+  final Map<int, (String, Timer, Completer<SenseFavAnswer>?)> _waiting = {};
   bool _disposed = false;
 
   SenseFavOs? get os => _os;
@@ -551,8 +624,52 @@ class SenseFavoritesModel extends ChangeNotifier {
       _notice(SenseFavoritesStrings.failed(it.name, SenseFavoritesStrings.errNotSent));
       return;
     }
-    _waiting[req] = (id, Timer(runTimeout, () => _onResult(req, false, 'timeout')));
+    _waiting[req] = (id, Timer(runTimeout, () => _onResult(req, false, 'timeout', null)), null);
   }
+
+  /// Asks the Host for a pane's answer (ping, window list, IP card, closing a window): the
+  /// answer comes back here instead of a toast. `err` is a Host code, `not_sent` when the
+  /// message could not go, `timeout` when no answer came (an older Host never answers).
+  Future<SenseFavAnswer> request(String id, {String? arg, Duration? timeout}) async {
+    if (!_inputAllowed) return const SenseFavAnswer(ok: false, err: 'no_permission');
+    final req = ++_seq;
+    String sent;
+    try {
+      sent = await io.send(kSenseShortcutRunMsg, jsonEncode({'req': req, 'id': id, if (arg != null) 'arg': arg}));
+    } catch (_) {
+      sent = 'failed';
+    }
+    if (_disposed) return const SenseFavAnswer(ok: false, err: 'failed');
+    if (sent.isNotEmpty) return const SenseFavAnswer(ok: false, err: 'not_sent');
+    final done = Completer<SenseFavAnswer>();
+    _waiting[req] = (id, Timer(timeout ?? runTimeout, () => _onResult(req, false, 'timeout', null)), done);
+    return done.future;
+  }
+
+  /// The IP card from the Host (`res.ip`); null when it did not answer with one.
+  Future<SenseFavIpInfo?> hostIpInfo(String id) async {
+    final a = await request(id);
+    return a.ok ? senseFavIpFromRes(a.res) : null;
+  }
+
+  /// The Host's windows / apps (`res.windows`), or the reason they are not there.
+  Future<(List<SenseFavWindow>?, String?)> windows(String id) async {
+    final a = await request(id);
+    if (!a.ok) return (null, a.err == 'timeout' ? SenseFavoritesStrings.windowsUnsupported : _paneError(a.err));
+    final list = senseFavWindowsFrom(a.res);
+    return list == null ? (null, SenseFavoritesStrings.windowsUnsupported) : (list, null);
+  }
+
+  /// Closes one window / app on the Host (`arg`: its process id); null when closed, else why.
+  Future<String?> closeWindow(String id, SenseFavWindow w) async {
+    final a = await request(id, arg: '${w.pid}');
+    if (!a.ok) return _paneError(a.err);
+    _notice(SenseFavoritesStrings.windowClosed(w.name, computerName));
+    return null;
+  }
+
+  String _paneError(String? err) =>
+      err == 'not_sent' ? SenseFavoritesStrings.errNotSent : senseFavErrorText(err);
 
   /// Hotkey slot [n] (Ctrl+Alt+Shift+n): true when a shortcut holds it (the key is used).
   bool runSlot(int n) {
@@ -572,10 +689,15 @@ class SenseFavoritesModel extends ChangeNotifier {
     return false;
   }
 
-  void _onResult(int req, bool ok, String? err) {
+  void _onResult(int req, bool ok, String? err, Map<String, dynamic>? res) {
     final w = _waiting.remove(req);
     if (w == null || _disposed) return;
     w.$2.cancel();
+    final done = w.$3;
+    if (done != null) {
+      if (!done.isCompleted) done.complete(SenseFavAnswer(ok: ok, err: err, res: res));
+      return;
+    }
     final it = item(w.$1);
     final name = it?.name ?? w.$1;
     _notice(ok
@@ -583,11 +705,15 @@ class SenseFavoritesModel extends ChangeNotifier {
         : SenseFavoritesStrings.failed(name, senseFavErrorText(err)));
   }
 
-  /// Ping from the Host: no message carries an address yet (plan §2.1), so this build says
-  /// it calmly instead of a result.
-  Future<String> ping(String address) async {
-    if (address.trim().isEmpty) return SenseFavoritesStrings.pingEmpty;
-    return SenseFavoritesStrings.pingUnsupported;
+  /// Ping from the Host (#171): the address goes as `arg`, the counts come back in `res.ping`.
+  /// A Host without the result body (or one that never answers) says so calmly.
+  Future<String> ping(String id, String address) async {
+    final a = address.trim();
+    if (a.isEmpty) return SenseFavoritesStrings.pingEmpty;
+    if (!senseFavPingAddressOk(a)) return SenseFavoritesStrings.pingBadAddress;
+    final r = await request(id, arg: a, timeout: pingTimeout);
+    if (!r.ok) return r.err == 'timeout' ? SenseFavoritesStrings.pingUnsupported : _paneError(r.err);
+    return senseFavPingText(r.res) ?? SenseFavoritesStrings.pingUnsupported;
   }
 
   // ---------------------------------------------------------------------------
@@ -645,6 +771,8 @@ class SenseFavoritesModel extends ChangeNotifier {
     _disposed = true;
     for (final w in _waiting.values) {
       w.$2.cancel();
+      final done = w.$3;
+      if (done != null && !done.isCompleted) done.complete(const SenseFavAnswer(ok: false, err: 'failed'));
     }
     _waiting.clear();
     if (peerId.isNotEmpty) SenseFavoritesEvents.forget(peerId, _onResult);

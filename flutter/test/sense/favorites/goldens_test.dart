@@ -80,7 +80,24 @@ void main() {
           {'id': 'win.taskmgr', 'key': 1},
           {'id': 'win.ping', 'key': null},
         ], recent: ['win.taskmgr'])
-      }, setAnswer: '');
+      }, setAnswer: '')
+        // Sürüm 12 (#171): the Host answers with its own values.
+        ..hostPeer = 'golden'
+        ..host['win.ipinfo'] = ((_) => (ok: true, err: null, res: kResIp))
+        ..host['win.ping'] = ((_) => (ok: true, err: null, res: kResPing));
+
+  testWidgets('window list from the Host (#171), the one that does not answer first',
+      (t) => shot(t, 'fav_windows',
+          io: FakeFavIo(prefs: {
+            SenseFavOs.win: prefsJson(os: SenseFavOs.win, items: [
+              {'id': 'win.killhung', 'key': 2},
+              {'id': 'win.taskmgr', 'key': 1},
+            ])
+          }, setAnswer: '')
+            ..hostPeer = 'golden'
+            ..host['win.killhung'] = ((_) => (ok: true, err: null, res: kResWindows)),
+          act: (t, m) => tapKey(t, 'sense-fav-run-win.killhung')),
+      skip: goldenSkip('fav_windows'), tags: const ['golden']);
 
   testWidgets('IP card under its row', (t) => shot(t, 'fav_ip', io: paneIo(),
       act: (t, m) => tapKey(t, 'sense-fav-run-win.ipinfo')), skip: goldenSkip('fav_ip'), tags: const ['golden']);
