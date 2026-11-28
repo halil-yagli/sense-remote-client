@@ -659,6 +659,11 @@ fn run(vs: VideoService) -> ResultType<()> {
     #[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "android")))]
     let capture_method = "scrap";
     crate::sense::diag::kinds::video_capture(capture_method, display_idx, c.width, c.height);
+    // Sense Remote (Sürüm 12, U168c): this screen's refresh rate caps a request above 30 fps.
+    if vs.source.is_monitor() {
+        crate::sense::fps_policy::note_display_refresh(display_idx);
+    }
+    let mut sense_encode = crate::sense::fps_policy::EncodeMeter::new(Instant::now());
     let mut video_qos = VIDEO_QOS.lock().unwrap();
     let mut spf = video_qos.spf();
     let mut quality = video_qos.ratio();
@@ -885,6 +890,7 @@ fn run(vs: VideoService) -> ResultType<()> {
                         }
                     }
 
+                    let sense_work = Instant::now(); // Sense Remote (U168c)
                     let frame = frame.to(encoder.yuvfmt(), &mut yuv, &mut mid_data)?;
                     static_refresh.on_frame(&frame);
                     let result = handle_one_frame(
@@ -901,6 +907,7 @@ fn run(vs: VideoService) -> ResultType<()> {
                         capture_height,
                     )?;
                     static_refresh.on_frame_encoded(&result);
+                    sense_encode.on_frame(sense_work.elapsed()); // Sense Remote (U168c)
                     frame_controller.set_send(now, result.send_conn_ids);
                     send_counter += 1;
                 }
@@ -1040,6 +1047,21 @@ fn run(vs: VideoService) -> ResultType<()> {
         }
         DISPLAY_CONN_IDS.lock().unwrap().remove(&display_idx);
 
+        // Sense Remote (Sürüm 12, U168c): conversion + encode slower than the frame interval is
+        // the encoder holding the frame rate down; recorded once per change.
+        if let Some(v) = sense_encode.tick(Instant::now(), spf) {
+            if v.changed {
+                log::info!(
+                    "Sense Remote qos: display {display_idx} encoder {} (about {} fps possible, target {} fps)",
+                    if v.limited { "is the limit" } else { "keeps up" },
+                    v.achievable_fps,
+                    (1.0 / spf.as_secs_f64()).round()
+                );
+                if v.limited {
+                    crate::sense::diag::kinds::video_fps_cap(v.achievable_fps, "encoder");
+                }
+            }
+        }
         let elapsed = now.elapsed();
         // may need to enable frame(timeout)
         log::trace!("{:?} {:?}", time::Instant::now(), elapsed);

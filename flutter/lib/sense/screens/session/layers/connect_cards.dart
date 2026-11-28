@@ -12,6 +12,7 @@
 // recorded as `ui/dialog` ([SenseConnectCards.noteStockDialog]; target: none) and each card
 // as `ui/card`.
 import 'dart:async';
+import 'dart:convert' show jsonDecode;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -94,6 +95,40 @@ SenseConnectCard? senseConnectCardOf(String type, String title, String text) {
   return null;
 }
 
+/// Sürüm 12: since when the computer is in use, from the Host's busy answer
+/// (`sense_busy {"since":<unix s>}`, `src/sense/single_conn.rs`). Null for the plain
+/// `sense_busy` of an older Host or an unreadable tail. The Host sends no name (karar #173:
+/// the answer goes out before the password check); "who" comes from the panel.
+int? senseBusySinceOf(String text) {
+  final at = text.indexOf('sense_busy');
+  if (at < 0) return null;
+  final open = text.indexOf('{', at);
+  if (open < 0) return null;
+  try {
+    final v = jsonDecode(text.substring(open));
+    if (v is! Map) return null;
+    final since = v['since'];
+    return since is int && since > 0 ? since : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Sürüm 12: what the panel knows about the computer (peer-status) for the busy and offline
+/// cards.
+class SensePanelInfo {
+  const SensePanelInfo({this.lastSeenAt, this.wakeable, this.busyBy});
+
+  /// Last heartbeat, Unix s.
+  final int? lastSeenAt;
+
+  /// The panel can wake it (null = not said).
+  final bool? wakeable;
+
+  /// Display name of the Sense employee connected to it (panel `busy_by`, karar #173).
+  final String? busyBy;
+}
+
 /// Name of a card in the record (`ui/card kind=…`).
 String senseConnectCardName(SenseConnectCard c) => switch (c) {
       SenseConnectCard.connecting => 'connecting',
@@ -139,17 +174,33 @@ abstract class SenseConnectHost {
   /// Connect again in this window.
   void retry();
 
+  /// Sürüm 12: the panel's view of the computer (who is connected, last seen, wake) for the
+  /// busy and offline cards. Null when the panel has nothing (no sign-in, not a Sense computer
+  /// the employee may see, network error).
+  Future<SensePanelInfo?> panelInfo();
+
   /// Close this connection window.
   void close();
 }
 
 class SenseConnectController extends ChangeNotifier {
-  SenseConnectController({required this.host, this.kind = SenseConnectKind.screen, bool autoStart = true}) {
+  SenseConnectController(
+      {required this.host, this.kind = SenseConnectKind.screen, bool autoStart = true, DateTime Function()? now})
+      : now = now ?? DateTime.now {
     if (autoStart) start();
   }
 
   final SenseConnectHost host;
   final SenseConnectKind kind;
+
+  /// Clock for "12 dk'dır" and "son görülme" (tests: fixed).
+  final DateTime Function() now;
+
+  /// Sürüm 12: since when the computer is in use (busy card, Unix s); null = the Host did not say.
+  int? busySince;
+
+  /// Sürüm 12: the panel's answer (busy and offline cards); null until it answered.
+  SensePanelInfo? panel;
 
   SenseConnectCard? _card;
   int _step = 0;
@@ -228,6 +279,8 @@ class SenseConnectController extends ChangeNotifier {
         card == SenseConnectCard.waitingAccept;
     if (host.connected && !loginCard) return false;
     _loginSent = false;
+    busySince = card == SenseConnectCard.busy ? senseBusySinceOf(text) : null;
+    if (card == SenseConnectCard.busy || card == SenseConnectCard.offline) _loadPanel();
     final retryable = hasRetry &&
         (card == SenseConnectCard.timeout ||
             card == SenseConnectCard.network ||
@@ -242,6 +295,14 @@ class SenseConnectController extends ChangeNotifier {
     }
     _set(card);
     return true;
+  }
+
+  void _loadPanel() {
+    host.panelInfo().then((info) {
+      if (_disposed || info == null) return;
+      panel = info;
+      _notify();
+    }).catchError((_) {});
   }
 
   void submitPassword(String password) {
@@ -423,6 +484,13 @@ class _SenseConnectCardViewState extends State<SenseConnectCardView> {
     super.dispose();
   }
 
+  String _offlineBody() {
+    final seen = _c.panel?.lastSeenAt;
+    if (seen == null || seen <= 0) return SenseConnectStrings.offlineBody;
+    final at = DateTime.fromMillisecondsSinceEpoch(seen * 1000);
+    return SenseConnectStrings.offlineBodySeen(SenseConnectStrings.seenAt(at, _c.now()));
+  }
+
   void _submitPassword() {
     _c.submitPassword(_field.text);
     _field.clear();
@@ -476,16 +544,19 @@ class _SenseConnectCardViewState extends State<SenseConnectCardView> {
           ..add(_Steps(step: _c.step, accept: card == SenseConnectCard.waitingAccept));
         buttons = [btn('cancel', SenseConnectStrings.cancel, _c.close)];
       case SenseConnectCard.busy:
+        final since = _c.busySince;
+        final held = since == null ? null : _c.now().millisecondsSinceEpoch ~/ 1000 - since;
+        final minutes = held == null ? null : (held < 0 ? 0 : held) ~/ 60;
         children
           ..add(title(SenseConnectStrings.busyTitle, SenseColors.warn))
-          ..add(sub(SenseConnectStrings.busyBody(name)))
+          ..add(sub(SenseConnectStrings.busyBodyDetail(name, by: _c.panel?.busyBy, minutes: minutes)))
           ..add(hint(SenseConnectStrings.busyHint));
         buttons = [btn('later', SenseConnectStrings.later, _c.close), retry];
       case SenseConnectCard.offline:
       case SenseConnectCard.notFound:
         children
           ..add(title(SenseConnectStrings.offlineTitle, SenseColors.warn))
-          ..add(sub(card == SenseConnectCard.offline ? SenseConnectStrings.offlineBody : SenseConnectStrings.notFoundBody));
+          ..add(sub(card == SenseConnectCard.offline ? _offlineBody() : SenseConnectStrings.notFoundBody));
         buttons = [close, retry];
       case SenseConnectCard.password:
       case SenseConnectCard.passwordWrong:

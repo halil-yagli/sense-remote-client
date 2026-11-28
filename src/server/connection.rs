@@ -2004,7 +2004,8 @@ impl Connection {
         // two logins racing past the first check cannot both get in.
         let sense_admission = crate::sense::single_conn::ADMISSION.lock().await;
         if !self.sense_single_conn_admits() {
-            self.send_login_error(crate::sense::single_conn::BUSY).await;
+            // Sense Remote (Sürüm 12): "Meşgul" with who and since when.
+            self.send_login_error(&crate::sense::single_conn::busy_message()).await;
             return false;
         }
         self.lr.trusted_device_v2_token.clear();
@@ -3125,7 +3126,8 @@ impl Connection {
             // Sense Remote (S8): one Controller at a time; checked before the password so a
             // busy Host does not spend a password try. Re-checked at authorization.
             if !self.sense_single_conn_admits() {
-                self.send_login_error(crate::sense::single_conn::BUSY).await;
+                // Sense Remote (Sürüm 12): "Meşgul" with who and since when.
+                self.send_login_error(&crate::sense::single_conn::busy_message()).await;
                 sleep(1.).await;
                 return false;
             }

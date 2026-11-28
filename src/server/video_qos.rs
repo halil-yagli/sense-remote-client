@@ -273,7 +273,7 @@ struct UserData {
 
 impl UserData {
     // The frame rate this viewer asked for, from its custom or auto-adjust limit.
-    fn fps_cap(&self) -> u32 {
+    fn requested_fps(&self) -> u32 {
         let mut fps = self.custom_fps.unwrap_or(FPS);
         if let Some(auto_adjust_fps) = self.auto_adjust_fps {
             if fps == 0 || auto_adjust_fps < fps {
@@ -281,6 +281,16 @@ impl UserData {
             }
         }
         fps.clamp(MIN_FPS, MAX_FPS)
+    }
+
+    // Sense Remote (Sürüm 12, U168c): the request, a request above 30 stopped at the Host's
+    // refresh rate.
+    fn fps_cap(&self) -> u32 {
+        crate::sense::fps_policy::host_fps_cap(
+            self.requested_fps(),
+            crate::sense::fps_policy::host_refresh(),
+        )
+        .0
     }
 }
 
@@ -300,6 +310,7 @@ pub struct VideoQoS {
     adjust_ratio_instant: Instant,
     abr_config: bool,
     first_reply_adjusts_ratio: bool, // false on Linux, where it can create vaapi twice
+    sense_cap: u32, // Sense Remote (U168c): last ceiling written to `video/fps_cap`
     #[cfg(test)]
     test_now: Option<Instant>,
 }
@@ -315,6 +326,7 @@ impl Default for VideoQoS {
             adjust_ratio_instant: Instant::now(),
             abr_config: true,
             first_reply_adjusts_ratio: !cfg!(target_os = "linux"),
+            sense_cap: 0,
             #[cfg(test)]
             test_now: None,
         }
@@ -868,6 +880,32 @@ impl VideoQoS {
 
         // Ensure fps stays within valid range
         self.fps = fps.clamp(MIN_FPS, highest_fps);
+        self.sense_note_cap(highest_fps);
+    }
+
+    // Sense Remote (Sürüm 12, U168c): the ceiling and why go to the event record once per change,
+    // so a measurement shows whether the viewer's request or the Host's screen set it.
+    fn sense_note_cap(&mut self, cap: u32) {
+        if self.users.is_empty() || cap == self.sense_cap {
+            return;
+        }
+        self.sense_cap = cap;
+        let requested = self
+            .users
+            .values()
+            .map(|u| u.requested_fps())
+            .min()
+            .unwrap_or(FPS);
+        let reason = if requested > cap {
+            crate::sense::fps_policy::CapReason::Refresh
+        } else {
+            crate::sense::fps_policy::CapReason::Viewer
+        };
+        log::info!(
+            "Sense Remote qos: fps cap {cap} ({}), requested {requested}",
+            reason.as_str()
+        );
+        crate::sense::diag::kinds::video_fps_cap(cap, reason.as_str());
     }
 }
 
@@ -999,6 +1037,24 @@ mod tests {
         );
         qos.user_network_delay(1, 10);
         assert_eq!(qos.fps(), FPS, "ordinary recovery can still reach the cap");
+    }
+
+    // Sense Remote (Sürüm 12, U168c, #168): on a quiet same-network link (3–4 ms) the stream
+    // reaches what the viewer asks for: 60 on a direct connection now, 30 as before otherwise.
+    #[test]
+    fn sense_quiet_link_reaches_the_requested_ceiling() {
+        for (requested, quality) in [
+            (60, Quality::Balanced),
+            (60, Quality::Best),
+            (30, Quality::Balanced),
+        ] {
+            let mut qos = smoke::session(requested, quality);
+            for _ in 0..90 {
+                qos.user_network_delay(1, 4);
+            }
+            assert_eq!(qos.fps(), requested, "requested={requested}");
+            assert_eq!(qos.sense_cap, requested);
+        }
     }
 
     mod adaptation;
