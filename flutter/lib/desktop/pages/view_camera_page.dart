@@ -20,6 +20,12 @@ import '../../utils/image.dart';
 import '../widgets/remote_toolbar.dart';
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
+// Sense Remote (Sürüm 12, #164, ST 9): the camera window connects with the Sense cards.
+import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
+import '../../sense/screens/session/layers/connect_cards.dart'
+    show SenseConnectCards, SenseConnectKind;
+import '../../sense/screens/session/layers/data/session_bridge.dart'
+    show SenseFfiConnectHost;
 
 import 'package:flutter_hbb/native/custom_cursor.dart'
     if (dart.library.html) 'package:flutter_hbb/web/custom_cursor.dart';
@@ -124,8 +130,11 @@ class _ViewCameraPageState extends State<ViewCameraPage>
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
-      _ffi.dialogManager
-          .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      // Sense Remote (#164): the "Bağlanılıyor" card is up already; the stock box is the fallback.
+      if (!kSenseRemoteWindow) {
+        _ffi.dialogManager
+            .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      }
     });
     WakelockManager.enable(_uniqueKey);
 
@@ -244,6 +253,7 @@ class _ViewCameraPageState extends State<ViewCameraPage>
     WakelockManager.disable(_uniqueKey);
     await Get.delete<FFI>(tag: widget.id);
     removeSharedStates(widget.id);
+    SenseConnectCards.remove(widget.id); // Sense Remote (#164)
   }
 
   Widget emptyOverlay() => BlockableOverlay(
@@ -312,6 +322,13 @@ class _ViewCameraPageState extends State<ViewCameraPage>
               _ffi.ffiModel.pi.isSet.isFalse ? emptyOverlay() : Offstage(),
             ],
           ),
+          // Sense Remote (Sürüm 12, #164): connecting cards over everything.
+          if (kSenseRemoteWindow)
+            Positioned.fill(
+                child: SenseConnectCards.attach(widget.id,
+                    kind: SenseConnectKind.camera,
+                    host: SenseFfiConnectHost(widget.id, _ffi,
+                        kind: SenseConnectKind.camera))),
         ],
       );
     }

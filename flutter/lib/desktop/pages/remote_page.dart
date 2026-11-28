@@ -27,6 +27,11 @@ import '../../sense/screens/session/sense_remote_window.dart'
     show SenseRemoteOverlay, SenseRemoteSession;
 import '../../sense/screens/session/layers/session_layers_ffi.dart'
     show SenseConnectionLayers;
+// Sense Remote (Sürüm 12, #164): connecting cards instead of RustDesk's boxes.
+import '../../sense/screens/session/layers/connect_cards.dart'
+    show SenseConnectCards, SenseConnectKind;
+import '../../sense/screens/session/layers/data/session_bridge.dart'
+    show SenseFfiConnectHost;
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
 import 'macos_full_screen_focus_recovery.dart';
@@ -206,8 +211,12 @@ class _RemotePageState extends State<RemotePage>
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
-      _ffi.dialogManager
-          .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      // Sense Remote (#164): the "Bağlanılıyor" card is up already (SenseConnectCards);
+      // RustDesk's box only without the Sense window.
+      if (!kSenseRemoteWindow) {
+        _ffi.dialogManager
+            .showLoading(translate('Connecting...'), onCancel: closeConnection);
+      }
     });
     WakelockManager.enable(_uniqueKey);
 
@@ -735,6 +744,7 @@ class _RemotePageState extends State<RemotePage>
           removeSharedStates(id);
           SenseRemoteSession.remove(id);
           SenseConnectionLayers.remove(id);
+          SenseConnectCards.remove(id);
         }
       });
       return;
@@ -745,6 +755,7 @@ class _RemotePageState extends State<RemotePage>
     SenseRemoteSession.remove(widget.id);
     // Sense Remote: stop the connection layers' timers (O13–O15).
     SenseConnectionLayers.remove(widget.id);
+    SenseConnectCards.remove(widget.id);
   }
 
   Widget emptyOverlay() => BlockableOverlay(
@@ -849,6 +860,12 @@ class _RemotePageState extends State<RemotePage>
           if (kSenseRemoteWindow && _ffi.ffiModel.pi.isSet.isTrue)
             Positioned.fill(
                 child: SenseConnectionLayers(id: widget.id, ffi: _ffi)),
+          // Sense Remote (Sürüm 12, #164): connecting cards, also before the peer info came.
+          if (kSenseRemoteWindow)
+            Positioned.fill(
+                child: SenseConnectCards.attach(widget.id,
+                    kind: SenseConnectKind.screen,
+                    host: SenseFfiConnectHost(widget.id, _ffi))),
         ],
       );
     }

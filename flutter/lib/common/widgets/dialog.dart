@@ -19,6 +19,11 @@ import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import 'address_book.dart';
+// Sense Remote (Sürüm 12, #162): stock boxes in the Sense dialog pattern.
+import '../../sense/components/sense_dialog.dart';
+import '../../sense/components/button.dart' show SenseButtonKind;
+import '../../sense/strings/connect.dart';
+import '../../sense/tokens/sense_tokens.dart' show SenseLevel;
 
 void clientClose(SessionID sessionId, FFI ffi) async {
   if (allowAskForNoteAtEndOfConnection(ffi, true)) {
@@ -1152,6 +1157,24 @@ _connectDialog(
 
 void showWaitUacDialog(
     SessionID sessionId, OverlayDialogManager dialogManager, String type) {
+  // Sense Remote (Sürüm 12, #162 ST 6): the wait in the Sense pattern.
+  if (kSenseDialogs) {
+    senseDialog<void>(dialogManager, (setState, close) {
+      return SenseDialog(
+        title: SenseConnectStrings.waitUacTitle,
+        level: SenseLevel.warn,
+        headline: SenseConnectStrings.waitUacTitle,
+        message: SenseConnectStrings.waitUacBody,
+        onCancel: () => close(),
+        onSubmit: () => close(),
+        actions: [
+          SenseDialogAction(SenseConnectStrings.ok, () => close(),
+              kind: SenseButtonKind.primary),
+        ],
+      );
+    }, tag: '$sessionId-wait-uac');
+    return;
+  }
   dialogManager.dismissAll();
   dialogManager.show(
       tag: '$sessionId-wait-uac',
@@ -1350,6 +1373,33 @@ void showOnBlockDialog(
       dialogManager.existing('$sessionId-request-elevation')) {
     return;
   }
+  // Sense Remote (Sürüm 12, #162 ST 6): UAC / elevated window in the Sense pattern; the
+  // elevation request form itself stays RustDesk's (themed).
+  if (kSenseDialogs) {
+    final uac = type.contains('uac');
+    senseDialog<void>(dialogManager, (setState, close) {
+      void submit() {
+        close();
+        showRequestElevationDialog(sessionId, dialogManager);
+      }
+
+      return SenseDialog(
+        title: uac ? SenseConnectStrings.uacTitle : SenseConnectStrings.elevatedTitle,
+        level: SenseLevel.warn,
+        headline: uac ? SenseConnectStrings.uacTitle : SenseConnectStrings.elevatedTitle,
+        message:
+            '${uac ? SenseConnectStrings.uacBody : SenseConnectStrings.elevatedBody} ${SenseConnectStrings.elevationTip}',
+        onCancel: () => close(),
+        onSubmit: submit,
+        actions: [
+          SenseDialogAction(SenseConnectStrings.wait, () => close()),
+          SenseDialogAction(SenseConnectStrings.requestElevation, submit,
+              kind: SenseButtonKind.primary),
+        ],
+      );
+    }, tag: '$sessionId-$type', keepOthers: true);
+    return;
+  }
   dialogManager.show(tag: '$sessionId-$type', (setState, close, context) {
     void submit() {
       close();
@@ -1372,6 +1422,34 @@ void showOnBlockDialog(
 
 void showElevationError(SessionID sessionId, String type, String title,
     String text, OverlayDialogManager dialogManager) {
+  // Sense Remote (Sürüm 12, #162 ST 6).
+  if (kSenseDialogs) {
+    final noPermission = text == 'No permission';
+    senseDialog<void>(dialogManager, (setState, close) {
+      void submit() {
+        close();
+        showRequestElevationDialog(sessionId, dialogManager);
+      }
+
+      return SenseDialog(
+        title: SenseConnectStrings.elevationErrorTitle,
+        level: SenseLevel.hot,
+        headline: SenseConnectStrings.elevationErrorTitle,
+        message: noPermission
+            ? SenseConnectStrings.elevationNoPermission
+            : translate(text),
+        onCancel: () => close(),
+        onSubmit: noPermission ? () => close() : submit,
+        actions: [
+          SenseDialogAction(SenseConnectStrings.close, () => close()),
+          if (!noPermission)
+            SenseDialogAction(SenseConnectStrings.retry, submit,
+                kind: SenseButtonKind.primary),
+        ],
+      );
+    }, tag: '$sessionId-$type', keepOthers: true);
+    return;
+  }
   dialogManager.show(tag: '$sessionId-$type', (setState, close, context) {
     void submit() {
       close();
@@ -1395,6 +1473,22 @@ void showElevationError(SessionID sessionId, String type, String title,
 
 void showWaitAcceptDialog(SessionID sessionId, String type, String title,
     String text, OverlayDialogManager dialogManager) {
+  // Sense Remote (Sürüm 12, #164): in a window with the connecting cards the card shows it.
+  if (kSenseDialogs) {
+    senseDialog<void>(dialogManager, (setState, close) {
+      return SenseDialog(
+        title: SenseConnectStrings.waitAcceptTitle,
+        level: SenseLevel.warn,
+        headline: SenseConnectStrings.waitAcceptTitle,
+        message: SenseConnectStrings.waitAcceptBody,
+        onCancel: closeConnection,
+        actions: [
+          SenseDialogAction(SenseConnectStrings.cancel, closeConnection),
+        ],
+      );
+    });
+    return;
+  }
   dialogManager.dismissAll();
   dialogManager.show((setState, close, context) {
     onCancel() {
@@ -2445,6 +2539,35 @@ void showWindowsSessionsDialog(
     names.add(session['name']);
   }
   String selectedUserValue = sids.first;
+  // Sense Remote (Sürüm 12, ST 18): the session choice in the Sense pattern. It cannot be
+  // dismissed (stock note above: a black screen otherwise), so there is no "×".
+  if (kSenseDialogs) {
+    var chosen = 0;
+    senseDialog<void>(dialogManager, (setState, close) {
+      void submit() {
+        bind.sessionSendSelectedSessionId(
+            sessionId: sessionId, sid: sids[chosen]);
+        close();
+      }
+
+      return SenseDialog(
+        title: SenseConnectStrings.sessionsTitle,
+        message: SenseConnectStrings.sessionsBody,
+        onSubmit: submit,
+        children: [
+          SenseDialogChoices(
+              labels: names,
+              selected: chosen,
+              onSelected: (i) => setState(() => chosen = i)),
+        ],
+        actions: [
+          SenseDialogAction(SenseConnectStrings.connect, submit,
+              kind: SenseButtonKind.primary),
+        ],
+      );
+    });
+    return;
+  }
   dialogManager.dismissAll();
   dialogManager.show((setState, close, context) {
     submit() {

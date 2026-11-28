@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'data/link_meter.dart';
+import 'data/session_hub.dart';
 import 'idle_watch.dart';
 import 'layer_spec.dart';
 import 'link_machine.dart';
@@ -122,6 +123,8 @@ class SenseLayerController extends ChangeNotifier {
   static void attach(String id, SenseLayerController c) {
     if (!identical(_byId[id], c)) _holders.remove(id);
     _byId[id] = c;
+    // Sürüm 12 (FO-A12): the attempt count goes to the top bar under this id.
+    c._hubId = id;
     _holders[id] = (_holders[id] ?? 0) + 1;
   }
 
@@ -134,9 +137,28 @@ class SenseLayerController extends ChangeNotifier {
     }
     _holders.remove(id);
     _byId.remove(id);
+    SenseSessionHub.forget(id);
   }
 
   final SenseLayerHost host;
+
+  // Sürüm 12 (FO-A12): the connection id the reconnect count is published under ([attach]).
+  String? _hubId;
+
+  // Sürüm 12 (§2.5 DK → BK): the user ended this connection with "Bağlantıyı bitir".
+  bool _endedBySelf = false;
+
+  /// Sürüm 12 (§2.5): true after "Bağlantıyı bitir" (BK draws "Bağlantıyı sen bitirdin" from it;
+  /// the reason value `SenseEndReason.self` belongs in session_end.dart, BK's file).
+  bool get endedBySelf => _endedBySelf;
+
+  /// Sürüm 12 (FO-A12): reconnect attempts while the transport is lost (null = not lost).
+  SenseReconnectInfo? get reconnectInfo {
+    if (_ended != null || !_link.transportDown) return null;
+    final v = _link.view;
+    return SenseReconnectInfo(attempt: v.attempt, closeIn: v.closeIn);
+  }
+
   final Duration Function() _clock;
   final DateTime Function() _wall;
 
@@ -324,6 +346,7 @@ class SenseLayerController extends ChangeNotifier {
     );
     _trackDismissal(now, view.phase);
     _runRetries(now, view);
+    _publishReconnect();
     // The bar keeps the warning colour while the card is up or minimized.
     wavy.value = view.wavy || view.phase != SenseLinkPhase.normal;
     if (_link.lastEvent == SenseLinkEvent.recovered) _recoveredSerial++;
@@ -344,6 +367,11 @@ class SenseLayerController extends ChangeNotifier {
   void _markLost(Duration now) {
     _link.transportLost(now);
     _lostWall ??= _wall();
+  }
+
+  void _publishReconnect() {
+    final id = _hubId;
+    if (id != null) SenseSessionHub.setReconnect(id, reconnectInfo);
   }
 
   void _runRetries(Duration now, SenseLinkView view) {
@@ -474,6 +502,7 @@ class SenseLayerController extends ChangeNotifier {
   /// "Bağlantıyı bitir" (after the in-place second step).
   void endByUser() {
     if (_disposed) return;
+    _endedBySelf = true;
     _timer?.cancel();
     _timer = null;
     host.endConnection();
@@ -504,8 +533,10 @@ class SenseLayerController extends ChangeNotifier {
     _dismissed = false;
     _prevPhase = SenseLinkPhase.normal;
     _startedAt = now;
+    _endedBySelf = false;
     _idle.activity(now);
     wavy.value = false;
+    _publishReconnect();
     onReconnected?.call();
   }
 
@@ -524,6 +555,7 @@ class SenseLayerController extends ChangeNotifier {
     _waitingSince = null;
     _infoOpen = false;
     wavy.value = false;
+    _publishReconnect();
     host.closePopups();
     _notify();
   }

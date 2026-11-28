@@ -26,7 +26,8 @@ import '../../sense/screens/camera/sense_camera_frame.dart';
 import '../../sense/screens/session/sense_remote_strings.dart' show kSenseRemoteWindow;
 
 class _MenuTheme {
-  static const Color blueColor = MyTheme.button;
+  // Sense Remote (Sürüm 12, ST 9): white marks instead of RustDesk's blue (T1).
+  static const Color blueColor = kSenseRemoteWindow ? MyTheme.accent : MyTheme.button;
   // kMinInteractiveDimension
   static const double height = 20.0;
   static const double dividerHeight = 12.0;
