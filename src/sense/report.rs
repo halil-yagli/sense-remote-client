@@ -70,6 +70,13 @@ pub const CAP_APPLY: &str = "apply";
 /// panel adds them only for a computer that reports it; an older build would refuse the whole
 /// envelope (`not_allowed`).
 pub const CAP_HOST_OPTS: &str = "host_opts";
+/// Sense Remote (Sürüm 12, FAV-Ç; panel `SHORTCUTS_CAP`): this build takes `sense_shortcuts` in
+/// a strategy envelope (approved custom shortcuts). The panel adds the key only for a computer
+/// that reports it; an older build would refuse the whole envelope (`deny_unknown_fields`).
+pub const CAP_SHORTCUTS: &str = "shortcuts";
+/// Sense Remote (Sürüm 12, FU-A6; panel `RELEASE_NOTES_SUMMARY_CAP`): this build takes
+/// `notes_summary` in a signed release (`update::manifest`). Only where updates are installed.
+pub const CAP_NOTES_SUMMARY: &str = "notes_summary";
 /// Health goes into the heartbeat at most this often (contract: "en çok 60 sn'de bir").
 pub const HEALTH_INTERVAL: Duration = Duration::from_secs(60);
 /// The heartbeat's `displays_hash` is recomputed at most this often (the heartbeat runs every
@@ -299,25 +306,37 @@ pub fn heartbeat_base() -> Option<Value> {
 
 /// Sense Remote (permanent password plan U14): the `caps` this build sends, from the switches.
 fn heartbeat_caps(curtain_supported: bool) -> Vec<String> {
-    caps_with_host_opts(
-        caps_with_wol(
-            caps_with_logs(
-                caps_with_update_now(
-                    caps_with_password(
-                        caps_with_update(
-                            caps(curtain_supported, super::envelope_apply::APPLIES),
-                            super::update::SUPPORTED,
-                        ),
-                        super::password::SUPPORTED,
+    let caps = caps_with_wol(
+        caps_with_logs(
+            caps_with_update_now(
+                caps_with_password(
+                    caps_with_update(
+                        caps(curtain_supported, super::envelope_apply::APPLIES),
+                        super::update::SUPPORTED,
                     ),
-                    super::update::SUPPORTED,
+                    super::password::SUPPORTED,
                 ),
-                super::log_upload::SUPPORTED,
+                super::update::SUPPORTED,
             ),
-            super::wol::SUPPORTED,
+            super::log_upload::SUPPORTED,
         ),
-        super::envelope_apply::APPLIES,
-    )
+        super::wol::SUPPORTED,
+    );
+    // Sense Remote (Sürüm 12, FAV-Ç): before `host_opts`, which stays last.
+    let caps = caps_with_s12(caps, super::envelope_apply::APPLIES, super::update::SUPPORTED);
+    caps_with_host_opts(caps, super::envelope_apply::APPLIES)
+}
+
+/// Sense Remote (Sürüm 12, FAV-Ç): `shortcuts` where envelopes are applied, `notes_summary` where
+/// updates are installed; both before `host_opts`, which stays last.
+fn caps_with_s12(mut caps: Vec<String>, applies: bool, update_supported: bool) -> Vec<String> {
+    if applies {
+        caps.push(CAP_SHORTCUTS.to_owned());
+    }
+    if update_supported {
+        caps.push(CAP_NOTES_SUMMARY.to_owned());
+    }
+    caps
 }
 
 /// Sense Remote (Sürüm 9, paket A): `host_opts` is the last capability, added where envelopes are
@@ -1706,6 +1725,28 @@ mod tests {
         assert!(heartbeat.len() <= SCHEMA_CAPS_MAX);
     }
 
+    // Sürüm 12 (FAV-Ç): `shortcuts` follows APPLIES, `notes_summary` the update switch; both
+    // before `host_opts`, and the whole list still fits the contract.
+    #[test]
+    fn s12_caps_follow_their_switches() {
+        let base = || vec!["role_all".to_owned()];
+        assert_eq!(caps_with_s12(base(), false, false), base());
+        assert_eq!(caps_with_s12(base(), true, true), ["role_all", "shortcuts", "notes_summary"]);
+        assert_eq!(caps_with_s12(base(), false, true), ["role_all", "notes_summary"]);
+        assert!(CAP_SHORTCUTS.len() <= SCHEMA_CAP_MAX_CHARS);
+        assert!(CAP_NOTES_SUMMARY.len() <= SCHEMA_CAP_MAX_CHARS);
+        let heartbeat = heartbeat_caps(true);
+        assert_eq!(
+            heartbeat.contains(&"shortcuts".to_owned()),
+            crate::sense::envelope_apply::APPLIES
+        );
+        assert_eq!(
+            heartbeat.contains(&"notes_summary".to_owned()),
+            crate::sense::update::SUPPORTED
+        );
+        assert!(heartbeat.len() <= SCHEMA_CAPS_MAX);
+    }
+
     // Sürüm 9 (R1): `wol` follows its one switch and comes after `logs`.
     #[test]
     fn wol_cap_follows_the_switch() {
@@ -1730,13 +1771,14 @@ mod tests {
             assert_eq!(caps.iter().filter(|cap| *cap == "password").count(), usize::from(on));
             if on {
                 // `update_now` follows `password`; karar #84: `logs` is the last one, only `wol` and
-                // `host_opts` (Sürüm 9) come after it.
+                // `host_opts` (Sürüm 9) come after it, and Sürüm 12's `shortcuts` / `notes_summary`.
                 let at = |name: &str| caps.iter().position(|cap| cap == name);
                 if at("update_now").is_some() {
                     assert_eq!(at("password").map(|i| i + 1), at("update_now"), "{caps:?}");
                 }
                 if at("logs").is_some() {
-                    let last = caps.iter().filter(|cap| *cap != "wol" && *cap != "host_opts").last();
+                    let after = ["wol", "host_opts", CAP_SHORTCUTS, CAP_NOTES_SUMMARY];
+                    let last = caps.iter().filter(|cap| !after.contains(&cap.as_str())).last();
                     assert_eq!(last.map(String::as_str), Some("logs"), "{caps:?}");
                 }
             }
