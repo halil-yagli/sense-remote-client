@@ -1771,13 +1771,14 @@ mod tests {
             assert_eq!(caps.iter().filter(|cap| *cap == "password").count(), usize::from(on));
             if on {
                 // `update_now` follows `password`; karar #84: `logs` is the last one, only `wol` and
-                // `host_opts` (Sürüm 9) come after it.
+                // `host_opts` (Sürüm 9) come after it, and Sürüm 12's `shortcuts` / `notes_summary`.
                 let at = |name: &str| caps.iter().position(|cap| cap == name);
                 if at("update_now").is_some() {
                     assert_eq!(at("password").map(|i| i + 1), at("update_now"), "{caps:?}");
                 }
                 if at("logs").is_some() {
-                    let last = caps.iter().filter(|cap| *cap != "wol" && *cap != "host_opts").last();
+                    let after = ["wol", "host_opts", CAP_SHORTCUTS, CAP_NOTES_SUMMARY];
+                    let last = caps.iter().filter(|cap| !after.contains(&cap.as_str())).last();
                     assert_eq!(last.map(String::as_str), Some("logs"), "{caps:?}");
                 }
             }
