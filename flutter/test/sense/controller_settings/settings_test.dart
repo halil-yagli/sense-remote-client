@@ -276,7 +276,7 @@ void main() {
       expect(b.accountGhost, isTrue);
     });
 
-    testWidgets('U169: an account that has not chosen yet leaves this computer's value', (tester) async {
+    testWidgets('U169: an account that has not chosen yet leaves this computer value', (tester) async {
       final b = _FakeBackend()..accountSupported = true;
       await _pump(tester, b, open: SenseSettingsCategory.newConnections);
       expect(find.text('1:1 · Dengeli · Hayalet mod'), findsOneWidget);
@@ -285,7 +285,7 @@ void main() {
       expect(b.accountWrites, [false]);
     });
 
-    testWidgets('U169: no account store, the switch is this computer's as before', (tester) async {
+    testWidgets('U169: no account store, the switch stays on this computer as before', (tester) async {
       final b = _FakeBackend();
       await _pump(tester, b, open: SenseSettingsCategory.newConnections);
       expect(find.text(SenseSettingsStrings.privacyHint), findsOneWidget);
