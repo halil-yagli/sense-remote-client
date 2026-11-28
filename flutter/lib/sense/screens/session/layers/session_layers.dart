@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import '../../../sense.dart';
 import 'data/session_hub.dart';
 import '../data/frame_rate.dart' show SenseFrameCap;
+import '../popups/note/note_state.dart' show SenseSessionNotes;
 import 'layer_controller.dart';
 import 'layer_strings.dart';
 import 'layer_spec.dart';
@@ -54,12 +55,18 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
   final SenseToastController _toast = SenseToastController();
   int _recoveredSeen = 0;
 
+  // Sürüm 12 (FO-A4): the note field of the ended card is open; the card was up last time.
+  bool _noteOpen = false;
+  bool _wasEnded = false;
+
   SenseLayerController get _c => widget.controller;
 
   @override
   void initState() {
     super.initState();
     _recoveredSeen = _c.recoveredSerial;
+    _wasEnded = _c.ended != null;
+    SenseSessionNotes.status(widget.id).addListener(_repaint);
     _wasMinimized = _c.minimized;
     _shrink.value = _wasMinimized ? 1 : 0;
     _shrink.addListener(_repaint);
@@ -75,6 +82,7 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
   @override
   void dispose() {
     _c.removeListener(_changed);
+    SenseSessionNotes.status(widget.id).removeListener(_repaint);
     SenseLayerController.detach(widget.id, _c);
     SenseSessionHub.unregister(widget.id, _c.onMessage);
     if (widget.listenToInput) {
@@ -134,11 +142,31 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
 
   void _changed() {
     _syncShrink();
+    // Sürüm 12 (FO-A4): connected again from the ended card: a new note for the new session.
+    final ended = _c.ended != null;
+    if (_wasEnded && !ended) {
+      SenseSessionNotes.reset(widget.id);
+      _noteOpen = false;
+    }
+    _wasEnded = ended;
     if (_c.recoveredSerial != _recoveredSeen) {
       _recoveredSeen = _c.recoveredSerial;
       _toast.show(SenseLayerStrings.recovered);
     }
     if (mounted) setState(() {});
+  }
+
+  /// Sürüm 12 (FO-A4): "Not ekle" on the ended card: the field opens, the count waits.
+  void _openNote() {
+    setState(() => _noteOpen = true);
+    _c.holdHome = true;
+  }
+
+  /// "Kaydet": the note goes out (an empty one is not sent); the count starts again.
+  void _saveNote(String text) {
+    SenseSessionNotes.send(widget.id, text);
+    setState(() => _noteOpen = false);
+    _c.holdHome = false;
   }
 
   @override
@@ -156,6 +184,10 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
             onClose: _c.closeEnded,
             onReconnect: _c.reconnectEnded,
             appear: t,
+            note: SenseSessionNotes.status(widget.id).value,
+            noteOpen: _noteOpen,
+            onAddNote: SenseSessionNotes.canSend(widget.id) ? _openNote : null,
+            onSaveNote: _saveNote,
           );
     } else if (link.layerUp && (_shrink.value < 1 || !_c.minimized)) {
       final lost = link.phase == SenseLinkPhase.lost;
@@ -178,6 +210,7 @@ class _SenseSessionLayersState extends State<SenseSessionLayers>
           serverName: _c.serverName,
           frame: SenseFrameCap.of(widget.id).value,
           onClose: _c.closeInfo,
+          anchor: Offset(SenseQuickCardLook.left, widget.stripTop + SenseQuickCardLook.below),
           appear: t);
     }
     return SenseToastHost(

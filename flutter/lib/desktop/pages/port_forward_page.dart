@@ -8,6 +8,16 @@ import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
 
+import '../../sense/screens/session/layers/connect_cards.dart'
+    show SenseConnectCards, SenseConnectKind;
+import '../../sense/screens/session/layers/data/session_bridge.dart'
+    show SenseFfiConnectHost;
+import '../../sense/screens/session/layers/data/session_hub.dart';
+import '../../sense/screens/shared/aux_window/aux_label.dart';
+import '../../sense/screens/tunnel/tunnel_connect.dart';
+import '../../sense/screens/tunnel/tunnel_rules.dart';
+import '../../sense/screens/tunnel/tunnel_view.dart';
+
 const double _kColumn1Width = 30;
 const double _kColumn4Width = 100;
 const double _kRowHeight = 60;
@@ -64,6 +74,13 @@ class _PortForwardPageState extends State<PortForwardPage>
   RxList<_PortForward> pfs = RxList.empty(growable: true);
   late FFI _ffi;
 
+  // Sense Remote (Sürüm 12, ST 7): the Sense TCP tunnel view (not for RDP).
+  late final bool _senseOn = senseAuxFrameOn() && !widget.isRDP;
+  final RxList<SenseTunnelRule> _senseRules = RxList.empty(growable: true);
+
+  /// Local port → why it is not listening (RustDesk "Failed to listen on N: …").
+  final RxMap<int, String> _senseErrors = RxMap();
+
   @override
   void initState() {
     super.initState();
@@ -77,6 +94,11 @@ class _PortForwardPageState extends State<PortForwardPage>
         connToken: widget.connToken,
         isRdp: widget.isRDP);
     Get.put<FFI>(_ffi, tag: 'pf_${widget.id}');
+    // Sense Remote: a listen error is shown on its rule instead of RustDesk's box.
+    if (_senseOn) {
+      SenseSessionHub.register(widget.id, _senseOnMessage);
+      _senseRefresh();
+    }
     debugPrint("Port forward page init success with id ${widget.id}");
     // Call onSelected in post frame callback, since we cannot guarantee that the callback will not call setState.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -84,8 +106,66 @@ class _PortForwardPageState extends State<PortForwardPage>
     });
   }
 
+  /// Sense Remote: a message box of this window; true = shown on the rule.
+  bool _senseOnMessage(String type, String title, String text) {
+    final e = senseTunnelListenError(text);
+    if (e == null) return false;
+    _senseErrors[e.port] = e.reason;
+    return true;
+  }
+
+  void _senseRefresh() {
+    _senseRules.value = senseTunnelRulesFrom(bind.mainGetPeerSync(id: widget.id));
+  }
+
+  Future<void> _senseAdd(SenseTunnelRule r) async {
+    _senseErrors.remove(r.localPort);
+    await bind.sessionAddPortForward(
+        sessionId: _ffi.sessionId,
+        localPort: r.localPort,
+        remoteHost: r.host,
+        remotePort: r.remotePort);
+    _senseRefresh();
+    refreshTunnelConfig();
+  }
+
+  Future<void> _senseRemove(int port) async {
+    _senseErrors.remove(port);
+    await bind.sessionRemovePortForward(
+        sessionId: _ffi.sessionId, localPort: port);
+    _senseRefresh();
+    refreshTunnelConfig();
+  }
+
+  /// Sense Remote (Sürüm 12, ST 7): rules, "Dinleniyor", empty list, listen error, add form,
+  /// with the connecting cards over it (#164; RustDesk connects on the first tunnel use).
+  Widget _senseBuild() {
+    return Stack(children: [
+      Positioned.fill(
+        child: Obx(() => SenseTunnelView(
+              computer: senseAuxPeerLabel(widget.id),
+              rules: _senseRules.toList(),
+              errors: Map<int, String>.of(_senseErrors),
+              onAdd: _senseAdd,
+              onRemove: _senseRemove,
+            )),
+      ),
+      Positioned.fill(
+        child: SenseConnectCards.attach(widget.id,
+            kind: SenseConnectKind.tunnel,
+            host: SenseTunnelConnectHost(SenseFfiConnectHost(widget.id, _ffi,
+                kind: SenseConnectKind.tunnel,
+                onClose: () => widget.tabController.closeBy(widget.id)))),
+      ),
+    ]);
+  }
+
   @override
   void dispose() {
+    if (_senseOn) {
+      SenseSessionHub.unregister(widget.id, _senseOnMessage);
+      SenseConnectCards.remove(widget.id);
+    }
     _ffi.close();
     _ffi.dialogManager.dismissAll();
     Get.delete<FFI>(tag: 'pf_${widget.id}');
@@ -95,6 +175,7 @@ class _PortForwardPageState extends State<PortForwardPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    if (_senseOn) return _senseBuild();
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: FutureBuilder(future: () async {
@@ -358,3 +439,4 @@ class _PortForwardPageState extends State<PortForwardPage>
   @override
   bool get wantKeepAlive => true;
 }
+

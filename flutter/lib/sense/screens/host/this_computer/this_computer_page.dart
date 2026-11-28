@@ -11,6 +11,7 @@ import 'package:get/get.dart';
 import '../../../../common.dart';
 import '../../../../models/state_model.dart';
 import '../../controller/sense_home_strings.dart' show SenseHomeRole;
+import '../data/host_settings.dart';
 import '../data/host_status.dart';
 import '../data/identity.dart';
 import '../data/password.dart';
@@ -64,6 +65,7 @@ class _SenseThisComputerPageState extends State<SenseThisComputerPage> {
 
   SenseIdentity _identity = SenseIdentity.empty;
   List<bool> _permissions = const [];
+  SenseHostNet _net = SenseHostNet.unknown;
   List<SenseRecentConnection> _recent = const [];
   SenseHostLive _live = const SenseHostLive();
   int? _seenSince;
@@ -115,7 +117,13 @@ class _SenseThisComputerPageState extends State<SenseThisComputerPage> {
 
   Future<void> _loadPermissions() async {
     final p = await senseHostPermissions();
-    if (mounted) setState(() => _permissions = p);
+    final n = await senseHostNetRead();
+    if (mounted) {
+      setState(() {
+        _permissions = p;
+        _net = n;
+      });
+    }
   }
 
   Future<void> _loadRecent() async {
@@ -167,6 +175,7 @@ class _SenseThisComputerPageState extends State<SenseThisComputerPage> {
         identity: _identity,
         deviceId: gFFI.serverModel.serverId.text,
         permissions: _permissions,
+        hostNet: _net,
         recent: _recent,
         now: DateTime.now(),
         macMissing: [for (final p in macMissing) p.label],

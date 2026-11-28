@@ -9,8 +9,10 @@ import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_hbb/sense/sense.dart';
 import 'package:flutter_hbb/sense/screens/host_live/data/call.dart';
 import 'package:flutter_hbb/sense/screens/host_live/data/chat.dart';
+import 'package:flutter_hbb/sense/screens/host_live/data/end_summary.dart';
 import 'package:flutter_hbb/sense/screens/host_live/data/files.dart';
 import 'package:flutter_hbb/sense/screens/host_live/data/overlay.dart';
+import 'package:flutter_hbb/sense/screens/host_live/data/peer_state.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_ended.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_geometry.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_page.dart';
@@ -816,7 +818,7 @@ void main() {
       await pumpCard(tester, client(1, 'Halil Y.')..disconnected = true,
           makeController(), calls);
       expect(find.text('Bağlantı sona erdi'), findsOneWidget);
-      expect(find.textContaining('sn sonra kapanıyor'), findsNothing);
+      expect(find.textContaining('sn sonra bu kart kapanır'), findsNothing);
       expect(find.byKey(const Key('sense-host-end')), findsNothing);
       await tester.tap(find.byKey(const Key('sense-host-close')));
       expect(calls, ['close']);
@@ -829,10 +831,125 @@ void main() {
           makeController(), calls,
           endedClosingIn: 4);
       expect(find.text('Bağlantı sona erdi'), findsOneWidget);
-      expect(find.text('4 sn sonra kapanıyor'), findsOneWidget);
+      expect(find.text('4 sn sonra bu kart kapanır'), findsOneWidget);
       expect(find.byType(SenseChatComposer), findsNothing);
       await tester.tap(find.byKey(const Key('sense-host-close')));
       expect(calls, ['close']);
+    });
+  });
+
+  group('Sürüm 12 (HB): bitiş kartı, sohbet görünür, yönetici terminali', () {
+    test('peer state JSON: chat_visible and admin_terminals', () {
+      final s = SenseHostPeerState.parse(
+          '{"chat_visible":[3,5],"admin_terminals":[{"conn_id":4,"by":"ben@example.test"},{"conn_id":6,"by":"ben@example.test"}]}');
+      expect(s.chatShown, isTrue);
+      expect(s.chatVisible, {3, 5});
+      expect(s.admins, hasLength(2));
+      // The same account twice reads once.
+      expect(s.adminLine, 'Yönetici terminali açık · ben@example.test');
+      expect(SenseHostPeerState.parse('{"chat_visible":[],"admin_terminals":[]}'), SenseHostPeerState.none);
+      expect(SenseHostPeerState.none.chatShown, isFalse);
+      expect(SenseHostPeerState.none.adminLine, isNull);
+      // Without an account: the sentence alone.
+      expect(SenseHostPeerState.parse('{"admin_terminals":[{"conn_id":4}]}').adminLine,
+          'Yönetici terminali açık');
+    });
+
+    test('peer state: broken input is "nothing asked", never an exception', () {
+      for (final raw in ['', 'x', '[]', '{"chat_visible":"a","admin_terminals":[1,{"conn_id":"x"}]}']) {
+        final s = SenseHostPeerState.parse(raw);
+        expect(s.chatShown, isFalse, reason: raw);
+        expect(s.adminLine, isNull, reason: raw);
+      }
+      expect(SenseHostPeerState.parse('{"chat_visible":[1]}') == SenseHostPeerState.parse('{"chat_visible":[1]}'), isTrue);
+      expect(SenseHostPeerState.parse('{"chat_visible":[1]}') == SenseHostPeerState.none, isFalse);
+    });
+
+    test('the watch reads once and keeps going after a failure', () async {
+      final seen = <SenseHostPeerState>[];
+      var n = 0;
+      final watch = SenseHostPeerWatch(
+        onState: seen.add,
+        read: () async {
+          n++;
+          if (n == 1) throw StateError('core closing');
+          return '{"chat_visible":[1]}';
+        },
+      );
+      await watch.poll();
+      expect(seen, isEmpty);
+      await watch.poll();
+      expect(seen.single.chatShown, isTrue);
+    });
+
+    test('end figures: counts and time are kept from the live connection', () {
+      final t = SenseHostEndTracker();
+      final chat = <SenseChatEntry>[
+        SenseChatText(text: 'a', mine: false, at: DateTime(2026, 11, 28, 10)),
+        SenseChatText(text: 'b', mine: true, at: DateTime(2026, 11, 28, 10, 1)),
+        SenseChatText(text: 'c', mine: false, at: DateTime(2026, 11, 28, 10, 2)),
+      ];
+      expect(senseHostChatCounts(chat), (messages: 3, files: 0));
+      t.observe(1, live: true, connectedFor: const Duration(minutes: 41), chat: chat);
+      // The connection ended: time is frozen from this reading, the chat is read a last time.
+      t.observe(1, live: false, connectedFor: const Duration(minutes: 42), chat: chat);
+      // Later readings (the card is still up, the chat is gone) change nothing.
+      t.observe(1, live: false, connectedFor: const Duration(minutes: 50));
+      final info = t.infoFor(1)!;
+      expect(info.duration, const Duration(minutes: 42));
+      expect(info.messages, 3);
+      expect(info.files, 0);
+      expect(info.byHost, isFalse);
+      t.markEndedByHost(1);
+      expect(t.infoFor(1)!.byHost, isTrue);
+      expect(t.infoFor(2), isNull);
+      t.forget({2});
+      expect(t.infoFor(1), isNull);
+    });
+
+    testWidgets('FH-A3: the ended card says who ended it, time, messages and files', (tester) async {
+      await pumpCard(tester, client(1, 'Halil Y.')..disconnected = true, makeController(), [],
+          endedClosingIn: 5,
+          endedInfo: const SenseHostEndInfo(duration: Duration(minutes: 42), messages: 3, files: 1));
+      expect(find.text('Bağlantı sona erdi'), findsOneWidget);
+      expect(find.text('Sense Department bağlantıyı bitirdi'), findsOneWidget);
+      expect(find.text('42 dk'), findsOneWidget);
+      expect(find.text('süre'), findsOneWidget);
+      expect(find.text('3 mesaj · 1 dosya'), findsOneWidget);
+      expect(find.text('sohbet silindi'), findsOneWidget);
+      expect(find.text('5 sn sonra bu kart kapanır'), findsOneWidget);
+      expect(find.byKey(const Key('sense-host-close')), findsOneWidget);
+    });
+
+    testWidgets('FH-A3: ended here says "Bağlantıyı sen bitirdin"; without figures no tiles',
+        (tester) async {
+      await pumpCard(tester, client(1, 'Halil Y.')..disconnected = true, makeController(), [],
+          endedInfo: const SenseHostEndInfo(byHost: true));
+      expect(find.text('Bağlantıyı sen bitirdin'), findsOneWidget);
+      // No known time: a dash, never a made-up number.
+      expect(
+          find.descendant(
+              of: find.byKey(const Key('sense-host-ended-time')), matching: find.text('–')),
+          findsOneWidget);
+      expect(find.text('0 mesaj · 0 dosya'), findsOneWidget);
+
+      await pumpCard(tester, client(1, 'Halil Y.')..disconnected = true, makeController(), []);
+      expect(find.text('Bağlantı sona erdi'), findsOneWidget);
+      expect(find.byKey(const Key('sense-host-ended-time')), findsNothing);
+      expect(find.byKey(const Key('sense-host-close')), findsOneWidget);
+    });
+
+    testWidgets('#151, #157: the card names what the Controller asked for', (tester) async {
+      await pumpCard(tester, client(1, 'Halil Y.'), makeController(), []);
+      expect(find.byKey(const Key('sense-host-chat-visible')), findsNothing);
+      expect(find.byKey(const Key('sense-host-admin-terminal')), findsNothing);
+
+      await pumpCard(tester, client(1, 'Halil Y.'), makeController(), [],
+          chatVisible: true, adminLine: 'Yönetici terminali açık · ekip@example.test');
+      expect(find.text('Yönetici terminali açık · ekip@example.test'), findsOneWidget);
+      expect(find.text('Bu kart bu oturumda karşı tarafın görüntüsüne giriyor'), findsOneWidget);
+      // The connected box keeps its button.
+      expect(find.byKey(const Key('sense-host-end')), findsOneWidget);
     });
   });
 
@@ -944,6 +1061,9 @@ Future<void> pumpCard(
   int? endedClosingIn,
   String? connectionsLine,
   Client? waiting,
+  SenseHostEndInfo? endedInfo,
+  bool chatVisible = false,
+  String? adminLine,
 }) async {
   setWindow(tester, kSenseCmPanelSize);
   await tester.pumpWidget(app(
@@ -958,6 +1078,9 @@ Future<void> pumpCard(
       endedClosingIn: endedClosingIn,
       connectionsLine: connectionsLine,
       waiting: waiting,
+      endedInfo: endedInfo,
+      chatVisible: chatVisible,
+      adminLine: adminLine,
       actions: SenseHostCardActions(
         onMinimize: () => calls.add('minimize'),
         onEnd: () => calls.add('end'),

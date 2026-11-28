@@ -347,6 +347,15 @@ class FakeBackend extends SenseSessionBackend {
   String fingerprint = 'ab12 cd34';
   @override
   void copyFingerprint() => _call('fingerprint');
+
+  // Sürüm 12 (#151)
+  @override
+  bool hostChatVisible = false;
+  @override
+  void setHostChatVisible(bool v) => set(() {
+        hostChatVisible = v;
+        calls.add('hostChat:$v');
+      });
 }
 
 class FakePopups extends ChangeNotifier implements SenseBarPopups {

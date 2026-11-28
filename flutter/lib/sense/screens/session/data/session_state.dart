@@ -7,9 +7,11 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../strings/session.dart';
+import '../layers/layer_strings.dart' show SenseLayerStrings;
 import '../record_notice.dart';
 import 'screen_still.dart' show senseStillScreen;
 import '../../../tokens/sense_tokens.dart';
+import '../../terminal/terminal_admin.dart' show SenseTermAdminEvents;
 
 /// The four lists of the bar (O3–O6).
 enum SenseBarMenu { screens, display, keyboard, actions }
@@ -62,6 +64,7 @@ class SenseLinkSample {
     this.reachableFps,
     this.remoteHz,
     this.troubleSecs,
+    this.reconnectAttempt,
   });
 
   final SenseLinkPath path;
@@ -95,6 +98,10 @@ class SenseLinkSample {
   /// How long the line has been showing trouble (seconds), for the hint.
   final int? troubleSecs;
 
+  /// Sürüm 12 (FO-A12): the transport is lost and the window connects again; the reconnect
+  /// attempt (`SenseLayerController.reconnectInfo`). Null = not lost.
+  final int? reconnectAttempt;
+
   SenseLinkSample copyWith({
     SenseLinkPath? path,
     int? fps,
@@ -107,6 +114,7 @@ class SenseLinkSample {
     int? reachableFps,
     int? remoteHz,
     int? troubleSecs,
+    int? reconnectAttempt,
   }) =>
       SenseLinkSample(
         path: path ?? this.path,
@@ -120,6 +128,7 @@ class SenseLinkSample {
         reachableFps: reachableFps ?? this.reachableFps,
         remoteHz: remoteHz ?? this.remoteHz,
         troubleSecs: troubleSecs ?? this.troubleSecs,
+        reconnectAttempt: reconnectAttempt ?? this.reconnectAttempt,
       );
 }
 
@@ -222,6 +231,11 @@ String? senseFrameLine(SenseLinkSample s) {
 /// The small line under the computer name, its colour and the hover hint.
 /// Karar #152: "60 fps · 3 ms" (no path word; the path is on the connection card).
 ({String text, SenseLevel level, String? hint}) senseLinkLine(SenseLinkSample s) {
+  // Sürüm 12 (FO-A12): red "Kesildi · Yeniden bağlanılıyor (N. deneme)" while connecting again.
+  final attempt = s.reconnectAttempt;
+  if (attempt != null) {
+    return (text: SenseLayerStrings.barReconnecting(attempt), level: SenseLevel.hot, hint: null);
+  }
   final health = senseLinkHealth(s);
   if (health == SenseLinkHealth.connecting) {
     return (text: SenseSessionStrings.connecting, level: SenseLevel.unknown, hint: null);
@@ -353,6 +367,7 @@ abstract final class SenseSessionEvents {
       return true;
     }
     if (SenseRecordNotice.handle(evt)) return true; // Sense Remote (#114): "Klasörü aç" note
+    if (SenseTermAdminEvents.handle(peerId, evt)) return true; // Sürüm 12 (#157): admin terminal
     return false;
   }
 }

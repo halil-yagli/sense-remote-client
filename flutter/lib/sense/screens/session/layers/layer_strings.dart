@@ -41,6 +41,11 @@ abstract final class SenseLayerStrings {
   static const String pathUnknown = 'Bağlantı türü ölçülüyor';
   static const String closeCard = 'Kapat';
 
+  /// Sürüm 12 (FO-A12): the line under the computer name while the transport is lost
+  /// (prototype `netRender`: at least "1. deneme").
+  static String barReconnecting(int attempt) =>
+      'Kesildi · Yeniden bağlanılıyor (${attempt < 1 ? 1 : attempt}. deneme)';
+
   /// Small word in the top bar while values shake but the layer is not up.
   static const String wavy = 'Dalgalı';
 
@@ -51,6 +56,8 @@ abstract final class SenseLayerStrings {
   static const String reasonGone = 'Uzak bilgisayar kapandı ya da ağdan çıktı';
   /// Sürüm 11 (O7): instead of RustDesk's "Login Error · sense_busy".
   static const String reasonBusy = 'Meşgul — şu an başka biri bağlı';
+  /// Sürüm 12 (FO-A11): this side pressed "Bağlantıyı bitir".
+  static const String reasonSelf = 'Bağlantıyı sen bitirdin';
   static const String duration = 'süre';
   static String durationValue(Duration d) {
     final m = d.inMinutes;

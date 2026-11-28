@@ -13,6 +13,9 @@ enum SenseEndReason {
 
   /// Sürüm 11 (O7): someone else is connected to the computer (S8 `sense_busy`).
   busy,
+
+  /// Sürüm 12 (FO-A11): this side pressed "Bağlantıyı bitir" (`SenseLayerController.endByUser`).
+  self,
 }
 
 /// What a session-ending message from RustDesk means for Sense.
@@ -87,6 +90,8 @@ class SenseSessionSummary {
         return SenseLayerStrings.reasonGone;
       case SenseEndReason.busy:
         return SenseLayerStrings.reasonBusy;
+      case SenseEndReason.self:
+        return SenseLayerStrings.reasonSelf;
     }
   }
 }

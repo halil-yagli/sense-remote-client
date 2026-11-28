@@ -64,7 +64,23 @@ abstract final class SenseHostLiveStrings {
 
   // Ended connection (#101; O14 wording): the card closes by itself.
   static const String ended = 'Bağlantı sona erdi';
-  static String endedClosing(int seconds) => '$seconds sn sonra kapanıyor';
+  static String endedClosing(int seconds) => '$seconds sn sonra bu kart kapanır';
+
+  // FH-A3: what the ended card says (prototype `hostEndCard`).
+  static const String endedByController = 'Sense Department bağlantıyı bitirdi';
+  static const String endedByHost = 'Bağlantıyı sen bitirdin';
+  static const String endedDuration = 'süre';
+  static const String endedChatWiped = 'sohbet silindi';
+
+  /// "3 mesaj · 1 dosya".
+  static String endedChat(int messages, int files) => '$messages mesaj · $files dosya';
+
+  // #151: the Controller asked to see this card in the screen it watches.
+  static const String chatVisible = 'Bu kart bu oturumda karşı tarafın görüntüsüne giriyor';
+
+  // #157: an admin terminal runs on this computer ("Yönetici terminali açık · mevlut@...").
+  static const String adminTerminal = 'Yönetici terminali açık';
+  static String adminTerminalBy(String by) => '$adminTerminal · $by';
   static const String close = 'Kapat';
 
   // Icon (H3).

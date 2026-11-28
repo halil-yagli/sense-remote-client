@@ -7,7 +7,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../../strings/session.dart';
 import '../../../tokens/sense_tokens.dart';
+import 'backend.dart' show SenseResolution;
 
 sealed class SenseListEntry {
   const SenseListEntry({
@@ -58,7 +60,9 @@ class SenseActionEntry extends SenseListEntry {
     this.tag,
     this.tagLevel,
     this.confirmQuestion,
+    this.confirmDetail,
     this.confirmLabel,
+    this.confirmPrimary = false,
     this.toast,
   });
 
@@ -74,7 +78,13 @@ class SenseActionEntry extends SenseListEntry {
 
   /// Irreversible: the row asks in place first (T7 "yerinde ikinci adım").
   final String? confirmQuestion;
+
+  /// Sürüm 12 (#158): second line of the question (`.ask-d`), e.g. "Bağlantı kopar, …".
+  final String? confirmDetail;
   final String? confirmLabel;
+
+  /// The step can be taken back (lock): the confirm button is white (`.btn.pri`), not red.
+  final bool confirmPrimary;
 
   /// Toast after the action ran (O7: "seçimde açık kalır + bildirim").
   final String? toast;
@@ -207,6 +217,7 @@ class SenseSizeInputEntry extends SenseListEntry {
     required this.onApply,
     this.min = kSenseCustomSizeMin,
     this.max = kSenseCustomSizeMax,
+    this.trial,
     super.hint,
     super.why,
     super.noRights,
@@ -221,8 +232,107 @@ class SenseSizeInputEntry extends SenseListEntry {
   /// Null = not available right now (faded).
   final void Function(int width, int height)? onApply;
 
+  /// Sürüm 12 (FO-A7/B7): with a trial the size is tried first and taken back by itself
+  /// unless the person keeps it within [SenseResolutionTrial.seconds]; [onApply] is then
+  /// not called (the trial applies).
+  final SenseResolutionTrial? trial;
+
   @override
   bool get disabled => onApply == null;
+}
+
+/// Sürüm 12 (FO-A7/B7, prototype `cresApply`): a custom resolution is tried; if the person
+/// does not say "Koru" within [seconds] the old one comes back by itself (a size the
+/// remote screen cannot show must not leave the person without an image). Lives with the
+/// session backend, so the countdown goes on when the list is closed.
+class SenseResolutionTrial extends ChangeNotifier {
+  SenseResolutionTrial(this._apply, this._current);
+
+  /// How long the new size waits for "Koru".
+  static const int seconds = 15;
+
+  final void Function(SenseResolution r) _apply;
+  final SenseResolution? Function() _current;
+  Timer? _timer;
+  SenseResolution? _previous;
+  SenseResolution? _trying;
+  int _left = 0;
+  ValueChanged<String>? _note;
+
+  /// A size is being tried.
+  bool get active => _trying != null;
+
+  /// The size being tried.
+  SenseResolution? get trying => _trying;
+
+  /// The size that comes back.
+  SenseResolution? get previous => _previous;
+
+  /// Seconds left before the old size comes back.
+  int get secondsLeft => _left;
+
+  /// Applies [next] and starts the countdown. The size to go back to is the current one (a
+  /// second try keeps the first size); when it is not known [next] is applied without a
+  /// trial. [note] gets the toast text of the end ("Eski çözünürlüğe dönüldü" /
+  /// "Çözünürlük korundu: …").
+  void start(SenseResolution next, {ValueChanged<String>? note}) {
+    _timer?.cancel();
+    final previous = (_trying != null && _previous != null) ? _previous : _current();
+    _apply(next);
+    if (previous == null || previous == next) {
+      _clear();
+      return;
+    }
+    _previous = previous;
+    _trying = next;
+    _left = seconds;
+    _note = note;
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _left--;
+      if (_left <= 0) {
+        undo();
+      } else {
+        notifyListeners();
+      }
+    });
+    notifyListeners();
+  }
+
+  /// "Koru": the size stays.
+  void keep() {
+    final t = _trying;
+    if (t == null) return;
+    final note = _note;
+    _clear();
+    note?.call(SenseSessionStrings.resolutionKept(t.label));
+  }
+
+  /// "Geri al" or the time ran out: the old size comes back.
+  void undo() {
+    final p = _previous;
+    if (_trying == null || p == null) return;
+    final note = _note;
+    _clear();
+    _apply(p);
+    note?.call(SenseSessionStrings.resolutionReverted);
+  }
+
+  void _clear() {
+    _timer?.cancel();
+    _timer = null;
+    _trying = null;
+    _previous = null;
+    _note = null;
+    _left = 0;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
+    super.dispose();
+  }
 }
 
 /// Limits of the custom resolution fields (RustDesk allows four digits; a virtual display

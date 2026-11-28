@@ -23,6 +23,7 @@ import '../shared/chat/chat_composer.dart';
 import '../shared/chat/chat_controller.dart';
 import '../shared/chat/chat_entry.dart';
 import '../shared/chat/chat_popup.dart' show SenseFileDropBuilder;
+import 'data/end_summary.dart';
 
 /// Actions of the card; the root wires them to the connection manager.
 class SenseHostCardActions {
@@ -68,6 +69,13 @@ abstract final class SenseHostCardSize {
   static const double recDot = 8;
   static const double recBorderOpacity = 0.45;
   static const double recFillOpacity = 0.08;
+
+  // FH-A3 (`.hend`: padding 20 16 16, gap 8, mark 52 x 48; `.hnm div` padding 8 6).
+  static const EdgeInsets endPadding = EdgeInsets.fromLTRB(4, 10, 4, 6);
+  static const EdgeInsets endFigurePadding = EdgeInsets.symmetric(horizontal: 6, vertical: 8);
+  static const double endGap = 8;
+  static const double endMarkWidth = 52;
+  static const double endMarkHeight = 48;
 }
 
 class SenseHostCard extends StatefulWidget {
@@ -87,6 +95,9 @@ class SenseHostCard extends StatefulWidget {
     this.endedClosingIn,
     this.connectionsLine,
     this.waiting,
+    this.endedInfo,
+    this.chatVisible = false,
+    this.adminLine,
   });
 
   /// The one connection (#40: one Controller at a time).
@@ -123,6 +134,15 @@ class SenseHostCard extends StatefulWidget {
   /// O6: a second connection waiting for an answer while [client] is live
   /// (approve mode "click"); shown in its own box above the live one.
   final Client? waiting;
+
+  /// FH-A3: what the ended card says (who ended it, time, message and file counts).
+  final SenseHostEndInfo? endedInfo;
+
+  /// #151: the Controller asked to see this card in its picture ("bu oturumda").
+  final bool chatVisible;
+
+  /// #157: "Yönetici terminali açık · e-posta"; null when no admin terminal is open.
+  final String? adminLine;
 
   @override
   State<SenseHostCard> createState() => _SenseHostCardState();
@@ -196,7 +216,8 @@ class _SenseHostCardState extends State<SenseHostCard> {
                     if (client.disconnected)
                       _EndedBox(
                           onClose: widget.actions.onCloseEnded,
-                          closingIn: widget.endedClosingIn)
+                          closingIn: widget.endedClosingIn,
+                          info: widget.endedInfo)
                     else if (!client.authorized)
                       _request(client)
                     else ...[
@@ -205,6 +226,12 @@ class _SenseHostCardState extends State<SenseHostCard> {
                       _ConnectedBox(
                         whoLine: widget.whoLine,
                         connectionsLine: widget.connectionsLine,
+                        notes: [
+                          if (widget.adminLine != null)
+                            (const Key('sense-host-admin-terminal'), widget.adminLine!),
+                          if (widget.chatVisible)
+                            (const Key('sense-host-chat-visible'), SenseHostLiveStrings.chatVisible),
+                        ],
                         onEnd: widget.actions.onEnd,
                       ),
                     ],
@@ -411,6 +438,7 @@ class _BoxText extends StatelessWidget {
     this.titleColor = SenseColors.text,
     this.meta,
     this.extra,
+    this.notes = const [],
   });
 
   final String title;
@@ -419,6 +447,9 @@ class _BoxText extends StatelessWidget {
 
   /// O6: "2 bağlantı · ekran, terminal" under the who line.
   final String? extra;
+
+  /// #151, #157: more hint lines (key, text) under the who line.
+  final List<(Key, String)> notes;
 
   @override
   Widget build(BuildContext context) {
@@ -455,6 +486,16 @@ class _BoxText extends StatelessWidget {
             style: SenseTextStyles.hint,
           ),
         ],
+        for (final (key, text) in notes) ...[
+          const SizedBox(height: SenseHostCardSize.metaGap),
+          Text(
+            text,
+            key: key,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: SenseTextStyles.hint,
+          ),
+        ],
       ],
     );
   }
@@ -463,10 +504,12 @@ class _BoxText extends StatelessWidget {
 /// `.ov.ok.hinfo`: "Sense Department bağlı" + who line + red Bağlantıyı bitir
 /// (O6: with more than one connection, their count and kinds + Tümünü bitir).
 class _ConnectedBox extends StatelessWidget {
-  const _ConnectedBox({required this.whoLine, required this.onEnd, this.connectionsLine});
+  const _ConnectedBox(
+      {required this.whoLine, required this.onEnd, this.connectionsLine, this.notes = const []});
 
   final String whoLine;
   final String? connectionsLine;
+  final List<(Key, String)> notes;
   final VoidCallback onEnd;
 
   @override
@@ -480,6 +523,7 @@ class _ConnectedBox extends StatelessWidget {
             titleColor: SenseColors.ok,
             meta: whoLine,
             extra: connectionsLine,
+            notes: notes,
           ),
         ),
         const SizedBox(width: SenseHostCardSize.boxGap),
@@ -536,31 +580,112 @@ class _RequestBox extends StatelessWidget {
   }
 }
 
+/// FH-A3 (prototype `hostEndCard`, `.hend`): the mark, "Bağlantı sona erdi", who ended it,
+/// two figures (time, messages and files with "sohbet silindi"), the countdown and Kapat.
 class _EndedBox extends StatelessWidget {
-  const _EndedBox({required this.onClose, this.closingIn});
+  const _EndedBox({required this.onClose, this.closingIn, this.info});
 
   final VoidCallback onClose;
   final int? closingIn;
+  final SenseHostEndInfo? info;
 
   @override
   Widget build(BuildContext context) {
-    return _Box(
+    final i = info;
+    return Container(
       key: const Key('sense-host-ended'),
-      child: Row(children: [
-        Expanded(
-          child: _BoxText(
-            title: SenseHostLiveStrings.ended,
-            titleColor: SenseColors.textMuted,
-            meta: closingIn == null ? null : SenseHostLiveStrings.endedClosing(closingIn!),
+      margin: const EdgeInsets.only(bottom: SenseHostCardSize.boxGap),
+      padding: SenseHostCardSize.endPadding,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const SenseMark(
+              width: SenseHostCardSize.endMarkWidth, height: SenseHostCardSize.endMarkHeight),
+          const SizedBox(height: SenseHostCardSize.endGap),
+          Text(
+            SenseHostLiveStrings.ended,
+            textAlign: TextAlign.center,
+            style: SenseTextStyles.of(size: SenseFontSize.pageTitle, weight: SenseFontWeight.bold),
           ),
+          if (i != null) ...[
+            const SizedBox(height: SenseHostCardSize.endGap),
+            Text(
+              i.byHost ? SenseHostLiveStrings.endedByHost : SenseHostLiveStrings.endedByController,
+              key: const Key('sense-host-ended-by'),
+              textAlign: TextAlign.center,
+              style: SenseTextStyles.of(size: SenseFontSize.body, color: SenseColors.textMuted),
+            ),
+            const SizedBox(height: SenseHostCardSize.endGap),
+            Row(children: [
+              Expanded(
+                child: _EndedFigure(
+                  key: const Key('sense-host-ended-time'),
+                  value: i.duration == null ? '–' : SenseHostLiveStrings.minutes(i.duration!),
+                  caption: SenseHostLiveStrings.endedDuration,
+                ),
+              ),
+              const SizedBox(width: SenseHostCardSize.endGap),
+              Expanded(
+                child: _EndedFigure(
+                  key: const Key('sense-host-ended-chat'),
+                  value: SenseHostLiveStrings.endedChat(i.messages, i.files),
+                  caption: SenseHostLiveStrings.endedChatWiped,
+                ),
+              ),
+            ]),
+          ],
+          if (closingIn != null) ...[
+            const SizedBox(height: SenseHostCardSize.endGap),
+            Text(
+              SenseHostLiveStrings.endedClosing(closingIn!),
+              key: const Key('sense-host-ended-closing'),
+              textAlign: TextAlign.center,
+              style: SenseTextStyles.hint,
+            ),
+          ],
+          const SizedBox(height: SenseHostCardSize.endGap),
+          SenseButton(
+            key: const Key('sense-host-close'),
+            label: SenseHostLiveStrings.close,
+            size: SenseButtonSize.small,
+            onPressed: onClose,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// `.hnm div`: a framed figure with a caption under it.
+class _EndedFigure extends StatelessWidget {
+  const _EndedFigure({super.key, required this.value, required this.caption});
+
+  final String value;
+  final String caption;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: SenseHostCardSize.endFigurePadding,
+      decoration: BoxDecoration(
+        border: Border.all(color: SenseColors.line),
+        borderRadius: BorderRadius.circular(SenseRadii.button),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: SenseTextStyles.of(size: SenseFontSize.categoryTitle, weight: SenseFontWeight.bold),
         ),
-        SenseButton(
-          key: const Key('sense-host-close'),
-          label: SenseHostLiveStrings.close,
-          onPressed: onClose,
+        const SizedBox(height: 2),
+        Text(
+          caption,
+          maxLines: 1,
+          style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted),
         ),
       ]),
     );
   }
 }
-

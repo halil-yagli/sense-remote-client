@@ -22,6 +22,17 @@ import '../widgets/material_mod_popup_menu.dart' as mod_menu;
 import '../widgets/popup_menu.dart';
 import 'package:bot_toast/bot_toast.dart';
 
+import '../../common/shared_state.dart';
+import '../../sense/screens/shared/aux_window/aux_label.dart';
+import '../../sense/screens/shared/aux_window/aux_window_frame.dart';
+import '../../sense/screens/terminal/aux_parts.dart';
+import '../../sense/screens/terminal/clip_notice.dart';
+import '../../sense/screens/terminal/terminal_admin.dart';
+import '../../sense/screens/terminal/terminal_window.dart';
+import '../../sense/sense.dart' show SenseLevel;
+import '../../sense/strings/files.dart';
+import '../../sense/strings/terminal.dart';
+
 typedef _TerminalClipboardSource = ({
   String peerId,
   int terminalId,
@@ -63,11 +74,20 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
   final _terminalClipboardNotice =
       TerminalClipboardNoticeCoordinator<_TerminalClipboardSource>();
 
+  // Sense Remote (Sürüm 12, ST 4, #157): the Sense terminal window.
+  final bool _senseOn = senseAuxFrameOn();
+
+  /// The tabs of a computer are being replaced (admin terminal): the window stays open.
+  bool _senseReopening = false;
+
   _TerminalTabPageState(Map<String, dynamic> params) {
     Get.put(DesktopTabController(tabType: DesktopTabType.terminal));
     tabController.onSelected = (id) {
-      WindowController.fromWindowId(windowId())
-          .setTitle(getWindowNameWithId(id));
+      // Sense Remote (ST 16): Turkish title with the computer's name, no ID.
+      WindowController.fromWindowId(windowId()).setTitle(_senseOn
+          ? senseAuxWindowTitle(SenseTerminalStrings.title,
+              senseTerminalTabKey(id)?.$1 ?? id)
+          : getWindowNameWithId(id));
     };
     tabController.onRemoved = (_, id) {
       _closeTerminalClipboardNoticeForTab(id);
@@ -83,6 +103,8 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
       isSharedPassword: params['isSharedPassword'],
       forceRelay: params['forceRelay'],
       connToken: params['connToken'],
+      // Sense Remote (#157): the opener asked for the admin terminal (confirmed in place).
+      senseAdmin: _senseOn && senseTakeAdminRequest(params['id']),
     ));
   }
 
@@ -94,8 +116,11 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     bool? isSharedPassword,
     bool? forceRelay,
     String? connToken,
+    bool senseAdmin = false,
   }) {
     final tabKey = '${peerId}_$terminalId';
+    // Sense Remote: direct / relay for the live line of the Sense frame.
+    if (_senseOn) ConnectionTypeState.init(peerId);
     final alias = bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
     final tabLabel =
         alias.isNotEmpty ? '$alias #$terminalId' : '$peerId #$terminalId';
@@ -130,8 +155,61 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
         onClipboardWriteSucceeded: (_) {
           _handleTerminalClipboardWriteSucceeded(clipboardSource);
         },
+        senseAdmin: senseAdmin,
+        onSenseClose: () => _closeTab(tabKey),
+        onSenseReopen: ({required bool stockAdmin}) =>
+            _senseReopen(peerId, stockAdmin: stockAdmin),
       ),
     );
+  }
+
+  /// Sense Remote (Sürüm 12, #157): the admin terminal is a new connection (the Host takes the
+  /// ticket only before a terminal opened). The computer's tabs close (their shells end) and one
+  /// new tab opens: as the admin terminal, or with RustDesk's administrator sign-in box
+  /// ([stockAdmin], fallback when the Host has no Windows session or is older).
+  Future<void> _senseReopen(String peerId, {required bool stockAdmin}) async {
+    if (_senseReopening) return;
+    final tabs = tabController.state.value.tabs
+        .where((t) => _parseTabKey(t.key)?.$1 == peerId)
+        .toList();
+    if (tabs.isEmpty || tabs.first.page is! TerminalPage) return;
+    final first = tabs.first.page as TerminalPage;
+    _senseReopening = true;
+    try {
+      final ffi = TerminalConnectionManager.getExistingConnection(peerId);
+      for (final t in tabs) {
+        final parsed = _parseTabKey(t.key);
+        final model = parsed == null ? null : ffi?.terminalModels[parsed.$2];
+        if (model != null) {
+          try {
+            await model.closeTerminal();
+          } catch (_) {}
+        }
+      }
+      for (final t in tabs) {
+        tabController.closeBy(t.key);
+      }
+      // The old pages release the connection when they leave the tree.
+      for (var i = 0;
+          i < 60 && TerminalConnectionManager.hasConnection(peerId);
+          i++) {
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+      if (!mounted) return;
+      if (stockAdmin) setEnvTerminalAdmin();
+      tabController.add(_createTerminalTab(
+        peerId: peerId,
+        terminalId: _nextTerminalId++,
+        password: first.password,
+        loginMethod: first.loginMethod,
+        isSharedPassword: first.isSharedPassword,
+        forceRelay: first.forceRelay,
+        connToken: first.connToken,
+        senseAdmin: !stockAdmin,
+      ));
+    } finally {
+      _senseReopening = false;
+    }
   }
 
   void _handleTerminalClipboardWriteBlocked(
@@ -161,7 +239,15 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
       onClose: _handleTerminalClipboardNoticeClosed,
       toastBuilder: (_) => AnimatedBuilder(
         animation: _terminalClipboardNotice,
-        builder: (_, __) => MaterialBanner(
+        // Sense Remote (Sürüm 12, ST 4): the notice in Sense colours.
+        builder: (_, __) => _senseOn
+            ? SenseTerminalClipNotice(
+                persistAllowed: request.persistAllowed,
+                enabled: _terminalClipboardNotice.canClaimAction,
+                onNegative: _handleTerminalClipboardNegativeAction,
+                onPositive: _handleTerminalClipboardPositiveAction,
+              )
+            : MaterialBanner(
           leading: const Icon(Icons.content_copy_outlined),
           content: Text(translate(kTerminalClipboardNoticeMessageKey)),
           actions: [
@@ -521,6 +607,7 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
           isSharedPassword: args['isSharedPassword'],
           forceRelay: args['forceRelay'],
           connToken: args['connToken'],
+          senseAdmin: _senseOn && senseTakeAdminRequest(id),
         ));
       } else if (call.method == kWindowEventRestoreTerminalSessions) {
         _restoreSessions(call.arguments);
@@ -541,6 +628,11 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
         if (lastUnderscore > 0 &&
             currentTab.key.substring(0, lastUnderscore) == call.arguments) {
           windowOnTop(windowId());
+          // Sense Remote (#157): an admin terminal was asked for this computer: its
+          // terminal opens again on a new connection as the admin terminal.
+          if (_senseOn && senseTakeAdminRequest(call.arguments)) {
+            _senseReopen(call.arguments, stockAdmin: false);
+          }
           return true;
         }
         return false;
@@ -733,8 +825,74 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     _addNewTerminal(peerId, terminalId: terminalId);
   }
 
+  /// Sense Remote (Sürüm 12, ST 4): live line of the Sense frame for a tab.
+  SenseAuxLive _senseLive(String key) {
+    final peer = senseTerminalTabKey(key)?.$1 ?? key;
+    String direct = kInvalidValueStr;
+    try {
+      direct = ConnectionTypeState.find(peer).direct.value;
+    } catch (_) {}
+    if (direct == kInvalidValueStr) {
+      return const SenseAuxLive(SenseAuxStrings.connecting, SenseLevel.unknown);
+    }
+    final way = direct == ConnectionType.strDirect
+        ? SenseAuxStrings.direct
+        : SenseAuxStrings.relay;
+    return SenseAuxLive('$way · ${SenseAuxStrings.screenNotOpened}', SenseLevel.ok);
+  }
+
+  List<Widget> _senseBadges(String key) {
+    final peer = senseTerminalTabKey(key)?.$1 ?? key;
+    if (!SenseTermAdminEvents.isGranted(peer)) return const [];
+    return const [
+      SenseAuxBadge(label: SenseTerminalStrings.adminChip, level: SenseLevel.warn)
+    ];
+  }
+
+  bool? _senseKeepSessions(String key) {
+    final peer = senseTerminalTabKey(key)?.$1;
+    final ffi =
+        peer == null ? null : TerminalConnectionManager.getExistingConnection(peer);
+    if (ffi == null) return null;
+    try {
+      return bind.sessionGetToggleOptionSync(
+          sessionId: ffi.sessionId, arg: kOptionTerminalPersistent);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _senseToggleKeepSessions(String key) {
+    final peer = senseTerminalTabKey(key)?.$1;
+    final ffi =
+        peer == null ? null : TerminalConnectionManager.getExistingConnection(peer);
+    if (ffi == null) return;
+    bind.sessionToggleOption(
+        sessionId: ffi.sessionId, value: kOptionTerminalPersistent);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Sense Remote (Sürüm 12, ST 4, 15): the Sense frame instead of the stock blue tab bar.
+    // The stock frame below stays the fallback without a Sense role.
+    if (_senseOn) {
+      return _wrapWindow(
+          context,
+          SenseTerminalTabWindow(
+            controller: tabController,
+            onWindowClose: handleWindowCloseButton,
+            onCloseTab: _closeTab,
+            onNewTab: (key) {
+              final peer = senseTerminalTabKey(key)?.$1;
+              if (peer != null) _addNewTerminal(peer);
+            },
+            liveFor: _senseLive,
+            badgesFor: _senseBadges,
+            keepSessions: (key) => _senseKeepSessions(key) ?? false,
+            onToggleKeepSessions: _senseToggleKeepSessions,
+            refresh: SenseTermAdminEvents.changes,
+          ));
+    }
     final child = Scaffold(
         backgroundColor: Theme.of(context).cardColor,
         body: DesktopTab(
@@ -750,6 +908,10 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
             return _tabMenuBuilder(peerId, () {});
           },
         ));
+    return _wrapWindow(context, child);
+  }
+
+  Widget _wrapWindow(BuildContext context, Widget child) {
     final tabWidget = isLinux
         ? buildVirtualWindowFrame(context, child)
         : workaroundWindowBorder(
@@ -770,6 +932,7 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
   }
 
   void onRemoveId(String id) {
+    if (_senseReopening) return; // Sense Remote: a new tab follows (#157)
     if (tabController.state.value.tabs.isEmpty) {
       WindowController.fromWindowId(windowId()).close();
     }
@@ -814,7 +977,10 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
           bind.mainGetLocalOption(key: kOptionEnableConfirmClosingTabs))) {
         res = true;
       } else {
-        res = await closeConfirmDialog();
+        // Sense Remote (Sürüm 12, ST 14): the Sense "close all" step.
+        res = _senseOn
+            ? await senseCloseTabsConfirm(connLength)
+            : await closeConfirmDialog();
       }
       if (res) {
         await _closeAllTabs();

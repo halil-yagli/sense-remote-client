@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_hbb/sense/sense.dart';
+import 'package:flutter_hbb/sense/screens/host_live/data/end_summary.dart';
 import 'package:flutter_hbb/sense/screens/host_live/data/overlay.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_geometry.dart';
 import 'package:flutter_hbb/sense/screens/host_live/sense_cm_page.dart';
@@ -57,7 +58,13 @@ Widget desk(List<Widget> children) => app(
 Future<List<String>> _noFiles() async => const <String>[];
 
 Widget card(Client c, SenseChatController chat,
-        {Duration? recording, bool attach = true, String? connectionsLine}) =>
+        {Duration? recording,
+        bool attach = true,
+        String? connectionsLine,
+        SenseHostEndInfo? endedInfo,
+        int? endedClosingIn,
+        bool chatVisible = false,
+        String? adminLine}) =>
     Positioned(
       right: kSenseCmMargin,
       bottom: kSenseCmMargin,
@@ -68,6 +75,10 @@ Widget card(Client c, SenseChatController chat,
         chat: chat,
         whoLine: senseHostWhoLine(c, const Duration(minutes: 14)),
         connectionsLine: connectionsLine,
+        endedInfo: endedInfo,
+        endedClosingIn: endedClosingIn,
+        chatVisible: chatVisible,
+        adminLine: adminLine,
         recording: recording,
         pickFiles: attach ? _noFiles : null,
         animateIn: false,
@@ -155,4 +166,28 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('h06_two')));
   }, skip: goldenSkip('h06_two'), tags: const ['golden']);
+
+  testWidgets('h07: the ended card (FH-A3: who ended it, time, chat figures)', (tester) async {
+    setWindow(tester, stage);
+    final c = halil()..disconnected = true;
+    await tester.pumpWidget(desk([
+      card(c, c08Controller(),
+          attach: false,
+          endedClosingIn: 4,
+          endedInfo: const SenseHostEndInfo(duration: Duration(minutes: 42), messages: 3, files: 1)),
+    ]));
+    await tester.pump(const Duration(milliseconds: 400));
+    await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('h07_ended')));
+  }, skip: goldenSkip('h07_ended'), tags: const ['golden']);
+
+  testWidgets('h08: admin terminal open and the card in the Controller\'s picture (#157, #151)',
+      (tester) async {
+    setWindow(tester, stage);
+    await tester.pumpWidget(desk([
+      card(halil(), c08Controller(),
+          adminLine: 'Yönetici terminali açık · ekip@example.test', chatVisible: true),
+    ]));
+    await tester.pump(const Duration(milliseconds: 400));
+    await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(goldenFile('h08_notes')));
+  }, skip: goldenSkip('h08_notes'), tags: const ['golden']);
 }

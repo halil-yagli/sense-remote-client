@@ -1,7 +1,7 @@
 // Sense Remote: "Bu bilgisayar" page (YH H1, H2; prototype `thisView`, images
 // a09–a11). Header with live state, the status box (six states, name ✎ in its
 // title, tiles Kimlik + Kopyala · Yer ✎ · Sense paneli · Etkin bağlantı) and the
-// closable categories (one open): Yetkiler, Kalıcı şifre, Bu bilgisayarın rolü,
+// closable categories (one open): Yetkiler, Ses ve ağ, Kalıcı şifre, Bu bilgisayarın rolü,
 // Son bağlantılar. Pure view (data + callbacks); the binding is
 // this_computer_page.dart. Host + Controller (B3) shows the same page without
 // the role category (it is in Ayarlar) and with the password in Ayarlar.
@@ -15,6 +15,7 @@ import '../../../sense.dart';
 import '../../../strings/host.dart';
 import '../data/host_status.dart';
 import '../data/identity.dart';
+import '../host_settings/host_settings_category.dart';
 import '../password/password_category.dart';
 import '../permissions/permissions_category.dart';
 import '../recent/recent_category.dart';
@@ -71,6 +72,7 @@ String senseIdentityErrorText(String code) {
 /// Category ids (also test keys `sense-acc-<id>`).
 abstract final class SenseThisComputerCategory {
   static const String permissions = 'perm';
+  static const String net = 'hset';
   static const String password = 'pw';
   static const String role = 'role';
   static const String recent = 'recent';
@@ -83,6 +85,7 @@ class SenseThisComputerView extends StatefulWidget {
     required this.identity,
     required this.deviceId,
     required this.permissions,
+    this.hostNet = SenseHostNet.unknown,
     required this.recent,
     required this.now,
     this.macMissing = const [],
@@ -108,6 +111,9 @@ class SenseThisComputerView extends StatefulWidget {
 
   /// One value per [kSenseHostPermissions] entry.
   final List<bool> permissions;
+
+  /// FU-A4: the panel's audio and network settings (locked rows).
+  final SenseHostNet hostNet;
   final List<SenseRecentConnection> recent;
   final DateTime now;
 
@@ -397,6 +403,13 @@ class _SenseThisComputerViewState extends State<SenseThisComputerView> {
               summary: senseHostPermissionsSummary(widget.permissions),
               level: SenseLevel.ok,
               builder: (_) => SensePermissionsCategoryBody(on: widget.permissions),
+            ),
+            SenseAccordionItem(
+              id: SenseThisComputerCategory.net,
+              title: SenseHostStrings.net,
+              summary: SenseHostStrings.netSummary,
+              level: SenseLevel.ok,
+              builder: (_) => SenseHostNetCategoryBody(net: widget.hostNet),
             ),
             SenseAccordionItem(
               id: SenseThisComputerCategory.password,

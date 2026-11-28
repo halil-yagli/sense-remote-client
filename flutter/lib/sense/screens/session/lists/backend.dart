@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../data/grants.dart';
 import '../data/session_state.dart';
+import 'list_model.dart' show SenseResolutionTrial;
 import 'rules.dart';
 
 @immutable
@@ -217,4 +218,25 @@ abstract class SenseSessionBackend extends ChangeNotifier {
   /// The connection fingerprint, or empty.
   String get fingerprint;
   void copyFingerprint();
+
+  // ---- Sürüm 12 ----
+  SenseResolutionTrial? _trial;
+
+  /// FO-A7/B7: the custom resolution being tried (15 s, then the old one comes back). One
+  /// per session, so the countdown survives the list closing.
+  SenseResolutionTrial get resolutionTrial => _trial ??= SenseResolutionTrial(setResolution, () => currentResolution);
+
+  /// #151: the Host's Sense card is shown in the image for this session (`sense.host-chat-visible`).
+  /// Off at the start of every session; the Host turns it off by itself when the session ends.
+  bool get hostChatVisible => false;
+
+  /// Asks the Host to show / hide its card. An older Host ignores the message.
+  void setHostChatVisible(bool v) {}
+
+  @override
+  void dispose() {
+    _trial?.dispose();
+    _trial = null;
+    super.dispose();
+  }
 }

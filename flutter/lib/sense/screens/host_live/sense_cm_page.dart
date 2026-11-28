@@ -25,8 +25,10 @@ import '../../components/popup_shell.dart' show SensePopupFrom;
 import '../shared/chat/chat_controller.dart';
 import 'data/call.dart';
 import 'data/chat.dart';
+import 'data/end_summary.dart';
 import 'data/files.dart';
 import 'data/overlay.dart';
+import 'data/peer_state.dart';
 import 'sense_cm_geometry.dart';
 import 'sense_cm_window.dart';
 import 'sense_cm_panel.dart';
@@ -70,6 +72,11 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
   final Map<int, int> _fed = {};
   late final SenseHostRecordingWatch _recording;
 
+  // Sürüm 12: what the Controllers asked for (#151, #157) and what the ended card says (FH-A3).
+  late final SenseHostPeerWatch _peers;
+  SenseHostPeerState _peerState = SenseHostPeerState.none;
+  final SenseHostEndTracker _ends = SenseHostEndTracker();
+
   /// Stands in while the shown connection has ended (its chat is dropped).
   late final SenseChatController _idleChat = senseHostChatController(-1);
   Timer? _ticker;
@@ -85,6 +92,10 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
     _recording = SenseHostRecordingWatch(
         onRecording: gFFI.serverModel.senseUpdateRecording)
       ..start();
+    _peers = SenseHostPeerWatch(onState: (state) {
+      if (mounted && state != _peerState) setState(() => _peerState = state);
+    })
+      ..start();
     // The card's times and the recording strip tick every second.
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && (SenseCm.open.value || _anyRecording())) setState(() {});
@@ -95,6 +106,7 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
   void dispose() {
     _ticker?.cancel();
     _recording.stop();
+    _peers.stop();
     gFFI.chatModel.removeListener(_onChatModel);
     windowManager.removeListener(this);
     for (final chat in _chats.values) {
@@ -208,6 +220,14 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
     Provider.of<ChatModel>(context);
     final clients = serverModel.clients.toList();
     _clock.update(clients);
+    // FH-A3: the figures of the ended card are read now, while the chat is still in memory.
+    for (final c in clients) {
+      _ends.observe(c.id,
+          live: c.authorized && !c.disconnected,
+          connectedFor: _clock.connectedFor(c.id),
+          chat: _chats[c.id]?.entries);
+    }
+    _ends.forget({for (final c in clients) c.id});
     _syncChats(clients);
     return Obx(() {
       final open = SenseCm.open.value;
@@ -267,6 +287,9 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
             // Ataç and drop: main_sense_host_offer_files (D3d2).
             pickFiles: SenseHostChatFiles.available ? senseHostPickFiles : null,
             from: SenseCm.anchor.bottom ? SensePopupFrom.bottom : SensePopupFrom.top,
+            endedInfo: selected.disconnected ? _ends.infoFor(selected.id) : null,
+            chatVisible: _peerState.chatShown,
+            adminLine: _peerState.adminLine,
             endedClosingIn: selected.disconnected && endedAt != null
                 ? SenseCm.endedSecondsLeft(DateTime.now())
                 : null,
@@ -278,8 +301,12 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
                   live.length > 1
                       ? SenseHostLiveStrings.endAll
                       : SenseHostLiveStrings.endConnection,
-                  () => senseHostEndAll(live, selected,
-                      (c) => _guarded(c, () => bind.cmCloseConnection(connId: c.id)))),
+                  () => senseHostEndAll(live, selected, (c) {
+                        _guarded(c, () {
+                          _ends.markEndedByHost(c.id);
+                          bind.cmCloseConnection(connId: c.id);
+                        });
+                      })),
               onAccept: _logged(
                   SenseHostLiveStrings.accept,
                   () => _guarded(asked,

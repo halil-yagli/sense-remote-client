@@ -170,6 +170,17 @@ abstract final class SenseSessionStrings {
   static const String customResolutionApply = 'Uygula';
   static String customResolutionRange(int min, int max) => 'Genişlik ve yükseklik $min–$max arası olmalı';
 
+  /// Sürüm 12 (FO-A7/B7): the custom size is tried, then kept or taken back.
+  static const String customResolutionTry = 'Dene';
+  static String resolutionTrialQuestion(int w, int h) => 'Bu çözünürlük uygun mu? $w × $h';
+  static String resolutionTrialLeft(int s) => '$s sn içinde onaylamazsan eski çözünürlüğe dönülür.';
+  static const String resolutionUndo = 'Geri al';
+  static const String resolutionKeep = 'Koru';
+  static String resolutionKept(String size) => 'Çözünürlük korundu: $size';
+  static const String resolutionReverted = 'Eski çözünürlüğe dönüldü';
+  static String customResolutionNote(int min, int max) =>
+      'Genişlik ve yükseklik $min–$max arası. Uzak ekran desteklemezse uygulanmaz.';
+
   // ---- Görüntü (O4) ----
   static const String size = 'Boyut';
   static const String fit = 'Sığdır';
@@ -207,6 +218,14 @@ abstract final class SenseSessionStrings {
   static const String renderTexture = 'doku';
   static const String renderD3d = 'D3D';
   static const String renderDefault = 'varsayılan';
+
+  /// Sürüm 12 (FO-A9): the drawing settings touch only this computer.
+  static const String renderInfo = 'Bu ayarlar yalnız bu bilgisayarın çizimini etkiler';
+  static const String renderInfoDetail = 'uzak bilgisayara dokunmaz';
+
+  /// Sürüm 12 (#151): the Host's Sense card is shown in the image for this session.
+  static const String hostChat = 'Karşı tarafın sohbet penceresini göster';
+  static const String hostChatHint = 'Host’taki Sense kartı bu oturumda görüntüye girer';
 
   // ---- Klavye ve fare (O5) ----
   static const String keyboardMode = 'Klavye';
@@ -253,6 +272,12 @@ abstract final class SenseSessionStrings {
   static const String restart = 'Uzak bilgisayarı yeniden başlat…';
   static const String restartConfirm = 'Uzak bilgisayar yeniden başlatılsın mı?';
   static const String restartGo = 'Yeniden başlat';
+
+  /// Sürüm 12 (#158, FO-A10): the second lines of the in-place questions.
+  static const String restartConfirmDetail = 'Bağlantı kopar, açılınca yeniden bağlanır.';
+  static const String lockConfirm = 'Uzak ekran kilitlensin mi?';
+  static const String lockConfirmDetail = 'Sahadaki kişi ekranı kendi şifresiyle açar.';
+  static const String lockGo = 'Kilitle';
   static const String blockInput = 'Sahadaki fare ve klavyeyi kilitle';
   static const String record = 'Oturumu kaydet';
   static const String clipboardFiles = 'Pano ve dosya';
