@@ -10,6 +10,14 @@ import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:get/get.dart';
 
+import '../../common/shared_state.dart';
+import '../../sense/screens/shared/aux_window/aux_label.dart';
+import '../../sense/screens/shared/aux_window/aux_tab_window.dart';
+import '../../sense/screens/shared/aux_window/aux_window_frame.dart';
+import '../../sense/sense.dart' show SenseLevel;
+import '../../sense/strings/files.dart';
+import '../../sense/strings/tunnel.dart';
+
 class PortForwardTabPage extends StatefulWidget {
   final Map<String, dynamic> params;
 
@@ -26,15 +34,21 @@ class _PortForwardTabPageState extends State<PortForwardTabPage> {
   static const IconData selectedIcon = Icons.forward_sharp;
   static const IconData unselectedIcon = Icons.forward_outlined;
 
+  /// Sense Remote (Sürüm 12, ST 7, 15): the Sense frame (not for RDP).
+  late final bool _senseOn = senseAuxFrameOn() && !isRDP;
+
   _PortForwardTabPageState(Map<String, dynamic> params) {
     isRDP = params['isRDP'];
     tabController =
         Get.put(DesktopTabController(tabType: DesktopTabType.portForward));
     tabController.onSelected = (id) {
-      WindowController.fromWindowId(windowId())
-          .setTitle(getWindowNameWithId(id));
+      // Sense Remote (ST 16): Turkish title with the computer's name, no ID.
+      WindowController.fromWindowId(windowId()).setTitle(_senseOn
+          ? senseAuxWindowTitle(SenseTunnelStrings.title, id)
+          : getWindowNameWithId(id));
     };
     tabController.onRemoved = (_, id) => onRemoveId(id);
+    ConnectionTypeState.init(params['id']); // Sense Remote: live line
     tabController.add(TabInfo(
         key: params['id'],
         label: params['id'],
@@ -66,6 +80,7 @@ class _PortForwardTabPageState extends State<PortForwardTabPage> {
         final id = args['id'];
         final isRDP = args['isRDP'];
         windowOnTop(windowId());
+        ConnectionTypeState.init(id); // Sense Remote: live line
         if (tabController.state.value.tabs.indexWhere((e) => e.key == id) >=
             0) {
           debugPrint("port forward $id exists");
@@ -98,9 +113,40 @@ class _PortForwardTabPageState extends State<PortForwardTabPage> {
     });
   }
 
+  /// Sense Remote (Sürüm 12, ST 7): live line of the Sense frame. RustDesk connects on the
+  /// first tunnel use; until then "Hazır".
+  SenseAuxLive _senseLive(String id) {
+    String direct = kInvalidValueStr;
+    try {
+      direct = ConnectionTypeState.find(id).direct.value;
+    } catch (_) {}
+    if (direct == kInvalidValueStr) {
+      return const SenseAuxLive(
+          '${SenseTunnelStrings.ready} · ${SenseAuxStrings.screenNotOpened}',
+          SenseLevel.unknown);
+    }
+    final way = direct == ConnectionType.strDirect
+        ? SenseAuxStrings.direct
+        : SenseAuxStrings.relay;
+    return SenseAuxLive(
+        '$way · ${SenseAuxStrings.screenNotOpened}', SenseLevel.ok);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final child = Scaffold(
+    // Sense Remote (Sürüm 12, ST 7, 15): the Sense frame instead of the stock blue tab bar;
+    // the stock one below stays the fallback (no Sense role, RDP).
+    final child = _senseOn
+        ? SenseAuxTabWindow(
+            controller: tabController,
+            title: SenseTunnelStrings.title,
+            onWindowClose: () async {
+              tabController.clear();
+              return true;
+            },
+            liveFor: _senseLive,
+          )
+        : Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       body: DesktopTab(
         controller: tabController,
@@ -140,6 +186,7 @@ class _PortForwardTabPageState extends State<PortForwardTabPage> {
   }
 
   void onRemoveId(String id) {
+    ConnectionTypeState.delete(id); // Sense Remote
     if (tabController.state.value.tabs.isEmpty) {
       WindowController.fromWindowId(windowId()).close();
     }
