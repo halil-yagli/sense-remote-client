@@ -92,6 +92,7 @@ class SenseUpdateWatch extends StatefulWidget {
     super.key,
     required this.builder,
     this.onLayoutChanged,
+    this.onStatus,
     SenseUpdateBackend? backend,
     this.interval = const Duration(seconds: 5),
     this.showSplash = true,
@@ -99,6 +100,10 @@ class SenseUpdateWatch extends StatefulWidget {
 
   final Widget Function(BuildContext context, Widget? strip) builder;
   final VoidCallback? onLayoutChanged;
+
+  /// Each new GuiStatus (FU-A3: the Controller menu's dot next to Hakkında follows it). Runs
+  /// from the poll, never while building.
+  final ValueChanged<SenseUpdateStatus>? onStatus;
   final SenseUpdateBackend backend;
   final Duration interval;
 
@@ -155,6 +160,7 @@ class _SenseUpdateWatchState extends State<SenseUpdateWatch> {
       }
       _status = next;
     });
+    widget.onStatus?.call(next);
   }
 
   void _askOrInstall() {
@@ -347,17 +353,29 @@ class SenseUpdateStripView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = Text(
-      strip.text,
-      key: const Key('sense-update-text'),
-      style: SenseTextStyles.of(
-        size: SenseFontSize.bodySmall,
-        weight: strip.done || strip.actions.contains(SenseUpdateAction.update)
-            ? SenseFontWeight.bold
-            : SenseFontWeight.regular,
-        color: strip.asking ? senseConfirmTextColor : SenseColors.text,
-      ),
+    final textStyle = SenseTextStyles.of(
+      size: SenseFontSize.bodySmall,
+      weight: strip.done || strip.actions.contains(SenseUpdateAction.update)
+          ? SenseFontWeight.bold
+          : SenseFontWeight.regular,
+      color: strip.asking ? senseConfirmTextColor : SenseColors.text,
     );
+    // #166: "· Neler yeni: …" follows the bold line, regular and muted (prototype `updStrip`).
+    final detail = strip.detail;
+    final text = detail == null
+        ? Text(strip.text, key: const Key('sense-update-text'), style: textStyle)
+        : Text.rich(
+            TextSpan(children: [
+              TextSpan(text: strip.text, style: textStyle),
+              TextSpan(
+                  text: ' · $detail',
+                  style: SenseTextStyles.of(
+                      size: SenseFontSize.bodySmall,
+                      weight: SenseFontWeight.regular,
+                      color: SenseColors.textSecondary)),
+            ]),
+            key: const Key('sense-update-text'),
+          );
     final lead = strip.busy && progressPct == null
         ? const Padding(
             padding: EdgeInsets.only(right: SenseUi.iconGap),

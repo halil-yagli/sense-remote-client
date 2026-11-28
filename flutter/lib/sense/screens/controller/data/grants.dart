@@ -100,24 +100,50 @@ class SenseGrantsBridge implements SenseGrantsBackend {
 
 /// Keeps the grants fresh while the Controller list is open: every [interval]
 /// (plan §2.3: 10 s) and when asked (window focus).
+///
+/// #149: right after the start the panel answer is often not there yet (the core
+/// fetches it with its own retries). The screen therefore does not call the grants
+/// "missing" at the first failed answer: it waits for [graceReads] answers in a row
+/// that are not "ok" (asked every [quickInterval] meanwhile, about 10 s in all).
 class SenseGrantsWatch extends ChangeNotifier {
-  SenseGrantsWatch(this.backend, {this.interval = const Duration(seconds: 10)});
+  SenseGrantsWatch(this.backend,
+      {this.interval = const Duration(seconds: 10), this.quickInterval = const Duration(seconds: 4)});
+
+  /// Answers in a row that are not "ok" before the screen says so (#149: 3 tries).
+  static const int graceReads = 3;
 
   final SenseGrantsBackend backend;
   final Duration interval;
+
+  /// Spacing of the first retries while the answer is not "ok" yet.
+  final Duration quickInterval;
   SenseGrants _grants = SenseGrants.missing;
   bool _loaded = false;
+  int _misses = 0;
   Timer? _timer;
+  Timer? _quick;
   bool _disposed = false;
 
   SenseGrants get grants => _grants;
 
-  /// False until the first answer (the screen does not flash "alınamadı").
+  /// False until the first answer.
   bool get loaded => _loaded;
+
+  /// #149: the answer can be trusted: "ok", or [graceReads] answers in a row were not.
+  /// Until then the screen shows neither "Yetkiler panelden alınamadı" nor "Yetkin yok".
+  bool get settled => _loaded && (_grants.ok || _misses >= graceReads);
 
   void start() {
     unawaited(_read());
     _timer ??= Timer.periodic(interval, (_) => unawaited(_read()));
+    _quick ??= Timer.periodic(quickInterval, (_) {
+      if (_grants.ok || _misses >= graceReads) {
+        _quick?.cancel();
+        _quick = null;
+        return;
+      }
+      unawaited(_read());
+    });
   }
 
   Future<void> refresh() async {
@@ -138,19 +164,22 @@ class SenseGrantsWatch extends ChangeNotifier {
       g = SenseGrants.missing;
     }
     if (_disposed) return;
+    final wasSettled = settled;
     final changed = !_loaded ||
         g.state != _grants.state ||
         g.rev != _grants.rev ||
         !setEquals(g.perms, _grants.perms);
     _grants = g;
     _loaded = true;
-    if (changed) notifyListeners();
+    _misses = g.ok ? 0 : _misses + 1;
+    if (changed || wasSettled != settled) notifyListeners();
   }
 
   @override
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _quick?.cancel();
     super.dispose();
   }
 }

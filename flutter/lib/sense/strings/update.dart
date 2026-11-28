@@ -31,6 +31,8 @@ const Map<String, String> kSenseUpdateTr = {
   'update': 'Güncelle',
   'update_now': 'Şimdi güncelle',
   'notes': 'Neler yeni',
+  // #166 / FU-A6: the release's one-line summary after the strip text.
+  'notes_prefix': 'Neler yeni: ',
   'retry': 'Tekrar dene',
   'close': 'Tamam',
   'cancel': 'Vazgeç',

@@ -527,13 +527,17 @@ void main() {
     });
   });
 
-  group('golden images (a03, s10, s11, s12)', () {
+  group('golden images (a03, s10, s11, s12, A7)', () {
     for (final e in {
       'settings_role': SenseSettingsCategory.role,
       'settings_connections': SenseSettingsCategory.connections,
       'settings_new': SenseSettingsCategory.newConnections,
       'settings_security': SenseSettingsCategory.security,
       'settings_incoming': SenseSettingsCategory.incoming,
+      // Sürüm 12 (A7): the three categories that had no image.
+      'settings_performance': SenseSettingsCategory.performance,
+      'settings_network': SenseSettingsCategory.network,
+      'settings_update': SenseSettingsCategory.update,
     }.entries) {
       testWidgets(e.key, (tester) async {
         final b = _FakeBackend()

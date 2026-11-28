@@ -9,6 +9,8 @@ import '../../../router.dart' show senseAboutRequest, senseRoleChangeReopen;
 import '../../../sense.dart';
 import '../../../strings/host.dart';
 import '../../controller/sense_update_view.dart' show SenseUpdateWatch;
+import '../../controller/shell/nav_dots.dart' show SenseHostDotWatch, senseAboutNavLevel;
+import '../../controller/update/sense_update_model.dart' show SenseUpdateStatus;
 import '../../controller/sense_home_strings.dart' show SenseHomeRole;
 import '../this_computer/this_computer_page.dart';
 import '../../../../desktop/pages/desktop_tab_page.dart' show DesktopTabPage;
@@ -38,16 +40,32 @@ class SenseHostShell extends StatefulWidget {
 class _SenseHostShellState extends State<SenseHostShell> {
   SenseHostNav _nav = SenseHostNav.thisComputer;
 
+  // Sense Remote (Sürüm 12, FU-A3): the dots of the menu, as in the Controller window:
+  // red next to "Bu bilgisayar" while the Host is not ready, yellow next to "Hakkında"
+  // while an update waits.
+  SenseLevel? _hostLevel;
+  SenseLevel? _aboutLevel;
+  late final SenseHostDotWatch _hostDot = SenseHostDotWatch(onChanged: (l) {
+    if (mounted) setState(() => _hostLevel = l);
+  });
+
+  void _onUpdateStatus(SenseUpdateStatus s) {
+    final level = senseAboutNavLevel(s);
+    if (level != _aboutLevel && mounted) setState(() => _aboutLevel = level);
+  }
+
   // Sense Remote (D3f): macOS app menu "Sense Remote Hakkında".
   @override
   void initState() {
     super.initState();
     senseAboutRequest.addListener(_showAbout);
+    _hostDot.start();
   }
 
   @override
   void dispose() {
     senseAboutRequest.removeListener(_showAbout);
+    _hostDot.dispose();
     super.dispose();
   }
 
@@ -55,9 +73,12 @@ class _SenseHostShellState extends State<SenseHostShell> {
 
   @override
   Widget build(BuildContext context) => SenseUpdateWatch(
+        onStatus: _onUpdateStatus,
         builder: (context, strip) => SenseHostShellView(
           nav: _nav,
           version: senseAppVersion(),
+          navLevel: _hostLevel,
+          aboutLevel: _aboutLevel,
           onNav: (n) => setState(() => _nav = n),
           strip: strip,
           child: _nav == SenseHostNav.about
@@ -82,6 +103,7 @@ class SenseHostShellView extends StatelessWidget {
     required this.child,
     this.version,
     this.navLevel,
+    this.aboutLevel,
     this.strip,
     this.splash = false,
   });
@@ -95,6 +117,9 @@ class SenseHostShellView extends StatelessWidget {
 
   /// Dot next to "Bu bilgisayar" when the state is not fine.
   final SenseLevel? navLevel;
+
+  /// Dot next to "Hakkında" while a verified update waits (FU-A3).
+  final SenseLevel? aboutLevel;
 
   /// Update strip above the page (update plan §6).
   final Widget? strip;
@@ -173,6 +198,7 @@ class SenseHostShellView extends StatelessWidget {
               key: const Key('sense-host-nav-about'),
               label: SenseHostStrings.about,
               selected: nav == SenseHostNav.about,
+              level: aboutLevel,
               onTap: () => onNav(SenseHostNav.about),
             ),
             const Spacer(),

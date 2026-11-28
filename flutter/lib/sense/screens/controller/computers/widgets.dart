@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../components/sense_dialog.dart' show SenseDialogCheck;
 import '../../../sense.dart';
 import '../../../strings/controller.dart';
 import '../data/peers.dart' show senseIdFrom;
@@ -161,9 +162,14 @@ class SenseHint extends StatelessWidget {
 /// Kimlikle bağlan, in place (not a window): ID field + Bağlan + explanation.
 /// The password is asked by the connection window itself.
 class SenseConnectByIdBox extends StatefulWidget {
-  const SenseConnectByIdBox({super.key, required this.onConnect, this.enabled = true, this.disabledTip});
+  const SenseConnectByIdBox(
+      {super.key, required this.onConnect, this.onConnectRelay, this.enabled = true, this.disabledTip});
 
   final ValueChanged<String> onConnect;
+
+  /// FU-A1: connects over the relay server; when given the box shows the check row
+  /// "Aktarma sunucusu üzerinden bağlan" and uses this while it is ticked.
+  final ValueChanged<String>? onConnectRelay;
 
   /// False when the person may not connect (grants).
   final bool enabled;
@@ -176,6 +182,7 @@ class SenseConnectByIdBox extends StatefulWidget {
 class _SenseConnectByIdBoxState extends State<SenseConnectByIdBox> {
   final _text = TextEditingController();
   bool _invalid = false;
+  bool _relay = false;
 
   @override
   void dispose() {
@@ -191,7 +198,12 @@ class _SenseConnectByIdBoxState extends State<SenseConnectByIdBox> {
       return;
     }
     setState(() => _invalid = false);
-    widget.onConnect(id);
+    final relay = widget.onConnectRelay;
+    if (_relay && relay != null) {
+      relay(id);
+    } else {
+      widget.onConnect(id);
+    }
   }
 
   @override
@@ -224,6 +236,15 @@ class _SenseConnectByIdBoxState extends State<SenseConnectByIdBox> {
               onPressed: widget.enabled ? _submit : null,
             ),
           ]),
+          if (widget.onConnectRelay != null) ...[
+            const SizedBox(height: SenseUi.iconGap),
+            SenseDialogCheck(
+              key: const Key('sense-id-relay'),
+              label: SenseControllerStrings.viaRelay,
+              value: _relay,
+              onChanged: (v) => setState(() => _relay = v),
+            ),
+          ],
           const SizedBox(height: SenseUi.iconGap),
           if (_invalid)
             SenseMeta(SenseControllerStrings.idInvalid, color: SenseColors.dangerText)

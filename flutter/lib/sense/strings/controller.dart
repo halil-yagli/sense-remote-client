@@ -46,6 +46,10 @@ abstract final class SenseControllerStrings {
       'Sense kurulu olmayan ya da listende bulunmayan bir bilgisayar için. Şifre ekibin şifre yöneticisinden girilir.';
   static const String idInvalid = 'Kimlik 6–12 rakam olmalı.';
 
+  /// FU-A1: the check row of "Kimlikle bağlan" (prototype `.chk`): the same screen over the
+  /// relay server when the direct path hangs.
+  static const String viaRelay = 'Aktarma sunucusu üzerinden bağlan · doğrudan yol takılırsa';
+
   // Number tiles (#26: no title, no computer names).
   static const String online = 'Çevrimiçi';
   static const String offline = 'Kapalı';
@@ -87,6 +91,14 @@ abstract final class SenseControllerStrings {
   static const String openFileTransfer = 'Dosya aktarımı';
   static const String openTerminal = 'Terminal';
   static const String openTcpTunnel = 'TCP tünel';
+
+  /// FU-A2: the screen over the relay server (`force-always-relay` for this one connection).
+  static const String openRelay = 'Aktarmayla bağlan';
+  static const String openRelayHint = 'Doğrudan yol takılırsa';
+
+  // Left menu dots (FU-A3).
+  static const String navUpdateDot = 'güncelleme var';
+  static const String navHostDot = 'Host hazır değil';
 
   // LED detail (250 px box).
   static const String healthOk = 'Sağlıklı';
