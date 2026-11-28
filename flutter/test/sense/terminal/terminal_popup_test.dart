@@ -20,7 +20,13 @@ Widget _app(Widget child, {Size size = const Size(560, 640)}) => MaterialApp(
       debugShowCheckedModeBanner: false,
       home: MediaQuery(
         data: MediaQueryData(size: size, disableAnimations: true),
-        child: ColoredBox(color: SenseColors.bg, child: child),
+        child: ColoredBox(
+          color: SenseColors.bg,
+          child: DefaultTextStyle(
+            style: const TextStyle(fontFamily: SenseFont.family, color: SenseColors.text),
+            child: child,
+          ),
+        ),
       ),
     );
 
@@ -85,7 +91,9 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(_app(RepaintBoundary(
       key: const Key('golden'),
-      child: Align(
+      child: ColoredBox(
+        color: SenseColors.bg,
+        child: Align(
         alignment: Alignment.topRight,
         child: Padding(
           padding: const EdgeInsets.all(10),
@@ -94,6 +102,7 @@ void main() {
             child: SenseTerminalPopup(computer: _pc, onClose: () {}, onOpenAdmin: () {}),
           ),
         ),
+      ),
       ),
     )));
     await tester.pumpAndSettle();
