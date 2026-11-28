@@ -121,6 +121,13 @@ class SenseFfiLayerHost implements SenseLayerHost {
         .whenComplete(() => closeConnection(id: id));
   }
 
+  /// Sürüm 12 (FO-A11): the connection ends in every window (the core closes this session);
+  /// this window stays for the "Bağlantıyı sen bitirdin" card until [goHome].
+  @override
+  void endKeepWindow() {
+    bind.sessionSenseEndAll(sessionId: ffi.sessionId).catchError((_) {});
+  }
+
   @override
   void shareActivity() => bind.sessionSenseActivity(sessionId: ffi.sessionId);
 

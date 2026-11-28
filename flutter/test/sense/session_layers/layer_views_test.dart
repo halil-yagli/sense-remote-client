@@ -7,6 +7,8 @@ import 'package:flutter_hbb/sense/sense.dart';
 import 'package:flutter_hbb/sense/screens/session/bar/sense_session_frame.dart';
 import 'package:flutter_hbb/sense/screens/session/data/session_state.dart' as bar show SenseBarPopup, SenseLinkSample, SenseLinkPath;
 import 'package:flutter_hbb/sense/screens/session/data/frame_rate.dart';
+import 'package:flutter_hbb/sense/screens/session/popups/note/note_state.dart';
+import 'package:flutter_hbb/sense/screens/session/popups/status/status_strings.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/data/session_hub.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_controller.dart';
 import 'package:flutter_hbb/sense/screens/session/layers/layer_spec.dart';
@@ -58,7 +60,7 @@ class _FakeWindow extends StatelessWidget {
             animateIn: false,
             onClose: () {},
             onMinimizedChanged: (_) {},
-            body: const SenseStatusBox(level: SenseLevel.ok, title: 'Her şey yolunda'),
+            body: const SenseStatusBox(level: SenseLevel.ok, title: SenseStatusStrings.allOk),
           ),
         ),
       ]),
@@ -207,25 +209,44 @@ void main() {
           find.byKey(const Key('golden')), matchesGoldenFile(_golden('o13_weak_minimized')));
     }, skip: _skip('o13_weak_minimized'), tags: ['golden']);
   });
-
-  // Sürüm 10 (#110): the same card opened from the logo area while the link is good.
-  group('O13 good-link card (#110)', () {
+  // Sürüm 10 (#110), Sürüm 12 (FO-B1): the small card that drops from the logo area.
+  group('O13 good-link card (#110, FO-B1)', () {
     const good = SenseLinkView(
       phase: SenseLinkPhase.normal,
       sample: SenseLinkSample(rttMs: 18, lossPct: 0.2, fps: 60),
     );
 
-    testWidgets('type, current values, limits line; no end button, no breathing logo', (tester) async {
+    Color? spanColor(WidgetTester tester, String text) {
+      final rich = tester.widget<Text>(find.byKey(const Key('sense-layer-info-values')));
+      Color? found;
+      rich.textSpan!.visitChildren((s) {
+        if (s is TextSpan && s.text == text) found = s.style?.color;
+        return found == null;
+      });
+      return found;
+    }
+
+    testWidgets('lines: title, type, values as one line, limits; no veil, no blur, no logo', (tester) async {
       await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, onClose: () {}), popupOpen: false);
       expect(find.text('Bağlantı iyi'), findsOneWidget);
       expect(find.text('Doğrudan bağlantı (aktarma yok)'), findsOneWidget);
-      expect(find.text('18 ms'), findsOneWidget);
-      expect(find.text('%0,2'), findsOneWidget);
-      expect(find.text('60 fps'), findsOneWidget);
-      expect(_valueColor(tester, '18 ms'), SenseColors.text, reason: 'large tiles: good values in white');
+      expect(find.text('gecikme 18 ms · tahmini kayıp %0,2 · görüntü 60 fps'), findsOneWidget,
+          reason: 'v11 value boxes kept as a line; "tahmini kayıp" stays (#69)');
+      expect(spanColor(tester, '18 ms'), SenseColors.text, reason: 'good values in white');
       expect(find.textContaining('Çalışılabilir bağlantı'), findsOneWidget);
       expect(find.byKey(const Key('sense-layer-end')), findsNothing);
-      expect(find.byType(SenseBreathe), findsNothing);
+      expect(find.byType(SenseLayerVeil), findsNothing, reason: 'FO-B1: no blur over the screen');
+      final card = find.byKey(const Key('sense-layer-info'));
+      expect(find.descendant(of: card, matching: find.byType(SenseMark)), findsNothing);
+      expect(find.descendant(of: card, matching: find.byType(SenseStatTile)), findsNothing);
+    });
+
+    testWidgets('sits under the computer name: left 50, 8 px under the bar', (tester) async {
+      await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, onClose: () {}), popupOpen: false);
+      final r = tester.getRect(find.byKey(const Key('sense-layer-info')));
+      expect(r.left, SenseQuickCardLook.left);
+      expect(r.top, SenseSizes.sessionToolbarHeight + SenseQuickCardLook.below);
+      expect(r.width, greaterThanOrEqualTo(SenseQuickCardLook.minWidth));
     });
 
     testWidgets('server line (#144): name, path, ms; empty name gives a dash', (tester) async {
@@ -243,7 +264,19 @@ void main() {
       expect(find.text('Sunucu: —'), findsOneWidget);
     });
 
-    testWidgets('relay, unknown type and "Dalgalı" wording', (tester) async {
+    testWidgets('frame line (#152/#154) is kept', (tester) async {
+      await _pump(
+          tester,
+          SenseLinkInfoLayer(
+              view: good,
+              direct: true,
+              frame: const SenseFrameInfo(drawnFps: 60, remoteHz: 60),
+              onClose: () {}),
+          popupOpen: false);
+      expect(find.text('Kare hızı: 60 fps · karşı ekran 60 Hz'), findsOneWidget);
+    });
+
+    testWidgets('relay, unknown type, not measured and "Dalgalı" wording', (tester) async {
       await _pump(tester, SenseLinkInfoLayer(view: good, direct: false, onClose: () {}), popupOpen: false);
       expect(find.text('Aktarma sunucusu üzerinden'), findsOneWidget);
       await _pump(
@@ -255,32 +288,35 @@ void main() {
           popupOpen: false);
       expect(find.text('Bağlantı türü ölçülüyor'), findsOneWidget);
       expect(find.text('Bağlantı dalgalı'), findsOneWidget);
-      expect(_valueColor(tester, '272 ms'), SenseColors.warn);
+      expect(spanColor(tester, '272 ms'), SenseColors.warn);
+      expect(find.text('gecikme 272 ms · tahmini kayıp — · görüntü 8 fps'), findsOneWidget);
     });
 
-    testWidgets('x, Kapat and a click beside the card close it; a click on the card does not', (tester) async {
+    testWidgets('a click beside the card (the logo area too) closes it; a click on it does not', (tester) async {
       var closed = 0;
       await _pump(tester, SenseLinkInfoLayer(view: good, direct: true, onClose: () => closed++), popupOpen: false);
       await tester.tap(find.text('Bağlantı iyi'));
       expect(closed, 0);
-      await tester.tap(find.byKey(const Key('sense-layer-minimize')));
-      expect(closed, 1);
-      await tester.tap(find.byKey(const Key('sense-layer-info-close')));
-      expect(closed, 2);
       await tester.tapAt(const Offset(40, 680));
-      expect(closed, 3);
+      expect(closed, 1);
+      await tester.tapAt(const Offset(30, 20));
+      expect(closed, 2, reason: 'the logo area: same as the prototype toggle');
     });
 
-    testWidgets('golden: good-link card', (tester) async {
+    testWidgets('golden: small connection card under the logo', (tester) async {
       await _pump(
           tester,
-          SenseLinkInfoLayer(view: good, direct: true, serverName: 'Türkiye (İstanbul)', onClose: () {}),
+          SenseLinkInfoLayer(
+              view: good,
+              direct: true,
+              serverName: 'Türkiye (İstanbul)',
+              frame: const SenseFrameInfo(drawnFps: 60, remoteHz: 60),
+              onClose: () {}),
           link: const bar.SenseLinkSample(path: bar.SenseLinkPath.direct, fps: 60, rttMs: 18),
           popupOpen: false);
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(_golden('o13_good_card')));
     }, skip: _skip('o13_good_card'), tags: ['golden']);
   });
-
   group('O13 lost (c12)', () {
     testWidgets('texts, all red, 6 px blur, 45 % brightness', (tester) async {
       await _pump(tester, SenseLinkLayer(view: _lost, onEnd: () {}));
@@ -338,13 +374,19 @@ void main() {
 
   group('O14 ended (n07)', () {
     Widget card({SenseReconnectState r = SenseReconnectState.idle, VoidCallback? close,
-            VoidCallback? again, SenseSessionSummary s = _summary}) =>
+            VoidCallback? again, SenseSessionSummary s = _summary,
+            SenseNoteStatus note = SenseNoteStatus.none, bool noteOpen = false,
+            VoidCallback? addNote, ValueChanged<String>? saveNote}) =>
         SenseEndedLayer(
           summary: s,
           backHomeIn: 5,
           reconnect: r,
           onClose: close ?? () {},
           onReconnect: again ?? () {},
+          note: note,
+          noteOpen: noteOpen,
+          onAddNote: addNote ?? () {},
+          onSaveNote: saveNote ?? (_) {},
         );
 
     testWidgets('reason, duration, chat summary, countdown', (tester) async {
@@ -390,9 +432,75 @@ void main() {
     });
 
     testWidgets('golden n07', (tester) async {
-      await _pump(tester, card());
+      await _pump(tester, card(), popupOpen: false); // FO-B11: O14 closes every popup
       await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(_golden('o14_ended_n07')));
     }, skip: _skip('o14_ended_n07'), tags: ['golden']);
+
+    // Sürüm 12 (FO-A4, FO-A11): the note row of the ended card (prototype `endSim`).
+    const self = SenseSessionSummary(
+      reason: SenseEndReason.self,
+      duration: Duration(minutes: 42),
+      messages: 3,
+      files: 1,
+      idleLimit: Duration(minutes: 30),
+    );
+
+    testWidgets('"Not ekle" under the tiles, before the countdown', (tester) async {
+      var add = 0;
+      await _pump(tester, card(addNote: () => add++), popupOpen: false);
+      final button = find.byKey(const Key('sense-ended-add-note'));
+      expect(find.text('Not ekle'), findsOneWidget);
+      expect(tester.getTopLeft(button).dy, greaterThan(tester.getBottomLeft(find.text('sohbet silindi')).dy));
+      expect(tester.getTopLeft(button).dy, lessThan(tester.getTopLeft(find.text('5 sn sonra ana ekrana dönülüyor')).dy));
+      await tester.tap(button);
+      expect(add, 1);
+    });
+
+    testWidgets('field open: Kaydet / Enter send the text, the count says it waits', (tester) async {
+      final saved = <String>[];
+      await _pump(tester, card(noteOpen: true, saveNote: saved.add), popupOpen: false);
+      expect(find.text('Not yazılırken ana ekrana dönülmez'), findsOneWidget);
+      expect(find.text('5 sn sonra ana ekrana dönülüyor'), findsNothing);
+      expect(find.text('Bu oturumda ne yaptın?'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('sense-ended-note-field')), 'Sürücü güncellendi');
+      await tester.tap(find.byKey(const Key('sense-ended-note-save')));
+      expect(saved, ['Sürücü güncellendi']);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      expect(saved, hasLength(2));
+    });
+
+    testWidgets('a saved note says so; after "Notsuz bitir" and for a busy computer no row', (tester) async {
+      await _pump(tester, card(note: SenseNoteStatus.saved), popupOpen: false);
+      expect(find.text('Oturum notu kaydedildi · denetim kaydına yazıldı'), findsOneWidget);
+      expect(find.text('Not ekle'), findsNothing);
+      await _pump(tester, card(s: self, note: SenseNoteStatus.skipped), popupOpen: false);
+      expect(find.text('Not ekle'), findsNothing);
+      const busy = SenseSessionSummary(
+          reason: SenseEndReason.busy, duration: Duration.zero, messages: 0, files: 0, idleLimit: Duration(minutes: 30));
+      await _pump(tester, card(s: busy), popupOpen: false);
+      expect(find.text('Not ekle'), findsNothing);
+      await _pump(tester, SenseEndedLayer(summary: _summary, backHomeIn: 5, reconnect: SenseReconnectState.idle,
+          onClose: () {}, onReconnect: () {}), popupOpen: false);
+      expect(find.text('Not ekle'), findsNothing, reason: 'no sender: nothing to offer');
+    });
+
+    testWidgets('"Bağlantıyı sen bitirdin": the same card with that reason', (tester) async {
+      await _pump(tester, card(s: self), popupOpen: false);
+      expect(find.text('Bağlantı sona erdi'), findsOneWidget);
+      expect(find.text('Bağlantıyı sen bitirdin'), findsOneWidget);
+      expect(find.text('42 dk'), findsOneWidget);
+      expect(find.text('3 mesaj · 1 dosya'), findsOneWidget);
+    });
+
+    testWidgets('golden: "Bağlantıyı sen bitirdin" with the saved note', (tester) async {
+      await _pump(tester, card(s: self, note: SenseNoteStatus.saved), popupOpen: false);
+      await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(_golden('o14_ended_self')));
+    }, skip: _skip('o14_ended_self'), tags: ['golden']);
+
+    testWidgets('golden: note field open on the ended card', (tester) async {
+      await _pump(tester, card(noteOpen: true), popupOpen: false);
+      await expectLater(find.byKey(const Key('golden')), matchesGoldenFile(_golden('o14_ended_note')));
+    }, skip: _skip('o14_ended_note'), tags: ['golden']);
   });
 
   group('O15 idle strip (n08)', () {
@@ -502,15 +610,15 @@ void main() {
       expect(find.text(SenseLayerStrings.weakTitle), findsOneWidget);
     });
 
-    testWidgets('#110: logo area on a good link opens the info card; x closes it', (tester) async {
+    testWidgets('#110: logo area on a good link opens the info card; a click beside closes it', (tester) async {
       await _pump(tester, SenseSessionLayers(id: 'p1', controller: c, listenToInput: false), popupOpen: false);
       await seconds(tester, 3, host.healthy);
       expect(find.byType(SenseLayerVeil), findsNothing);
       c.openCard(); // what the bar's logo area calls
       await tester.pump();
       expect(find.text(SenseLayerStrings.goodTitle), findsOneWidget);
-      expect(find.text('20 ms'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('sense-layer-minimize')));
+      expect(find.textContaining('gecikme 20 ms'), findsOneWidget);
+      await tester.tapAt(const Offset(640, 600));
       await tester.pump();
       expect(c.infoOpen, isFalse);
       expect(find.byType(SenseLayerVeil), findsNothing);

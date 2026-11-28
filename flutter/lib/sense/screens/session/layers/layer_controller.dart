@@ -72,6 +72,10 @@ abstract class SenseLayerHost {
   /// and this window closes.
   void endConnection();
 
+  /// Sürüm 12 (FO-A11): the same end in every window, but this window stays for the
+  /// "Bağlantıyı sen bitirdin" card ([goHome] closes it afterwards).
+  void endKeepWindow();
+
   /// Sürüm 11 (O3): input in this window, shared by every window of the connection.
   void shareActivity();
 
@@ -148,9 +152,24 @@ class SenseLayerController extends ChangeNotifier {
   // Sürüm 12 (§2.5 DK → BK): the user ended this connection with "Bağlantıyı bitir".
   bool _endedBySelf = false;
 
-  /// Sürüm 12 (§2.5): true after "Bağlantıyı bitir" (BK draws "Bağlantıyı sen bitirdin" from it;
-  /// the reason value `SenseEndReason.self` belongs in session_end.dart, BK's file).
+  /// Sürüm 12 (§2.5): true after "Bağlantıyı bitir"; the ended card then has the reason
+  /// [SenseEndReason.self] ("Bağlantıyı sen bitirdin").
   bool get endedBySelf => _endedBySelf;
+
+  /// Sürüm 12 (FO-A4): how long this connection has been up (the note popup's "Süre").
+  Duration get elapsed => (_ended?.duration) ?? (_clock() - _startedAt);
+
+  // Sürüm 12 (FO-A4): the note is typed on the ended card: no going back by itself.
+  bool _holdHome = false;
+
+  /// Sürüm 12 (FO-A4): "Not yazılırken ana ekrana dönülmez". Released, the count starts again.
+  bool get holdHome => _holdHome;
+  set holdHome(bool v) {
+    if (_holdHome == v) return;
+    _holdHome = v;
+    if (!v && _ended != null) _endedAt = _clock();
+    _notify();
+  }
 
   /// Sürüm 12 (FO-A12): reconnect attempts while the transport is lost (null = not lost).
   SenseReconnectInfo? get reconnectInfo {
@@ -306,6 +325,9 @@ class SenseLayerController extends ChangeNotifier {
           _reconnectFailed = true;
           _endedAt = now;
         }
+      } else if (_holdHome) {
+        // Sürüm 12 (FO-A4): the count waits while the note is typed.
+        _endedAt = now;
       } else if (backHomeIn <= 0) {
         _finishHome();
         return;
@@ -499,13 +521,14 @@ class SenseLayerController extends ChangeNotifier {
   static bool _isError(String type, String title) =>
       title == 'Connection Error' || type == 'error' || type.contains('error');
 
-  /// "Bağlantıyı bitir" (after the in-place second step).
+  /// "Bağlantıyı bitir" (after the in-place second step, or the note popup). Sürüm 12
+  /// (FO-A11): the connection ends in every window; this one shows "Bağlantıyı sen bitirdin"
+  /// (duration, chat summary, note) and goes back like any ended card.
   void endByUser() {
-    if (_disposed) return;
+    if (_disposed || _ended != null) return;
     _endedBySelf = true;
-    _timer?.cancel();
-    _timer = null;
-    host.endConnection();
+    _end(SenseEndReason.self);
+    host.endKeepWindow();
   }
 
   /// "Kapat" on the ended card.
@@ -534,6 +557,7 @@ class SenseLayerController extends ChangeNotifier {
     _prevPhase = SenseLinkPhase.normal;
     _startedAt = now;
     _endedBySelf = false;
+    _holdHome = false;
     _idle.activity(now);
     wavy.value = false;
     _publishReconnect();
