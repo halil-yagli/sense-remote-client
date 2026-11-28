@@ -11,7 +11,13 @@ import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:get/get.dart';
 
+import '../../common/shared_state.dart';
 import '../../models/platform_model.dart';
+import '../../sense/screens/shared/aux_window/aux_label.dart';
+import '../../sense/screens/shared/aux_window/aux_tab_window.dart';
+import '../../sense/screens/shared/aux_window/aux_window_frame.dart';
+import '../../sense/sense.dart' show SenseLevel;
+import '../../sense/strings/files.dart';
 
 /// File Transfer for multi tabs
 class FileManagerTabPage extends StatefulWidget {
@@ -32,10 +38,14 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
   _FileManagerTabPageState(Map<String, dynamic> params) {
     Get.put(DesktopTabController(tabType: DesktopTabType.fileTransfer));
     tabController.onSelected = (id) {
-      WindowController.fromWindowId(windowId())
-          .setTitle(getWindowNameWithId(id));
+      WindowController.fromWindowId(windowId()).setTitle(senseAuxFrameOn()
+          // Sense Remote (ST 16): Turkish title with the computer's name, no ID.
+          ? senseAuxWindowTitle(SenseFilesStrings.title, id)
+          : getWindowNameWithId(id));
     };
     tabController.onRemoved = (_, id) => onRemoveId(id);
+    // Sense Remote: direct / relay for the live line of the Sense frame.
+    ConnectionTypeState.init(params['id']);
     tabController.add(TabInfo(
         key: params['id'],
         label: params['id'],
@@ -74,6 +84,7 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
         final args = jsonDecode(call.arguments);
         final id = args['id'];
         windowOnTop(windowId());
+        ConnectionTypeState.init(id); // Sense Remote: live line of the frame
         tabController.add(TabInfo(
             key: id,
             label: id,
@@ -109,9 +120,34 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
     });
   }
 
+  /// Sense Remote (#155, ST 15): live line of the Sense frame for a tab.
+  SenseAuxLive _live(String id) {
+    String direct = kInvalidValueStr;
+    try {
+      direct = ConnectionTypeState.find(id).direct.value;
+    } catch (_) {}
+    if (direct == kInvalidValueStr) {
+      return const SenseAuxLive(SenseAuxStrings.connecting, SenseLevel.unknown);
+    }
+    final way = direct == ConnectionType.strDirect
+        ? SenseAuxStrings.direct
+        : SenseAuxStrings.relay;
+    return SenseAuxLive(
+        '$way · ${SenseAuxStrings.screenNotOpened}', SenseLevel.ok);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final child = Scaffold(
+    // Sense Remote (#155, ST 15): the Sense frame instead of the stock blue tab bar.
+    // The stock frame below stays as the fallback without a Sense role.
+    final Widget child = senseAuxFrameOn()
+        ? SenseAuxTabWindow(
+            controller: tabController,
+            title: SenseFilesStrings.title,
+            onWindowClose: handleWindowCloseButton,
+            liveFor: _live,
+          )
+        : Scaffold(
         backgroundColor: Theme.of(context).cardColor,
         body: DesktopTab(
           controller: tabController,
@@ -140,6 +176,7 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
   }
 
   void onRemoveId(String id) {
+    ConnectionTypeState.delete(id); // Sense Remote
     if (tabController.state.value.tabs.isEmpty) {
       WindowController.fromWindowId(windowId()).close();
     }

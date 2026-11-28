@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
-const sidebarColor = Color(0xFF0C6AF6);
-const backgroundStartColor = Color(0xFF0583EA);
-const backgroundEndColor = Color(0xFF0697EA);
+import '../../sense/tokens/sense_tokens.dart';
+
+// Sense Remote (T1, ST 15): no stock blue; the Sense surfaces instead. The Sense
+// secondary windows draw their own bar (sense/screens/shared/aux_window).
+const sidebarColor = SenseColors.surface;
+const backgroundStartColor = SenseColors.surface;
+const backgroundEndColor = SenseColors.bg;
 
 class DesktopTitleBar extends StatelessWidget {
   final Widget? child;
