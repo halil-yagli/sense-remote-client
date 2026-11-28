@@ -338,7 +338,7 @@ Future<bool> senseEndWithNote(
 }
 
 /// Eylemler › Oturuma not ekle (OT binds it; instead of the stock `showAuditDialog`). Shows the
-/// toast "Not kaydedildi · …" (or "Not boş") in the nearest [SenseToastHost].
+/// toast "Not kaydedildi · …" (or "Not boş") in the nearest [SenseToastHost] ([SenseToast.show]).
 Future<void> senseAddNote(
   BuildContext context, {
   required String peerId,
@@ -355,6 +355,6 @@ Future<void> senseAddNote(
   if (r.action != SenseNoteAction.saved) return;
   final sent = SenseSessionNotes.send(peerId, r.text);
   if (context.mounted) {
-    SenseToastHost.show(context, sent ? SenseNoteStrings.savedToast : SenseNoteStrings.emptyToast);
+    SenseToast.show(context, sent ? SenseNoteStrings.savedToast : SenseNoteStrings.emptyToast);
   }
 }
