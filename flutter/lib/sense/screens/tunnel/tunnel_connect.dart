@@ -35,6 +35,10 @@ class SenseTunnelConnectHost implements SenseConnectHost {
   @override
   void retry() => inner.retry();
 
+  // Sense Remote (Sürüm 12, KQ): busy / offline card details from the panel.
+  @override
+  Future<SensePanelInfo?> panelInfo() => inner.panelInfo();
+
   @override
   void close() => inner.close();
 }

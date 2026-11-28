@@ -61,6 +61,8 @@ class _FakeHost implements SenseConnectHost {
   @override
   void retry() => retries++;
   @override
+  Future<SensePanelInfo?> panelInfo() async => null;
+  @override
   void close() => closes++;
 }
 
