@@ -1041,6 +1041,55 @@ void main() {
     test('#109 capture exclusion asks for WDA_EXCLUDEFROMCAPTURE', () {
       expect(kSenseWdaExcludeFromCapture, 0x11);
     });
+
+    test('#151/#172 the switch asks WDA_NONE to show, WDA_EXCLUDEFROMCAPTURE to hide', () {
+      expect(senseCmCaptureAffinity(true), 0x11);
+      expect(senseCmCaptureAffinity(false), 0x00);
+    });
+  });
+
+  group('#151/#172: Host kartı görüntüye yalnız istenince girer', () {
+    test('only when every live screen connection asked', () {
+      // Core answer for one Controller that turned the switch on (conn 7).
+      final asked = SenseHostPeerState.parse('{"chat_visible":[7],"admin_terminals":[]}').chatVisible;
+      final screen = client(7, 'H');
+      expect(senseCmCardInPicture(asked, senseCmLiveScreens([screen])), isTrue);
+      // The switch off (core: chat_visible []): out of the picture.
+      expect(senseCmCardInPicture(const {}, senseCmLiveScreens([screen])), isFalse);
+      // The connection ended: out, whatever the last answer said.
+      expect(senseCmCardInPicture(asked, senseCmLiveScreens([screen..disconnected = true])), isFalse);
+      // No screen connection at all (terminal, files): out.
+      final term = client(8, 'H')..isTerminal = true;
+      final file = Client(9, true, true, false, 'H', '1', false, false, false);
+      expect(senseCmCardInPicture({8, 9}, senseCmLiveScreens([term, file])), isFalse);
+      // A terminal next to the asking screen does not see the screen: still in.
+      expect(senseCmCardInPicture({10}, senseCmLiveScreens([client(10, 'H'), term])), isTrue);
+      // A second screen connection that did not ask keeps it out (stricter than S8 needs).
+      expect(senseCmCardInPicture({10}, senseCmLiveScreens([client(10, 'H'), client(11, 'H')])), isFalse);
+      // Not yet accepted: it sees nothing, so it does not count.
+      expect(
+          senseCmCardInPicture({10}, senseCmLiveScreens([client(10, 'H'), client(12, 'H', authorized: false)])),
+          isTrue);
+    });
+
+    test('the switch touches the window only on a change and records the real state', () async {
+      final calls = <bool>[];
+      var ok = true;
+      final s = SenseCmCaptureSwitch((excluded) async {
+        calls.add(excluded);
+        return ok;
+      });
+      expect(s.wantExcluded, isTrue); // #109: out by default
+      expect(await s.set(inPicture: false, why: 'not-asked'), isNull);
+      expect(await s.set(inPicture: true, why: 'asked'), {'excluded': false, 'why': 'asked'});
+      expect(await s.set(inPicture: true, why: 'asked'), isNull);
+      // The connection ended: back out.
+      expect(await s.set(inPicture: false, why: 'ended'), {'excluded': true, 'why': 'ended'});
+      expect(calls, [false, true]);
+      // A failed "put in" leaves the card out, and says so.
+      ok = false;
+      expect(await s.set(inPicture: true, why: 'asked'), {'excluded': true, 'why': 'asked', 'failed': true});
+    });
   });
 }
 

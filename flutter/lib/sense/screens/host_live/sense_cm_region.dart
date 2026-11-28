@@ -294,16 +294,28 @@ const int kSenseWdaExcludeFromCapture = 0x00000011;
 /// its own. Older Windows rejects the value: nothing changes there (the window
 /// stays in the picture as before). The window is never hidden from the Host
 /// user (workshop CLAUDE.md, Security). Returns (done, Windows error code).
-(bool, int) senseCmExcludeFromCapture() {
+(bool, int) senseCmExcludeFromCapture() => senseCmSetCaptureExcluded(true);
+
+/// WDA_NONE: the window is in screen capture like any other (#151).
+const int kSenseWdaNone = 0x00000000;
+
+/// Affinity for [senseCmSetCaptureExcluded] (pure, for tests).
+int senseCmCaptureAffinity(bool excluded) =>
+    excluded ? kSenseWdaExcludeFromCapture : kSenseWdaNone;
+
+/// #151, #172: false puts the card into the picture while the Controller asked
+/// to see it (WDA_NONE); true leaves it out again (WDA_EXCLUDEFROMCAPTURE).
+/// Returns (done, Windows error code).
+(bool, int) senseCmSetCaptureExcluded(bool excluded) {
   try {
     final hwnd = _ownWindow();
     if (hwnd == 0) return (false, 0);
-    if (_setWindowDisplayAffinity(hwnd, kSenseWdaExcludeFromCapture) != 0) {
+    if (_setWindowDisplayAffinity(hwnd, senseCmCaptureAffinity(excluded)) != 0) {
       return (true, 0);
     }
     return (false, win32.GetLastError());
   } catch (e) {
-    debugPrint('Sense CM: capture exclusion failed: $e');
+    debugPrint('Sense CM: capture affinity failed: $e');
     return (false, -1);
   }
 }
