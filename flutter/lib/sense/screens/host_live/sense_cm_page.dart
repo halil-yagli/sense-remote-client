@@ -53,6 +53,13 @@ Client senseCmPick(List<Client> clients) =>
     clients.firstWhereOrNull(senseCmNeedsAttention) ??
     clients.first;
 
+/// #151, #172: connections that see the Host's screen now (authorized, not
+/// ended, screen type): the card goes into the picture only if all of them
+/// asked ([senseCmCardInPicture]).
+Iterable<int> senseCmLiveScreens(List<Client> clients) => clients
+    .where((c) => c.authorized && !c.disconnected && c.type_() == ClientType.remote)
+    .map((c) => c.id);
+
 /// O6: a connection waiting for "Kabul et" / "Reddet", if any.
 Client? senseCmWaiting(List<Client> clients) =>
     clients.firstWhereOrNull((c) => !c.disconnected && !c.authorized);
@@ -229,6 +236,9 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
     }
     _ends.forget({for (final c in clients) c.id});
     _syncChats(clients);
+    // #151, #172: the card is in the Controller's picture only while it asked.
+    final inPicture = senseCmCardInPicture(_peerState.chatVisible, senseCmLiveScreens(clients));
+    unawaited(SenseCm.syncCapture(inPicture: inPicture, why: inPicture ? 'asked' : 'not-asked'));
     return Obx(() {
       final open = SenseCm.open.value;
       final edge = SenseCm.edge.value;
@@ -288,7 +298,7 @@ class _SenseCmRootState extends State<SenseCmRoot> with WindowListener {
             pickFiles: SenseHostChatFiles.available ? senseHostPickFiles : null,
             from: SenseCm.anchor.bottom ? SensePopupFrom.bottom : SensePopupFrom.top,
             endedInfo: selected.disconnected ? _ends.infoFor(selected.id) : null,
-            chatVisible: _peerState.chatShown,
+            chatVisible: inPicture,
             adminLine: _peerState.adminLine,
             endedClosingIn: selected.disconnected && endedAt != null
                 ? SenseCm.endedSecondsLeft(DateTime.now())

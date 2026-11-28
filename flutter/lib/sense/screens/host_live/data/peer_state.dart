@@ -96,6 +96,21 @@ class SenseHostPeerState {
   int get hashCode => Object.hash(Object.hashAllUnordered(chatVisible), Object.hashAll(admins));
 }
 
+/// #151, #172: the card goes into the picture only while every live screen
+/// connection ([liveScreens]: authorized, not ended, remote type) asked to see
+/// it ([asked], `chat_visible`). No live screen connection, or one that did not
+/// ask, keeps it out of capture. Sense Remote lets one Controller in (S8), so in
+/// practice this is "the Controller asked"; the stricter rule only matters if a
+/// second screen connection ever gets in: it never sees the card unasked.
+bool senseCmCardInPicture(Set<int> asked, Iterable<int> liveScreens) {
+  var any = false;
+  for (final id in liveScreens) {
+    if (!asked.contains(id)) return false;
+    any = true;
+  }
+  return any;
+}
+
 /// Reads the state now and then while the card is up; calls [onState] with each answer.
 class SenseHostPeerWatch {
   SenseHostPeerWatch({

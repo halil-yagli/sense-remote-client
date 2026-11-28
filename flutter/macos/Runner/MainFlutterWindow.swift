@@ -331,6 +331,22 @@ class MainFlutterWindow: NSWindow {
                         result(false)
                     }
 
+                case "senseCmSetCaptureExcluded":
+                    // Sense Remote (#151, #172): the Controller asked to see the
+                    // Host card ("Karşı tarafın sohbet penceresini göster"), so it
+                    // goes back into the picture (.readOnly, the system default);
+                    // when it stops asking or the connection ends it leaves again
+                    // (.none). ScreenCaptureKit's filter follows within a second
+                    // (libs/scrap/src/quartz/sck.m, refreshFilter).
+                    let excluded = ((call.arguments as? [String: Any])?["excluded"]
+                        as? Bool) ?? true
+                    if let window = registrar.view?.window {
+                        window.sharingType = excluded ? .none : .readOnly
+                        result(true)
+                    } else {
+                        result(false)
+                    }
+
                 default:
                     result(FlutterMethodNotImplemented)
                 }

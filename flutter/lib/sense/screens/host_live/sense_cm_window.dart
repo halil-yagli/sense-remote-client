@@ -30,6 +30,10 @@
 // #109: the card and the icon are left out of screen capture (Windows
 // WDA_EXCLUDEFROMCAPTURE, macOS sharingType none): the Controller does not see
 // the Host's icon next to its own. The Host user still sees the window.
+// #151, #172 (Sürüm 12): while the Controller asks to see the card ("Karşı
+// tarafın sohbet penceresini göster"), it goes back into the picture
+// (SenseCmCaptureSwitch); it leaves again when the Controller stops asking or
+// the connection ends.
 
 import 'dart:async';
 
@@ -171,6 +175,8 @@ class SenseCm {
   /// and the window closes by itself after [kSenseCmEndedLinger], whatever the
   /// card does meanwhile (#107: open, icon or edge tab, clicks included).
   static void onAllEnded() {
+    // #151, #172: whatever was asked, the card leaves the picture again.
+    unawaited(syncCapture(inPicture: false, why: 'ended'));
     if (!_ended.start(() => unawaited(_closeAfterEnd()))) return;
     endedAt.value = DateTime.now();
     senseUiEvent('cm.ended', {'closeInS': kSenseCmEndedLinger.inSeconds});
@@ -310,6 +316,39 @@ class SenseCm {
   }
 
   static bool _macCaptureDone = false;
+
+  /// #151, #172: in or out of the Controller's picture (out by default, #109).
+  static final SenseCmCaptureSwitch capture = SenseCmCaptureSwitch(_applyCapture);
+
+  /// #151, #172: the card goes into the picture while the Controller asked
+  /// ("Karşı tarafın sohbet penceresini göster") and leaves it when it stops
+  /// asking or the connection ends. Only a change touches the window; it goes
+  /// into the record as `cm.capture` (`excluded`, `why`).
+  static Future<void> syncCapture(
+      {required bool inPicture, required String why}) async {
+    if (!enabled) return;
+    final fields = await capture.set(inPicture: inPicture, why: why);
+    if (fields != null) senseUiEvent('cm.capture', fields);
+  }
+
+  static Future<bool> _applyCapture(bool excluded) async {
+    if (isWindows) {
+      final (done, error) = senseCmSetCaptureExcluded(excluded);
+      if (!done) debugPrint('Sense CM: capture affinity error $error');
+      return done;
+    }
+    if (isMacOS) {
+      try {
+        return await _macHostChannel.invokeMethod<bool>(
+                'senseCmSetCaptureExcluded', {'excluded': excluded}) ==
+            true;
+      } catch (e) {
+        debugPrint('Sense CM: macOS capture switch failed: $e');
+        return false;
+      }
+    }
+    return false;
+  }
 
   /// #109 (macOS): `sharingType = .none` on the CM window, once per start.
   static Future<void> _excludeMacFromCapture() async {
@@ -548,4 +587,30 @@ Future<bool> senseCmShowWindow(
     }
   }
   return readyToShow;
+}
+
+/// #151, #172: whether the card is left out of screen capture. Starts out
+/// (#109: the window is excluded when it is prepared); [set] only calls the
+/// window when the wish changes. A failed call is recorded as it really is:
+/// a failed "put in" leaves the card out, a failed "leave out" (Windows before
+/// 10 2004) leaves it in, as #109 always did there.
+class SenseCmCaptureSwitch {
+  SenseCmCaptureSwitch(this._apply);
+
+  final Future<bool> Function(bool excluded) _apply;
+  bool _wantExcluded = true;
+
+  /// What was last asked of the window (true = out of the picture).
+  bool get wantExcluded => _wantExcluded;
+
+  /// Returns the `cm.capture` record fields when the window was asked to
+  /// change, null when nothing changed.
+  Future<Map<String, Object?>?> set(
+      {required bool inPicture, required String why}) async {
+    final want = !inPicture;
+    if (want == _wantExcluded) return null;
+    _wantExcluded = want;
+    final done = await _apply(want);
+    return {'excluded': done ? want : !want, 'why': why, if (!done) 'failed': true};
+  }
 }
