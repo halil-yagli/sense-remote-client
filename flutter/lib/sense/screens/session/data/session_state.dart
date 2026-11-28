@@ -10,6 +10,7 @@ import '../../../strings/session.dart';
 import '../record_notice.dart';
 import 'screen_still.dart' show senseStillScreen;
 import '../../../tokens/sense_tokens.dart';
+import '../../terminal/terminal_admin.dart' show SenseTermAdminEvents;
 
 /// The four lists of the bar (O3–O6).
 enum SenseBarMenu { screens, display, keyboard, actions }
@@ -353,6 +354,7 @@ abstract final class SenseSessionEvents {
       return true;
     }
     if (SenseRecordNotice.handle(evt)) return true; // Sense Remote (#114): "Klasörü aç" note
+    if (SenseTermAdminEvents.handle(peerId, evt)) return true; // Sürüm 12 (#157): admin terminal
     return false;
   }
 }
