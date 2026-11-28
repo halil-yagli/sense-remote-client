@@ -128,3 +128,37 @@ abstract final class SenseLayerLook {
   static const double idleTextLighten = 0.3;
   static const double idleDot = 7;
 }
+
+/// Sürüm 12 (FO-B1): the small connection card that drops from the bar's logo area
+/// (prototype `.qcard`, `qcardToggle`: no veil, no blur).
+abstract final class SenseQuickCardLook {
+  // `.qcard`: min-width 270, padding 12 14, gap 3, radius 12, shadow 0 16px 44px rgba(0,0,0,.6).
+  static const double minWidth = 270;
+  static const double padV = 12;
+  static const double padH = 14;
+  static const double gap = 3;
+  static const double shadowBlur = 44;
+  static const double shadowY = 16;
+  static const double shadowOpacity = 0.6;
+
+  // Placed under `#qual` (the computer name): `.brand` padding 14 + logo 26 + gap 10, and
+  // 8 px under the bar.
+  static const double left = 50;
+  static const double below = 8;
+
+  // The v11 value boxes and the limits line, as lines (a little apart from the rest).
+  static const double valuesTop = 4;
+}
+
+/// Sürüm 12 (FO-A4): the note row of the ended card (prototype `.endnote`, `.nsaved`).
+abstract final class SenseEndNoteLook {
+  // `.endnote`: gap 6, margin 10 0 2; the input padding 6 10. `.nsaved` margin 10 0 2.
+  // "Not ekle" `margin-top:10px`.
+  static const double top = 10;
+  static const double bottom = 2;
+  static const double gap = 6;
+  static const double fieldPadH = 10;
+  static const double fieldPadV = 6;
+  static const double fieldWidth = 240;
+  static const int maxLength = 1000;
+}

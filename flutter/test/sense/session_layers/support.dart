@@ -73,6 +73,8 @@ class FakeHost implements SenseLayerHost {
   @override
   void endConnection() => calls.add('end');
   @override
+  void endKeepWindow() => calls.add('endKeep');
+  @override
   void shareActivity() => shared++;
   @override
   Duration? sharedIdle() => sharedIdleValue;

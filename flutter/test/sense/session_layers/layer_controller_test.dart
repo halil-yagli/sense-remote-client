@@ -169,9 +169,53 @@ void main() {
     });
 
     // Sürüm 11 (O2): every window of the connection closes, not only this one.
-    test('"Bağlantıyı bitir" ends the connection in every window', () {
+    // Sürüm 12 (FO-A11): this window stays for "Bağlantıyı sen bitirdin" and goes back after 5 s.
+    test('"Bağlantıyı bitir" ends the connection in every window; the "sen bitirdin" card', () {
+      seconds(42 * 60, host.healthy);
       c.endByUser();
-      expect(host.calls, ['end']);
+      expect(host.calls, ['closePopups', 'endKeep'], reason: 'no window close yet');
+      expect(c.endedBySelf, isTrue);
+      expect(c.ended!.reason, SenseEndReason.self);
+      expect(c.ended!.reasonText, 'Bağlantıyı sen bitirdin');
+      expect(c.ended!.duration, const Duration(minutes: 42));
+      expect(c.ended!.messages, 3);
+      expect(c.elapsed, const Duration(minutes: 42), reason: 'frozen at the end');
+      c.endByUser();
+      expect(host.calls.where((e) => e == 'endKeep'), hasLength(1), reason: 'once');
+      seconds(4);
+      expect(host.calls, isNot(contains('home')));
+      seconds(1);
+      expect(host.calls.last, 'home');
+    });
+
+    // Sürüm 12 (FO-A4): "Not yazılırken ana ekrana dönülmez".
+    test('the ended card waits while the note is typed, then counts again from 5', () {
+      seconds(3, host.healthy);
+      c.endByUser();
+      seconds(2);
+      c.holdHome = true;
+      seconds(30);
+      expect(host.calls, isNot(contains('home')));
+      expect(c.backHomeIn, 5);
+      c.holdHome = false;
+      expect(c.backHomeIn, 5);
+      seconds(4);
+      expect(host.calls, isNot(contains('home')));
+      seconds(1);
+      expect(host.calls.last, 'home');
+    });
+
+    test('connected again from the "sen bitirdin" card: the flags are cleared', () {
+      seconds(3, host.healthy);
+      c.endByUser();
+      c.holdHome = true;
+      c.reconnectEnded();
+      clock.advance(const Duration(seconds: 1));
+      host.healthy();
+      c.tick();
+      expect(c.ended, isNull);
+      expect(c.endedBySelf, isFalse);
+      expect(c.holdHome, isFalse);
     });
 
     test('ended in another window of the connection: this one closes too', () {

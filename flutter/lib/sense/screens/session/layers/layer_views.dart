@@ -6,8 +6,11 @@ import 'dart:ui' show FontFeature;
 import 'package:flutter/widgets.dart';
 
 import '../../../sense.dart';
+import '../../../components/sense_dialog.dart' show SenseDialogField;
+import '../../../strings/note.dart';
 import '../../../strings/session.dart';
 import '../data/frame_rate.dart' show SenseFrameInfo;
+import '../popups/note/note_state.dart' show SenseNoteStatus;
 import 'layer_controller.dart';
 import 'layer_spec.dart';
 import 'layer_strings.dart';
@@ -339,9 +342,10 @@ class SenseLinkLayer extends StatelessWidget {
   );
 }
 
-/// Sürüm 10 (#110): the O13 card opened from the bar's logo / status area while the link is
-/// good — same layout (logo, title, three value boxes, limits line), with the current
-/// connection type and values; "×" or Kapat closes it, so does a click beside the card.
+/// Sürüm 10 (#110), Sürüm 12 (FO-B1): the connection card opened from the bar's logo / status
+/// area while the link is good. A small card that drops from under the computer name (no veil,
+/// no blur; prototype `.qcard`): title, `Sunucu: … · yol · ms`, connection type, `Kare hızı: …`,
+/// and the v11 value boxes and limits as lines. A click beside it (the logo area too) closes it.
 class SenseLinkInfoLayer extends StatelessWidget {
   const SenseLinkInfoLayer({
     super.key,
@@ -351,6 +355,7 @@ class SenseLinkInfoLayer extends StatelessWidget {
     this.serverName,
     this.frame = const SenseFrameInfo(),
     this.appear = 1,
+    this.anchor = const Offset(SenseQuickCardLook.left, SenseSizes.sessionToolbarHeight + SenseQuickCardLook.below),
   });
 
   final SenseLinkView view;
@@ -366,45 +371,101 @@ class SenseLinkInfoLayer extends StatelessWidget {
   final SenseFrameInfo frame;
   final double appear;
 
+  /// Top-left corner of the card in the layer (under the computer name).
+  final Offset anchor;
+
+  static Color _levelColor(SenseLevel? l) => switch (l) {
+        SenseLevel.warn => SenseColors.warn,
+        SenseLevel.hot => SenseColors.dangerText,
+        _ => SenseColors.text,
+      };
+
   @override
   Widget build(BuildContext context) {
     final s = view.sample;
     final fr = senseCardFrame(s, frame);
-    final tiles = [
-      SenseStatTile(
-        label: SenseLayerStrings.latency,
-        value: s.rttMs == null ? null : SenseLayerStrings.ms(s.rttMs!.round()),
-        level: s.rttMs == null ? null : s.latencyLevel,
-        large: true,
-      ),
-      SenseStatTile(
-        label: SenseLayerStrings.lossEstimated,
-        value: s.lossPct == null ? null : SenseLayerStrings.percent(s.lossPct!),
-        level: s.lossPct == null ? null : s.lossLevel,
-        large: true,
-      ),
-      SenseStatTile(
-        label: SenseLayerStrings.frames,
-        value: fr == null ? null : SenseLayerStrings.fps(fr.shown),
-        level: s.fps == null ? null : s.fpsShownLevel,
-        large: true,
-      ),
-    ];
     final path = switch (direct) {
       true => SenseLayerStrings.pathDirect,
       false => SenseLayerStrings.pathRelay,
       null => SenseLayerStrings.pathUnknown,
     };
-    return Stack(children: [
-      Positioned.fill(
-        child: SenseLayerVeil(
-          key: const Key('sense-layer-info'),
-          blur: SenseLayerLook.weakBlur,
-          brightness: SenseLayerLook.weakBrightness,
-          appear: appear,
-          child: const SizedBox.shrink(),
+    final muted = SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted);
+    TextSpan value(String label, String? v, SenseLevel? level) => TextSpan(children: [
+          TextSpan(text: '$label '),
+          TextSpan(
+            text: v ?? SenseLayerStrings.noValue,
+            style: muted.copyWith(
+              color: v == null ? SenseColors.textMuted : _levelColor(level),
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ]);
+    final dot = TextSpan(text: ' · ', style: muted);
+    final card = Container(
+      key: const Key('sense-layer-info'),
+      constraints: const BoxConstraints(minWidth: SenseQuickCardLook.minWidth),
+      padding: const EdgeInsets.symmetric(horizontal: SenseQuickCardLook.padH, vertical: SenseQuickCardLook.padV),
+      decoration: BoxDecoration(
+        color: SenseColors.surface,
+        border: Border.all(color: SenseColors.line),
+        borderRadius: BorderRadius.circular(SenseRadii.popup),
+        boxShadow: [
+          BoxShadow(
+            color: SenseColors.bg.withOpacity(SenseQuickCardLook.shadowOpacity),
+            blurRadius: SenseQuickCardLook.shadowBlur,
+            offset: const Offset(0, SenseQuickCardLook.shadowY),
+          ),
+        ],
+      ),
+      child: IntrinsicWidth(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              view.wavy ? SenseLayerStrings.wavyTitle : SenseLayerStrings.goodTitle,
+              style: SenseTextStyles.of(
+                  size: SenseFontSize.popupTitle,
+                  weight: SenseFontWeight.bold,
+                  color: view.wavy ? SenseColors.warn : SenseColors.text),
+            ),
+            const SizedBox(height: SenseQuickCardLook.gap),
+            Text(
+              SenseSessionStrings.serverLine(serverName, direct, s.rttMs?.round()),
+              key: const Key('sense-layer-info-server'),
+              style: muted.copyWith(color: SenseColors.text),
+            ),
+            const SizedBox(height: SenseQuickCardLook.gap),
+            Text(path, key: const Key('sense-layer-info-path'), style: muted),
+            if (fr != null) ...[
+              const SizedBox(height: SenseQuickCardLook.gap),
+              Text(fr.line, key: const Key('sense-layer-info-frames'), style: muted),
+            ],
+            const SizedBox(height: SenseQuickCardLook.gap + SenseQuickCardLook.valuesTop),
+            Text.rich(
+              TextSpan(children: [
+                value(SenseLayerStrings.latency, s.rttMs == null ? null : SenseLayerStrings.ms(s.rttMs!.round()),
+                    s.rttMs == null ? null : s.latencyLevel),
+                dot,
+                value(SenseLayerStrings.lossEstimated, s.lossPct == null ? null : SenseLayerStrings.percent(s.lossPct!),
+                    s.lossPct == null ? null : s.lossLevel),
+                dot,
+                value(SenseLayerStrings.frames, fr == null ? null : SenseLayerStrings.fps(fr.shown),
+                    s.fps == null ? null : s.fpsShownLevel),
+              ]),
+              key: const Key('sense-layer-info-values'),
+              style: muted,
+            ),
+            const SizedBox(height: SenseQuickCardLook.gap),
+            Text(
+              senseWorkingLimitsText(),
+              style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textDim),
+            ),
+          ],
         ),
       ),
+    );
+    return Stack(children: [
       // A click beside the card closes it (the card itself takes its own clicks).
       Positioned.fill(
         child: GestureDetector(
@@ -413,46 +474,12 @@ class SenseLinkInfoLayer extends StatelessWidget {
           onTap: onClose,
         ),
       ),
-      Center(
+      Positioned(
+        left: anchor.dx,
+        top: anchor.dy,
         child: Opacity(
           opacity: appear,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {},
-            child: SenseLayerCard(onClose: onClose, closeLabel: SenseLayerStrings.closeCard, children: [
-              _logo(breathe: false),
-              _title(view.wavy ? SenseLayerStrings.wavyTitle : SenseLayerStrings.goodTitle,
-                  view.wavy ? SenseColors.warn : SenseColors.ok),
-              Text(
-                SenseSessionStrings.serverLine(serverName, direct, s.rttMs?.round()),
-                key: const Key('sense-layer-info-server'),
-                textAlign: TextAlign.center,
-                style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted),
-              ),
-              if (fr != null)
-                Text(
-                  fr.line,
-                  key: const Key('sense-layer-info-frames'),
-                  textAlign: TextAlign.center,
-                  style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.textMuted),
-                ),
-              _sub(path),
-              _tiles(tiles),
-              Text(
-                senseWorkingLimitsText(),
-                textAlign: TextAlign.center,
-                style: SenseTextStyles.of(size: SenseFontSize.hintSmall, color: SenseColors.textMuted),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: SenseLayerLook.buttonsTop - SenseLayerLook.cardGap),
-                child: SenseButton(
-                  key: const Key('sense-layer-info-close'),
-                  label: SenseLayerStrings.closeCard,
-                  onPressed: onClose,
-                ),
-              ),
-            ]),
-          ),
+          child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () {}, child: card),
         ),
       ),
     ]);
@@ -510,7 +537,9 @@ class SenseWaitingImageLayer extends StatelessWidget {
   }
 }
 
-/// O14 — "Bağlantı sona erdi".
+/// O14 — "Bağlantı sona erdi". Sürüm 12 (FO-A4, FO-A11): the note row — "Not ekle" opens a field
+/// in the card (the window does not go back while it is open), a saved note says so; after
+/// "Notsuz bitir" (and for a busy computer) there is no row.
 class SenseEndedLayer extends StatelessWidget {
   const SenseEndedLayer({
     super.key,
@@ -521,6 +550,10 @@ class SenseEndedLayer extends StatelessWidget {
     required this.onReconnect,
     this.appear = 1,
     this.failed = false,
+    this.note = SenseNoteStatus.none,
+    this.noteOpen = false,
+    this.onAddNote,
+    this.onSaveNote,
   });
 
   final double appear;
@@ -534,6 +567,18 @@ class SenseEndedLayer extends StatelessWidget {
   final VoidCallback onClose;
   final VoidCallback onReconnect;
 
+  /// Sürüm 12 (FO-A4): what happened to this connection's note.
+  final SenseNoteStatus note;
+
+  /// The note field is open in the card.
+  final bool noteOpen;
+
+  /// "Not ekle" (null = no note row: the window cannot send a note).
+  final VoidCallback? onAddNote;
+
+  /// "Kaydet" / Enter in the field.
+  final ValueChanged<String>? onSaveNote;
+
   @override
   Widget build(BuildContext context) {
     final connecting = reconnect == SenseReconnectState.connecting;
@@ -543,11 +588,45 @@ class SenseEndedLayer extends StatelessWidget {
           '${SenseLayerStrings.busy} · ${SenseLayerStrings.backHome(backHomeIn)}',
           spinner: false,
           color: SenseColors.warn),
-      SenseReconnectState.idle => failed
-          ? _statusLine('${SenseLayerStrings.reconnectFailed} · ${SenseLayerStrings.backHome(backHomeIn)}',
-              spinner: false, color: SenseColors.warn)
-          : _statusLine(SenseLayerStrings.backHome(backHomeIn), spinner: false),
+      SenseReconnectState.idle => noteOpen
+          ? _statusLine(SenseNoteStrings.holdHome, spinner: false)
+          : failed
+              ? _statusLine('${SenseLayerStrings.reconnectFailed} · ${SenseLayerStrings.backHome(backHomeIn)}',
+                  spinner: false, color: SenseColors.warn)
+              : _statusLine(SenseLayerStrings.backHome(backHomeIn), spinner: false),
     };
+    final Widget? noteRow;
+    if (note == SenseNoteStatus.saved) {
+      noteRow = Padding(
+        padding: const EdgeInsets.only(top: SenseEndNoteLook.top - SenseLayerLook.cardGap, bottom: SenseEndNoteLook.bottom),
+        child: Text(
+          SenseNoteStrings.saved,
+          key: const Key('sense-ended-note-saved'),
+          textAlign: TextAlign.center,
+          style: SenseTextStyles.of(size: SenseFontSize.hintLarge, color: SenseColors.ok),
+        ),
+      );
+    } else if (noteOpen && onSaveNote != null) {
+      noteRow = Padding(
+        padding: const EdgeInsets.only(top: SenseEndNoteLook.top - SenseLayerLook.cardGap, bottom: SenseEndNoteLook.bottom),
+        child: _EndNoteField(onSave: onSaveNote!),
+      );
+    } else if (onAddNote != null &&
+        note == SenseNoteStatus.none &&
+        summary.reason != SenseEndReason.busy &&
+        reconnect == SenseReconnectState.idle) {
+      noteRow = Padding(
+        padding: const EdgeInsets.only(top: SenseEndNoteLook.top - SenseLayerLook.cardGap),
+        child: SenseButton(
+          key: const Key('sense-ended-add-note'),
+          label: SenseNoteStrings.addNote,
+          size: SenseButtonSize.small,
+          onPressed: onAddNote,
+        ),
+      );
+    } else {
+      noteRow = null;
+    }
     return SenseLayerVeil(
       key: const Key('sense-layer-ended'),
       blur: SenseLayerLook.weakBlur,
@@ -569,6 +648,7 @@ class SenseEndedLayer extends StatelessWidget {
             large: true,
           ),
         ]),
+        if (noteRow != null) noteRow,
         status,
         Padding(
           padding: const EdgeInsets.only(top: SenseLayerLook.endButtonsTop - SenseLayerLook.cardGap),
@@ -593,6 +673,54 @@ class SenseEndedLayer extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// `.endnote`: the field and "Kaydet" side by side.
+class _EndNoteField extends StatefulWidget {
+  const _EndNoteField({required this.onSave});
+
+  final ValueChanged<String> onSave;
+
+  @override
+  State<_EndNoteField> createState() => _EndNoteFieldState();
+}
+
+class _EndNoteFieldState extends State<_EndNoteField> {
+  final TextEditingController _text = TextEditingController();
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _save() => widget.onSave(_text.text);
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: SenseEndNoteLook.fieldWidth,
+            child: SenseDialogField(
+              key: const Key('sense-ended-note-field'),
+              controller: _text,
+              hint: SenseNoteStrings.endPlaceholder,
+              autofocus: true,
+              maxLength: SenseEndNoteLook.maxLength,
+              onSubmitted: (_) => _save(),
+            ),
+          ),
+          const SizedBox(width: SenseEndNoteLook.gap),
+          SenseButton(
+            key: const Key('sense-ended-note-save'),
+            label: SenseNoteStrings.endSave,
+            kind: SenseButtonKind.primary,
+            size: SenseButtonSize.small,
+            onPressed: _save,
+          ),
+        ],
+      );
 }
 
 /// O15 — the orange strip under the top bar, content on the left (the Sense island

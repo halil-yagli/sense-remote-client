@@ -4,6 +4,8 @@
 import 'package:flutter/widgets.dart';
 
 import '../../../../models/model.dart';
+import '../../../../models/platform_model.dart';
+import '../popups/note/note_state.dart' show SenseSessionNotes;
 import 'data/idle_policy.dart';
 import 'data/session_bridge.dart';
 import 'layer_controller.dart';
@@ -21,13 +23,21 @@ class SenseConnectionLayers extends StatelessWidget {
   /// reconnect keeps the timers and the ended card).
   static SenseLayerController controllerFor(String id, FFI ffi) => _byId.putIfAbsent(id, () {
         final c = SenseLayerController(host: SenseFfiLayerHost(id, ffi));
-        SenseIdlePolicy.load(id, c);
+        // Sürüm 12 (U167): the Host's own idle value when the panel cannot be read.
+        SenseHostIdle hostIdle() =>
+            SenseIdlePolicy.parseHost(bind.sessionSenseIdlePolicy(sessionId: ffi.sessionId));
+        SenseIdlePolicy.load(id, c, hostIdle: hostIdle);
         // Sürüm 11 (O5): the limit may have changed in the panel while the link was down.
-        c.onReconnected = () => SenseIdlePolicy.load(id, c);
+        c.onReconnected = () => SenseIdlePolicy.load(id, c, hostIdle: hostIdle);
+        // Sürüm 12 (FO-A4): the session note goes out the stock way (`session_send_note`).
+        SenseSessionNotes.setSender(id, (note) => bind.sessionSendNote(sessionId: ffi.sessionId, note: note));
         return c;
       });
 
-  static void remove(String id) => _byId.remove(id)?.dispose();
+  static void remove(String id) {
+    _byId.remove(id)?.dispose();
+    SenseSessionNotes.forget(id);
+  }
 
   @override
   Widget build(BuildContext context) =>
