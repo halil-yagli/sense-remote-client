@@ -30,6 +30,7 @@ void main() {
     await tester.pumpWidget(_app(Builder(
       builder: (context) => GestureDetector(
         key: const Key('open'),
+        behavior: HitTestBehavior.opaque,
         onTap: () => senseShowTerminalPopup(context, admin: false, computer: _pc, onOpen: () => opened++),
         child: const SizedBox.expand(),
       ),
@@ -46,6 +47,7 @@ void main() {
       child: Builder(
         builder: (context) => GestureDetector(
           key: const Key('open'),
+        behavior: HitTestBehavior.opaque,
           onTap: () => senseShowTerminalPopup(context,
               admin: true, computer: _pc, peerId: null, onOpen: () => opened++),
           child: const SizedBox.expand(),
