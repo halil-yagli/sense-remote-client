@@ -21,12 +21,20 @@ const int kSenseDefaultFpsCap = 30;
 /// How long a rate measured while the picture moved stands in for a still screen.
 const Duration kSenseRecentFpsWindow = Duration(seconds: 60);
 
-/// The session's frame limit: the custom frame rate under "Özel kalite", else the
-/// Host's default cap.
-int senseSessionFpsCap({String? imageQuality, int? customFps}) =>
-    imageQuality == kRemoteImageQualityCustom && customFps != null && customFps > 0
-        ? customFps
-        : kSenseDefaultFpsCap;
+/// Sürüm 12 (U168c): what a Controller asks for on a direct connection with a stock quality
+/// (`src/sense/fps_policy.rs` `DIRECT_FPS_CAP`).
+const int kSenseDirectFpsCap = 60;
+
+/// The session's frame limit, the core's rule (`fps_policy::controller_fps_ceiling`): under
+/// "Özel kalite" the person's own frame rate (5–120, else the default 30); with a stock quality
+/// 60 on a direct connection, 30 relayed. The Host then caps it by its refresh rate
+/// ([senseReachableFps]).
+int senseSessionFpsCap({String? imageQuality, int? customFps, bool direct = false}) {
+  if (imageQuality == kRemoteImageQualityCustom) {
+    return customFps != null && customFps >= 5 && customFps <= 120 ? customFps : kSenseDefaultFpsCap;
+  }
+  return direct ? kSenseDirectFpsCap : kSenseDefaultFpsCap;
+}
 
 /// The smaller of the Host display's refresh rate (when known) and the session's cap.
 int senseReachableFps({double? refreshHz, required int cap}) {

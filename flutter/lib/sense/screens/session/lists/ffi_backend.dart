@@ -30,6 +30,7 @@ import '../../../strings/terminal.dart' show SenseTerminalStrings;
 import '../../terminal/terminal_admin.dart' show senseRequestAdminTerminal;
 import '../bar/session_popups.dart' show SenseSessionPopups;
 import '../popups/terminal/terminal_popup.dart' show senseShowTerminalPopup, SenseTerminalPopup;
+import '../popups/note/note_popup.dart' show senseEndWithNote, senseAddNote;
 import '../../../../desktop/widgets/kb_layout_type_chooser.dart' show KBLayoutType;
 import '../../../../desktop/widgets/remote_toolbar.dart' show ScreenAdjustor, ToolbarState;
 import '../../../../models/model.dart';
@@ -346,7 +347,12 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       drawnFps: _drawnFps,
       recentFps: _meter.recent(_meterClock.elapsed),
       reachableFps: senseReachableFps(
-          refreshHz: hz?.toDouble(), cap: senseSessionFpsCap(imageQuality: _imageQuality, customFps: _customFps)),
+          refreshHz: hz?.toDouble(),
+          // Sürüm 12 (U168c): same rule as the core (`src/sense/fps_policy.rs`): 60 on a direct link.
+          cap: senseSessionFpsCap(
+              imageQuality: _imageQuality,
+              customFps: _customFps,
+              direct: _try(() => ConnectionTypeState.find(ffi.id).direct.value == ConnectionType.strDirect, false))),
       remoteHz: hz,
     );
   }
@@ -385,6 +391,8 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
       lossPct: d.lossEst,
       // O13: the connection layer decides "Dalgalı" (C4); the T6 limits only without it.
       wavy: SenseLayerController.find(ffi.id)?.wavy.value,
+      // Sürüm 12 (FO-A12): "Kesildi · Yeniden bağlanılıyor (N. deneme)" while the link is lost.
+      reconnectAttempt: SenseLayerController.find(ffi.id)?.reconnectInfo?.attempt,
       // Sürüm 10 (#110): the logo area opens the link card (minimized weak card, or the
       // same card with the current values while the link is good) — not Ekran bilgisi.
       // Sürüm 12 (#150): looked up on the click, not when the bar was built, so the area
@@ -464,8 +472,31 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   /// Decision 4: no note window; the note is in Eylemler › Oturuma not ekle.
   /// Sürüm 11 (O2): the connection ends in every window that shows it (a display in its own
   /// window, "Tüm ekranlarımı kullan"), not only in this one.
+  /// Sürüm 12 (FO-A4, FO-A11): "Bitir" goes through the note step of BK — with "Oturum bitince
+  /// not sor" on the note popup comes first (Vazgeç keeps the connection); the ended card then
+  /// says "Bağlantıyı sen bitirdin". Without the connection layer: the old direct end.
   @override
   void end() {
+    if (SenseLayerController.find(ffi.id) == null) {
+      _endAll();
+      return;
+    }
+    senseEndWithNote(
+      contextOf(),
+      peerId: ffi.id,
+      ask: _try(() => mainGetLocalBoolOptionSync(kOptionAllowAskForNoteAtEndOfConnection), false),
+      computer: _computerName(),
+      popups: SenseSessionPopups.of(ffi.id, ffi).controller,
+    );
+  }
+
+  /// The computer's name for popups: alias or host name, never the ID (ST 16).
+  String _computerName() {
+    final alias = _try(() => bind.mainGetPeerOptionSync(id: ffi.id, key: 'alias'), '');
+    return alias.isNotEmpty ? alias : _pi.hostname;
+  }
+
+  void _endAll() {
     // The other windows are found through this window's session: close it only afterwards.
     bind
         .sessionSenseEndAll(sessionId: ffi.sessionId)
@@ -1116,7 +1147,8 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   void setLockAfterEnd(bool v) => _set('lock-after-session-end', v);
 
   @override
-  void addNote() => showAuditDialog(ffi);
+  void addNote() => senseAddNote(contextOf(),
+      peerId: ffi.id, computer: _computerName(), popups: SenseSessionPopups.of(ffi.id, ffi).controller);
 
   @override
   void openTerminal() => _connectWithToken(terminal: true);
@@ -1127,8 +1159,7 @@ class SenseFfiSessionBackend extends SenseSessionBackend {
   /// answers `unsupported`.
   @override
   void openTerminalAdmin() {
-    final alias = _try(() => bind.mainGetPeerOptionSync(id: ffi.id, key: 'alias'), '');
-    final computer = alias.isNotEmpty ? alias : _pi.hostname; // never the ID (ST 16)
+    final computer = _computerName();
     final ctx = contextOf();
     if (SensePopupHost.maybeOf(ctx) != null) {
       senseShowTerminalPopup(ctx, admin: true, computer: computer, peerId: ffi.id, onOpen: openTerminal);

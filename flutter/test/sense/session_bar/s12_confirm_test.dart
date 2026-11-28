@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/sense/components/button.dart';
+import 'package:flutter_hbb/sense/screens/session/data/frame_rate.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/backend.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/list_model.dart';
 import 'package:flutter_hbb/sense/screens/session/lists/list_specs.dart';
@@ -231,5 +232,16 @@ void main() {
     final info = render.entries.last as SenseInfoEntry;
     expect(info.label, 'Bu ayarlar yalnız bu bilgisayarın çizimini etkiler');
     expect(info.detail, 'uzak bilgisayara dokunmaz');
+  });
+
+  // U168c (KQ): the session's frame limit follows the core's rule (src/sense/fps_policy.rs).
+  test('U168c: 60 on a direct link with a stock quality, 30 relayed, own rate under Özel kalite', () {
+    expect(senseSessionFpsCap(imageQuality: 'balanced', direct: true), 60);
+    expect(senseSessionFpsCap(imageQuality: 'best', direct: false), 30);
+    expect(senseSessionFpsCap(imageQuality: 'custom', customFps: 45, direct: true), 45);
+    expect(senseSessionFpsCap(imageQuality: 'custom', customFps: 200, direct: true), 30, reason: 'outside 5–120');
+    expect(senseReachableFps(refreshHz: 60, cap: senseSessionFpsCap(imageQuality: 'balanced', direct: true)), 60);
+    expect(senseReachableFps(refreshHz: 50, cap: senseSessionFpsCap(imageQuality: 'balanced', direct: true)), 50);
+    expect(senseReachableFps(refreshHz: 144, cap: senseSessionFpsCap(imageQuality: 'balanced', direct: true)), 60);
   });
 }
