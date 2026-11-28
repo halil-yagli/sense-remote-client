@@ -39,10 +39,6 @@ String senseOsName(String platform) {
   }
 }
 
-/// Turkish capitals for caps labels ("Değiştirilme" → "DEĞİŞTİRİLME"); Dart's
-/// toUpperCase would give "DEĞIŞTIRILME".
-String senseUpperTr(String s) => s.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
-
 /// Last part of a path, for both separators.
 String senseBaseName(String path) {
   final trimmed = path.replaceAll(RegExp(r'[\\/]+$'), '');
