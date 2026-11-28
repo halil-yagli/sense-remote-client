@@ -195,6 +195,10 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Apply hbb_common patches
+        shell: bash
+        run: bash .github/scripts/sense-apply-hbb-patches.sh
+
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -253,6 +257,11 @@ jobs:
           # master'daki Windows derlemesinde koşmaya devam eder.
           cargo test --locked --lib --features "$FEATURES" --             --skip keyboard::shortcuts::tests::alt_only_shortcut_neutralizes_windows_menu
 
+      # Sense Remote: libs/hbb_common yamasının (store_path yeniden deneme) testleri.
+      - name: Run the hbb_common patch tests
+        shell: bash
+        run: cargo test --locked -p hbb_common --lib sense_store_retry_tests
+
   # Mac koduna (cfg(target_os = "macos")) PR'da derleme denetimi: Linux işi bunu derlemez, Mac
   # derlemesi ise yalnız master'da koşardı (Mac'e özgü kırık sürüm gününe kalıyordu). Yalnız
   # `cargo check` (bağlama ve Flutter paketi yok); vcpkg ikilileri master'daki Mac işinin
@@ -276,6 +285,10 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+
+      - name: Apply hbb_common patches
+        shell: bash
+        run: bash .github/scripts/sense-apply-hbb-patches.sh
 
       - name: Install build runtime
         run: |
