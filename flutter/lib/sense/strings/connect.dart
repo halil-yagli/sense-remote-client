@@ -31,7 +31,7 @@ abstract final class SenseConnectStrings {
   }
 
   static String busyFor(int minutes) =>
-      minutes < 60 ? '${minutes < 1 ? 1 : minutes} dk'dır' : '${minutes ~/ 60} saattir';
+      minutes < 60 ? "${minutes < 1 ? 1 : minutes} dk'dır" : '${minutes ~/ 60} saattir';
   static const String later = 'Sonra dene';
 
   static const String offlineTitle = 'Çevrimdışı';
