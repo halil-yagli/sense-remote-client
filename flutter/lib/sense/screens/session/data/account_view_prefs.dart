@@ -69,8 +69,9 @@ class SenseAccountViewPrefs {
       return null;
     }
     if (v is! Map || v['error'] != null || v['entries'] is! List) return null;
+    final entries = v['entries'] as List;
     Object? value(String key) {
-      for (final e in v['entries'] as List) {
+      for (final e in entries) {
         if (e is Map && e['os'] == 'any' && e['key'] == key) return e['value'];
       }
       return null;
